@@ -154,9 +154,11 @@ void extractionTests() {
     ResetGamePresentationScene();
 }
 }
+int runSceneViewTests();
 int main() {
     try {
         assetTests(); frameTests(); extractionTests();
+        Checks += runSceneViewTests();
         std::printf("PASS: %d renderer scene checks\n", Checks);
         return 0;
     } catch (const std::exception& error) {

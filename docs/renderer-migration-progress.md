@@ -13,6 +13,49 @@ Do not mistake the frozen baseline results below for new-renderer results.
 
 ## Runnable inspection checkpoint
 
+The user requested an explicit checkpoint before continuation. Annotated Git tag
+`codex/renderer-room-inspection-checkpoint` points to `f20ddf8`. Its executable,
+shader HOG, launcher source and migration notes are copied under
+`C:/tmp/D3RendererVerification/checkpoints/room-inspection-f20ddf8`.
+The preserved executable hash matches the verified test build below.
+
+## Continuation: shared camera and view-local visibility
+
+`renderer/SceneView.h/.cpp` now owns the canonical positive-eye-Z projection,
+legacy `1 - 1/z` depth convention, anchored/overscan camera preparation and
+conservative frustum query. The GPU consumes those projection coefficients;
+it no longer computes a separate projection or selects/sorts faces itself.
+
+Queries return frame-identified per-view surface lists and object-sphere
+candidates without modifying the presentation. Only visible room assets are
+uploaded on demand, but off-camera room geometry remains in the complete scene.
+This is a conservative frustum reference, NOT portal/occlusion traversal or a
+gameplay visibility report. Object bounds/poses and rendering remain unfinished.
+
+Validation:
+
+- 71 scene/extraction/view checks pass, including 4,000 deterministic points
+  comparing CPU half-spaces to the GPU homogeneous clipping contract.
+- Tests cover wide/portrait/anchored views, near-plane tangency/crossings,
+  large polygons covering the viewport while their vertices are outside,
+  translated/rotated/rear cameras, transparency ordering, object exclusion,
+  immutable off-camera data and independence between main/auxiliary queries.
+- Full application builds. New verification runtime is `scene-view-test`;
+  the original user-facing `scene-test` runtime was NOT overwritten.
+- Two complete eight-save runs passed: `scene-view-corpus-clean` and
+  `scene-view-repeat-clean`.
+- `scene-view-parity.json`: seven saves are pixel-identical to the room-inspection
+  checkpoint. save002 mean RGB delta is 0.001001881/255; 0.02235243% of pixels
+  differ by more than two levels, maximum nine.
+- `scene-view-repeatability.json`: the same seven saves repeat identically;
+  save002 has mean delta 0.001346933/255 and 0.03125% above two, maximum seven.
+  This supports run-to-run variation, not a claim that every save002 difference
+  is proven harmless. The save002 image was visually inspected.
+- No objects, terrain, lighting, effects, cockpit, portal feedback or shadows
+  were silently marked complete by this change. Continue their migration.
+
+## Preserved room-inspection test build
+
 - Runtime: `C:/tmp/D3RendererVerification/scene-test` (separate 2 GB copy).
 - User launcher: `Launch Renderer Test.cmd` in that runtime. It invokes
   `tools/renderer-scene-test-launch.ps1`, copies pilot/save/counter from the

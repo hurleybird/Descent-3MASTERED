@@ -1,6 +1,7 @@
 // Descent 3MASTERED - GPL-3.0-or-later
 #include "gl_local.h"
 #include "gl_mesh.h"
+#include "SceneView.h"
 #include <cmath>
 
 namespace {
@@ -12,13 +13,14 @@ layout(location=2) in vec2 light_uv;
 layout(location=3) in float alpha;
 uniform vec3 eye, camera_right, camera_up, camera_forward;
 uniform vec4 projection;
+uniform float near_distance;
 out vec2 texcoord, lightcoord;
 out float vertex_alpha;
 void main() {
     vec3 relative = position-eye;
     float z = dot(relative,camera_forward);
     gl_Position = vec4(dot(relative,camera_right)*projection.x + z*projection.z,
-                       dot(relative,camera_up)*projection.y + z*projection.w, z-2.0,z);
+                       dot(relative,camera_up)*projection.y + z*projection.w, z-2.0*near_distance,z);
     texcoord=uv; lightcoord=light_uv; vertex_alpha=alpha;
 }
 )GLSL";
@@ -38,9 +40,6 @@ void main() {
     color=vec4(base.rgb*illumination,base.a);
 }
 )GLSL";
-float facing(d3scene::Vec3 n, d3scene::Vec3 eye, d3scene::Vec3 p) {
-    return n.x*(eye.x-p.x)+n.y*(eye.y-p.y)+n.z*(eye.z-p.z);
-}
 }
 
 void GL4Renderer::DestroySceneResources() {
@@ -57,6 +56,7 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
     const d3scene::View& view) {
     if (!view.geometry_inspection)
         Error("Scene executor migration incomplete: only explicit geometry inspection is currently supported.");
+    const auto visibility = d3scene::queryView(presentation,view);
     FlushFontBatch();
     if (scene_asset_lifetime != presentation.data().scene_lifetime) {
         DestroySceneResources();
@@ -78,25 +78,22 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
     glDepthMask(GL_TRUE);
     glDepthFunc(GL_LEQUAL);
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-    const float aspect = static_cast<float>(view.projection_anchor.width)/view.projection_anchor.height;
-    const float zoom = view.zoom * .75f;
-    const float sx = (aspect <= 1 ? 1 : 1/aspect)/zoom;
-    const float sy = (aspect <= 1 ? aspect : 1)/zoom;
-    const float width = static_cast<float>(view.viewport.width), height = static_cast<float>(view.viewport.height);
     scene_shader.Use();
     auto vec = [&](const char* name, d3scene::Vec3 v) { glUniform3f(scene_shader.FindUniform(name),v.x,v.y,v.z); };
     vec("eye",view.camera.position); vec("camera_right",view.camera.right);
     vec("camera_up",view.camera.up); vec("camera_forward",view.camera.forward);
-    glUniform4f(scene_shader.FindUniform("projection"), sx*view.projection_anchor.width/width,
-        sy*view.projection_anchor.height/height,
-        (2.f*view.projection_anchor.x+view.projection_anchor.width)/width-1,
-        1-(2.f*view.projection_anchor.y+view.projection_anchor.height)/height);
+    const auto& projection = visibility.camera.projection;
+    glUniform4f(scene_shader.FindUniform("projection"),projection.x_scale,projection.y_scale,
+        projection.x_offset,projection.y_offset);
+    glUniform1f(scene_shader.FindUniform("near_distance"),projection.near_distance);
     glUniform1i(scene_shader.FindUniform("colortexture"),0);
     glUniform1i(scene_shader.FindUniform("lightmaptexture"),1);
 
-    struct Item { const d3scene::RoomState* room; size_t polygon; float distance; bool blended; };
-    std::vector<Item> items;
-    for (const auto& room : presentation.data().rooms) {
+    std::vector<bool> visible_rooms(presentation.data().rooms.size(),false);
+    for (const auto& surface : visibility.surfaces) visible_rooms[surface.room_index] = true;
+    for (size_t room_index = 0; room_index < presentation.data().rooms.size(); ++room_index) {
+        if (!visible_rooms[room_index]) continue;
+        const auto& room = presentation.data().rooms[room_index];
         const auto& geometry = room.asset->geometry();
         if (scene_rooms.size() <= static_cast<size_t>(room.number)) scene_rooms.resize(room.number+1);
         auto& gpu = scene_rooms[room.number];
@@ -127,25 +124,11 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
                 glVertexAttribPointer(attribute,counts[attribute],GL_FLOAT,GL_FALSE,sizeof(SceneVertex),reinterpret_cast<void*>(offsets[attribute]));
             }
         }
-        for (size_t i=0; i<geometry.polygons.size(); ++i) {
-            const auto& surface=room.surfaces[i];
-            if (!surface.draw_surface || surface.bitmap < 0) continue;
-            const auto& polygon=geometry.polygons[i];
-            const auto point=geometry.vertices[polygon.corners[0].vertex];
-            if (facing(polygon.normal,view.camera.position,point)<0) continue;
-            const float depth=-facing(view.camera.forward,view.camera.position,point);
-            bool alpha=surface.alpha<.999f || surface.additive;
-            for (const auto& c : polygon.corners) alpha=alpha || c.alpha<255;
-            items.push_back({&room,i,depth,alpha});
-        }
     }
-    std::stable_sort(items.begin(),items.end(),[](const Item& a,const Item& b) {
-        if (a.blended!=b.blended) return !a.blended;
-        return a.blended ? a.distance>b.distance : a.distance<b.distance;
-    });
-    for (const auto& item : items) {
-        const auto& surface=item.room->surfaces[item.polygon];
-        const auto& gpu=scene_rooms[item.room->number];
+    for (const auto& item : visibility.surfaces) {
+        const auto& room = presentation.data().rooms[item.room_index];
+        const auto& surface=room.surfaces[item.polygon_index];
+        const auto& gpu=scene_rooms[room.number];
         BindBitmap(surface.bitmap);
         if(surface.lightmap_bitmap>=0) BindLightmap(surface.lightmap_bitmap);
         scene_shader.Use();
@@ -159,7 +142,7 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
             glDepthMask(GL_FALSE);
         } else { glDisable(GL_BLEND); glDepthMask(GL_TRUE); }
         glBindVertexArray(gpu.vao);
-        const auto range=gpu.polygons[item.polygon];
+        const auto range=gpu.polygons[item.polygon_index];
         glDrawArrays(GL_TRIANGLES,range.offset,range.count);
         rend_RecordDrawCall(RENDERER_DRAW_CALL_3D);
     }
