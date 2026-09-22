@@ -104,6 +104,41 @@ instance animation/effects once during preparation, and publish owned poses for
 all views. Collision still consumes the explicit scratch adapter; audit/migrate
 its consumers rather than claiming all shared state has disappeared. No shadows.
 
+## Continuation: immutable model assets and shared mesh execution
+
+Room and model polygons now share `MeshGeometry`, one conservative surface query,
+one opaque/transparent ordering, one GPU mesh upload implementation and one surface
+material resolver. `SceneAssets` owns revisioned model topology, hierarchy,
+vertex normals, material slots and flat colors. Published frames own instance
+poses/materials; multiple objects share geometry without sharing animation scratch.
+Object poses are evaluated once in PrepareGamePresentation and shared by main and
+auxiliary views. Previous submodel poses are retained by object handle/asset revision.
+
+`model/SceneModelAsset` compiles legacy authored model data without game globals.
+The first runtime attempt exposed non-finite imported vertex normals. Invalid or
+missing shading normals are reconstructed from incident polygon normals; unused
+vertices have zero normals. Raw source data is unchanged. Capture diagnostics record
+repair counts (PyroGL, NapalmRocket, Smart, cloak in save003). The scene boundary
+continues rejecting invalid geometry/materials. This is tested with synthetic NaNs.
+
+2,143 CPU checks pass. Full application builds. `scene-model-corpus-clean` and
+`scene-model-final-clean` each passed eight captures; all eight first-run images
+were inspected (save003 in `scene-model-normal-fixed` is the same visual stage).
+Visible pickups, robots, signs and door parts now pass through the new executor.
+Models are deliberately not fully lit yet. This is NOT full-renderer parity.
+`scene-model-first` preserves the failed asset-validation evidence.
+
+Remaining model limitations are explicit: old-format geometry, camera LOD, detached
+debris pivot policy, special facing/glow/custom submodels, deformation/cloak,
+instance lightmap UVs, dynamic/static object lighting and complete pose-history
+cut policy. Model geometry is compiled/compared once per referenced model per
+presentation (not once per instance/view); source revision tracking/performance
+optimization remains. Pending domains are not cleared. User-facing `scene-test`
+and Candidate are unchanged; working binary/captures use `scene-view-test`.
+
+Next upstream cut: canonical scene emitters/material evaluation, removing the
+simulation-to-dynamic-lightmap/per-draw transport rather than reconnecting it.
+
 ## Preserved room-inspection test build
 
 - Runtime: `C:/tmp/D3RendererVerification/scene-test` (separate 2 GB copy).

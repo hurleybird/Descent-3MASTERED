@@ -15,51 +15,66 @@
 
 bool SceneGeometryInspection() { return FindArg("-scene-inspection") != 0; }
 
+namespace {
+// One material resolver for all prepared mesh surfaces. Source-domain rules
+// are explicit authoring conventions, not state inferred from a draw call.
+void resolveMaterial(d3scene::SurfaceBinding& surface, float time, bool model) {
+    if (surface.texture < 0 && model) return; // authored flat-color polygon
+    if (surface.texture < 0 || surface.texture >= MAX_TEXTURES || !GameTextures[surface.texture].used)
+        Error("Scene material references missing texture %d", surface.texture);
+    int base_texture = surface.texture;
+    const auto& authored = GameTextures[surface.texture];
+    if (!model && (surface.authored_flags & FF_DESTROYED) && (authored.flags & TF_DESTROYABLE))
+        base_texture = authored.destroy_handle;
+    else if (SplitSpecularTexturePathEnabled()) {
+        const auto pair = FindSplitSpecularTexturePair(surface.texture);
+        if (pair.valid) base_texture = pair.base_tmap;
+    }
+    if (base_texture < 0 || base_texture >= MAX_TEXTURES || !GameTextures[base_texture].used)
+        Error("Scene material references missing base texture %d", base_texture);
+    const auto& texture = GameTextures[base_texture];
+    surface.bitmap = GetTextureBitmap(base_texture, 0);
+    surface.u_offset = authored.slide_u ? std::fmod(time / authored.slide_u, 1.f) : 0;
+    surface.v_offset = authored.slide_v ? std::fmod(time / authored.slide_v, 1.f) : 0;
+    surface.alpha = texture.alpha;
+    surface.additive = (texture.flags & TF_SATURATE) != 0;
+    // Room 4444 textures historically carry specular masks, while model alpha
+    // can be authored in that format. Keep the distinction at compilation.
+    surface.texture_alpha = (texture.flags & TF_TMAP2) != 0 &&
+        (model || bm_format(surface.bitmap) != BITMAP_FORMAT_4444);
+    if (surface.lightmap >= 0) {
+        const int handle = LightmapInfo[surface.lightmap].lm_handle;
+        if (handle >= 0 && handle < MAX_LIGHTMAPS && GameLightmaps[handle].square_res > 0) {
+            surface.lightmap_bitmap = handle;
+            surface.lightmap_u_scale = static_cast<float>(GameLightmaps[handle].width) / GameLightmaps[handle].square_res;
+            surface.lightmap_v_scale = static_cast<float>(GameLightmaps[handle].height) / GameLightmaps[handle].square_res;
+        }
+    }
+}
+}
+
 d3scene::PresentationRef PrepareGamePresentation(bool advance_history) {
     const auto source = ExtractGamePresentation(Gametime, Frametime, Game_paused, advance_history);
     auto data = source->data();
+    static d3scene::PresentationRef previous_models;
+    PrepareGameModelInstances(data, previous_models ? &previous_models->data() : nullptr);
     static uint64_t material_lifetime = 0;
     if (material_lifetime != data.scene_lifetime) {
         ResetSplitSpecularTexturePairCache();
         material_lifetime = data.scene_lifetime;
     }
-    for (auto& room : data.rooms) {
-        for (auto& surface : room.surfaces) {
-            if (surface.texture < 0 || surface.texture >= MAX_TEXTURES || !GameTextures[surface.texture].used)
-                Error("Scene material references missing texture %d", surface.texture);
-            int base_texture = surface.texture;
-            const auto& authored = GameTextures[surface.texture];
-            if ((surface.authored_flags & FF_DESTROYED) && (authored.flags & TF_DESTROYABLE))
-                base_texture = authored.destroy_handle;
-            else if (SplitSpecularTexturePathEnabled()) {
-                const auto pair = FindSplitSpecularTexturePair(surface.texture);
-                if (pair.valid) base_texture = pair.base_tmap;
-            }
-            if (base_texture < 0 || base_texture >= MAX_TEXTURES || !GameTextures[base_texture].used)
-                Error("Scene material references missing base texture %d", base_texture);
-            const auto& texture = GameTextures[base_texture];
-            surface.bitmap = GetTextureBitmap(base_texture, 0);
-            surface.u_offset = authored.slide_u != 0 ? std::fmod(Gametime / authored.slide_u, 1.f) : 0;
-            surface.v_offset = authored.slide_v != 0 ? std::fmod(Gametime / authored.slide_v, 1.f) : 0;
-            surface.alpha = texture.alpha;
-            surface.additive = (texture.flags & TF_SATURATE) != 0;
-            surface.texture_alpha = (texture.flags & TF_TMAP2) != 0 && bm_format(surface.bitmap) != BITMAP_FORMAT_4444;
-            surface.draw_surface = !(surface.authored_flags & FF_FLOATING_TRIG);
-            if (surface.portal >= 0 && surface.portal < static_cast<int>(room.portals.size()))
-                surface.draw_surface = surface.draw_surface && (room.portals[surface.portal].flags & PF_RENDER_FACES);
-            if (surface.lightmap >= 0) {
-                const int handle = LightmapInfo[surface.lightmap].lm_handle;
-                if (handle >= 0 && handle < MAX_LIGHTMAPS && GameLightmaps[handle].square_res > 0) {
-                    surface.lightmap_bitmap = handle;
-                    surface.lightmap_u_scale = static_cast<float>(GameLightmaps[handle].width) / GameLightmaps[handle].square_res;
-                    surface.lightmap_v_scale = static_cast<float>(GameLightmaps[handle].height) / GameLightmaps[handle].square_res;
-                }
-            }
-        }
+    for (auto& room : data.rooms) for (auto& surface : room.surfaces) {
+        resolveMaterial(surface,static_cast<float>(data.simulation_time),false);
+        surface.draw_surface = !(surface.authored_flags & FF_FLOATING_TRIG);
+        if (surface.portal >= 0 && surface.portal < static_cast<int>(room.portals.size()))
+            surface.draw_surface = surface.draw_surface && (room.portals[surface.portal].flags & PF_RENDER_FACES);
     }
-    // Pending domains deliberately remain set: this is not a completed material
-    // compiler or a claim of full scene support.
-    return d3scene::Presentation::freeze(data);
+    for (auto& object : data.objects) for (auto& part : object.parts) for (auto& surface : part.surfaces)
+        resolveMaterial(surface,static_cast<float>(data.simulation_time),true);
+    // No domain is declared complete by a diagnostic subset of its consumers.
+    auto prepared = d3scene::Presentation::freeze(data);
+    if (advance_history) previous_models = prepared;
+    return prepared;
 }
 
 void RenderGameSceneView(const d3scene::Presentation& frame, d3scene::View view) {

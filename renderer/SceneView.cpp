@@ -25,14 +25,14 @@ double tolerance(const Plane& plane, Vec3 point) {
     return 2e-6*(1+std::abs(double(plane.normal.x)*point.x)+
         std::abs(double(plane.normal.y)*point.y)+std::abs(double(plane.normal.z)*point.z)+std::abs(plane.constant));
 }
-bool polygonOutside(const Camera& camera, const RoomGeometry& geometry, const RoomPolygon& polygon) {
+bool polygonOutside(const Camera& camera, const MeshGeometry& geometry, const MeshPolygon& polygon, const Transform& world) {
     // A separating frustum plane proves rejection. Not finding one deliberately
     // keeps possible corner false positives: never reject a large polygon just
     // because all of its vertices lie outside different planes.
     for (const auto& plane : camera.planes) {
         bool all_outside = true;
         for (const auto& corner : polygon.corners) {
-            const auto& point = geometry.vertices[corner.vertex];
+            const auto point = transformPoint(world,geometry.vertices[corner.vertex]);
             if (distance(plane,point) >= -tolerance(plane,point)) { all_outside = false; break; }
         }
         if (all_outside) return true;
@@ -89,40 +89,58 @@ ViewVisibility queryView(const Presentation& frame, const View& view) {
     result.scene_lifetime = frame.data().scene_lifetime;
     result.history_key = view.history_key;
     const auto& rooms = frame.data().rooms;
+    auto consider = [&](const MeshGeometry& geometry, const SurfaceBinding& surface, VisibleSurface item) {
+        if (!surface.draw_surface || (!item.model && surface.bitmap < 0)) return;
+        ++result.stats.surfaces_considered;
+        const auto& polygon = geometry.polygons[item.polygon_index];
+        const auto point = transformPoint(item.world,geometry.vertices[polygon.corners[0].vertex]);
+        const auto normal = transformDirection(item.world,polygon.normal);
+        if (dot(normal,subtract(view.camera.position,point)) < 0) {
+            ++result.stats.surfaces_backfacing;
+            return;
+        }
+        if (polygonOutside(result.camera,geometry,polygon,item.world)) {
+            ++result.stats.surfaces_outside;
+            return;
+        }
+        item.blended = surface.alpha < .999f || surface.additive;
+        for (const auto& corner : polygon.corners) item.blended = item.blended || corner.alpha < 255;
+        item.depth = static_cast<float>(dot(view.camera.forward,subtract(point,view.camera.position)));
+        result.surfaces.push_back(item);
+    };
     for (size_t r = 0; r < rooms.size(); ++r) {
         ++result.stats.rooms_considered;
         const auto& room = rooms[r];
         const auto& geometry = room.asset->geometry();
         for (size_t f = 0; f < geometry.polygons.size(); ++f) {
-            const auto& surface = room.surfaces[f];
-            if (!surface.draw_surface || surface.bitmap < 0) continue;
-            ++result.stats.surfaces_considered;
-            const auto& polygon = geometry.polygons[f];
-            const auto point = geometry.vertices[polygon.corners[0].vertex];
-            if (dot(polygon.normal,subtract(view.camera.position,point)) < 0) {
-                ++result.stats.surfaces_backfacing;
-                continue;
+            consider(geometry,room.surfaces[f],{static_cast<uint32_t>(r),static_cast<uint32_t>(f)});
+        }
+    }
+    for (size_t i = 0; i < frame.data().objects.size(); ++i) {
+        const auto& object = frame.data().objects[i];
+        if (view.exclude_object && object.handle == view.excluded_object) continue;
+        if (sphereIntersects(result.camera,object.current.position,object.radius))
+            result.object_indices.push_back(static_cast<uint32_t>(i));
+        if (!object.model) continue;
+        // Until deformed/animated bounds are compiled, a source object sphere
+        // is not proof that its posed mesh is offscreen. Test authored polygons.
+        for (size_t part = 0; part < object.parts.size(); ++part) {
+            if (!object.parts[part].draw) continue;
+            const auto world = compose(object.current,object.parts[part].current);
+            const auto& geometry = object.model->geometry().parts[part].geometry;
+            for (size_t face = 0; face < geometry.polygons.size(); ++face) {
+                VisibleSurface item;
+                item.model = true; item.object_index = static_cast<uint32_t>(i);
+                item.part_index = static_cast<uint32_t>(part); item.polygon_index = static_cast<uint32_t>(face);
+                item.world = world;
+                consider(geometry,object.parts[part].surfaces[face],item);
             }
-            if (polygonOutside(result.camera,geometry,polygon)) {
-                ++result.stats.surfaces_outside;
-                continue;
-            }
-            bool blended = surface.alpha < .999f || surface.additive;
-            for (const auto& corner : polygon.corners) blended = blended || corner.alpha < 255;
-            const float depth = static_cast<float>(dot(view.camera.forward,subtract(point,view.camera.position)));
-            result.surfaces.push_back({static_cast<uint32_t>(r),static_cast<uint32_t>(f),depth,blended});
         }
     }
     std::stable_sort(result.surfaces.begin(),result.surfaces.end(),[](const VisibleSurface& a,const VisibleSurface& b) {
         if (a.blended != b.blended) return !a.blended;
         return a.blended ? a.depth > b.depth : a.depth < b.depth;
     });
-    for (size_t i = 0; i < frame.data().objects.size(); ++i) {
-        const auto& object = frame.data().objects[i];
-        if (view.exclude_object && object.handle == view.excluded_object) continue;
-        if (sphereIntersects(result.camera,object.current.position,object.radius))
-            result.object_indices.push_back(static_cast<uint32_t>(i));
-    }
     return result;
 }
 } // namespace d3scene

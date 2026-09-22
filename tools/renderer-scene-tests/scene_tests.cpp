@@ -25,10 +25,10 @@ template<class F> void rejects(F operation, const char* message) {
     try { operation(); } catch (const std::logic_error&) { rejected = true; }
     check(rejected, message);
 }
-d3scene::RoomGeometry triangle() {
-    d3scene::RoomGeometry geometry;
+d3scene::MeshGeometry triangle() {
+    d3scene::MeshGeometry geometry;
     geometry.vertices = {{0, 0, 0}, {1, 0, 0}, {0, 1, 0}};
-    d3scene::RoomPolygon polygon;
+    d3scene::MeshPolygon polygon;
     polygon.normal = {0, 0, 1};
     polygon.corners = {{0, 0, 0, 0, 0, 255}, {1, 1, 0, 1, 0, 255}, {2, 0, 1, 0, 1, 255}};
     geometry.polygons.push_back(polygon);
@@ -156,11 +156,13 @@ void extractionTests() {
 }
 int runSceneViewTests();
 int runModelPoseTests();
+int runModelSceneTests();
 int main() {
     try {
         assetTests(); frameTests(); extractionTests();
         Checks += runSceneViewTests();
         Checks += runModelPoseTests();
+        Checks += runModelSceneTests();
         std::printf("PASS: %d renderer scene checks\n", Checks);
         return 0;
     } catch (const std::exception& error) {

@@ -15,6 +15,9 @@ struct Transform {
     Vec3 right{1, 0, 0}, up{0, 1, 0}, forward{0, 0, 1};
 };
 struct Bounds { Vec3 minimum, maximum; };
+Vec3 transformPoint(const Transform&, Vec3);
+Vec3 transformDirection(const Transform&, Vec3);
+Transform compose(const Transform& parent, const Transform& local);
 
 struct AssetId {
     uint64_t lifetime = 0;
@@ -26,32 +29,58 @@ bool operator!=(AssetId a, AssetId b);
 
 // Authored polygon topology is retained, not recovered from camera-clipped
 // triangles. Triangulation and GPU buffers belong to the renderer.
-struct RoomCorner {
+struct MeshCorner {
     uint32_t vertex = 0;
     float u = 0, v = 0, light_u = 0, light_v = 0;
     uint8_t alpha = 255;
 };
-struct RoomPolygon {
+struct MeshPolygon {
     Vec3 normal;
-    std::vector<RoomCorner> corners;
+    std::vector<MeshCorner> corners;
 };
-struct RoomGeometry {
+struct MeshGeometry {
     std::vector<Vec3> vertices;
-    std::vector<RoomPolygon> polygons;
+    std::vector<MeshPolygon> polygons;
 };
-bool operator==(const RoomGeometry& a, const RoomGeometry& b);
+bool operator==(const MeshGeometry& a, const MeshGeometry& b);
 
 class RoomAsset final {
 public:
     AssetId id() const { return id_; }
-    const RoomGeometry& geometry() const { return geometry_; }
+    const MeshGeometry& geometry() const { return geometry_; }
 private:
     friend class SceneAssets;
-    RoomAsset(AssetId id, RoomGeometry geometry);
+    RoomAsset(AssetId id, MeshGeometry geometry);
     AssetId id_;
-    RoomGeometry geometry_;
+    MeshGeometry geometry_;
 };
 using RoomAssetRef = std::shared_ptr<const RoomAsset>;
+
+struct ModelPart {
+    MeshGeometry geometry;
+    std::vector<Vec3> vertex_normals;
+    std::vector<int32_t> polygon_materials;
+    std::vector<Vec3> polygon_colors;
+    int32_t parent = -1;
+    Vec3 offset;
+    uint32_t authored_flags = 0;
+};
+struct ModelGeometry {
+    std::vector<ModelPart> parts;
+    std::vector<int32_t> textures;
+};
+bool operator==(const ModelGeometry&, const ModelGeometry&);
+class ModelAsset final {
+public:
+    AssetId id() const { return id_; }
+    const ModelGeometry& geometry() const { return geometry_; }
+private:
+    friend class SceneAssets;
+    ModelAsset(AssetId id, ModelGeometry geometry);
+    AssetId id_;
+    ModelGeometry geometry_;
+};
+using ModelAssetRef = std::shared_ptr<const ModelAsset>;
 
 // Immutable revisions keep already-published frames alive across level unload,
 // slot reuse, and geometry changes. Reset never invalidates an existing frame.
@@ -60,18 +89,23 @@ public:
     SceneAssets();
     void reset();
     RoomAssetRef room(uint32_t slot) const;
-    RoomAssetRef publishRoom(uint32_t slot, RoomGeometry geometry);
+    RoomAssetRef publishRoom(uint32_t slot, MeshGeometry geometry);
     void removeRoom(uint32_t slot);
+    ModelAssetRef model(uint32_t slot) const;
+    ModelAssetRef publishModel(uint32_t slot, ModelGeometry geometry);
+    void removeModel(uint32_t slot);
     uint64_t lifetime() const { return lifetime_; }
 private:
     uint64_t lifetime_ = 0;
     uint64_t revision_ = 0;
     std::vector<RoomAssetRef> rooms_;
+    std::vector<ModelAssetRef> models_;
 };
 
 // These are authoring bindings, not alternate material implementations. The
 // material compiler must resolve them before execution is enabled.
 struct SurfaceBinding {
+    Vec3 base_color{1, 1, 1};
     int32_t bitmap = -1, lightmap_bitmap = -1;
     float lightmap_u_scale = 1, lightmap_v_scale = 1;
     float u_offset = 0, v_offset = 0, alpha = 1;
@@ -98,6 +132,12 @@ struct RoomState {
     int32_t mirror_polygon = -1;
 };
 
+struct PreparedModelPart {
+    // Model-space transforms, composed once from the complete hierarchy.
+    Transform current, previous;
+    bool draw = true;
+    std::vector<SurfaceBinding> surfaces;
+};
 // Object identity includes the game's allocation generation, not just its slot.
 // Preparation will replace source classifications with asset/pose/material
 // records. Unprepared objects MUST NOT be sent to a legacy draw fallback.
@@ -109,6 +149,8 @@ struct ObjectState {
     Transform current, previous;
     bool has_previous = false;
     float radius = 0;
+    ModelAssetRef model;
+    std::vector<PreparedModelPart> parts;
 };
 
 enum class PendingDomain : uint32_t {

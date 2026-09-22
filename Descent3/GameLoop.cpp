@@ -3104,9 +3104,9 @@ void GameRenderFrame(void)
 			StartFrame(0, 0, Max_window_w, Max_window_h, false);
 			grtext_SetFont(HUD_FONT);
 			RenderHUDText(GR_RGB(255, 220, 80), 255, 1, 12, 12,
-				"RENDERER TEST: room geometry + base materials only");
+				"RENDERER TEST: rooms + posed model geometry / base materials");
 			RenderHUDText(GR_RGB(255, 220, 80), 255, 1, 12, 28,
-				"Not migrated: objects, terrain, effects, specular, fog, cockpit");
+				"Incomplete: lighting, terrain, effects, fog, cockpit, special models");
 			grtext_Flush();
 			EndFrame();
 		}

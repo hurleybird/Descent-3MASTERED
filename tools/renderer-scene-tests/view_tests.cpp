@@ -17,16 +17,16 @@ d3scene::View view() {
     result.projection_anchor=result.viewport;
     return result;
 }
-d3scene::RoomGeometry triangle(float x, float z, bool facing=true) {
-    d3scene::RoomGeometry geometry;
+d3scene::MeshGeometry triangle(float x, float z, bool facing=true) {
+    d3scene::MeshGeometry geometry;
     geometry.vertices={{x-1,-1,z},{x+1,-1,z},{x,1,z}};
-    d3scene::RoomPolygon polygon;
+    d3scene::MeshPolygon polygon;
     polygon.normal={0,0,facing?-1.f:1.f};
     polygon.corners={{0},{1},{2}};
     geometry.polygons.push_back(polygon);
     return geometry;
 }
-void appendRoom(d3scene::SceneAssets& assets,d3scene::FrameData& data,d3scene::RoomGeometry geometry) {
+void appendRoom(d3scene::SceneAssets& assets,d3scene::FrameData& data,d3scene::MeshGeometry geometry) {
     d3scene::RoomState room;
     room.number=static_cast<int32_t>(data.rooms.size());
     room.asset=assets.publishRoom(room.number,std::move(geometry));

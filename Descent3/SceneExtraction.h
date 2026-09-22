@@ -9,6 +9,7 @@ struct object;
 // reads simulation state but does not draw, advance RNG, or mark visibility.
 d3scene::PresentationRef ExtractGamePresentation(double time, float delta, bool paused, bool advance_history = true);
 void ResetGamePresentationScene();
+void PrepareGameModelInstances(d3scene::FrameData&, const d3scene::FrameData* previous);
 d3scene::PresentationRef PrepareGamePresentation(bool advance_history = true);
 void RenderGameSceneView(const d3scene::Presentation&, d3scene::View);
 bool SceneGeometryInspection();

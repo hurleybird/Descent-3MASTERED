@@ -5,7 +5,9 @@ add_executable(renderer_scene_tests
     scene_tests.cpp
     view_tests.cpp
     model_pose_tests.cpp
+    model_scene_tests.cpp
     ../../model/ModelPose.cpp
+    ../../model/SceneModelAsset.cpp
     ../../vecmat/vector.cpp
     ../../fix/fix.cpp
     ../../renderer/Scene.cpp

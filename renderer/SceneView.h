@@ -27,6 +27,9 @@ struct VisibleSurface {
     uint32_t room_index = 0, polygon_index = 0;
     float depth = 0;
     bool blended = false;
+    bool model = false;
+    uint32_t object_index = 0, part_index = 0;
+    Transform world;
 };
 struct ViewQueryStats {
     uint32_t rooms_considered = 0, surfaces_considered = 0;

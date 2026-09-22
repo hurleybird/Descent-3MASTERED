@@ -19,7 +19,7 @@ bool same(d3scene::Vec3 a, const vector& b) { return a.x == b.x && a.y == b.y &&
 // fields (never addresses, padding, transient face marks, or hashes) at extraction
 // and publish an explicit asset revision only when they change. This scan is a
 // measurable migration cost; it does not clone level geometry every frame.
-bool matches(const d3scene::RoomGeometry& geometry, const room& source) {
+bool matches(const d3scene::MeshGeometry& geometry, const room& source) {
     if (geometry.vertices.size() != static_cast<size_t>(source.num_verts) ||
         geometry.polygons.size() != static_cast<size_t>(source.num_faces)) return false;
     for (int i = 0; i < source.num_verts; ++i)
@@ -35,14 +35,14 @@ bool matches(const d3scene::RoomGeometry& geometry, const room& source) {
     }
     return true;
 }
-d3scene::RoomGeometry extractGeometry(const room& source) {
-    d3scene::RoomGeometry geometry;
+d3scene::MeshGeometry extractGeometry(const room& source) {
+    d3scene::MeshGeometry geometry;
     geometry.vertices.reserve(source.num_verts);
     for (int i = 0; i < source.num_verts; ++i) geometry.vertices.push_back(value(source.verts[i]));
     geometry.polygons.reserve(source.num_faces);
     for (int i = 0; i < source.num_faces; ++i) {
         const face& face = source.faces[i];
-        d3scene::RoomPolygon polygon;
+        d3scene::MeshPolygon polygon;
         polygon.normal = value(face.normal);
         polygon.corners.reserve(face.num_verts);
         for (int j = 0; j < face.num_verts; ++j) {

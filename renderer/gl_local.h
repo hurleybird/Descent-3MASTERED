@@ -119,12 +119,14 @@ static constexpr GLuint GL4_DRAW_BUFFER_SYNC_POINT_COUNT = 16;
 constexpr int NUM_GL4_FBOS = 1;
 class GL4Renderer : public IRenderer
 {
-	struct SceneRoomGpu {
+	struct SceneMeshGpu {
 		d3scene::AssetId id;
 		GLuint vao = 0, buffer = 0;
 		std::vector<ElementRange> polygons;
 	};
-	std::vector<SceneRoomGpu> scene_rooms;
+	std::vector<SceneMeshGpu> scene_rooms;
+	std::vector<std::vector<SceneMeshGpu>> scene_models;
+	void UploadSceneMesh(SceneMeshGpu&, d3scene::AssetId, const d3scene::MeshGeometry&);
 	uint64_t scene_asset_lifetime = 0;
 	ShaderProgram scene_shader;
 	void DestroySceneResources();
