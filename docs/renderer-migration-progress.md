@@ -1,5 +1,22 @@
 # Renderer migration checkpoint
 
+## Continuation: raster depth policy independent of opaque products
+
+Materials now explicitly resolve Automatic/ReadWrite/ReadOnly/Disabled depth
+policy. Raster writes and solid-depth participation are different predicates.
+Normal polymodels preserve their authored late depth-write self-occlusion without
+entering opaque AO/motion products. Solid read-only/no-depth overlays also execute
+after opaque export, independently of alpha. Renamed the pass to LateWorld rather
+than calling every late surface blended. Background depth participation is rejected.
+
+Full build and 5,267 checks pass. All eight depth-policy-normal captures are
+pixel-identical to model-ownership-effects. Clean/native and effects/2x-SSAA
+depth-policy fixtures were visually inspected. Measured clean-frame center RGB
+samples are exactly (0,0,128), (128,0,64), (128,64,64), (0,128,128) for write,
+read-only, disabled, and read-only-with-occluder: the expected alpha/depth outcomes.
+Opaque surface records resolve before late raster writes, preserving their
+associated depth/identity sample. This is not full cockpit or rare-model coverage.
+
 ## Continuation: explicit view content collections
 
 Model/mesh publication and view requests now carry a content collection. Zero is

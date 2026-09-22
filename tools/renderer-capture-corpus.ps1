@@ -17,6 +17,7 @@ param(
     [switch]$AtmosphereProbe,
     [switch]$AxisProbe,
     [switch]$RingProbe,
+    [switch]$DepthPolicyProbe,
     [switch]$ModelEffectsProbe,
     [switch]$StandaloneModelProbe,
     [switch]$ModelCollectionProbe,
@@ -41,6 +42,7 @@ if ($StandaloneModelProbe) {
 }
 if ($LayerProbe -and -not $SceneInspection) { throw 'Layer probe requires scene inspection.' }
 if ($RingProbe -and -not $SceneInspection) { throw 'Ring probe requires scene inspection.' }
+if ($DepthPolicyProbe -and -not $SceneInspection) { throw 'Depth policy probe requires scene inspection.' }
 if ($ResourceProbe -and -not $SceneInspection) { throw 'Resource probe requires scene inspection.' }
 if ($LodProbeTier -ge 0 -and (-not $SceneInspection -or $HistoryProbe -or $ModelEffectsProbe -or $TerrainProbe -or $SkyProbe -or $SatelliteProbe -or $ScorchViewProbe)) {
     throw 'LOD probe requires isolated scene inspection and no other camera fixture.'
@@ -92,6 +94,7 @@ $manifest = [ordered]@{
     atmosphere_probe = [bool]$AtmosphereProbe
     axis_probe = [bool]$AxisProbe
     ring_probe = [bool]$RingProbe
+    depth_policy_probe = [bool]$DepthPolicyProbe
     ring_probe_revision = $(if ($RingProbe) { 2 } else { 0 })
     model_effects_probe = [bool]$ModelEffectsProbe
     standalone_model_probe = [bool]$StandaloneModelProbe
@@ -146,6 +149,7 @@ try {
         if ($StandaloneModelProbe) { $arguments += '-scene-standalone-model-probe' }
         if ($ModelCollectionProbe) { $arguments += '-scene-model-collection-probe' }
         if ($RingProbe) { $arguments += '-scene-ring-probe' }
+        if ($DepthPolicyProbe) { $arguments += '-scene-depth-policy-probe' }
         if ($ModelEffectsProbe) { $arguments += '-scene-model-effects-probe' }
         if ($ScorchProbe) { $arguments += '-capture-scorch' }
         if ($ScorchViewProbe) { $arguments += '-scene-scorch-view-probe' }
@@ -169,6 +173,7 @@ try {
         $process.WaitForExit()
         $logText = if (Test-Path -LiteralPath $log) { Get-Content -LiteralPath $log -Raw } else { '' }
         $resourceValidated = $true
+        if ($DepthPolicyProbe) { $resourceValidated = $logText.Contains('scene depth fixture columns=write,read,disabled,read_occluded') }
         if ($StandaloneModelProbe) { $resourceValidated = $logText.Contains('scene standalone model fixture instances=1') }
         if ($ModelCollectionProbe) { $resourceValidated = $resourceValidated -and $logText.Contains('scene model collection fixture world=0 preview=1') }
         if ($RingProbe) { $resourceValidated = $resourceValidated -and $logText.Contains('scene ring fixture facing=1 planar_reverse=1 object=1 gravity=1') }

@@ -465,7 +465,7 @@ int runSceneViewTests() {
     const auto passes = d3scene::buildViewPasses(*scheduled_frame,scheduled_visibility);
     check(passes.size() == 4 && passes[0].kind == d3scene::ViewPassKind::Background &&
         passes[1].kind == d3scene::ViewPassKind::OpaqueWorld && passes[2].kind == d3scene::ViewPassKind::SnapshotOpaqueDepth &&
-        passes[3].kind == d3scene::ViewPassKind::BlendedWorld,"Opaque depth dependency was scheduled after its consumer");
+        passes[3].kind == d3scene::ViewPassKind::LateWorld,"Opaque depth dependency was scheduled after its consumer");
     check(passes[0].begin == 0 && passes[0].end == 1 && passes[1].begin == 1 && passes[1].end == 2 &&
         passes[2].begin == passes[2].end && passes[3].begin == 2 && passes[3].end == 3,"View pass ranges overlap or omit surfaces");
     scheduled.meshes[0].surface.soft_depth_range = 0; scheduled.meshes[0].surface.blend = d3scene::BlendMode::Alpha;
@@ -474,8 +474,28 @@ int runSceneViewTests() {
         "Unconsumed opaque depth was copied");
     const auto exported = d3scene::buildViewPasses(*scheduled_frame,scheduled_visibility,{true});
     check(exported.size() == 5 && exported[3].kind == d3scene::ViewPassKind::ExportOpaqueScene &&
-        exported[4].kind == d3scene::ViewPassKind::BlendedWorld,"Opaque image product includes translucent consumers");
+        exported[4].kind == d3scene::ViewPassKind::LateWorld,"Opaque image product includes translucent consumers");
     const auto empty_frame = d3scene::Presentation::freeze(shaken);
+    {
+        auto read_only = solid; read_only.surface.depth = d3scene::DepthMode::ReadOnly;
+        auto no_depth_overlay = solid; no_depth_overlay.surface.depth = d3scene::DepthMode::Disabled;
+        auto depth_scene = scheduled; depth_scene.meshes = {no_depth_overlay,solid,read_only};
+        const auto depth_frame = d3scene::Presentation::freeze(depth_scene);
+        const auto depth_view = d3scene::queryView(*depth_frame,view());
+        const auto depth_passes = d3scene::buildViewPasses(*depth_frame,depth_view,{true});
+        check(depth_passes.size() == 3 && depth_passes[0].end == 1 &&
+            depth_passes[1].kind == d3scene::ViewPassKind::ExportOpaqueScene && depth_passes[2].begin == 1,
+            "No-depth or read-only geometry was included in opaque products");
+        check(!depth_view.surfaces[1].blended && depth_view.surfaces[1].late &&
+            !depth_view.surfaces[2].blended && depth_view.surfaces[2].late,"Late execution still depends on alpha blending");
+        depth_scene.meshes[0].surface.depth = static_cast<d3scene::DepthMode>(255); bool invalid_depth = false;
+        try { d3scene::Presentation::freeze(depth_scene); } catch (const std::invalid_argument&) { invalid_depth = true; }
+        check(invalid_depth,"Unknown depth policy accepted");
+        depth_scene.meshes[0] = background; depth_scene.meshes[0].surface.depth = d3scene::DepthMode::ReadWrite;
+        invalid_depth = false;
+        try { d3scene::Presentation::freeze(depth_scene); } catch (const std::invalid_argument&) { invalid_depth = true; }
+        check(invalid_depth,"Background depth writes accepted");
+    }
     const auto empty_passes = d3scene::buildViewPasses(*empty_frame,d3scene::queryView(*empty_frame,view()),{true});
     check(empty_passes.size() == 1 && empty_passes[0].kind == d3scene::ViewPassKind::ExportOpaqueScene,
         "An empty view reused a previous view's opaque image product");
@@ -498,7 +518,7 @@ int runSceneViewTests() {
     catch (const std::invalid_argument&) { rejected_missing_depth = true; }
     check(rejected_missing_depth,"Occlusion pass accepted a missing opaque scene dependency");
     check(radiance_passes.back().kind == d3scene::ViewPassKind::CompositeWorldOcclusion &&
-        radiance_passes[radiance_passes.size()-2].kind == d3scene::ViewPassKind::BlendedWorld,
+        radiance_passes[radiance_passes.size()-2].kind == d3scene::ViewPassKind::LateWorld,
         "Eligible radiance was exported before translucency attenuated it");
     const d3scene::RadianceSample opaque{{.6f,.7f,.8f},{.3f,.2f,.1f}}; // the remainder is fog/emissive
     for (const auto blend : {d3scene::BlendMode::Alpha,d3scene::BlendMode::Additive,d3scene::BlendMode::Multiply}) {

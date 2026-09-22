@@ -446,6 +446,38 @@ void PrepareGameEffects(d3scene::FrameData& frame) {
         if (!prepareAxisEffect(frame,probe,quad)) Error("Beam fixture could not publish its source texture");
         prepared += 3;
     }
+    if (SceneGeometryInspection() && FindArg("-scene-depth-policy-probe") && Viewer_object) {
+        auto pair = d3scene::unitBillboardQuad();
+        const auto far = pair;
+        for (auto position : far.vertices) { position.z = 1; pair.vertices.push_back(position); }
+        auto face = far.polygons[0];
+        for (auto& corner : face.corners) corner.vertex += 4;
+        pair.polygons.push_back(face);
+        pair.vertex_colors = {{0,0,1},{0,0,1},{0,0,1},{0,0,1},{1,0,0},{1,0,0},{1,0,0},{1,0,0}};
+        const auto pair_asset = d3scene::assets().publishMesh(7,std::move(pair));
+        for (int column = 0; column < 4; ++column) {
+            d3scene::PreparedMesh panel;
+            panel.asset = quad; panel.room = Viewer_object->roomnum; panel.world = basis(Viewer_object->orient);
+            panel.world.right = value(Viewer_object->orient.rvec*.65f);
+            panel.world.up = value(Viewer_object->orient.uvec*.65f);
+            const auto center = Viewer_object->pos+Viewer_object->orient.fvec*6+Viewer_object->orient.rvec*((column-1.5f)*1.7f);
+            panel.world.position = value(center+Viewer_object->orient.fvec*2);
+            panel.surface.unlit = true; panel.surface.two_sided = true; panel.surface.base_color = {0,0,0};
+            frame.meshes.push_back(panel);
+            if (column >= 2) {
+                panel.world.position = value(center+Viewer_object->orient.fvec*.5f);
+                panel.surface.base_color = {0,1,0}; frame.meshes.push_back(panel);
+            }
+            panel.asset = pair_asset; panel.world.position = value(center);
+            panel.surface.base_color = {1,1,1}; panel.surface.alpha = .5f;
+            panel.surface.blend = d3scene::BlendMode::Alpha;
+            panel.surface.depth = column == 0 ? d3scene::DepthMode::ReadWrite :
+                column == 2 ? d3scene::DepthMode::Disabled : d3scene::DepthMode::ReadOnly;
+            frame.meshes.push_back(panel);
+        }
+        if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
+            AutomatedCaptureLog("scene depth fixture columns=write,read,disabled,read_occluded expected=blue,purple,pink,cyan");
+    }
     if (SceneGeometryInspection() && FindArg("-scene-ring-probe") && Viewer_object) {
         vis_effect probe{};
         probe.type = VIS_FIREBALL; probe.id = BLAST_RING_INDEX; probe.roomnum = Viewer_object->roomnum;

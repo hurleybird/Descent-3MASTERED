@@ -38,6 +38,10 @@ void validateSurface(const SurfaceBinding& surface) {
     require(surface.blend == BlendMode::Solid || surface.blend == BlendMode::Alpha || surface.blend == BlendMode::Additive ||
         surface.blend == BlendMode::Multiply,"Invalid material blend mode");
     require(surface.layer == RenderLayer::World || surface.layer == RenderLayer::Background,"Invalid material layer");
+    require(surface.depth == DepthMode::Automatic || surface.depth == DepthMode::ReadWrite ||
+        surface.depth == DepthMode::ReadOnly || surface.depth == DepthMode::Disabled,"Invalid material depth policy");
+    require(surface.layer != RenderLayer::Background || surface.depth == DepthMode::Automatic ||
+        surface.depth == DepthMode::Disabled,"Background cannot participate in raster depth");
     require(finite(surface.base_color) && finite(surface.color_modulation) && finite(surface.ambient_color) && finite(surface.ambient_direction) &&
         std::isfinite(surface.alpha) && surface.alpha >= 0 && surface.alpha <= 1 &&
         std::isfinite(surface.u_offset) && std::isfinite(surface.v_offset) &&
@@ -263,6 +267,9 @@ MaterialPolicy compileMaterialPolicy(const SurfaceBinding& surface, const MeshPo
     bool fractional = surface.alpha < 1 || result.texture_alpha == TextureAlpha::Continuous || surface.soft_depth_range > 0;
     for (const auto& corner : polygon.corners) fractional = fractional || corner.alpha < 255;
     result.blend = surface.blend != BlendMode::Solid ? surface.blend : fractional ? BlendMode::Alpha : BlendMode::Solid;
+    result.depth = surface.depth != DepthMode::Automatic ? surface.depth :
+        surface.layer == RenderLayer::Background ? DepthMode::Disabled :
+        result.blended() ? DepthMode::ReadOnly : DepthMode::ReadWrite;
     return result;
 }
 

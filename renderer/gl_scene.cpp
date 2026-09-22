@@ -1101,7 +1101,7 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
             else if (surface.material.blend == d3scene::BlendMode::Additive) glBlendFunci(3,GL_ZERO,GL_ONE);
             else glBlendFunci(3,GL_ZERO,GL_ONE_MINUS_SRC_ALPHA);
         }
-        glDepthMask(surface.material.writesSolidDepth() ? GL_TRUE : GL_FALSE);
+        glDepthMask(surface.material.writesDepth() ? GL_TRUE : GL_FALSE);
         if (surface.material.testsDepth()) glEnable(GL_DEPTH_TEST); else glDisable(GL_DEPTH_TEST);
         glBindVertexArray(gpu.vao);
         const auto range = item.terrain || item.mesh ? ElementRange(0,gpu.polygons.back().offset+gpu.polygons.back().count) : gpu.polygons[item.polygon_index];

@@ -203,16 +203,20 @@ private:
 
 enum class RenderLayer : uint8_t { Background, World };
 enum class BlendMode : uint8_t { Solid, Alpha, Additive, Multiply };
+enum class DepthMode : uint8_t { Automatic, ReadWrite, ReadOnly, Disabled };
 enum class TextureAlpha : uint8_t { Ignore, Cutout, Continuous };
 enum class OcclusionClass : uint8_t { Default, Terrain, Model, MineRock, Mine };
 struct MaterialPolicy {
     RenderLayer layer = RenderLayer::World;
     BlendMode blend = BlendMode::Solid;
+    DepthMode depth = DepthMode::ReadWrite; // fully resolved; never Automatic
     TextureAlpha texture_alpha = TextureAlpha::Ignore;
     float alpha_cutoff = .01f;
     bool blended() const { return blend != BlendMode::Solid; }
-    bool testsDepth() const { return layer == RenderLayer::World; }
-    bool writesSolidDepth() const { return testsDepth() && !blended(); }
+    bool testsDepth() const { return depth != DepthMode::Disabled; }
+    bool writesDepth() const { return depth == DepthMode::ReadWrite; }
+    bool writesSolidDepth() const { return writesDepth() && !blended(); }
+    bool requiresLatePass() const { return !writesSolidDepth(); }
     bool allowsBehind() const { return blended() || texture_alpha != TextureAlpha::Ignore; }
 };
 // These are authoring bindings, not alternate material implementations. The
@@ -231,6 +235,7 @@ struct SurfaceBinding {
     RenderLayer layer = RenderLayer::World;
     bool unlit = false, two_sided = false;
     BlendMode blend = BlendMode::Solid; // non-solid modes explicitly request compositing
+    DepthMode depth = DepthMode::Automatic;
     bool texture_wrap = true;
     float soft_depth_range = 0; // zero disables intersection fading; positive requires opaque depth
     // Authored translucent effect depth in eye units, not a geometry/fog shift.

@@ -109,6 +109,9 @@ if ([bool]$referenceManifest.axis_probe -ne [bool]$actualManifest.axis_probe -an
 if ([bool]$referenceManifest.ring_probe -ne [bool]$actualManifest.ring_probe -and -not $DiagnosticComparison) {
     throw 'Ring fixture differs; use DiagnosticComparison for intentional fixture changes.'
 }
+if ([bool]$referenceManifest.depth_policy_probe -ne [bool]$actualManifest.depth_policy_probe -and -not $DiagnosticComparison) {
+    throw 'Depth policy fixtures differ; this is not a parity comparison.'
+}
 if ([int]$referenceManifest.ring_probe_revision -ne [int]$actualManifest.ring_probe_revision -and -not $DiagnosticComparison) {
     throw 'Ring fixture revisions differ; this is not a parity comparison.'
 }

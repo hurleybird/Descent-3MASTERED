@@ -72,6 +72,18 @@ int runSceneImageTests() {
     check(compileMaterialPolicy(surface,polygon).blended(),"Almost-opaque alpha incorrectly wrote solid depth");
     surface.alpha = 1; polygon.corners[0].alpha = 254;
     check(compileMaterialPolicy(surface,polygon).blended(),"Vertex alpha absent from material policy");
+    surface.depth = DepthMode::ReadWrite;
+    policy = compileMaterialPolicy(surface,polygon);
+    check(policy.blended() && policy.testsDepth() && policy.writesDepth() && !policy.writesSolidDepth() && policy.requiresLatePass(),
+        "Late transparent depth writes contaminated solid depth or lost self-occlusion");
+    polygon.corners[0].alpha = 255; surface.depth = DepthMode::ReadOnly;
+    policy = compileMaterialPolicy(surface,polygon);
+    check(!policy.blended() && policy.testsDepth() && !policy.writesDepth() && policy.requiresLatePass(),
+        "Read-only opaque overlay was scheduled as an opaque depth writer");
+    surface.depth = DepthMode::Disabled;
+    policy = compileMaterialPolicy(surface,polygon);
+    check(!policy.blended() && !policy.testsDepth() && !policy.writesDepth() && policy.requiresLatePass(),
+        "Foreground no-depth policy was inferred from color blending");
     assets.reset();
     check(!assets.image(42) && image->mips()[0].width == 2,"Scene reset invalidated held image");
     check(assets.publishImage(43,source)->id().lifetime != truecolor->id().lifetime,"Image slot reuse inherited old lifetime");

@@ -313,6 +313,9 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::FrameDat
                 for (size_t j = 0; j < asset_part.geometry.polygons.size(); ++j) {
                     d3scene::SurfaceBinding binding;
                     binding.occlusion_class = d3scene::OcclusionClass::Model;
+                    // Normal authored polymodel transparency writes late raster
+                    // depth for self-occlusion, but never enters opaque products.
+                    binding.depth = d3scene::DepthMode::ReadWrite;
                     binding.ambient_color = ambient;
                     binding.directional_ambient = directional;
                     binding.alpha = effect.alpha;

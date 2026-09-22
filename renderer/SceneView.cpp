@@ -258,6 +258,7 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
             return;
         }
         item.blended = surface.material.blended();
+        item.late = surface.material.requiresLatePass();
         item.depth = static_cast<float>(dot(view.camera.forward,subtract(point,view.camera.position)));
         result.surfaces.push_back(item);
     };
@@ -339,6 +340,7 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
                     VisibleSurface item; item.terrain = true;
                     item.terrain_patch = static_cast<uint32_t>(patch_index); item.terrain_batch = static_cast<uint32_t>(batch);
                     item.blended = surface.material.blended();
+                    item.late = surface.material.requiresLatePass();
                     item.depth = static_cast<float>(dot(view.camera.forward,subtract(center,view.camera.position)));
                     result.surfaces.push_back(item);
                 }
@@ -379,6 +381,7 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
         if (!visible) continue;
         item.layer = instance.surface.material.layer;
         item.blended = instance.surface.material.blended();
+        item.late = instance.surface.material.requiresLatePass();
         item.depth = static_cast<float>(dot(view.camera.forward,subtract(item.world.position,view.camera.position)));
         result.surfaces.push_back(item);
     }
@@ -386,8 +389,8 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
     std::stable_sort(result.surfaces.begin(),result.surfaces.end(),[](const VisibleSurface& a,const VisibleSurface& b) {
         if (a.layer != b.layer) return a.layer == RenderLayer::Background;
         if (a.layer == RenderLayer::Background) return false; // retain authored compositing order
-        if (a.blended != b.blended) return !a.blended;
-        return a.blended ? a.depth > b.depth : a.depth < b.depth;
+        if (a.late != b.late) return !a.late;
+        return a.late ? a.depth > b.depth : a.depth < b.depth;
     });
     return result;
 }
@@ -406,14 +409,14 @@ std::vector<ViewPass> buildViewPasses(const Presentation& frame,const ViewVisibi
     while (index < view.surfaces.size() && view.surfaces[index].layer == RenderLayer::Background) ++index;
     if (index) passes.push_back({ViewPassKind::Background,0,index});
     const auto opaque = index;
-    while (index < view.surfaces.size() && !view.surfaces[index].blended) ++index;
+    while (index < view.surfaces.size() && !view.surfaces[index].late) ++index;
     if (index > opaque) passes.push_back({ViewPassKind::OpaqueWorld,opaque,index});
     bool depth_required = false;
     for (size_t i = index; i < view.surfaces.size(); ++i)
         depth_required = depth_required || visibleSurfaceBinding(frame,view.surfaces[i]).soft_depth_range > 0;
     if (depth_required) passes.push_back({ViewPassKind::SnapshotOpaqueDepth,index,index});
     if (products.opaque_scene) passes.push_back({ViewPassKind::ExportOpaqueScene,index,index});
-    if (index < view.surfaces.size()) passes.push_back({ViewPassKind::BlendedWorld,index,static_cast<uint32_t>(view.surfaces.size())});
+    if (index < view.surfaces.size()) passes.push_back({ViewPassKind::LateWorld,index,static_cast<uint32_t>(view.surfaces.size())});
     if (products.occlusion_radiance) passes.push_back({ViewPassKind::CompositeWorldOcclusion,index,index});
     return passes;
 }

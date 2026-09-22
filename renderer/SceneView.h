@@ -36,6 +36,7 @@ struct VisibleSurface {
     uint32_t room_index = 0, polygon_index = 0;
     float depth = 0;
     bool blended = false;
+    bool late = false; // pass membership is independent of color blending
     bool model = false;
     uint32_t model_instance_index = 0, part_index = 0;
     uint32_t model_variant = 0;
@@ -59,7 +60,7 @@ struct ViewVisibility {
     ViewQueryStats stats;
     bool exterior_visible = false;
 };
-enum class ViewPassKind { Background, OpaqueWorld, SnapshotOpaqueDepth, ExportOpaqueScene, BlendedWorld, CompositeWorldOcclusion };
+enum class ViewPassKind { Background, OpaqueWorld, SnapshotOpaqueDepth, ExportOpaqueScene, LateWorld, CompositeWorldOcclusion };
 struct ViewProducts { bool opaque_scene = false, occlusion_radiance = false; };
 struct ViewPass {
     ViewPassKind kind;
