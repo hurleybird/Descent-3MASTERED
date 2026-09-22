@@ -3,7 +3,25 @@
 #include "SceneLighting.h"
 #include <cmath>
 #include <stdexcept>
+#include <algorithm>
 namespace d3scene {
+std::vector<GlowSlice> thrusterSlices(float radius,float length) {
+    if (!std::isfinite(radius) || !std::isfinite(length)) throw std::invalid_argument("Invalid thruster profile");
+    std::vector<GlowSlice> result;
+    if (length < .1f || radius <= .05f) return result;
+    // The 100-slice maximum and three slices/unit are the original authored
+    // appearance, not a renderer submission/storage limit.
+    const int divisions = static_cast<int>((std::min)(100.f,length*3));
+    if (!divisions) return result;
+    const float radius_step = radius/divisions, distance_step = length/divisions;
+    float distance = 0;
+    for (int i = 0; i < divisions && radius > .05f; ++i) {
+        result.push_back({distance,radius});
+        radius -= radius_step; distance += distance_step;
+    }
+    std::reverse(result.begin(),result.end());
+    return result;
+}
 Transform axisBillboardPlacement(Vec3 start,Vec3 end,float radius) {
     if (!std::isfinite(radius) || radius < 0 || !std::isfinite(start.x) || !std::isfinite(start.y) ||
         !std::isfinite(start.z) || !std::isfinite(end.x) || !std::isfinite(end.y) || !std::isfinite(end.z))

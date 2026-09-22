@@ -34,6 +34,26 @@ d3scene::ModelGeometry modelGeometry() {
 int runModelSceneTests() {
     using namespace d3scene;
     checks = 0;
+    check(ResolveSceneModelPartRole(0,1,0,false) == SceneModelPartRole::Surface,"Ordinary model part lost surface role");
+    check(ResolveSceneModelPartRole(SOF_FACING,1,0,false) == SceneModelPartRole::Facing,"Facing part became ordinary geometry");
+    check(ResolveSceneModelPartRole(SOF_FACING|SOF_GLOW,1,0,false) == SceneModelPartRole::Glow,"Glow role lost legacy precedence");
+    check(ResolveSceneModelPartRole(SOF_THRUSTER,1,0,false) == SceneModelPartRole::Glow,"Thruster bypassed glow preparation");
+    check(ResolveSceneModelPartRole(SOF_CUSTOM,1,0,false) == SceneModelPartRole::Hidden &&
+        ResolveSceneModelPartRole(SOF_CUSTOM,1,0,true) == SceneModelPartRole::Surface,"Custom panel eligibility ignored published texture");
+    check(ResolveSceneModelPartRole(SOF_CUSTOM|SOF_FACING,1,0,true) == SceneModelPartRole::Facing,"Custom facing part lost its role");
+    check(ResolveSceneModelPartRole(SOF_SHELL,1,0,true) == SceneModelPartRole::Hidden &&
+        ResolveSceneModelPartRole(SOF_FRONTFACE,1,0,true) == SceneModelPartRole::Hidden,"Door authoring metadata became model draw geometry");
+    check(ResolveSceneModelPartRole(SOF_GLOW,1,1,true) == SceneModelPartRole::Hidden &&
+        ResolveSceneModelPartRole(0,UINT32_MAX,32,true) == SceneModelPartRole::Hidden,"Part visibility mask wrapped or was ignored");
+    auto hierarchy = modelGeometry(); hierarchy.parts.push_back(hierarchy.parts[0]); hierarchy.parts[1].parent = 0;
+    hierarchy.parts[0].authored_flags = SOF_SHELL;
+    check(ResolveSceneModelRoles(hierarchy,3,false)[1] == SceneModelPartRole::Hidden,"Door metadata exposed descendant geometry");
+    hierarchy.parts[0].authored_flags = SOF_CUSTOM;
+    check(ResolveSceneModelRoles(hierarchy,2,false)[1] == SceneModelPartRole::Surface,"Masked/custom parent hid an independent child");
+    hierarchy.parts[0].geometry.polygons.clear();
+    check(ResolveSceneModelRoles(hierarchy,3,true)[1] == SceneModelPartRole::Hidden,"Empty parent bypassed legacy traversal exclusion");
+    hierarchy.parts[0].parent = 1;
+    rejects([&] { ResolveSceneModelRoles(hierarchy,3,true); });
     vector vertices[] = {{-1,-1,0},{0,1,0},{1,-1,0}};
     vector normals[] = {{0,0,-1},{0,std::numeric_limits<float>::quiet_NaN(),0},{0,0,0}};
     short indices[] = {0,1,2};

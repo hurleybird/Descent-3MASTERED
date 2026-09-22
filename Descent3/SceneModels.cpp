@@ -3,6 +3,8 @@
 #include "SceneMaterialBindings.h"
 #include "gametexture.h"
 #include "bitmap.h"
+#include "fireball.h"
+#include "descent.h"
 #include "object.h"
 #include "objinfo.h"
 #include "polymodel.h"
@@ -22,10 +24,13 @@
 #include "../renderer/SceneLighting.h"
 #include "../renderer/SceneGeometry.h"
 #include "args.h"
+#include "config.h"
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
 #include <unordered_map>
+
+extern bool is_multi_demo;
 
 namespace {
 d3scene::Vec3 value(const vector& v) { return {v.x, v.y, v.z}; }
@@ -56,12 +61,68 @@ void prepareFacingPart(d3scene::FrameData& frame,const d3scene::ObjectState& own
     sprite.surface.soft_depth_range = SceneFacingUsesSoftIntersection(model.name,GameTextures[texture].name) ? 2.f : 0.f;
     frame.meshes.push_back(std::move(sprite));
 }
+void prepareGlowPart(d3scene::FrameData& frame,const d3scene::ObjectState& owner,const object& source,
+    const poly_model& model,size_t part_index,const d3scene::Transform& world) {
+    if (source.type == OBJ_WEAPON && !Detail_settings.Weapon_coronas_enabled) return;
+    const auto* glow = model.submodel[part_index].glow_info;
+    if (!glow || !(glow->glow_size > 0)) return;
+    const int bitmap = Fireballs[GRADIENT_BALL_INDEX].bm_handle;
+    if (bitmap <= BAD_BITMAP_HANDLE || bitmap >= MAX_BITMAPS || !GameBitmaps[bitmap].used) return;
+    const int width = bm_w(bitmap,0), height = bm_h(bitmap,0);
+    if (width <= 0 || height <= 0) return;
+    d3scene::Vec3 color{glow->glow_r,glow->glow_g,glow->glow_b};
+    std::vector<d3scene::GlowSlice> slices;
+    const bool thruster = source.type == OBJ_PLAYER;
+    if (thruster) {
+        const auto& player = Players[source.id];
+        const float jitter = (int(d3scene::visualNoise(frame.simulation_time,owner.handle,0x74687275)%100)-50)/50.f;
+        float length = player.thrust_mag+player.afterburner_mag*3+.2f*jitter;
+        if (Katmai) length *= 1.5f;
+        float radius = glow->glow_size*(player.thrust_mag+player.afterburner_mag*.5f);
+        if (SceneGeometryInspection() && FindArg("-scene-model-effects-probe")) { radius = glow->glow_size; length = 1.5f; }
+        slices = d3scene::thrusterSlices(radius,3*length);
+        if ((is_multi_demo || (Game_mode & GM_MULTI)) && Num_teams > 1)
+            color = ScenePlayerColor(PlayerGetTeam(source.id));
+    } else slices.push_back({0,glow->glow_size});
+    const auto quantize = [](float c) { return static_cast<unsigned>((std::max)(0.f,(std::min)(1.f,c))*255)/255.f; };
+    color = {quantize(color.x),quantize(color.y),quantize(color.z)};
+    const auto normal = d3scene::transformDirection(world,value(glow->normal));
+    const bool soft = !thruster && SceneGlowUsesSoftIntersection(model.name);
+    const auto quad = d3scene::assets().publishMesh(2,d3scene::unitBillboardQuad());
+    if (AutomatedCaptureFrameIndex() == 0)
+        AutomatedCaptureLog("scene glow owner=%u model=%s part=%u slices=%u soft=%d",owner.handle,model.name,
+            static_cast<unsigned>(part_index),static_cast<unsigned>(slices.size()),soft ? 1 : 0);
+    for (const auto& slice : slices) {
+        d3scene::PreparedMesh sprite;
+        sprite.asset = quad; sprite.owner = owner.handle; sprite.has_owner = true; sprite.room = owner.room;
+        sprite.alignment = d3scene::MeshAlignment::Camera;
+        sprite.world.position = {world.position.x+normal.x*slice.distance,world.position.y+normal.y*slice.distance,
+            world.position.z+normal.z*slice.distance};
+        sprite.world.right = {slice.radius,0,0}; sprite.world.up = {0,slice.radius*height/width,0};
+        sprite.surface.bitmap = bitmap; sprite.surface.texture_alpha = true; sprite.surface.texture_wrap = false;
+        sprite.surface.unlit = true; sprite.surface.two_sided = true; sprite.surface.blend = d3scene::BlendMode::Additive;
+        sprite.surface.alpha = thruster ? 76/255.f : 204/255.f; sprite.surface.color_modulation = color;
+        sprite.surface.soft_depth_range = soft ? 2.f : 0.f;
+        sprite.surface.effect_depth_offset = soft ? 0.f : -slice.radius;
+        frame.meshes.push_back(std::move(sprite));
+    }
+}
 struct ModelAppearance {
     float alpha = 1, deformation = 0;
     d3scene::Vec3 color{1,1,1};
+    d3scene::Vec3 player_color{1,1,1};
+    bool has_player_color = false;
+    int custom_texture = -1;
 };
 ModelAppearance appearance(const object& source) {
     ModelAppearance result;
+    if (source.type == OBJ_PLAYER && (is_multi_demo || (Game_mode & GM_MULTI))) {
+        result.has_player_color = true;
+        result.player_color = ScenePlayerColor(Num_teams > 1 ? PlayerGetTeam(source.id) : source.id);
+        const int texture = Players[source.id].custom_texture_handle;
+        if (Multi_logo_state && texture >= 0 && texture < MAX_TEXTURES && GameTextures[texture].used &&
+            GameTextures[texture].bm_handle != BAD_BITMAP_HANDLE) result.custom_texture = texture;
+    }
     if (source.effect_info) {
         const auto& effect = *source.effect_info;
         const float fade = effect.fade_max_time > 0 ? effect.fade_time/effect.fade_max_time : 0;
@@ -130,6 +191,7 @@ d3scene::Vec3 ambientColor(const object& source, const RoomTable& rooms, const d
 }
 
 void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::FrameData* previous) {
+    const int player_color_texture = FindTextureName("MultiColor");
     std::unordered_map<int, d3scene::ModelAssetRef> frame_assets;
     RoomTable rooms;
     for (const auto& room : data.rooms) rooms.emplace(room.number,&room);
@@ -147,7 +209,8 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::FrameDat
         }
         if (!instance.visible) continue;
         if (source->render_type != RT_POLYOBJ && source->render_type != RT_WEAPON) continue;
-        if (source->render_type == RT_WEAPON && (Weapons[source->id].flags & (WF_IMAGE_BITMAP | WF_IMAGE_VCLIP))) continue;
+        if (source->render_type == RT_WEAPON && (Weapons[source->id].flags &
+            (WF_IMAGE_BITMAP | WF_IMAGE_VCLIP | WF_INVISIBLE | WF_ELECTRICAL))) continue;
         int model_number = source->type == OBJ_MARKER ? Marker_polynum : source->rtype.pobj_info.model_num;
         if (source->type == OBJ_BUILDING && (source->flags & OF_USE_DESTROYED_POLYMODEL) &&
             Object_info[source->id].lo_render_handle >= 0) model_number = Object_info[source->id].lo_render_handle;
@@ -190,6 +253,7 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::FrameDat
         const auto old = prior.find(instance.handle);
         const d3scene::ObjectState* history = old != prior.end() && old->second->model &&
             old->second->model->id() == instance.model->id() ? old->second : nullptr;
+        const auto roles = ResolveSceneModelRoles(instance.model->geometry(),source->rtype.pobj_info.subobj_flags,effect.custom_texture >= 0);
         for (size_t i = 0; i < instance.model->geometry().parts.size(); ++i) {
             const auto& asset_part = instance.model->geometry().parts[i];
             d3scene::PreparedModelPart part;
@@ -198,13 +262,12 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::FrameDat
             part.has_previous = history && history->parts[i].draw && instance.has_previous;
             part.vertices = d3scene::deformMesh(asset_part.geometry,effect.deformation,data.simulation_time,instance.handle,static_cast<uint32_t>(i));
             part.previous_vertices = history ? history->parts[i].vertices : part.vertices;
-            // Special billboard/glow geometry needs explicit effect preparation.
-            part.draw = !(asset_part.authored_flags & (SOF_SHELL | SOF_FRONTFACE | SOF_FACING | SOF_GLOW | SOF_THRUSTER));
-            part.draw = part.draw && (source->rtype.pobj_info.subobj_flags & (1u << i));
-            if ((asset_part.authored_flags & SOF_FACING) &&
-                !(asset_part.authored_flags & (SOF_SHELL | SOF_FRONTFACE | SOF_GLOW | SOF_THRUSTER)) &&
-                (source->rtype.pobj_info.subobj_flags & (1u << i)))
+            const auto role = roles[i];
+            part.draw = role == SceneModelPartRole::Surface;
+            if (role == SceneModelPartRole::Facing)
                 prepareFacingPart(data,instance,*model,i,d3scene::compose(instance.current,part.current));
+            if (role == SceneModelPartRole::Glow)
+                prepareGlowPart(data,instance,*source,*model,i,d3scene::compose(instance.current,part.current));
             for (size_t j = 0; j < asset_part.geometry.polygons.size(); ++j) {
                 d3scene::SurfaceBinding binding;
                 binding.occlusion_class = d3scene::OcclusionClass::Model;
@@ -216,6 +279,15 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::FrameDat
                 if (slot >= 0) binding.texture = instance.model->geometry().textures[slot];
                 else binding.base_color = asset_part.polygon_colors[j];
                 if (source->rtype.pobj_info.tmap_override != -1) binding.texture = source->rtype.pobj_info.tmap_override;
+                if ((asset_part.authored_flags & SOF_CUSTOM) && effect.custom_texture >= 0 && binding.texture >= 0)
+                    binding.texture = effect.custom_texture;
+                if (effect.has_player_color && binding.texture >= 0 && binding.texture == player_color_texture) {
+                    // Authored team-color panels use flat ambient response,
+                    // not the directional shading of the surrounding hull.
+                    binding.directional_ambient = false;
+                    binding.color_modulation = {effect.color.x*effect.player_color.x,
+                        effect.color.y*effect.player_color.y,effect.color.z*effect.player_color.z};
+                }
                 if (baked && part.draw) {
                     const auto& face = source->lm_object.lightmap_faces[i][j];
                     binding.lightmap = face.lmi_handle;

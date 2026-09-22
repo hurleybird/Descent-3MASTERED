@@ -3,6 +3,9 @@
 #include "Scene.h"
 namespace d3scene {
 Transform axisBillboardPlacement(Vec3 start,Vec3 end,float radius);
+struct GlowSlice { float distance = 0, radius = 0; };
+// Authored D3 cone profile, emitted tail-to-base without a mutable draw loop.
+std::vector<GlowSlice> thrusterSlices(float radius,float length);
 // A view into one published frame, never into simulation scratch. All geometry
 // consumers use these positions, including conservative visibility and lighting.
 struct MeshView {

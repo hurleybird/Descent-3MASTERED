@@ -13,6 +13,7 @@
 #include "game.h"
 #include "object.h"
 #include "args.h"
+#include "weapon.h"
 #include <cmath>
 #include <algorithm>
 namespace {
@@ -95,6 +96,106 @@ bool prepareAxisEffect(d3scene::FrameData& frame,const vis_effect& effect,const 
     frame.meshes.push_back(std::move(rod));
     return true;
 }
+}
+// Object effects share owned geometry with model attachments. Publication is
+// after object eligibility; per-view exclusion is applied by the scene query.
+void PrepareGameObjectEffects(d3scene::FrameData& frame) {
+    const auto quad = d3scene::assets().publishMesh(2,d3scene::unitBillboardQuad());
+    for (const auto& owner : frame.objects) {
+        auto* source = ObjGet(owner.handle);
+        if (!source || !owner.visible) continue;
+        if (source->render_type == RT_WEAPON && source->type == OBJ_WEAPON) {
+            const auto& weapon = Weapons[source->id];
+            if (!(weapon.flags & (WF_IMAGE_BITMAP | WF_IMAGE_VCLIP)) ||
+                (weapon.flags & (WF_INVISIBLE | WF_ELECTRICAL)) || WeaponIsCloseScreenEffectObject(source)) continue;
+            if (weapon.flags & WF_IMAGE_VCLIP) {
+                const int clip = weapon.fire_image_handle;
+                if (clip < 0 || clip >= MAX_VCLIPS || !GameVClips[clip].used) continue;
+                PageInVClip(clip);
+                if (!GameVClips[clip].frames || GameVClips[clip].num_frames <= 0 || !(GameVClips[clip].frame_time > 0)) continue;
+            }
+            const int bitmap = GetWeaponFireImageAtTime(source->id,0,static_cast<float>(frame.simulation_time));
+            if (bitmap <= BAD_BITMAP_HANDLE || bitmap >= MAX_BITMAPS || !GameBitmaps[bitmap].used) continue;
+            const int width = bm_w(bitmap,0), height = bm_h(bitmap,0);
+            if (width <= 0 || height <= 0 || !(source->size > 0)) continue;
+            const int rotation = weapon.flags & WF_NO_ROTATE ? static_cast<int>(source-Objects)*1000%65536 :
+                d3scene::weaponSpriteAngle(frame.simulation_time,weapon.phys_info.rotvel.z);
+            matrix spin; vm_AnglesToMatrix(&spin,0,0,static_cast<angle>(rotation));
+            d3scene::PreparedMesh sprite;
+            sprite.asset = quad; sprite.has_owner = true; sprite.owner = owner.handle; sprite.room = source->roomnum;
+            if (weapon.flags & WF_PLANAR) {
+                vector normal = source->mtype.phys_info.velocity;
+                if (vm_GetMagnitude(&normal) < .0001f) continue;
+                matrix plane; vm_VectorToMatrix(&plane,&normal,nullptr,nullptr);
+                sprite.world = d3scene::compose(basis(plane),basis(spin));
+            } else {
+                vm_TransposeMatrix(&spin); sprite.world = basis(spin); sprite.alignment = d3scene::MeshAlignment::Camera;
+            }
+            sprite.world.position = value(source->pos);
+            auto& r = sprite.world.right; auto& u = sprite.world.up;
+            const float size = source->size, vertical = size*height/width;
+            r = {r.x*size,r.y*size,r.z*size}; u = {u.x*vertical,u.y*vertical,u.z*vertical};
+            auto& surface = sprite.surface;
+            surface.bitmap = bitmap; surface.unlit = true; surface.two_sided = true;
+            surface.texture_alpha = true; surface.texture_wrap = false;
+            surface.alpha = alphaByte(weapon.alpha);
+            surface.blend = weapon.flags & WF_SATURATE ? d3scene::BlendMode::Additive : d3scene::BlendMode::Alpha;
+            frame.meshes.push_back(std::move(sprite));
+            continue;
+        }
+        if (source->render_type != RT_FIREBALL || source->type != OBJ_FIREBALL) continue;
+        if (source->id >= NUM_FIREBALLS || source->id == BLAST_RING_INDEX ||
+            source->id == GRAVITY_FIELD_INDEX || source->id == SMOLDERING_INDEX) continue;
+        const auto& definition = Fireballs[source->id];
+        const float age = (std::max)(0.f,static_cast<float>(frame.simulation_time)-source->creation_time);
+        const float normalized = source->lifetime > 0 ? (std::min)(.99999f,age/source->lifetime) : .99999f;
+        float size = source->size;
+        int bitmap = -1;
+        const auto clip = [&](int handle) {
+            if (handle < 0 || handle >= MAX_VCLIPS || !GameVClips[handle].used) return;
+            PageInVClip(handle);
+            const auto& animation = GameVClips[handle];
+            if (animation.frames && animation.num_frames > 0)
+                bitmap = animation.frames[d3scene::animationFrames(animation.num_frames,normalized,false).frame0];
+        };
+        if (source->id == SMOKE_TRAIL_INDEX || source->id == CUSTOM_EXPLOSION_INDEX) {
+            const int texture = source->ctype.blast_info.bm_handle;
+            if (texture < 0 || texture >= MAX_TEXTURES || !GameTextures[texture].used) continue;
+            const auto& material = GameTextures[texture];
+            if (source->id == SMOKE_TRAIL_INDEX) {
+                if (material.flags & TF_ANIMATED) clip(material.bm_handle);
+                else bitmap = material.bm_handle;
+            } else {
+                bitmap = GetTextureBitmapAtTime(texture,0,static_cast<float>(frame.simulation_time));
+                if (!(material.flags & TF_ANIMATED))
+                    size *= normalized < .5f ? (std::min)(1.f,normalized/.2f) : 2*(1-normalized);
+            }
+        } else if (definition.type == FT_SPARK) { bitmap = definition.bm_handle; size *= 1-normalized; }
+        else clip(definition.bm_handle);
+        const bool smoke = definition.type == FT_SMOKE;
+        if (smoke && normalized > .3f) size *= 1+(normalized-.3f)/.7f*2.3f;
+        size = (std::min)(size,static_cast<float>(MAX_FIREBALL_SIZE));
+        if (!(size > 0) || !std::isfinite(size) || bitmap <= BAD_BITMAP_HANDLE ||
+            bitmap >= MAX_BITMAPS || !GameBitmaps[bitmap].used) continue;
+        const int width = bm_w(bitmap,0), height = bm_h(bitmap,0);
+        if (width <= 0 || height <= 0) continue;
+        d3scene::PreparedMesh sprite;
+        sprite.asset = quad; sprite.has_owner = true; sprite.owner = owner.handle;
+        sprite.room = source->roomnum; sprite.alignment = d3scene::MeshAlignment::Camera;
+        matrix spin;
+        vm_AnglesToMatrix(&spin,0,0,static_cast<angle>(d3scene::visualAngle(frame.simulation_time,
+            definition.type == FT_BILLOW ? 160.f : 30.f,static_cast<int>(source-Objects)*5000)));
+        vm_TransposeMatrix(&spin); sprite.world = basis(spin); sprite.world.position = value(source->pos);
+        sprite.world.right = value(spin.rvec*size); sprite.world.up = value(spin.uvec*(size*height/width));
+        auto& surface = sprite.surface;
+        surface.bitmap = bitmap; surface.unlit = true; surface.two_sided = true;
+        surface.texture_alpha = true; surface.texture_wrap = false;
+        surface.blend = smoke || source->id == CUSTOM_EXPLOSION_INDEX ? d3scene::BlendMode::Alpha : d3scene::BlendMode::Additive;
+        surface.alpha = alphaByte((normalized > .5f ? 2*(1-normalized) : 1)*(smoke ? SMOKE_ALPHA : FIREBALL_ALPHA));
+        surface.soft_depth_range = Render_soft_vis_effects ? 2.f : 0.f;
+        surface.effect_depth_offset = Render_soft_vis_effects && smoke ? 0.f : -2.f;
+        frame.meshes.push_back(std::move(sprite));
+    }
 }
 void PrepareGameEffects(d3scene::FrameData& frame) {
     if (!VisEffects) return;

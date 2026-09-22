@@ -11,6 +11,16 @@ inline int visualAngle(double time,float units_per_tick,int offset = 0) {
     if (phase < 0) phase += 65536.0;
     return static_cast<int>(phase);
 }
+// Preserve the authored legacy remainder convention, including its unusual
+// period scaling, while defining stationary sprites instead of dividing by 0.
+inline int weaponSpriteAngle(double time,float rotation_velocity) {
+    if (!std::isfinite(time) || !std::isfinite(rotation_velocity)) throw std::invalid_argument("Invalid weapon phase");
+    const double period = rotation_velocity/65536.0;
+    if (period == 0) return 0;
+    double phase = std::fmod(std::fmod(time,period)*65536.0,65536.0);
+    if (phase < 0) phase += 65536.0;
+    return static_cast<int>(phase);
+}
 struct AnimationFrames {
     int frame0 = 0, frame1 = 0;
     float frame1_weight = 0;

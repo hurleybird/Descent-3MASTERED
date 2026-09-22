@@ -299,6 +299,7 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance_history) {
     PrepareGameSky(data);
     PrepareGameEffects(data);
     PrepareGameModelInstances(data, previous_models ? &previous_models->data() : nullptr);
+    PrepareGameObjectEffects(data);
     for (auto& surface : data.terrain.materials) resolveMaterial(surface,static_cast<float>(data.simulation_time),false,true);
     for (auto& object : data.objects) for (auto& part : object.parts) for (auto& surface : part.surfaces)
         resolveMaterial(surface,static_cast<float>(data.simulation_time),true);
@@ -357,6 +358,25 @@ void RenderGameSceneView(const d3scene::Presentation& frame, d3scene::View view)
             view.camera.right = {orientation.rvec.x,orientation.rvec.y,orientation.rvec.z};
             view.camera.up = {orientation.uvec.x,orientation.uvec.y,orientation.uvec.z};
             view.camera.forward = {orientation.fvec.x,orientation.fvec.y,orientation.fvec.z};
+            break;
+        }
+    }
+    if (FindArg("-scene-model-effects-probe") && Player_object) {
+        for (const auto& object : frame.data().objects) if (object.handle == static_cast<uint32_t>(Player_object->handle)) {
+            const auto& pose = object.current;
+            const float distance = object.radius*4+2;
+            view.camera = pose;
+            view.camera.position = {pose.position.x-pose.forward.x*distance+pose.right.x*distance*.45f,
+                pose.position.y-pose.forward.y*distance+pose.right.y*distance*.45f,
+                pose.position.z-pose.forward.z*distance+pose.right.z*distance*.45f};
+            vector toward{pose.position.x-view.camera.position.x,pose.position.y-view.camera.position.y,
+                pose.position.z-view.camera.position.z};
+            vector up{pose.up.x,pose.up.y,pose.up.z};
+            matrix facing; vm_VectorToMatrix(&facing,&toward,&up,nullptr);
+            view.camera.right = {facing.rvec.x,facing.rvec.y,facing.rvec.z};
+            view.camera.up = {facing.uvec.x,facing.uvec.y,facing.uvec.z};
+            view.camera.forward = {facing.fvec.x,facing.fvec.y,facing.fvec.z};
+            view.room = object.room; view.attached_camera = false; view.exclude_object = false;
             break;
         }
     }

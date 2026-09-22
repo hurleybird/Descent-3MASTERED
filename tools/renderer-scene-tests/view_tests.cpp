@@ -288,6 +288,12 @@ int runSceneViewTests() {
     const auto upright_pole = d3scene::resolveMeshTransform(anchored,d3scene::prepareCamera(vertical_view));
     check(near(upright_pole.right.z,2) && near(upright_pole.up.x,3),"Upright camera pole lost the view meridian");
     const auto ring = d3scene::billboardRing(.3f,102,0);
+    const auto thrust = d3scene::thrusterSlices(1,3);
+    check(thrust.size() == 9 && near(thrust.back().radius,1) && near(thrust.back().distance,0) &&
+        near(thrust.front().radius,1.f/9) && near(thrust.front().distance,8.f/3),"Thruster profile changed authored density or order");
+    check(d3scene::thrusterSlices(1,.2f).empty() && d3scene::thrusterSlices(.04f,3).empty(),
+        "Degenerate thruster profile generated geometry");
+    check(d3scene::thrusterSlices(100,100).size() == 100,"Thruster appearance cap changed");
     auto rod = billboard; rod.alignment = d3scene::MeshAlignment::Axis;
     rod.world = d3scene::axisBillboardPlacement({0,2,10},{0,-2,10},.5f);
     const auto rod_front = d3scene::resolveMeshTransform(rod,d3scene::prepareCamera(view()));

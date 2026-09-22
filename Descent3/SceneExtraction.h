@@ -14,6 +14,7 @@ void PrepareGameSceneLights(d3scene::FrameData&);
 void PrepareGameTerrain(d3scene::FrameData&);
 void PrepareGameSky(d3scene::FrameData&);
 void PrepareGameEffects(d3scene::FrameData&);
+void PrepareGameObjectEffects(d3scene::FrameData&);
 d3scene::PresentationRef PrepareGamePresentation(bool advance_history = true);
 void RenderGameSceneView(const d3scene::Presentation&, d3scene::View);
 bool SceneGeometryInspection();

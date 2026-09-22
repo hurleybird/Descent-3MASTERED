@@ -16,6 +16,7 @@ param(
     [switch]$SatelliteProbe,
     [switch]$AtmosphereProbe,
     [switch]$AxisProbe,
+    [switch]$ModelEffectsProbe,
     [switch]$HistoryProbe,
     [switch]$DeformationProbe
 )
@@ -25,6 +26,9 @@ param(
 $ErrorActionPreference = 'Stop'
 if ($AtmosphereProbe) { $SatelliteProbe = $true }
 if ($AxisProbe -and -not $SceneInspection) { throw 'Axis probe requires the explicit scene inspection executor.' }
+if ($ModelEffectsProbe -and (-not $SceneInspection -or $TerrainProbe -or $SkyProbe -or $SatelliteProbe -or $HistoryProbe)) {
+    throw 'Model effects probe requires scene inspection and cannot combine with other camera probes.'
+}
 if ($DeformationProbe -and -not $SceneInspection) { throw 'Deformation probe requires the explicit scene inspection executor.' }
 if ($TerrainProbe -and -not $SceneInspection) { throw 'Terrain probe requires the explicit scene inspection executor.' }
 if ($SkyProbe -and -not $SceneInspection) { throw 'Sky probe requires the explicit scene inspection executor.' }
@@ -61,6 +65,8 @@ $manifest = [ordered]@{
     satellite_probe = [bool]$SatelliteProbe
     atmosphere_probe = [bool]$AtmosphereProbe
     axis_probe = [bool]$AxisProbe
+    model_effects_probe = [bool]$ModelEffectsProbe
+    model_effects_revision = $(if ($ModelEffectsProbe) { 2 } else { 0 })
     history_probe = [bool]$HistoryProbe
     executable = (Get-FileHash -LiteralPath $exe).Hash
     shaders = (Get-FileHash -LiteralPath (Join-Path $runtimePath 'descent3mastered.hog')).Hash
@@ -97,6 +103,7 @@ try {
         if ($SatelliteProbe) { $arguments += '-scene-satellite-probe' }
         if ($AtmosphereProbe) { $arguments += '-scene-atmosphere-probe' }
         if ($AxisProbe) { $arguments += '-scene-axis-probe' }
+        if ($ModelEffectsProbe) { $arguments += '-scene-model-effects-probe' }
         if ($DeformationProbe) { $arguments += '-scene-deformation-probe' }
         $started = Get-Date
         $process = Start-Process -FilePath $exe -ArgumentList $arguments -WorkingDirectory $runtimePath -WindowStyle Hidden -PassThru

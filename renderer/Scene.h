@@ -231,6 +231,9 @@ struct SurfaceBinding {
     BlendMode blend = BlendMode::Solid; // non-solid modes explicitly request compositing
     bool texture_wrap = true;
     float soft_depth_range = 0; // zero disables intersection fading; positive requires opaque depth
+    // Authored translucent effect depth in eye units, not a geometry/fog shift.
+    // Excluded from opaque depth and temporal surface products.
+    float effect_depth_offset = 0;
     std::vector<uint32_t> light_indices;
     std::vector<Vec2> baked_uvs; // optional per-instance corner UVs, never shared model scratch
     Vec3 ambient_color{1,1,1}, ambient_direction{0,-1,0};

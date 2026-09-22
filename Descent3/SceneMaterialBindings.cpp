@@ -6,6 +6,24 @@
 #include "config.h"
 #include "game.h"
 #include <cstring>
+#include <stdexcept>
+// Mutable module ABI table; ownership is game appearance, not object drawing.
+ddgr_color Player_colors[] = { GR_RGB(255,0,0),GR_RGB(0,32,255),GR_RGB(0,255,0),GR_RGB(255,255,0),GR_RGB(32,64,96),
+GR_RGB(255,0,255),GR_RGB(255,128,0),GR_RGB(128,128,0),GR_RGB(0,128,0),GR_RGB(0,32,128),
+GR_RGB(0,128,128),GR_RGB(128,0,128),GR_RGB(128,0,0),GR_RGB(128,128,255),GR_RGB(255,128,255),
+GR_RGB(255,128,128),GR_RGB(128,64,0),GR_RGB(128,0,255),GR_RGB(0,255,128),GR_RGB(255,64,0),
+GR_RGB(128,255,0),GR_RGB(255,0,128),GR_RGB(64,64,128),GR_RGB(128,64,64),GR_RGB(255,192,128),
+GR_RGB(255,255,128),GR_RGB(128,128,64),GR_RGB(64,128,64),GR_RGB(128,0,64),GR_RGB(255,192,0),
+GR_RGB(255,255,255),GR_RGB(128,128,128) };
+d3scene::Vec3 ScenePlayerColor(int index) {
+    if (index < 0 || index >= int(sizeof(Player_colors)/sizeof(Player_colors[0])))
+        throw std::invalid_argument("Invalid player appearance index");
+    const auto color = Player_colors[index];
+    return {GR_COLOR_RED(color)/255.f,GR_COLOR_GREEN(color)/255.f,GR_COLOR_BLUE(color)/255.f};
+}
+bool SceneGlowUsesSoftIntersection(const char* model_name) {
+    return Render_soft_vis_effects && model_name && !stricmp(model_name,"pumpingpipelarge.OOF");
+}
 bool SceneFacingUsesSoftIntersection(const char* model_name,const char* texture_name) {
     // Preserve the authored Gyro lamp treatment at material compilation, not
     // as a renderer-side model-name branch.

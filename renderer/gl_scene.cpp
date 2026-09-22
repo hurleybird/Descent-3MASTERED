@@ -81,7 +81,7 @@ uniform vec3 previous_position, previous_right, previous_up, previous_forward;
 uniform mat4 previous_view_projection;
 out vec4 current_clip, previous_clip;
 uniform vec4 projection;
-uniform float near_distance;
+uniform float near_distance, effect_depth_offset;
 out vec2 texcoord, lightcoord;
 out float vertex_alpha;
 out vec3 world_position;
@@ -101,6 +101,8 @@ void main() {
     gl_Position = vec4(dot(relative,camera_right)*projection.x + z*projection.z,
                        dot(relative,camera_up)*projection.y + z*projection.w, z-2.0*near_distance,z);
     gl_Position.xy += raster_offset*raster_pixel_scale*gl_Position.w;
+    if (effect_depth_offset != 0.0)
+        gl_Position.z = (1.0-2.0*near_distance/max(near_distance,z+effect_depth_offset))*gl_Position.w;
     current_clip = gl_Position;
     vec3 previous_world = previous_position+previous_right*previous_prepared.x+
         previous_up*previous_prepared.y+previous_forward*previous_prepared.z;
@@ -1031,6 +1033,7 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
         glUniform2f(scene_shader.FindUniform("texture_offset"),surface.u_offset,surface.v_offset);
         glUniform2f(scene_shader.FindUniform("texture_scale"),surface.texture_scale.x,surface.texture_scale.y);
         glUniform1f(scene_shader.FindUniform("material_alpha"),surface.alpha);
+        glUniform1f(scene_shader.FindUniform("effect_depth_offset"),surface.effect_depth_offset);
         if(surface.material.blended()) {
             glEnablei(GL_BLEND,0);
             if (surface.material.blend == d3scene::BlendMode::Multiply) glBlendFuncSeparatei(0,GL_DST_COLOR,GL_ZERO,GL_ZERO,GL_ONE);

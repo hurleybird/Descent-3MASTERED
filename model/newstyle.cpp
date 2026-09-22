@@ -102,17 +102,6 @@ static void RestorePolymodelDepthWriteMask()
 	rend_SetZBufferWriteMask(transparent_pass ? 0 : 1);
 }
 
-static bool PolymodelUseSoftGlowEffects(const poly_model* pm)
-{
-	if (!Render_soft_vis_effects || !pm)
-		return false;
-
-	// This asset places large glow planes inside a tight mechanical housing.
-	// Its legacy radius-sized forward bias pulls the lights through the shell;
-	// other polymodel coronas retain their authored hard presentation.
-	return stricmp(pm->name, "pumpingpipelarge.OOF") == 0;
-}
-
 static int Multicolor_texture=-1;
 static bool Polymodel_cockpit_batching = false;
 static bool Polymodel_cockpit_transparent_face_filter_enabled = false;
@@ -1810,7 +1799,7 @@ void DrawGlowEffect (poly_model *pm,vector *pos,float r,float g,float b,vector *
 	ddgr_color color=GR_RGB(r*255,g*255,b*255);
 	int bm_handle=Fireballs[GRADIENT_BALL_INDEX].bm_handle;
 
-	const bool use_soft_intersection = PolymodelUseSoftGlowEffects(pm);
+	const bool use_soft_intersection = SceneGlowUsesSoftIntersection(pm->name);
 	rend_SetSoftParticleState(use_soft_intersection ? 1 : 0);
 	// With soft intersections enabled, use the glow's real depth instead of
 	// pulling it forward by its full radius through the parent model.

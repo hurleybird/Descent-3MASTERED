@@ -84,6 +84,12 @@ if ([bool]$referenceManifest.atmosphere_probe -ne [bool]$actualManifest.atmosphe
 if ([bool]$referenceManifest.axis_probe -ne [bool]$actualManifest.axis_probe -and -not $DiagnosticComparison) {
     throw 'Axis fixture differs; use DiagnosticComparison for intentional fixture changes.'
 }
+if ([bool]$referenceManifest.model_effects_probe -ne [bool]$actualManifest.model_effects_probe -and -not $DiagnosticComparison) {
+    throw 'Model effects fixture differs; use DiagnosticComparison for intentional fixture changes.'
+}
+if ([int]$referenceManifest.model_effects_revision -ne [int]$actualManifest.model_effects_revision -and -not $DiagnosticComparison) {
+    throw 'Model effects fixture revision differs; use DiagnosticComparison for intentional fixture changes.'
+}
 if ([bool]$referenceManifest.satellite_probe -ne [bool]$actualManifest.satellite_probe -and -not $DiagnosticComparison) {
     throw 'Satellite probe mismatch requires DiagnosticComparison.'
 }

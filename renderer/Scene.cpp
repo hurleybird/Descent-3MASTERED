@@ -32,6 +32,9 @@ void validateSurface(const SurfaceBinding& surface) {
     require(static_cast<unsigned>(surface.occlusion_class) <= static_cast<unsigned>(OcclusionClass::Mine),
         "Unknown surface occlusion class");
     require(std::isfinite(surface.soft_depth_range) && surface.soft_depth_range >= 0,"Invalid soft intersection range");
+    require(std::isfinite(surface.effect_depth_offset) && (surface.effect_depth_offset == 0 ||
+        (surface.unlit && surface.blend != BlendMode::Solid && surface.layer == RenderLayer::World)),
+        "Depth offset requires an unlit translucent world effect");
     require(surface.blend == BlendMode::Solid || surface.blend == BlendMode::Alpha || surface.blend == BlendMode::Additive ||
         surface.blend == BlendMode::Multiply,"Invalid material blend mode");
     require(surface.layer == RenderLayer::World || surface.layer == RenderLayer::Background,"Invalid material layer");

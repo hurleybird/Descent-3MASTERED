@@ -382,6 +382,10 @@ int LoadWeaponHudImage(char* filename, int* type)
 // Given a weapon handle, returns that weapons discharge bitmap 
 int GetWeaponFireImage(int handle, int frame)
 {
+    return GetWeaponFireImageAtTime(handle,frame,Gametime);
+}
+int GetWeaponFireImageAtTime(int handle, int frame, float time)
+{
 	if (Weapons[handle].flags & WF_IMAGE_VCLIP)
 	{
 		float cur_frametime;
@@ -392,7 +396,7 @@ int GetWeaponFireImage(int handle, int frame)
 		vclip* vc = &GameVClips[Weapons[handle].fire_image_handle];
 		ASSERT(vc->used >= 1);
 
-		cur_frametime = Gametime / vc->frame_time;
+		cur_frametime = time / vc->frame_time;
 		int_frame = cur_frametime;
 		int_frame += frame;
 		return (vc->frames[int_frame % vc->num_frames]);

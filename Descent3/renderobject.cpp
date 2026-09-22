@@ -1669,15 +1669,8 @@ void RenderObject_SetLightmaps(lightmap_object* lmobject)
 	RenderObjectLightmapObject = lmobject;
 }
 
-ddgr_color Player_colors[] = { GR_RGB(255,0,0),GR_RGB(0,32,255),GR_RGB(0,255,0),GR_RGB(255,255,0),GR_RGB(32,64,96),
-GR_RGB(255,0,255),GR_RGB(255,128,0),GR_RGB(128,128,0),GR_RGB(0,128,0),GR_RGB(0,32,128),
-GR_RGB(0,128,128),GR_RGB(128,0,128),GR_RGB(128,0,0),GR_RGB(128,128,255),GR_RGB(255,128,255),
-GR_RGB(255,128,128),GR_RGB(128,64,0),GR_RGB(128,0,255),GR_RGB(0,255,128),GR_RGB(255,64,0),
-GR_RGB(128,255,0),GR_RGB(255,0,128),GR_RGB(64,64,128),GR_RGB(128,64,64),GR_RGB(255,192,128),
-GR_RGB(255,255,128),GR_RGB(128,128,64),GR_RGB(64,128,64),GR_RGB(128,0,64),GR_RGB(255,192,0),
-GR_RGB(255,255,255),GR_RGB(128,128,128) };
-
-bool is_multi_demo = false;
+extern ddgr_color Player_colors[];
+extern bool is_multi_demo;
 
 // Actually draws a polygon model based on the light parameters set by the above
 // functions

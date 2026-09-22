@@ -51,7 +51,7 @@
 #include "demofile.h"
 #include "multi_instance.h"
 
-extern bool is_multi_demo;
+bool is_multi_demo = false;
 CFILE* Demo_cfp = NULL;
 char Demo_fname[_MAX_PATH * 2];
 char Old_demo_fname[_MAX_PATH * 2];

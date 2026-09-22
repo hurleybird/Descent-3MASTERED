@@ -1,5 +1,29 @@
 # Renderer migration checkpoint
 
+## Continuation: owned model roles, glows and object imagery
+
+Model preparation now resolves surface/facing/glow/hidden roles and hierarchy
+eligibility once. Door shells/front faces remain non-rendered authoring data;
+masked parents do not incorrectly hide children. Glow/thruster cones publish
+owned billboards with explicit translucent depth offset, never modified world
+positions or opaque/history depth. Player palette storage and shared appearance
+policies moved out of the legacy draw executor; the exported palette ABI remains.
+
+Ordinary fireball objects and bitmap/vclip weapon bodies now publish owned mesh
+instances. Weapon image selection accepts presentation time; stationary weapon
+rotation no longer divides by zero. Invisible/electrical weapon model bodies and
+disabled weapon coronas are excluded. Close-screen weapons, electrical/streamer/
+ring geometry and special fireballs remain pending, not legacy fallbacks.
+
+Full build and 5,172 CPU checks pass. Eight-save hierarchy, fireball and owned
+object-effects corpora complete with normal shutdown/GPU self-checks. Rear-quarter
+model-effects probe 000 was visually inspected and shows the tapered thruster
+trails. Ordinary-save captures are regression coverage, not proof that every new
+effect is exercised; targeted object-effect and multiplayer appearance fixtures
+remain necessary. Hierarchy versus appearance captures have seven exact saves
+and a small 002 difference (mean RGB 0.02273). All pending-domain barriers remain;
+this is not a gameplay-ready replacement. Candidate/Previous Candidate untouched.
+
 ## Continuation: environment materials and owned effect placement
 
 Published the primary exterior reflection source through immutable material

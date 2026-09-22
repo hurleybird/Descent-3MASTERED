@@ -195,6 +195,7 @@ int LoadWeaponFireImage (char *filename,int *type,int *anim,int pageable=1);
 
 // Given a weapon handle, returns that weapons firing bitmap/model
 int GetWeaponFireImage (int handle,int frame);
+int GetWeaponFireImageAtTime(int handle,int frame,float time);
 
 
 // Given a weapon name, assigns that weapon to a specific index into

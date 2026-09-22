@@ -8,6 +8,10 @@ int runProceduralTests() {
     int checks = 0;
     const auto check = [&](bool value) { ++checks; if (!value) throw std::runtime_error("Procedural clock/random contract"); };
     check(visualAngle(1,160,5000) == 14600);
+    check(weaponSpriteAngle(10,0) == 0);
+    check(weaponSpriteAngle(1.25,65536) == 16384);
+    check(weaponSpriteAngle(1.25,32768) == 16384);
+    check(weaponSpriteAngle(-.25,65536) == 49152);
     check(visualAngle(-1,160) == 55936);
     check(visualAngle(65536,1) == 0);
     const auto first = animationFrames(10,0,false), halfway = animationFrames(10,.25f,false);

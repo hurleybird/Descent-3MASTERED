@@ -6,6 +6,35 @@
 namespace {
 d3scene::Vec3 value(const vector& v) { return {v.x,v.y,v.z}; }
 }
+SceneModelPartRole ResolveSceneModelPartRole(uint32_t flags,uint32_t mask,size_t part,bool has_custom_texture) {
+    if (part >= 32 || !(mask&(uint32_t(1)<<part)) || ((flags&SOF_CUSTOM) && !has_custom_texture))
+        return SceneModelPartRole::Hidden;
+    // Door authoring metadata is intentionally not model draw geometry.
+    if (flags&(SOF_SHELL|SOF_FRONTFACE)) return SceneModelPartRole::Hidden;
+    if (flags&(SOF_GLOW|SOF_THRUSTER)) return SceneModelPartRole::Glow;
+    if (flags&SOF_FACING) return SceneModelPartRole::Facing;
+    return SceneModelPartRole::Surface;
+}
+std::vector<SceneModelPartRole> ResolveSceneModelRoles(const d3scene::ModelGeometry& model,uint32_t mask,bool has_custom_texture) {
+    std::vector<SceneModelPartRole> result;
+    for (size_t i = 0; i < model.parts.size(); ++i) {
+        auto role = ResolveSceneModelPartRole(model.parts[i].authored_flags,mask,i,has_custom_texture);
+        int current = static_cast<int>(i);
+        for (size_t depth = 0; current >= 0; ++depth) {
+            if (size_t(current) >= model.parts.size() || depth >= model.parts.size())
+                throw std::invalid_argument("Invalid model role hierarchy");
+            const auto& ancestor = model.parts[current];
+            // Legacy traversal returns before visiting children for metadata
+            // and empty parts. A masked/custom-hidden parent, by contrast,
+            // still traverses its children; do not propagate that draw mask.
+            if (ancestor.geometry.polygons.empty() || (ancestor.authored_flags&(SOF_SHELL|SOF_FRONTFACE)))
+                role = SceneModelPartRole::Hidden;
+            current = ancestor.parent;
+        }
+        result.push_back(role);
+    }
+    return result;
+}
 d3scene::ModelGeometry CompileSceneModelAsset(const poly_model& model, size_t* repaired_normals) {
     if (repaired_normals) *repaired_normals = 0;
     if (model.n_models < 0 || model.n_models > MAX_SUBOBJECTS || model.n_textures < 0 ||
