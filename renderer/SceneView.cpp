@@ -348,7 +348,7 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
         // the expanded vertices and is authoritative for this representation.
         bool visible = !geometry.raster_offsets.empty();
         if (!visible) for (const auto& polygon : geometry.polygons)
-            if (!polygonOutside(result.camera,MeshView(geometry),polygon,item.world,window)) { visible = true; break; }
+            if (!polygonOutside(result.camera,MeshView(geometry,instance.vertices),polygon,item.world,window)) { visible = true; break; }
         if (!visible) continue;
         item.layer = instance.surface.material.layer;
         item.blended = instance.surface.material.blended();

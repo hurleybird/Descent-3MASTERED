@@ -16,6 +16,7 @@ param(
     [switch]$SatelliteProbe,
     [switch]$AtmosphereProbe,
     [switch]$AxisProbe,
+    [switch]$RingProbe,
     [switch]$ModelEffectsProbe,
     [switch]$ScorchProbe,
     [switch]$ScorchViewProbe,
@@ -32,6 +33,7 @@ param(
 $ErrorActionPreference = 'Stop'
 if ($AtmosphereProbe) { $SatelliteProbe = $true }
 if ($LayerProbe -and -not $SceneInspection) { throw 'Layer probe requires scene inspection.' }
+if ($RingProbe -and -not $SceneInspection) { throw 'Ring probe requires scene inspection.' }
 if ($ResourceProbe -and -not $SceneInspection) { throw 'Resource probe requires scene inspection.' }
 if ($LodProbeTier -ge 0 -and (-not $SceneInspection -or $HistoryProbe -or $ModelEffectsProbe -or $TerrainProbe -or $SkyProbe -or $SatelliteProbe -or $ScorchViewProbe)) {
     throw 'LOD probe requires isolated scene inspection and no other camera fixture.'
@@ -82,6 +84,8 @@ $manifest = [ordered]@{
     satellite_probe = [bool]$SatelliteProbe
     atmosphere_probe = [bool]$AtmosphereProbe
     axis_probe = [bool]$AxisProbe
+    ring_probe = [bool]$RingProbe
+    ring_probe_revision = $(if ($RingProbe) { 2 } else { 0 })
     model_effects_probe = [bool]$ModelEffectsProbe
     scorch_probe = [bool]$ScorchProbe
     scorch_view_probe = [bool]$ScorchViewProbe
@@ -130,6 +134,7 @@ try {
         if ($SatelliteProbe) { $arguments += '-scene-satellite-probe' }
         if ($AtmosphereProbe) { $arguments += '-scene-atmosphere-probe' }
         if ($AxisProbe) { $arguments += '-scene-axis-probe' }
+        if ($RingProbe) { $arguments += '-scene-ring-probe' }
         if ($ModelEffectsProbe) { $arguments += '-scene-model-effects-probe' }
         if ($ScorchProbe) { $arguments += '-capture-scorch' }
         if ($ScorchViewProbe) { $arguments += '-scene-scorch-view-probe' }
@@ -153,6 +158,7 @@ try {
         $process.WaitForExit()
         $logText = if (Test-Path -LiteralPath $log) { Get-Content -LiteralPath $log -Raw } else { '' }
         $resourceValidated = $true
+        if ($RingProbe) { $resourceValidated = $logText.Contains('scene ring fixture facing=1 planar_reverse=1 object=1 gravity=1') }
         if ($LodProbeTier -ge 0) {
             $resourceValidated = $logText.Contains("scene LOD fixture tier=$LodProbeTier ") -and $logText.Contains('scene LOD visible ')
         }

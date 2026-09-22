@@ -29,6 +29,106 @@ bool special(int id) {
 d3scene::Vec3 value(const vector& v) { return {v.x,v.y,v.z}; }
 d3scene::Transform basis(const matrix& m) { return {{},value(m.rvec),value(m.uvec),value(m.fvec)}; }
 float alphaByte(float alpha) { return static_cast<int>((std::max)(0.f,(std::min)(255.f,alpha*255.f)))/255.f; }
+d3scene::PreparedMesh prepareRing(float radius,float phase,float alpha,int bitmap,int room) {
+    // One immutable topology/material-coordinate layout, with frame-owned
+    // procedural positions. No new asset revision for every expanding ring.
+    auto geometry = d3scene::billboardRing(.5f,0,255,20);
+    for (auto& polygon : geometry.polygons) {
+        polygon.corners[0].u = 0; polygon.corners[0].v = 0;
+        polygon.corners[1].u = 1; polygon.corners[1].v = 0;
+        polygon.corners[2].u = 1; polygon.corners[2].v = 1;
+        polygon.corners[3].u = 0; polygon.corners[3].v = 1;
+    }
+    d3scene::PreparedMesh ring;
+    ring.asset = d3scene::assets().publishMesh(5,std::move(geometry));
+    ring.room = room;
+    for (int i = 0; i < 20; ++i) {
+        const auto angle = static_cast<::angle>((i*(65536/20)+static_cast<int>(phase*65536))%65536);
+        const float x = FixCos(angle)*radius, y = FixSin(angle)*radius;
+        ring.vertices.push_back({x,y,0}); ring.vertices.push_back({x*.5f,y*.5f,0});
+    }
+    auto& surface = ring.surface;
+    surface.bitmap = bitmap; surface.unlit = true; surface.two_sided = true;
+    surface.texture_alpha = true; surface.texture_wrap = true;
+    surface.blend = d3scene::BlendMode::Additive; surface.alpha = alpha;
+    return ring;
+}
+bool prepareVisRing(d3scene::FrameData& frame,const vis_effect& effect) {
+    if (!(effect.lifetime > 0) || !std::isfinite(effect.size) || effect.size <= 0 ||
+        effect.custom_handle <= BAD_BITMAP_HANDLE || effect.custom_handle >= MAX_BITMAPS ||
+        !GameBitmaps[effect.custom_handle].used) return false;
+    float life = (effect.lifetime-effect.lifeleft)/effect.lifetime;
+    if (effect.flags & VF_REVERSE) life = 1-life;
+    life = (std::max)(0.f,(std::min)(1.f,life));
+    auto ring = prepareRing(life*effect.size,0,1-life,effect.custom_handle,effect.roomnum);
+    if (effect.flags & VF_PLANAR) {
+        vector normal = effect.end_pos;
+        if (vm_GetMagnitudeFast(&normal) < .5f) return false;
+        matrix plane; vm_VectorToMatrix(&plane,&normal,nullptr,nullptr);
+        ring.world = basis(plane);
+    } else {
+        ring.alignment = d3scene::MeshAlignment::FacingEye;
+        // FacingEye's canonical forward points away from the eye; this authored
+        // effect uses the opposite normal, including its texture handedness.
+        ring.world.right = {-1,0,0}; ring.world.forward = {0,0,-1};
+    }
+    ring.world.position = value(effect.pos);
+    ring.surface.u_offset = life; ring.surface.effect_depth_offset = -1;
+    ring.surface.soft_depth_range = Render_soft_vis_effects && !(effect.flags & VF_NO_SOFT_PARTICLES) ? 2.f : 0.f;
+    frame.meshes.push_back(std::move(ring));
+    return true;
+}
+bool prepareObjectRing(d3scene::FrameData& frame,const d3scene::ObjectState& owner,const object& source,
+    const d3scene::MeshAssetRef& quad) {
+    if (!(source.lifetime > 0) || !(source.ctype.blast_info.max_size > 0)) return false;
+    const int bitmap = source.ctype.blast_info.bm_handle;
+    if (bitmap <= BAD_BITMAP_HANDLE || bitmap >= MAX_BITMAPS || !GameBitmaps[bitmap].used) return false;
+    const float life = (std::max)(0.f,(std::min)(1.f,(source.lifetime-source.lifeleft)/source.lifetime));
+    const bool gravity = source.id == GRAVITY_FIELD_INDEX;
+    const float radius = (gravity ? 1-life : life)*source.ctype.blast_info.max_size;
+    const float phase = life < .2f ? life*3 : .6f+(life-.2f)*.5f;
+    auto ring = prepareRing(radius*2,phase,1-phase,bitmap,source.roomnum);
+    // The old gravity draw forced ObjSetOrient(identity) during rendering.
+    // This is a presentation choice, never a simulation orientation update.
+    const auto& orientation = gravity ? Identity_matrix : source.orient;
+    ring.world = basis(orientation);
+    ring.world.up = value(orientation.fvec); ring.world.forward = value(-orientation.uvec);
+    ring.world.position = value(source.pos); ring.has_owner = true; ring.owner = owner.handle;
+    ring.surface.effect_depth_offset = -radius*.5f;
+    ring.surface.soft_depth_range = Render_soft_vis_effects ? 2.f : 0.f;
+    const float disk_scale = life < .1f ? life*10 : (std::max)(0.f,1-(life-.1f)*1.5f);
+    const int disk_bitmap = Fireballs[SHRINKING_BLAST_INDEX].bm_handle;
+    if (gravity && disk_scale > 0) {
+        d3scene::PreparedMesh disk;
+        disk.asset = d3scene::assets().publishMesh(6,d3scene::billboardRing(0,255,0,32));
+        disk.has_owner = true; disk.owner = owner.handle; disk.room = source.roomnum;
+        disk.alignment = d3scene::MeshAlignment::Camera; disk.world.position = value(source.pos);
+        const float size = disk_scale*source.ctype.blast_info.max_size;
+        for (int i = 0; i < 32; ++i) {
+            disk.vertices.push_back({FixCos(i*(65536/32))*size,FixSin(i*(65536/32))*size,0});
+            disk.vertices.push_back({0,0,0});
+        }
+        disk.surface = ring.surface; disk.surface.bitmap = -1; disk.surface.texture_alpha = false;
+        disk.surface.alpha = .9f; disk.surface.base_color = {.3f,.5f,1};
+        frame.meshes.push_back(std::move(disk));
+    } else if (!gravity && disk_scale > 0 && disk_bitmap > BAD_BITMAP_HANDLE && disk_bitmap < MAX_BITMAPS && GameBitmaps[disk_bitmap].used) {
+        const int width = bm_w(disk_bitmap,0), height = bm_h(disk_bitmap,0);
+        if (width > 0 && height > 0) {
+            d3scene::PreparedMesh disk;
+            disk.asset = quad; disk.has_owner = true; disk.owner = owner.handle; disk.room = source.roomnum;
+            disk.alignment = d3scene::MeshAlignment::Camera;
+            matrix spin; vm_AnglesToMatrix(&spin,0,0,static_cast<angle>(d3scene::visualAngle(frame.simulation_time,life < .1f ? 20.f : 550.f,0)));
+            vm_TransposeMatrix(&spin); disk.world = basis(spin); disk.world.position = value(source.pos);
+            const float size = disk_scale*source.ctype.blast_info.max_size;
+            disk.world.right = value(spin.rvec*size); disk.world.up = value(spin.uvec*(size*height/width));
+            disk.surface = ring.surface; disk.surface.bitmap = disk_bitmap;
+            disk.surface.alpha = alphaByte(disk_scale); disk.surface.texture_wrap = false;
+            frame.meshes.push_back(std::move(disk));
+        }
+    }
+    frame.meshes.push_back(std::move(ring));
+    return true;
+}
 bool prepareAxisEffect(d3scene::FrameData& frame,const vis_effect& effect,const d3scene::MeshAssetRef& quad) {
     const bool trail = effect.id == BILLBOARD_SMOKETRAIL_INDEX;
     const bool beam = effect.id == THICK_LIGHTNING_INDEX;
@@ -104,6 +204,11 @@ void PrepareGameObjectEffects(d3scene::FrameData& frame) {
     for (const auto& owner : frame.objects) {
         auto* source = ObjGet(owner.handle);
         if (!source || !owner.visible) continue;
+        if (source->render_type == RT_FIREBALL && source->type == OBJ_FIREBALL &&
+            (source->id == BLAST_RING_INDEX || source->id == GRAVITY_FIELD_INDEX)) {
+            prepareObjectRing(frame,owner,*source,quad);
+            continue;
+        }
         if (source->render_type == RT_WEAPON && source->type == OBJ_WEAPON) {
             const auto& weapon = Weapons[source->id];
             if (!(weapon.flags & (WF_IMAGE_BITMAP | WF_IMAGE_VCLIP)) ||
@@ -144,8 +249,7 @@ void PrepareGameObjectEffects(d3scene::FrameData& frame) {
             continue;
         }
         if (source->render_type != RT_FIREBALL || source->type != OBJ_FIREBALL) continue;
-        if (source->id >= NUM_FIREBALLS || source->id == BLAST_RING_INDEX ||
-            source->id == GRAVITY_FIELD_INDEX || source->id == SMOLDERING_INDEX) continue;
+        if (source->id >= NUM_FIREBALLS || source->id == SMOLDERING_INDEX) continue;
         const auto& definition = Fireballs[source->id];
         const float age = (std::max)(0.f,static_cast<float>(frame.simulation_time)-source->creation_time);
         const float normalized = source->lifetime > 0 ? (std::min)(.99999f,age/source->lifetime) : .99999f;
@@ -204,6 +308,11 @@ void PrepareGameEffects(d3scene::FrameData& frame) {
     for (int slot = 0; slot <= Highest_vis_effect_index; ++slot) {
         const auto& effect = VisEffects[slot];
         if (effect.type == VIS_NONE || (effect.flags & VF_DEAD)) continue;
+        if (effect.type == VIS_FIREBALL && effect.id == BLAST_RING_INDEX &&
+            !(effect.flags & (VF_WINDSHIELD_EFFECT | VF_CLOSE_SCREEN_EFFECT))) {
+            if (prepareVisRing(frame,effect)) ++prepared;
+            continue;
+        }
         if (effect.type == VIS_FIREBALL && (effect.id == AXIS_BILLBOARD_INDEX || effect.id == BILLBOARD_SMOKETRAIL_INDEX || effect.id == THICK_LIGHTNING_INDEX) &&
             !(effect.flags & (VF_WINDSHIELD_EFFECT | VF_CLOSE_SCREEN_EFFECT))) {
             if (prepareAxisEffect(frame,effect,quad)) ++prepared;
@@ -336,6 +445,41 @@ void PrepareGameEffects(d3scene::FrameData& frame) {
         probe.end_pos += Viewer_object->orient.uvec*2;
         if (!prepareAxisEffect(frame,probe,quad)) Error("Beam fixture could not publish its source texture");
         prepared += 3;
+    }
+    if (SceneGeometryInspection() && FindArg("-scene-ring-probe") && Viewer_object) {
+        vis_effect probe{};
+        probe.type = VIS_FIREBALL; probe.id = BLAST_RING_INDEX; probe.roomnum = Viewer_object->roomnum;
+        probe.lifetime = 1; probe.lifeleft = .65f; probe.size = 7;
+        probe.custom_handle = Fireballs[BLUE_BLAST_RING_INDEX].bm_handle;
+        const auto center = Viewer_object->pos+Viewer_object->orient.fvec*12;
+        probe.pos = center-Viewer_object->orient.rvec*3;
+        if (!prepareVisRing(frame,probe)) Error("Facing ring fixture could not publish");
+        probe.pos = center+Viewer_object->orient.rvec*3;
+        probe.flags = VF_PLANAR | VF_REVERSE;
+        probe.end_pos = -Viewer_object->orient.fvec+Viewer_object->orient.rvec*.6f;
+        vm_NormalizeVector(&probe.end_pos);
+        if (!prepareVisRing(frame,probe)) Error("Planar reverse ring fixture could not publish");
+        object blast{};
+        blast.pos = center-Viewer_object->orient.uvec*3;
+        blast.orient = Viewer_object->orient;
+        blast.orient.fvec = Viewer_object->orient.uvec;
+        blast.orient.uvec = -Viewer_object->orient.fvec;
+        blast.roomnum = probe.roomnum; blast.lifetime = 1; blast.lifeleft = .85f;
+        blast.ctype.blast_info.max_size = 3; blast.ctype.blast_info.bm_handle = probe.custom_handle;
+        const auto first_blast_mesh = frame.meshes.size();
+        if (frame.objects.empty() || !prepareObjectRing(frame,frame.objects.front(),blast,quad))
+            Error("Object blast ring fixture could not publish");
+        // Fixture ownership must not inherit camera exclusion from the first
+        // game object. The synthetic effect is never inserted into simulation.
+        for (size_t i = first_blast_mesh; i < frame.meshes.size(); ++i) frame.meshes[i].has_owner = false;
+        blast.id = GRAVITY_FIELD_INDEX; blast.pos = center+Viewer_object->orient.uvec*3;
+        blast.lifeleft = .4f; blast.ctype.blast_info.max_size = 3;
+        const auto first_gravity_mesh = frame.meshes.size();
+        if (!prepareObjectRing(frame,frame.objects.front(),blast,quad)) Error("Gravity ring fixture could not publish");
+        for (size_t i = first_gravity_mesh; i < frame.meshes.size(); ++i) frame.meshes[i].has_owner = false;
+        prepared += 6;
+        if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
+            AutomatedCaptureLog("scene ring fixture facing=1 planar_reverse=1 object=1 gravity=1 prepared_positions=224");
     }
     if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
         AutomatedCaptureLog("scene effects sprites=%u pending=%u",prepared,pending);

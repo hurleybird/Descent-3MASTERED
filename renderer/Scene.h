@@ -263,6 +263,7 @@ struct TerrainState {
 enum class MeshAlignment : uint8_t { World, Camera, FacingEye, CameraUpright, Axis };
 struct PreparedMesh {
     MeshAssetRef asset;
+    std::vector<Vec3> vertices; // owned frame-local positions; empty uses authored geometry
     SurfaceBinding surface;
     Transform world;
     Vec3 camera_translation; // sky follows the eye with authored half-height parallax

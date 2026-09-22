@@ -1,5 +1,28 @@
 # Renderer migration checkpoint
 
+## Continuation: owned procedural positions and blast rings
+
+Generic meshes now carry optional frame-owned positions against persistent
+topology. Freeze validates and copies that stream; view culling and GPU execution
+consume the same geometry. Model deformation and procedural effects share the
+triangle-position expansion contract. Transient meshes do not invent temporal
+identity/history. This removes the need to republish changing effect topology or
+construct its shape during individual view execution.
+
+Migrated visual-effect rings (facing, planar, reversed), object blast rings and
+gravity fields, including authored phase/radius curves, UV progression, flare
+and colored disk, alpha gradients and depth bias. The old gravity draw's
+ObjSetOrient(identity) mutation is replaced by a presentation-only orientation.
+No simulation object or effect is created by the ring inspection fixture.
+
+Full build and 5,242 CPU checks pass. All eight procedural-effects saves are
+pixel-identical to model-variants-effects. After gravity migration, normal
+000/003 captures also complete. The final clean/native and effects/2x-SSAA ring
+fixtures were visually inspected, including their additive flare and room-depth
+intersections. This is authored-effect inspection, not a legacy ring golden
+comparison or a claim that all rare effects are migrated. Candidate and Previous
+Candidate remain untouched; all domain gates remain pending.
+
 ## Continuation: presentation-owned model variants
 
 Objects now publish all eligible authored LOD variants, with independent poses,

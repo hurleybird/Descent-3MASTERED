@@ -527,6 +527,15 @@ void GL4Renderer::UploadSceneFrame(const d3scene::Presentation& frame) {
             for (const auto& surface : part.surfaces) add(surface);
         std::vector<d3scene::PositionPair> positions;
         scene_position_ranges.clear();
+        for (const auto& mesh : frame.data().meshes) {
+            // Transient meshes have no declared temporal identity yet. Publish
+            // current/current positions without inventing valid object motion.
+            const auto pairs = d3scene::preparedPositionPairs(mesh.asset->geometry(),mesh.vertices,mesh.vertices);
+            if (pairs.empty()) continue;
+            const uint32_t start = static_cast<uint32_t>(positions.size());
+            positions.insert(positions.end(),pairs.begin(),pairs.end());
+            scene_position_ranges.emplace(&mesh,ElementRange(start,static_cast<uint32_t>(positions.size())-start));
+        }
         for (const auto& object : frame.data().objects) for (const auto& model : object.models) for (size_t i = 0; i < model.parts.size(); ++i) {
             const auto& part = model.parts[i];
             const auto pairs = d3scene::modelPositionPairs(model.asset->geometry().parts[i].geometry,part);
@@ -989,6 +998,8 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
             if (scene_meshes.size() <= id.slot) scene_meshes.resize(id.slot+1);
             mesh = &scene_meshes[id.slot]; UploadSceneMesh(*mesh,id,instance.asset->geometry());
             binding = &instance.surface;
+            const auto positions = scene_position_ranges.find(&instance);
+            if (positions != scene_position_ranges.end()) prepared_positions = positions->second;
         } else if (item.terrain) {
             const auto& terrain = presentation.data().terrain;
             if (scene_terrain.size() <= item.terrain_patch) scene_terrain.resize(item.terrain_patch+1);

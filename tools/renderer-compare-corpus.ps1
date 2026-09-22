@@ -96,6 +96,12 @@ if ([bool]$referenceManifest.atmosphere_probe -ne [bool]$actualManifest.atmosphe
 if ([bool]$referenceManifest.axis_probe -ne [bool]$actualManifest.axis_probe -and -not $DiagnosticComparison) {
     throw 'Axis fixture differs; use DiagnosticComparison for intentional fixture changes.'
 }
+if ([bool]$referenceManifest.ring_probe -ne [bool]$actualManifest.ring_probe -and -not $DiagnosticComparison) {
+    throw 'Ring fixture differs; use DiagnosticComparison for intentional fixture changes.'
+}
+if ([int]$referenceManifest.ring_probe_revision -ne [int]$actualManifest.ring_probe_revision -and -not $DiagnosticComparison) {
+    throw 'Ring fixture revisions differ; this is not a parity comparison.'
+}
 if ([bool]$referenceManifest.model_effects_probe -ne [bool]$actualManifest.model_effects_probe -and -not $DiagnosticComparison) {
     throw 'Model effects fixture differs; use DiagnosticComparison for intentional fixture changes.'
 }

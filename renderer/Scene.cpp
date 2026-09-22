@@ -315,6 +315,9 @@ PresentationRef Presentation::freeze(const FrameData& data) {
     }
     for (const auto& mesh : data.meshes) {
         require(mesh.asset && mesh.asset->id().lifetime == data.scene_lifetime,"Stale generic mesh");
+        require(mesh.vertices.empty() || mesh.vertices.size() == mesh.asset->geometry().vertices.size(),
+            "Incomplete prepared mesh positions");
+        for (const auto& vertex : mesh.vertices) require(finite(vertex),"Invalid prepared mesh position");
         require(mesh.asset->geometry().raster_offsets.empty() || mesh.surface.layer == RenderLayer::Background,
             "Raster markers require a background layer");
         require(finite(mesh.world) && finite(mesh.camera_translation),"Invalid generic mesh transform");

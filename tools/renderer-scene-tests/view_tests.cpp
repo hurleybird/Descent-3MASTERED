@@ -5,6 +5,8 @@
 #include "../../renderer/SceneCompositing.h"
 #include "../../renderer/SceneHistory.h"
 #include "../../renderer/SceneSamples.h"
+#include "../../renderer/SceneMotion.h"
+#include <limits>
 #include <cmath>
 #include <stdexcept>
 
@@ -314,6 +316,34 @@ int runSceneViewTests() {
     check(rejected_colors,"Incomplete authored mesh color stream was accepted");
     d3scene::PreparedMesh billboard;
     billboard.asset = assets.publishMesh(2,d3scene::unitBillboardQuad());
+    {
+        d3scene::FrameData transient; transient.scene_lifetime = assets.lifetime();
+        transient.sequence = 1;
+        auto mesh = billboard;
+        mesh.world.position = {0,0,5}; mesh.surface.two_sided = true;
+        transient.meshes.push_back(mesh);
+        check(d3scene::queryView(*d3scene::Presentation::freeze(transient),view()).surfaces.size() == 1,
+            "Authored transient mesh was not visible");
+        transient.meshes[0].vertices = mesh.asset->geometry().vertices;
+        for (auto& vertex : transient.meshes[0].vertices) vertex.x += 100;
+        const auto moved = d3scene::Presentation::freeze(transient);
+        check(d3scene::queryView(*moved,view()).surfaces.empty(),"Mesh culling ignored prepared positions");
+        for (auto& vertex : transient.meshes[0].vertices) vertex.x -= 100;
+        const auto restored = d3scene::Presentation::freeze(transient);
+        check(d3scene::queryView(*restored,view()).surfaces.size() == 1,"Prepared mesh positions did not return to view");
+        check(moved->data().meshes[0].vertices[0].x > 90,"Published procedural positions aliased mutable input");
+        const auto& prepared = restored->data().meshes[0];
+        const auto pairs = d3scene::preparedPositionPairs(prepared.asset->geometry(),prepared.vertices,prepared.vertices);
+        check(pairs.size() == 6 && pairs[0].current.x == -1 && pairs[0].previous.x == -1,
+            "Transient mesh GPU position stream lost topology or invented history");
+        transient.meshes[0].vertices.pop_back(); bool incomplete = false;
+        try { d3scene::Presentation::freeze(transient); } catch (const std::invalid_argument&) { incomplete = true; }
+        check(incomplete,"Incomplete procedural positions were accepted");
+        transient.meshes[0].vertices = prepared.vertices;
+        transient.meshes[0].vertices[0].x = std::numeric_limits<float>::infinity(); bool nonfinite = false;
+        try { d3scene::Presentation::freeze(transient); } catch (const std::invalid_argument&) { nonfinite = true; }
+        check(nonfinite,"Nonfinite procedural positions were accepted");
+    }
     billboard.alignment = d3scene::MeshAlignment::Camera;
     billboard.world.position = {10,2,3};
     billboard.world.right = {0,-2,0}; billboard.world.up = {3,0,0}; // rotated, non-square sprite

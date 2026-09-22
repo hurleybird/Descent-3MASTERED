@@ -4,15 +4,19 @@
 #include "SceneView.h"
 namespace d3scene {
 struct PositionPair { Vec3 current, previous; };
-inline std::vector<PositionPair> modelPositionPairs(const MeshGeometry& mesh,const PreparedModelPart& part) {
+inline std::vector<PositionPair> preparedPositionPairs(const MeshGeometry& mesh,
+    const std::vector<Vec3>& current_positions,const std::vector<Vec3>& previous_positions) {
     std::vector<PositionPair> pairs;
-    if (part.vertices.empty() && part.previous_vertices.empty()) return pairs;
-    const MeshView current(mesh,part.vertices), previous(mesh,part.previous_vertices);
+    if (current_positions.empty() && previous_positions.empty()) return pairs;
+    const MeshView current(mesh,current_positions), previous(mesh,previous_positions);
     for (const auto& polygon : mesh.polygons) forEachTriangleCorner(polygon.corners.size(),[&](size_t corner) {
         const auto index = polygon.corners[corner].vertex;
         pairs.push_back({current.positions[index],previous.positions[index]});
     });
     return pairs;
+}
+inline std::vector<PositionPair> modelPositionPairs(const MeshGeometry& mesh,const PreparedModelPart& part) {
+    return preparedPositionPairs(mesh,part.vertices,part.previous_vertices);
 }
 struct SurfaceMotion {
     Transform previous;
