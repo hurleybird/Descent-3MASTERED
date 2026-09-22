@@ -682,6 +682,7 @@ private:
 public:
 	GL4Renderer();
 	d3scene::VisibilityReport RenderSceneView(const d3scene::Presentation&, const d3scene::View&) override;
+	void RenderForeground(const d3scene::Presentation&, const d3scene::ForegroundLayer&) override;
 
 	//INITIALIZATION
 

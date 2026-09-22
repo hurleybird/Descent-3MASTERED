@@ -1,5 +1,18 @@
 # Renderer migration checkpoint
 
+## Continuation: renderer-owned foreground schedule
+
+Prepared cockpit composition now submits one ForegroundLayer containing ordered
+scene-resolution views and subsequent display-resolution views. The renderer
+owns storage clear, shared depth, resolve and placement over the completed world;
+the producer no longer calls legacy begin/start/end cockpit frame brackets.
+The old ABI remains for unmigrated callers, but is not invoked by this path.
+The request rejects empty schedules, target mismatches and world/feedback owners.
+Full build and 5,327 checks pass. Effects cockpit 003 and normal 000/003 captures
+are pixel-identical to the preceding text-batch captures. This is boundary
+verification, not full HUD/module/cinematic acceptance. All domain gates remain
+set and Candidate is unchanged.
+
 ## Continuation: prepared texture attributes and glyph batching
 
 Prepared meshes now own optional per-vertex base UVs, validated and triangulated

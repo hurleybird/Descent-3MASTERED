@@ -4,6 +4,17 @@
 #include <stdexcept>
 
 namespace d3scene {
+inline void validateForeground(const ForegroundLayer& layer) {
+    if (layer.scene_views.empty() && layer.display_views.empty())
+        throw std::invalid_argument("Empty foreground layer");
+    const auto validate = [](const View& view, ViewTarget target) {
+        validateView(view);
+        if (view.target != target || view.kind == ViewKind::Main || view.feedback != NoFeedback)
+            throw std::invalid_argument("Foreground views cannot own world products or gameplay feedback");
+    };
+    for (const auto& view : layer.scene_views) validate(view,ViewTarget::Scene);
+    for (const auto& view : layer.display_views) validate(view,ViewTarget::Display);
+}
 struct ImageReduction { uint32_t source_scale, destination_scale; };
 // One reduction law for world and overlay layers. Each kernel reduces by two;
 // cropping remains expressed in logical coordinates until the final consumer.

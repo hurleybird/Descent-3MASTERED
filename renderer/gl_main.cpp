@@ -2515,6 +2515,7 @@ void GL4Renderer::EndPostPresentFrame()
 }
 
 bool GL4Renderer::BeginCockpitFrame()
+// Legacy ABI adapter; prepared scenes use RenderForeground instead.
 {
 	if (!framebuffer_ok)
 		return false;
@@ -2524,6 +2525,39 @@ bool GL4Renderer::BeginCockpitFrame()
 
 	cockpit_scene_frame_active = true;
 	return true;
+}
+
+void GL4Renderer::RenderForeground(const d3scene::Presentation& frame,
+    const d3scene::ForegroundLayer& layer)
+{
+	d3scene::validateForeground(layer);
+	if (!framebuffer_ok || modal_ui_frame_active || cockpit_scene_frame_active)
+		Error("Foreground composition unavailable in this frame phase");
+	if (!BeginPostPresentFrame()) Error("Foreground requires a completed world image");
+	FlushFontBatch();
+	if (!layer.scene_views.empty()) {
+		auto& storage = framebuffers[framebuffer_current_draw];
+		storage.MarkAllDirty();
+		glBindFramebuffer(GL_DRAW_FRAMEBUFFER,storage.Handle());
+		glBindFramebuffer(GL_READ_FRAMEBUFFER,0);
+		glDrawBuffer(GL_COLOR_ATTACHMENT0);
+		glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);
+		glClearColor(0,0,0,0);
+		GL4ClearBuffers(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+		cockpit_scene_frame_active = true;
+		try {
+			for (const auto& view : layer.scene_views) RenderSceneView(frame,view);
+			ClearPostPresentAlpha();
+			if (!ResolveCockpitLayerToPostComposite()) Error("Foreground image resolve failed");
+			BlendPostCompositeOverPostPresent();
+		} catch (...) {
+			cockpit_scene_frame_active = false;
+			throw;
+		}
+		cockpit_scene_frame_active = false;
+	}
+	for (const auto& view : layer.display_views) RenderSceneView(frame,view);
+	UseDrawVAO();
 }
 
 void GL4Renderer::EndCockpitFrame()

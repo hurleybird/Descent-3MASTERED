@@ -545,24 +545,21 @@ void RenderPreparedCockpit(const d3scene::Presentation& frame, d3scene::Rect vie
     view.geometry_inspection = true; view.kind = d3scene::ViewKind::Preview;
     view.viewport = viewport; view.projection_anchor = {0,0,viewport.width,viewport.height};
     view.zoom = zoom; view.dynamic_lighting = false; view.portal_visibility = false;
-    if (!rend_BeginCockpitFrame()) Error("Cockpit scene composition unavailable");
-    // The layer allocation is cleared by its compositor. Geometry execution
-    // owns the requested viewport and does not invoke any legacy model draw.
-    rend_StartFrame(viewport.x,viewport.y,viewport.x+viewport.width,viewport.y+viewport.height,0);
+    d3scene::ForegroundLayer layer;
     if (monitors) {
         view.collection = view.history_key = SceneCockpitMonitorBacking;
         view.ordering = d3scene::ViewOrdering::Compositing;
-        d3scene::renderView(frame,view);
+        layer.scene_views.push_back(view);
         view.ordering = d3scene::ViewOrdering::Depth;
     }
     if (base) {
         view.collection = view.history_key = SceneCockpitBase;
-        d3scene::renderView(frame,view);
+        layer.scene_views.push_back(view);
     }
     if (gauges) {
         view.collection = view.history_key = SceneCockpitGauges;
         view.ordering = d3scene::ViewOrdering::Compositing;
-        d3scene::renderView(frame,view);
+        layer.scene_views.push_back(view);
         view.ordering = d3scene::ViewOrdering::Depth;
     }
     if (text) {
@@ -573,18 +570,18 @@ void RenderPreparedCockpit(const d3scene::Presentation& frame, d3scene::Rect vie
         canvas.orthographic_size = {float(viewport.width),float(viewport.height)};
         canvas.camera.position = {viewport.width*.5f,viewport.height*.5f,0};
         canvas.camera.up = {0,-1,0};
-        d3scene::renderView(frame,canvas);
+        layer.scene_views.push_back(canvas);
     }
     if (layered) {
         view.collection = view.history_key = SceneCockpitAfterGauges;
-        d3scene::renderView(frame,view);
+        layer.scene_views.push_back(view);
     }
-    rend_EndFrame(); rend_EndCockpitFrame();
     if (late) {
         view.collection = view.history_key = SceneCockpitLate;
         view.target = d3scene::ViewTarget::Display;
-        d3scene::renderView(frame,view);
+        layer.display_views.push_back(view);
     }
+    d3scene::renderForeground(frame,layer);
     if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
         AutomatedCaptureLog("scene cockpit composed base=%d late=%d gauges=%d text=%d",base,late,gauges,text);
 }

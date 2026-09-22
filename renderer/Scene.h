@@ -489,5 +489,13 @@ struct VisibilityReport {
 // an explicit publisher, not unsynchronized access to this store.
 SceneAssets& assets();
 VisibilityReport renderView(const Presentation& frame, const View& view);
+// Ordered independent foreground views share a freshly cleared scene-resolution
+// image/depth buffer, then resolve once over the completed world. Display views
+// follow that resolve (e.g. an authored late canopy or native-resolution UI).
+struct ForegroundLayer {
+    std::vector<View> scene_views;
+    std::vector<View> display_views;
+};
+void renderForeground(const Presentation& frame, const ForegroundLayer& layer);
 
 } // namespace d3scene

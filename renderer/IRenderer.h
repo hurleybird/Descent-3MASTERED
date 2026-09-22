@@ -33,6 +33,7 @@ public:
 	// presentation remains rejected while preparation domains are pending.
 	virtual d3scene::VisibilityReport RenderSceneView(const d3scene::Presentation& frame,
 		const d3scene::View& view) = 0;
+	virtual void RenderForeground(const d3scene::Presentation&, const d3scene::ForegroundLayer&) = 0;
 
 	//INITIALIZATION
 

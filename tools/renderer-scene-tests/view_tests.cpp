@@ -183,6 +183,32 @@ int runSceneViewTests() {
         try { d3scene::validateView(request); } catch (const std::invalid_argument&) { rejected = true; }
         check(rejected,"Display preview accepted gameplay feedback");
     }
+    {
+        d3scene::ForegroundLayer layer;
+        const auto rejected = [&] {
+            try { d3scene::validateForeground(layer); } catch (const std::invalid_argument&) { return true; }
+            return false;
+        };
+        check(rejected(),"Empty foreground accepted");
+        auto request = view(); request.kind = d3scene::ViewKind::Preview;
+        layer.scene_views.push_back(request);
+        check(!rejected(),"Independent foreground rejected");
+        layer.scene_views[0].kind = d3scene::ViewKind::Main;
+        check(rejected(),"Foreground accepted world ownership");
+        layer.scene_views[0] = request;
+        layer.scene_views[0].feedback = d3scene::Automap;
+        check(rejected(),"Foreground accepted game observations");
+        layer.scene_views[0] = request;
+        layer.scene_views[0].target = d3scene::ViewTarget::Display;
+        check(rejected(),"Scene-resolution list accepted display view");
+        layer.scene_views[0] = request;
+        layer.display_views.push_back(request);
+        check(rejected(),"Display-resolution list accepted scene view");
+        layer.display_views[0].target = d3scene::ViewTarget::Display;
+        check(!rejected(),"Ordered mixed-resolution layer rejected");
+        layer.scene_views.clear();
+        check(!rejected(),"Native-resolution-only layer rejected");
+    }
     check(d3scene::imageReductionSteps(1).empty(),"Native resolution introduced a reduction pass");
     const auto reduction2 = d3scene::imageReductionSteps(2), reduction4 = d3scene::imageReductionSteps(4);
     check(reduction2.size() == 1 && reduction2[0].source_scale == 2 && reduction2[0].destination_scale == 1,

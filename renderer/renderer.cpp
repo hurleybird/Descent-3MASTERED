@@ -21,6 +21,7 @@
 #include "IRenderer.h"
 #include "pserror.h"
 #include "gl_local.h"
+#include "SceneCompositing.h"
 
 int RendererOpenGLMajorVersion = 0;
 int RendererOpenGLMinorVersion = 0;
@@ -35,6 +36,13 @@ d3scene::VisibilityReport d3scene::renderView(const Presentation& frame, const V
 	return renderer_inst->RenderSceneView(frame, view);
 }
 static oeApplication* Renderer_app;
+void d3scene::renderForeground(const Presentation& frame, const ForegroundLayer& layer)
+{
+	validateForeground(layer);
+	for (const auto& view : layer.scene_views) if (!view.geometry_inspection) frame.requireExecutable();
+	for (const auto& view : layer.display_views) if (!view.geometry_inspection) frame.requireExecutable();
+	renderer_inst->RenderForeground(frame,layer);
+}
 static renderer_preferred_state Renderer_last_preferred_state;
 static bool Renderer_last_preferred_state_valid = false;
 static uint32_t Renderer_generation = 0;
