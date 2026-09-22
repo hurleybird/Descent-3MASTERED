@@ -4,6 +4,8 @@
 #include "../renderer/SceneLighting.h"
 #include "../renderer/SceneImages.h"
 #include "../renderer/SceneTerrain.h"
+#include "../renderer/SceneFog.h"
+#include "config.h"
 #include "descent.h"
 #include "bitmap.h"
 #include <cmath>
@@ -80,6 +82,10 @@ void prepareImages(d3scene::FrameData& data) {
 void logPreparedModels(const d3scene::FrameData& data) {
     if (!AutomatedCapturePending() && AutomatedCaptureFrameIndex() != 0) return;
     AutomatedCaptureLog("scene probe frame=%d time=%.9g",AutomatedCaptureFrameIndex(),data.simulation_time);
+    size_t fog_triangles = 0;
+    for (const auto& volume : d3scene::fogVolumes(data)) fog_triangles += volume.boundary.size();
+    AutomatedCaptureLog("scene fog volumes=%u triangles=%u exterior=%d",static_cast<unsigned>(d3scene::fogVolumes(data).size()),
+        static_cast<unsigned>(fog_triangles),data.exterior_fog.enabled ? 1 : 0);
     for (const auto& effect : data.camera_perturbations)
         AutomatedCaptureLog("scene camera perturbation owner=%u forward=%.9g,%.9g,%.9g",effect.owner,
             effect.rotation.forward.x,effect.rotation.forward.y,effect.rotation.forward.z);
@@ -178,6 +184,7 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance_history) {
     }
     for (auto& room : data.rooms) {
       room.exterior = (room.authored_flags & RF_EXTERNAL) != 0;
+      room.fog_enabled = Detail_settings.Fog_enabled && (room.authored_flags & RF_FOG) && GetFunctionMode() != EDITOR_MODE;
       const auto& source = Rooms[room.number];
       room.blocks_portals = (source.flags & RF_DOOR) && source.doorway_data &&
           DoorwayGetPosition(&Rooms[room.number]) == 0 && !(Doors[source.doorway_data->doornum].flags & DF_SEETHROUGH);
@@ -207,6 +214,7 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance_history) {
         portal.traversable = !(portal.flags & PF_RENDER_FACES) || material.allowsBehind() ||
             (GameTextures[surface.texture].flags & TF_PROCEDURAL);
     }
+    data.fog = d3scene::assets().publishFog(data.rooms);
     logPreparedModels(data);
     // No domain is declared complete by a diagnostic subset of its consumers.
     auto prepared = d3scene::Presentation::freeze(data);

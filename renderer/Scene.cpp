@@ -1,6 +1,7 @@
 // Descent 3MASTERED - GPL-3.0-or-later
 #include "Scene.h"
 #include "SceneTerrain.h"
+#include "SceneFog.h"
 #include <atomic>
 #include <cmath>
 #include <limits>
@@ -75,7 +76,7 @@ bool operator==(const MeshGeometry& a, const MeshGeometry& b) {
         if (!equal(a.vertices[i], b.vertices[i])) return false;
     for (size_t i = 0; i < a.polygons.size(); ++i) {
         const auto& x = a.polygons[i]; const auto& y = b.polygons[i];
-        if (!equal(x.normal, y.normal) || x.corners.size() != y.corners.size()) return false;
+        if (!equal(x.normal, y.normal) || x.corners.size() != y.corners.size() || x.bounds_volume != y.bounds_volume) return false;
         for (size_t j = 0; j < x.corners.size(); ++j) {
             const auto& c = x.corners[j]; const auto& d = y.corners[j];
             if (c.vertex != d.vertex || c.u != d.u || c.v != d.v || c.light_u != d.light_u ||
@@ -101,6 +102,7 @@ void SceneAssets::reset() {
     images_.clear();
     terrain_.reset();
     meshes_.clear();
+    fog_.reset();
     lifetime_ = lifetime;
     revision_ = 0;
 }
@@ -229,6 +231,21 @@ PresentationRef Presentation::freeze(const FrameData& data) {
             require(!image || image->id().lifetime == data.scene_lifetime,"Stale image asset in frame");
     };
     require(finite(data.sky_color),"Invalid sky color");
+    require(finite(data.exterior_fog.color) && std::isfinite(data.exterior_fog.start) && std::isfinite(data.exterior_fog.end) &&
+        (!data.exterior_fog.enabled || data.exterior_fog.end > data.exterior_fog.start),"Invalid exterior fog");
+    require(!data.fog || data.fog->id().lifetime == data.scene_lifetime,"Stale fog asset");
+    for (const auto& volume : fogVolumes(data)) {
+        require(finite(volume.color) && std::isfinite(volume.depth) && volume.depth > 0,"Invalid fog volume");
+        require(finite(volume.bounds.minimum) && finite(volume.bounds.maximum),"Invalid fog bounds");
+        require(volume.boundary.empty() == volume.nodes.empty(),"Missing fog spatial index");
+        for (size_t index = 0; index < volume.nodes.size(); ++index) {
+            const auto& node = volume.nodes[index];
+            require(finite(node.bounds.minimum) && finite(node.bounds.maximum) && node.escape > index && node.escape <= volume.nodes.size() &&
+                uint64_t(node.first)+node.count <= volume.boundary.size(),"Invalid fog spatial node");
+        }
+        for (const auto& triangle : volume.boundary)
+            require(finite(triangle.a) && finite(triangle.b) && finite(triangle.c) && finite(triangle.inward),"Invalid fog boundary");
+    }
     for (const auto& mesh : data.meshes) {
         require(mesh.asset && mesh.asset->id().lifetime == data.scene_lifetime,"Stale generic mesh");
         require(finite(mesh.world) && finite(mesh.camera_translation),"Invalid generic mesh transform");

@@ -39,6 +39,7 @@ struct MeshCorner {
 struct MeshPolygon {
     Vec3 normal;
     std::vector<MeshCorner> corners;
+    bool bounds_volume = true; // false for floating trigger sheets, not room walls
 };
 struct MeshGeometry {
     std::vector<Vec3> vertices;
@@ -132,6 +133,9 @@ using ImageAssetRef = std::shared_ptr<const ImageAsset>;
 struct TerrainGrid;
 class TerrainAsset;
 using TerrainAssetRef = std::shared_ptr<const TerrainAsset>;
+class FogAsset;
+struct RoomState;
+using FogAssetRef = std::shared_ptr<const FogAsset>;
 
 // Immutable revisions keep already-published frames alive across level unload,
 // slot reuse, and geometry changes. Reset never invalidates an existing frame.
@@ -150,6 +154,7 @@ public:
     TerrainAssetRef terrain() const { return terrain_; }
     TerrainAssetRef publishTerrain(const TerrainGrid&);
     MeshAssetRef publishMesh(uint32_t,MeshGeometry);
+    FogAssetRef publishFog(const std::vector<RoomState>&);
     uint64_t lifetime() const { return lifetime_; }
 private:
     uint64_t lifetime_ = 0;
@@ -159,6 +164,7 @@ private:
     std::vector<ImageAssetRef> images_;
     TerrainAssetRef terrain_;
     std::vector<MeshAssetRef> meshes_;
+    FogAssetRef fog_;
 };
 
 enum class RenderLayer : uint8_t { Background, World };
@@ -228,6 +234,25 @@ struct RoomState {
     int32_t mirror_polygon = -1;
     float light_scalar = 1;
     bool blocks_portals = false, exterior = false;
+    bool fog_enabled = false;
+};
+struct FogTriangle { Vec3 a, b, c, inward; };
+struct FogNode {
+    Bounds bounds;
+    uint32_t first = 0, count = 0, escape = 0;
+};
+struct FogVolume {
+    std::vector<int32_t> rooms;
+    std::vector<FogTriangle> boundary;
+    Vec3 color;
+    float depth = 1;
+    Bounds bounds;
+    std::vector<FogNode> nodes; // depth-first, stackless traversal; no query depth cap
+};
+struct ExteriorFog {
+    bool enabled = false;
+    Vec3 color;
+    float start = 0, end = 1;
 };
 
 struct PreparedModelPart {
@@ -293,6 +318,8 @@ struct FrameData {
     std::vector<PreparedMesh> meshes;
     bool sky_enabled = false;
     Vec3 sky_color;
+    FogAssetRef fog;
+    ExteriorFog exterior_fog;
 };
 
 class Presentation final {

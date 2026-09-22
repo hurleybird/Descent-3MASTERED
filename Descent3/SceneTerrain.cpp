@@ -2,6 +2,7 @@
 #include "SceneExtraction.h"
 #include "SceneMaterialBindings.h"
 #include "gametexture.h"
+#include "config.h"
 #include "../renderer/SceneTerrain.h"
 #include "terrain.h"
 #include "lightmap.h"
@@ -94,6 +95,10 @@ void PrepareGameSky(d3scene::FrameData& frame) {
     };
     frame.sky_enabled = true;
     frame.sky_color = color(Terrain_sky.sky_color);
+    frame.exterior_fog.color = color(Terrain_sky.fog_color);
+    frame.exterior_fog.end = 200.f*TERRAIN_SIZE;
+    frame.exterior_fog.start = frame.exterior_fog.end*(std::max)(0.f,(std::min)(.9999f,Terrain_sky.fog_scalar));
+    frame.exterior_fog.enabled = Detail_settings.Fog_enabled && (Terrain_sky.flags & TF_FOG);
     d3scene::Transform rotation;
     if ((Terrain_sky.flags & TF_ROTATE_SKY) && Terrain_sky.rotate_rate > 0) {
         // A view never advances the sky. All views evaluate the same simulation

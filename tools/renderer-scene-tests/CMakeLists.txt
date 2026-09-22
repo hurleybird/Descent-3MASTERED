@@ -10,11 +10,13 @@ add_executable(renderer_scene_tests
     image_tests.cpp
     procedural_tests.cpp
     terrain_tests.cpp
+    fog_tests.cpp
     ../../renderer/SceneLighting.cpp
     ../../renderer/SceneGeometry.cpp
     ../../renderer/ScenePortals.cpp
     ../../renderer/SceneImages.cpp
     ../../renderer/SceneTerrain.cpp
+    ../../renderer/SceneFog.cpp
     ../../model/ModelPose.cpp
     ../../model/SceneModelAsset.cpp
     ../../vecmat/vector.cpp

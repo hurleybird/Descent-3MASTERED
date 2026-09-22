@@ -136,6 +136,8 @@ class GL4Renderer : public IRenderer
 	GLuint scene_influence_buffer = 0, scene_influence_texture = 0;
 	GLuint scene_uv_buffer = 0, scene_uv_texture = 0;
 	GLuint scene_position_buffer = 0, scene_position_texture = 0;
+	GLuint scene_fog_buffer = 0, scene_fog_texture = 0;
+	d3scene::AssetId scene_fog_id;
 	uint64_t scene_frame_sequence = 0;
 	std::unordered_map<const d3scene::SurfaceBinding*, ElementRange> scene_light_ranges;
 	std::unordered_map<const d3scene::SurfaceBinding*, ElementRange> scene_uv_ranges;

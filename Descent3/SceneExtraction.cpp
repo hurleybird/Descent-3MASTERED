@@ -44,6 +44,7 @@ bool matches(const d3scene::MeshGeometry& geometry, const room& source) {
         if (!same(geometry.vertices[i], source.verts[i])) return false;
     for (int i = 0; i < source.num_faces; ++i) {
         const auto& polygon = geometry.polygons[i]; const face& face = source.faces[i];
+        if (polygon.bounds_volume != ((face.flags & FF_FLOATING_TRIG) == 0)) return false;
         if (polygon.corners.size() != face.num_verts || !same(polygon.normal, face.normal)) return false;
         for (int j = 0; j < face.num_verts; ++j) {
             const auto& c = polygon.corners[j]; const auto& uv = face.face_uvls[j];
@@ -62,6 +63,7 @@ d3scene::MeshGeometry extractGeometry(const room& source) {
         const face& face = source.faces[i];
         d3scene::MeshPolygon polygon;
         polygon.normal = value(face.normal);
+        polygon.bounds_volume = (face.flags & FF_FLOATING_TRIG) == 0;
         polygon.corners.reserve(face.num_verts);
         for (int j = 0; j < face.num_verts; ++j) {
             const auto& uv = face.face_uvls[j];

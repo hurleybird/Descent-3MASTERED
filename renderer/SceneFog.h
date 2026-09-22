@@ -1,0 +1,31 @@
+// Descent 3MASTERED - GPL-3.0-or-later
+#pragma once
+#include "Scene.h"
+namespace d3scene {
+// Connected authored space, compiled before any camera query. Interior portal
+// faces disappear from the boundary; all other faces close the volume.
+struct FogPortalSource { int32_t polygon, destination_room, destination_portal; bool open; };
+struct FogRoomSource {
+    int32_t number;
+    RoomAssetRef asset;
+    Vec3 color;
+    float depth;
+    std::vector<FogPortalSource> portals;
+};
+class FogAsset final {
+public:
+    AssetId id() const { return id_; }
+    const std::vector<FogVolume>& volumes() const { return volumes_; }
+private:
+    friend class SceneAssets;
+    FogAsset(AssetId id,std::vector<FogRoomSource> source,std::vector<FogVolume> volumes) :
+        id_(id), source_(std::move(source)), volumes_(std::move(volumes)) {}
+    AssetId id_;
+    std::vector<FogRoomSource> source_;
+    std::vector<FogVolume> volumes_;
+};
+const std::vector<FogVolume>& fogVolumes(const FrameData&);
+void buildFogAcceleration(FogVolume&);
+bool fogContains(const FogVolume&,Vec3);
+float fogSegmentLength(const FogVolume&,Vec3 eye,Vec3 endpoint,bool eye_inside);
+}

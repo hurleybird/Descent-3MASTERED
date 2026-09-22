@@ -1,5 +1,41 @@
 # Renderer migration checkpoint
 
+## Continuation: fog belongs to immutable connected scene space
+
+Fog-enabled rooms with matching authored color/depth connect through reciprocal
+open portals. Internal portal faces are removed from the compiled boundary;
+remaining room walls/portals close it. Floating trigger sheets explicitly do not
+bound space. A renderer-owned immutable fog asset holds this boundary and a
+stackless spatial index; exact source keys include geometry revisions, fog values
+and portal connectivity. Unchanged frames reuse it, and level reset preserves
+already-held assets while rejecting them from the new lifetime.
+
+CPU containment and GPU segment queries traverse the same prepared index. Fog
+measures entry/exit intervals, including clear gaps, instead of inheriting the
+current room's mutable draw state. All world geometry uses the same fragment
+evaluator; additive materials attenuate without adding fog color. Authored linear
+camera-forward depth remains the transfer law. Exterior distance/color is frame
+data. Background meshes are excluded. Multiple different fog colors currently
+use optical-distance-weighted linear mixing: heterogeneous overlapping/crossed
+volumes still need targeted visual qualification, not an assumption of old pass
+order parity. Mirror/particle/composition integration remains pending.
+
+The corpus includes levels with 2,636, 9,204 and 12,060 boundary triangles; neither
+CPU preparation nor GPU upload repeats full geometry for an unchanged asset.
+Only view containment updates per camera. There is no alternate unindexed draw
+path. 4,820 CPU checks and the full game build pass. Checks cover entry/exit,
+shared diagonals, connected-room seams, clear intervals, trigger exclusion,
+authored color separation, revision retention and cross-level rejection.
+
+All eight `scene-fog-clean` captures complete: five are identical to the sky
+checkpoint, while saves 001/002/007 gain fog. Those three were visually inspected;
+001/002 were also compared visually against the preserved complete renderer.
+They repeat byte-for-byte in `scene-fog-repeat`. All eight `scene-fog-indexed`
+captures exactly match the initial query implementation, and all eight
+`scene-fog-owned` captures exactly match indexed output. Both exterior fixtures
+were visually inspected and repeat exactly in `scene-fog-owned-sky`. These checks
+do not establish complete renderer parity or interactive performance. No shadows.
+
 ## Continuation: owned environment meshes and background depth policy
 
 Generic immutable mesh assets now carry optional authored vertex colors and
