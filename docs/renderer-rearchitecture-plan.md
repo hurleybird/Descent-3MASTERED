@@ -1,6 +1,9 @@
 # Renderer rearchitecture and dynamic shadows
 
-Status: proposed plan, not implementation authorization.
+Status: renderer replacement authorized. Shadows are deferred until the new
+renderer has been verified. Background save-game screenshot comparisons are
+authorized. No shadow implementation or shadow-specific prototype belongs in
+the renderer migration.
 
 ## Decision
 
@@ -235,7 +238,11 @@ all regression scenes and required module tests pass, and no legacy core path
 can be selected. No requirement to preserve pixels already identified as bugs,
 but every intentional visual departure must be documented and inspected.
 
-### 4. Implement shadows as an ordinary scene consumer
+### Deferred: shadows, only after renderer verification
+
+This section is future design context, not work to perform during the migration.
+Complete the deletion audit and renderer qualification below before touching
+shadows. Keep renderer comparison results separate from future shadow changes.
 
 Use shadow maps: spotlight projection for a headlight-sized cone and cubemaps
 for selected point lights. Use the canonical emitter, geometry/material opacity,
@@ -255,7 +262,7 @@ Gate: off-screen caster, camera-independent position, animation, portal/door,
 cutout and headlight tests pass in motion and across sample configurations.
 Neither old draw interception nor post-composite light subtraction exists.
 
-### 5. Deletion audit and release qualification
+### 4. Deletion audit and renderer qualification (before any shadow work)
 
 Verify removal by symbol/dependency checks and runtime counters, not comments
 calling code obsolete. Remove temporary migration switches and debug substitutes.
