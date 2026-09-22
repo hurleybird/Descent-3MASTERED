@@ -40,6 +40,29 @@ MeshGeometry unitBillboardQuad() {
     mesh.polygons.push_back(std::move(face));
     return mesh;
 }
+MeshGeometry unitQuadBatch(uint32_t count) {
+    if (!count || count > 128) throw std::invalid_argument("Invalid canonical quad batch size");
+    MeshGeometry result;
+    const auto quad = unitBillboardQuad();
+    for (uint32_t index = 0; index < count; ++index) {
+        result.vertices.insert(result.vertices.end(),quad.vertices.begin(),quad.vertices.end());
+        auto polygon = quad.polygons[0];
+        for (auto& corner : polygon.corners) corner.vertex += index*4;
+        result.polygons.push_back(std::move(polygon));
+    }
+    return result;
+}
+std::vector<Vec2> preparedTextureCoordinates(const PreparedMesh& mesh) {
+    if (mesh.texture_uvs.empty()) return {};
+    if (!mesh.asset || mesh.texture_uvs.size() != mesh.asset->geometry().vertices.size())
+        throw std::invalid_argument("Prepared UVs do not match mesh topology");
+    std::vector<Vec2> result;
+    for (const auto& polygon : mesh.asset->geometry().polygons)
+        forEachTriangleCorner(polygon.corners.size(),[&](size_t corner) {
+            result.push_back(mesh.texture_uvs.at(polygon.corners[corner].vertex));
+        });
+    return result;
+}
 MeshGeometry billboardRing(float inner_ratio,uint8_t inner_alpha,uint8_t outer_alpha,uint32_t segments) {
     if (!std::isfinite(inner_ratio) || inner_ratio < 0 || inner_ratio > 1 || segments < 3 || segments > 256)
         throw std::invalid_argument("Invalid billboard ring");

@@ -327,6 +327,9 @@ PresentationRef Presentation::freeze(const FrameData& data) {
         require(mesh.vertices.empty() || mesh.vertices.size() == mesh.asset->geometry().vertices.size(),
             "Incomplete prepared mesh positions");
         for (const auto& vertex : mesh.vertices) require(finite(vertex),"Invalid prepared mesh position");
+        require(mesh.texture_uvs.empty() || mesh.texture_uvs.size() == mesh.asset->geometry().vertices.size(),
+            "Incomplete prepared mesh texture coordinates");
+        for (const auto uv : mesh.texture_uvs) require(std::isfinite(uv.x) && std::isfinite(uv.y),"Invalid prepared texture coordinate");
         require(mesh.asset->geometry().raster_offsets.empty() || mesh.surface.layer == RenderLayer::Background,
             "Raster markers require a background layer");
         require(finite(mesh.world) && finite(mesh.camera_translation),"Invalid generic mesh transform");

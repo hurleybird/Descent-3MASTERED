@@ -45,6 +45,34 @@ void appendRoom(d3scene::SceneAssets& assets,d3scene::FrameData& data,d3scene::M
 
 int runSceneViewTests() {
     {
+        d3scene::SceneAssets batch_assets;
+        d3scene::FrameData data; data.sequence = 1; data.scene_lifetime = batch_assets.lifetime();
+        d3scene::PreparedMesh batch;
+        batch.asset = batch_assets.publishMesh(258,d3scene::unitQuadBatch(2));
+        for (int i = 0; i < 8; ++i) batch.texture_uvs.push_back({float(i),float(i+10)});
+        data.meshes.push_back(batch);
+        const auto frame = d3scene::Presentation::freeze(data);
+        const auto coordinates = d3scene::preparedTextureCoordinates(frame->data().meshes[0]);
+        const int indices[12] = {0,1,2,0,2,3,4,5,6,4,6,7};
+        check(coordinates.size() == 12,"Prepared texture coordinates lost quad batch triangles");
+        for (int i = 0; i < 12; ++i) check(coordinates[i].x == indices[i] && coordinates[i].y == indices[i]+10,
+            "Prepared base UV ordering diverged from triangulated positions");
+        data.meshes[0].texture_uvs[0].x = 99;
+        check(frame->data().meshes[0].texture_uvs[0].x == 0,"Published UVs borrowed caller storage");
+        data.meshes[0].texture_uvs.pop_back(); bool rejected = false;
+        try { d3scene::Presentation::freeze(data); } catch (const std::invalid_argument&) { rejected = true; }
+        check(rejected,"Incomplete base UV attributes passed publication");
+        data.meshes[0].texture_uvs = batch.texture_uvs;
+        data.meshes[0].texture_uvs[0].x = std::numeric_limits<float>::infinity(); rejected = false;
+        try { d3scene::Presentation::freeze(data); } catch (const std::invalid_argument&) { rejected = true; }
+        check(rejected,"Nonfinite base UV attributes passed publication");
+        for (const uint32_t count : {0u,129u}) {
+            rejected = false;
+            try { d3scene::unitQuadBatch(count); } catch (const std::invalid_argument&) { rejected = true; }
+            check(rejected,"Unbounded canonical quad batch was accepted");
+        }
+    }
+    {
         auto canvas = view(); canvas.kind = d3scene::ViewKind::Preview;
         canvas.projection = d3scene::ViewProjection::Orthographic;
         canvas.orthographic_size = {800,600}; canvas.orthographic_depth = {-2,2};

@@ -283,8 +283,12 @@ void PrepareGameCockpitGauges(d3scene::FrameData& frame,const ModelTransforms& t
         }
       }
     }
-    if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
-        AutomatedCaptureLog("scene gauge graphics prepared quads=%d glyphs=%d backing=%d",order,text_order,Cockpit_alt_mode ? 1 : 0);
+    if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0) {
+        size_t glyphs = 0;
+        for (const auto& mesh : frame.meshes) if (mesh.collection == SceneCockpitText) glyphs += mesh.vertices.size()/4;
+        AutomatedCaptureLog("scene gauge graphics prepared quads=%d glyphs=%u text_batches=%d backing=%d",
+            order,static_cast<unsigned>(glyphs),text_order,Cockpit_alt_mode ? 1 : 0);
+    }
 }
 
 //	renders a monitor style quad 

@@ -66,6 +66,7 @@ layout(location=6) in vec2 raster_offset;
 uniform vec2 raster_pixel_scale;
 uniform samplerBuffer instance_uvs;
 uniform int use_instance_uvs, instance_uv_offset;
+uniform int use_texture_uvs, texture_uv_offset;
 uniform samplerBuffer instance_positions;
 uniform int use_instance_positions, instance_position_offset;
 uniform samplerBuffer scene_reflections;
@@ -115,6 +116,7 @@ void main() {
     previous_clip = previous_view_projection*vec4(previous_world,1);
     texcoord=uv; lightcoord=light_uv; vertex_alpha=alpha;
     if (use_instance_uvs != 0) lightcoord = texelFetch(instance_uvs,gl_VertexID+instance_uv_offset).rg;
+    if (use_texture_uvs != 0) texcoord = texelFetch(instance_uvs,gl_VertexID+texture_uv_offset).rg;
     vec3 world_normal = model_right*normal.x + model_up*normal.y + model_forward*normal.z;
     reflection_normal = use_reflection_normals != 0 ? texelFetch(scene_reflections,gl_VertexID+reflection_normal_offset).rgb : world_normal;
     field_modulation = vec3(1);
@@ -390,6 +392,7 @@ void GL4Renderer::DestroySceneResources() {
     if (scene_uv_texture) glDeleteTextures(1,&scene_uv_texture);
     scene_uv_buffer = scene_uv_texture = 0;
     scene_uv_ranges.clear();
+    scene_texture_uv_ranges.clear();
     if (scene_position_buffer) glDeleteBuffers(1,&scene_position_buffer);
     if (scene_position_texture) glDeleteTextures(1,&scene_position_texture);
     scene_position_buffer = scene_position_texture = 0;
@@ -491,6 +494,7 @@ void GL4Renderer::UploadSceneFrame(const d3scene::Presentation& frame) {
         scene_field_ranges.clear();
         scene_light_ranges.clear();
         scene_uv_ranges.clear();
+        scene_texture_uv_ranges.clear();
         const auto add = [&](const d3scene::SurfaceBinding& surface) {
             SceneReflectionRanges reflection_ranges{};
             if (surface.reflection && surface.specular_strength > 0) {
@@ -533,7 +537,14 @@ void GL4Renderer::UploadSceneFrame(const d3scene::Presentation& frame) {
         };
         for (const auto& room : frame.data().rooms) for (const auto& surface : room.surfaces) add(surface);
         for (const auto& patch : frame.data().terrain.patches) for (const auto& surface : patch) add(surface);
-        for (const auto& mesh : frame.data().meshes) add(mesh.surface);
+        for (const auto& mesh : frame.data().meshes) {
+            add(mesh.surface);
+            const auto coordinates = d3scene::preparedTextureCoordinates(mesh);
+            if (coordinates.empty()) continue;
+            const uint32_t start = static_cast<uint32_t>(uvs.size());
+            uvs.insert(uvs.end(),coordinates.begin(),coordinates.end());
+            scene_texture_uv_ranges.emplace(&mesh.surface,ElementRange(start,static_cast<uint32_t>(uvs.size())-start));
+        }
         for (const auto& object : frame.data().model_instances) for (const auto& model : object.models) for (const auto& part : model.parts)
             for (const auto& surface : part.surfaces) add(surface);
         std::vector<d3scene::PositionPair> positions;
@@ -741,6 +752,10 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
     if (!view.geometry_inspection)
         Error("Scene executor migration incomplete: only explicit geometry inspection is currently supported.");
     const auto visibility = d3scene::queryView(presentation,view);
+    if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
+        AutomatedCaptureLog("scene view collection=%llu target=%u projection=%u surfaces=%u",
+            static_cast<unsigned long long>(view.collection),static_cast<unsigned>(view.target),
+            static_cast<unsigned>(view.projection),static_cast<unsigned>(visibility.surfaces.size()));
     const bool display_target = view.target == d3scene::ViewTarget::Display;
     if (!framebuffer_ok || modal_ui_frame_active ||
         (display_target && (!post_present_pending_swap || cockpit_scene_frame_active)) ||
@@ -1142,6 +1157,8 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
         glBindVertexArray(gpu.vao);
         const auto range = item.terrain || item.mesh ? ElementRange(0,gpu.polygons.back().offset+gpu.polygons.back().count) : gpu.polygons[item.polygon_index];
         const auto uv_range = scene_uv_ranges.at(binding);
+        const auto texture_uv_found = scene_texture_uv_ranges.find(binding);
+        const auto texture_uv_range = texture_uv_found == scene_texture_uv_ranges.end() ? ElementRange() : texture_uv_found->second;
         const auto normals = scene_normal_ranges.at(binding);
         const auto field = scene_field_ranges.at(binding);
         glUniform1i(scene_shader.FindUniform("use_reflection_field"),field.count != 0);
@@ -1150,6 +1167,8 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
         glUniform1i(scene_shader.FindUniform("reflection_normal_offset"),static_cast<int>(normals.offset)-static_cast<int>(range.offset));
         glUniform1i(scene_shader.FindUniform("use_instance_uvs"),uv_range.count != 0);
         glUniform1i(scene_shader.FindUniform("instance_uv_offset"),static_cast<int>(uv_range.offset)-static_cast<int>(range.offset));
+        glUniform1i(scene_shader.FindUniform("use_texture_uvs"),texture_uv_range.count != 0);
+        glUniform1i(scene_shader.FindUniform("texture_uv_offset"),static_cast<int>(texture_uv_range.offset)-static_cast<int>(range.offset));
         glUniform1i(scene_shader.FindUniform("use_instance_positions"),prepared_positions.count != 0);
         glUniform1i(scene_shader.FindUniform("instance_position_offset"),prepared_positions.offset);
         if (item.terrain || (item.mesh && !surface.two_sided)) { glEnable(GL_CULL_FACE); glFrontFace(GL_CCW); glCullFace(GL_BACK); }

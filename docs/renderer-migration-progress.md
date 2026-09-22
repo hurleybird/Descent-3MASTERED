@@ -1,5 +1,22 @@
 # Renderer migration checkpoint
 
+## Continuation: prepared texture attributes and glyph batching
+
+Prepared meshes now own optional per-vertex base UVs, validated and triangulated
+in the same order as positions. The existing UV stream carries these independent
+of model lightmap UVs. Text runs batch contiguous atlas pages (bounded at 128
+quads) using persistent quad-count templates in game mesh slots 257..384; changing
+characters changes frame attributes, not mesh assets. Alpha/additive sequence
+and glyph order are preserved. Generic view diagnostics expose executed surface
+counts without renderer knowledge of cockpit collections.
+
+Full build and 5,319 checks pass, including topology/attribute order, ownership,
+invalid UVs and template bounds. The batch 003 effects capture is pixel-identical
+to scene-canvas-reference. The 38 glyph quads become 20 atlas batches, and the GPU
+view reports 20 surfaces. Normal effects 000/003 are pixel-identical to
+scene-canvas-normal. No full-renderer performance improvement is inferred from
+this local reduction. All domain gates remain set; Candidate is untouched.
+
 ## Continuation: orthographic canvas and prepared gauge text
 
 Views now explicitly select perspective or orthographic projection; CPU query,

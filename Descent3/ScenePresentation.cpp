@@ -43,7 +43,15 @@ void PrepareSceneText(d3scene::FrameData& frame,uint64_t collection,int32_t& nex
     if (!text || style.font < 0 || !std::isfinite(style.scale) || style.scale <= 0)
         throw std::invalid_argument("Invalid prepared text input");
     const int origin = x, spacing = 1+grfont_GetTracking(style.font);
-    const auto quad = d3scene::assets().publishMesh(2,d3scene::unitBillboardQuad());
+    d3scene::PreparedMesh run;
+    const auto flush = [&] {
+        if (run.vertices.empty()) return;
+        const auto count = static_cast<uint32_t>(run.vertices.size()/4);
+        // Game mesh slots 257..384 are canonical quad-count templates. UVs and
+        // positions are frame attributes, never new assets for changing text.
+        run.asset = d3scene::assets().publishMesh(256+count,d3scene::unitQuadBatch(count));
+        frame.meshes.push_back(std::move(run)); run = {};
+    };
     for (const auto* cursor = reinterpret_cast<const unsigned char*>(text); *cursor; ++cursor) {
         if (*cursor == '\n') { x = origin; y += int(grfont_GetHeight(style.font)*style.scale)+1; continue; }
         if (*cursor == ' ') { x += int(grfont_GetCharWidth(style.font,' ')*style.scale)+spacing; continue; }
@@ -52,23 +60,26 @@ void PrepareSceneText(d3scene::FrameData& frame,uint64_t collection,int32_t& nex
         if (found && glyph.width > 0 && glyph.height > 0) {
             const int right = int(x+glyph.width*style.scale), bottom = int(y+glyph.height*style.scale);
             if (right > x && bottom > y) {
-                d3scene::PreparedMesh mesh;
-                mesh.asset = quad; mesh.collection = collection;
-                mesh.vertices = {{float(x),float(y),.5f},{float(right),float(y),.5f},
-                    {float(right),float(bottom),.5f},{float(x),float(bottom),.5f}};
-                auto& surface = mesh.surface;
-                surface.composition_order = next_order++;
-                surface.bitmap = glyph.bitmap; surface.texture_alpha = true; surface.texture_wrap = false;
-                surface.unlit = true; surface.two_sided = true; surface.depth = d3scene::DepthMode::Disabled;
-                surface.blend = style.additive ? d3scene::BlendMode::Additive : d3scene::BlendMode::Alpha;
-                surface.alpha = style.alpha; surface.color_modulation = style.color;
-                surface.u_offset = glyph.u; surface.v_offset = glyph.v; surface.texture_scale = {glyph.uv_width,glyph.uv_height};
-                frame.meshes.push_back(std::move(mesh));
+                if (!run.vertices.empty() && (run.surface.bitmap != glyph.bitmap || run.vertices.size() == 128*4)) flush();
+                if (run.vertices.empty()) {
+                    run.collection = collection;
+                    auto& surface = run.surface;
+                    surface.composition_order = next_order++;
+                    surface.bitmap = glyph.bitmap; surface.texture_alpha = true; surface.texture_wrap = false;
+                    surface.unlit = true; surface.two_sided = true; surface.depth = d3scene::DepthMode::Disabled;
+                    surface.blend = style.additive ? d3scene::BlendMode::Additive : d3scene::BlendMode::Alpha;
+                    surface.alpha = style.alpha; surface.color_modulation = style.color;
+                }
+                run.vertices.insert(run.vertices.end(),{{float(x),float(y),.5f},{float(right),float(y),.5f},
+                    {float(right),float(bottom),.5f},{float(x),float(bottom),.5f}});
+                run.texture_uvs.insert(run.texture_uvs.end(),{{glyph.u,glyph.v},{glyph.u+glyph.uv_width,glyph.v},
+                    {glyph.u+glyph.uv_width,glyph.v+glyph.uv_height},{glyph.u,glyph.v+glyph.uv_height}});
             }
         }
         x += (found ? int(glyph.width*style.scale) : 1)+spacing+
             grfont_GetKernedSpacing(style.font,*cursor,cursor[1]);
     }
+    flush();
 }
 
 d3scene::OcclusionClass SceneRoomOcclusionClass(int texture, bool exterior) {

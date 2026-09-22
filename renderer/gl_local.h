@@ -152,6 +152,7 @@ class GL4Renderer : public IRenderer
 	uint64_t scene_frame_sequence = 0;
 	std::unordered_map<const d3scene::SurfaceBinding*, ElementRange> scene_light_ranges;
 	std::unordered_map<const d3scene::SurfaceBinding*, ElementRange> scene_uv_ranges;
+	std::unordered_map<const d3scene::SurfaceBinding*, ElementRange> scene_texture_uv_ranges;
 	std::unordered_map<const void*, ElementRange> scene_position_ranges;
 	void UploadSceneFrame(const d3scene::Presentation&);
 	struct SceneImageGpu { d3scene::AssetId id; GLuint texture = 0; };

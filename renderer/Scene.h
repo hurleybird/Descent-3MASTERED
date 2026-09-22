@@ -274,6 +274,7 @@ struct PreparedMesh {
     MeshAssetRef asset;
     uint64_t collection = 0; // zero is the world; other collections are isolated view content
     std::vector<Vec3> vertices; // owned frame-local positions; empty uses authored geometry
+    std::vector<Vec2> texture_uvs; // optional per-vertex base UVs; split vertices at seams
     SurfaceBinding surface;
     Transform world;
     Vec3 camera_translation; // sky follows the eye with authored half-height parallax
