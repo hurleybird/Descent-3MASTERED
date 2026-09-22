@@ -84,7 +84,11 @@ msn_urls* msn_GetURL(network_address* net_addr)
 	}
 
 	if (tries >= 5 || Got_url != 1)
+	{
+		AutomatedCaptureLog("mission URL request failed tries=%d result=%d",
+			tries, Got_url);
 		return NULL;
+	}
 
 	return &msn_URL;
 }
@@ -96,97 +100,6 @@ msn_urls* msn_GetURL(char* msnfile)
 	//static msn_urls url;
 	//strcpy(url.msnname,msnfile);
 	return &Net_msn_URLs;
-}
-
-#define MSN_DWNLD_CHOICE_H	256
-#define MSN_DWNLD_CHOICE_W	512
-
-//Present the user with a list of URLs to download from. Return the 0 based selection, or -1 if cancel is hit.
-int msn_ShowDownloadChoices(msn_urls* urls)
-{
-	UITextItem title_text(TXT_DOWNLOADPROMPT, UICOL_WINDOW_TITLE);
-	UITextItem title1_text(TXT_DONTHAVEMSN, UICOL_WINDOW_TITLE);
-	UITextItem header_text(TXT_DOWNLOADMSN, UICOL_TEXT_NORMAL);
-	UIHotspot ok_hot;
-	UIHotspot cancel_hot;
-	NewUIListBox choices_list;
-
-	NewUIGameWindow menu_wnd;
-
-	UIText texts[10];
-
-	int exit_menu = 0;
-	int ret = 0;
-
-	menu_wnd.Create(10, 10, MSN_DWNLD_CHOICE_W, MSN_DWNLD_CHOICE_H, UIF_PROCESS_ALL | UIF_CENTER);
-	texts[0].Create(&menu_wnd, &header_text, 0, 8, UIF_CENTER);
-	texts[1].Create(&menu_wnd, &title_text, 0, 55, UIF_CENTER);
-	texts[2].Create(&menu_wnd, &title1_text, 0, 35, UIF_CENTER);
-
-	UITextItem ok_off(TXT_OK, UICOL_HOTSPOT_LO, UIALPHA_HOTSPOT_LO);
-	UITextItem ok_on(TXT_OK, UICOL_HOTSPOT_HI, UIALPHA_HOTSPOT_HI);
-	UITextItem cancel_off(TXT_CANCEL, UICOL_HOTSPOT_LO, UIALPHA_HOTSPOT_LO);
-	UITextItem cancel_on(TXT_CANCEL, UICOL_HOTSPOT_HI, UIALPHA_HOTSPOT_HI);
-
-	int ok_x, cancel_x;
-	GetCenteredTextPos(menu_wnd.W(), 20, ok_on.width(), cancel_on.width(), &ok_x, &cancel_x);
-
-	ok_hot.Create(&menu_wnd, UID_OK, KEY_ENTER, &ok_off, &ok_on,
-		ok_x, MSN_DWNLD_CHOICE_H - OKCANCEL_YOFFSET, 0, 0, UIF_FIT);
-	cancel_hot.Create(&menu_wnd, UID_CANCEL, KEY_ESC, &cancel_off, &cancel_on,
-		cancel_x, MSN_DWNLD_CHOICE_H - OKCANCEL_YOFFSET, 0, 0, UIF_FIT);
-
-	choices_list.Create(&menu_wnd, 1, 0, 70, 480, 128, UIF_CENTER | UILB_NOSORT);
-	choices_list.SetSelectedColor(UICOL_LISTBOX_HI);
-	choices_list.SetHiliteColor(UICOL_LISTBOX_HI);
-	choices_list.RemoveAll();
-
-	UITextItem urlti[MAX_MISSION_URL_COUNT];
-	int url_indices[MAX_MISSION_URL_COUNT];
-	//urls
-	int i;
-	int urlcount = 0;
-	for (i = 0; i < MAX_MISSION_URL_COUNT; i++)
-	{
-		if (urls->URL[i][0])
-		{
-			urlti[i] = UITextItem(urls->URL[i], UICOL_LISTBOX_LO);
-			choices_list.AddItem(&urlti[i]);
-			url_indices[urlcount] = i;
-			urlcount++;
-		}
-	}
-	if (urlcount == 0)
-	{
-		//Message that the mission can't be downloaded
-		DoMessageBox(TXT_ERROR, TXT_FMTCANTDNLD, MSGBOX_OK);
-		menu_wnd.Destroy();
-		return -1;
-	}
-	menu_wnd.Open();
-
-	while (!exit_menu)
-	{
-		int res;
-
-		res = DoUI();
-		switch (res)
-		{
-		case NEWUIRES_FORCEQUIT:
-		case UID_CANCEL:
-			ret = -1;
-			menu_wnd.Close();
-			exit_menu = 1;
-			break;
-		case UID_OK:
-			ret = url_indices[choices_list.GetSelectedIndex()];
-			menu_wnd.Close();
-			exit_menu = 1;
-			break;
-		}
-	}
-	menu_wnd.Destroy();
-	return ret;
 }
 
 #define MSN_REFRESH_INTERVAL	.5
@@ -251,8 +164,10 @@ enum class msn_download_result
 static bool msn_BuildArchiveFallbackURL(const char* source_url,
 	const char* mission_filename, char* output, size_t output_size);
 
-static msn_download_result msn_DownloadWithStatusInternal(char* url, char* filename)
+static msn_download_result msn_DownloadWithStatusInternal(char* url, char* filename,
+	int attempt_number = 0, int attempt_count = 0)
 {
+	constexpr float MSN_DOWNLOAD_STALL_TIMEOUT = 30.0f;
 	AutomatedCaptureLog("mission download begin url=%s filename=%s", url, filename);
 	char qualfile[_MAX_PATH*2];
 	char finalfile[_MAX_PATH*2];
@@ -263,6 +178,8 @@ static msn_download_result msn_DownloadWithStatusInternal(char* url, char* filen
 	int time_remain = 0;
 	int xfer_rate = 0;
 	int starttime = timer_GetTime();
+	float last_progress_time = timer_GetTime();
+	int last_progress_bytes = 0;
 
 	char fmturl[MSN_MAX_STRING_LEN];
 	char fmtrcvd[MSN_MAX_STRING_LEN];
@@ -293,7 +210,16 @@ static msn_download_result msn_DownloadWithStatusInternal(char* url, char* filen
 		getmsnfile = new InetGetFile(url,qualfile);
 	}
 
-	UITextItem title_text(TXT_MD_DOWNLOADSTATUS,UICOL_TEXT_NORMAL);
+	char download_title[128];
+	if (attempt_number > 0 && attempt_count > 0)
+		snprintf(download_title, sizeof(download_title), "Downloading mission (%d of %d)",
+			attempt_number, attempt_count);
+	else
+	{
+		strncpy(download_title, TXT_MD_DOWNLOADSTATUS, sizeof(download_title) - 1);
+		download_title[sizeof(download_title) - 1] = '\0';
+	}
+	UITextItem title_text(download_title,UICOL_TEXT_NORMAL);
 
 	UIHotspot cancel_hot;
 
@@ -391,6 +317,20 @@ static msn_download_result msn_DownloadWithStatusInternal(char* url, char* filen
 			last_refresh = timer_GetTime();
 			received_bytes = getmsnfile->GetBytesIn();
 			total_bytes = getmsnfile->GetTotalBytes();
+			if (received_bytes != last_progress_bytes)
+			{
+				last_progress_bytes = received_bytes;
+				last_progress_time = last_refresh;
+			}
+			else if (last_refresh - last_progress_time >= MSN_DOWNLOAD_STALL_TIMEOUT)
+			{
+				AutomatedCaptureLog("mission download stalled bytes=%d timeout=%.0f url=%s",
+					received_bytes, MSN_DOWNLOAD_STALL_TIMEOUT, url);
+				getmsnfile->AbortGet();
+				ddio_DeleteFile(qualfile);
+				exit_menu = 1;
+				ret = 0;
+			}
 
 			time_elapsed = timer_GetTime()-starttime;
 
@@ -614,7 +554,11 @@ void msn_DoCurrMsnURLs(ubyte* data, int len, network_address* net_addr)
 		}
 		memcpy(msn_URL.URL[i], data + count, urllen);
 		count += urllen;
+		AutomatedCaptureLog("mission URL source index=%d url=%s", i,
+			msn_URL.URL[i]);
 	}
+	AutomatedCaptureLog("mission URL response mission=%s urls=%d",
+		msn_URL.msnname, num_urls);
 	Got_url = 1;
 }
 
@@ -674,6 +618,203 @@ static bool msn_BuildArchiveFallbackURL(const char* source_url,
 	return written > 0 && static_cast<size_t>(written) < output_size;
 }
 
+constexpr int MSN_MAX_DOWNLOAD_CANDIDATES = MAX_MISSION_URL_COUNT * 2 + 1;
+constexpr int MSN_MAX_DOWNLOAD_HOSTS = 16;
+
+struct msn_download_candidate
+{
+	char url[MAX_MISSION_URL_LEN];
+	char host[128];
+	int authored_order;
+	bool archive_fallback;
+	bool attempted;
+};
+
+struct msn_download_host_history
+{
+	char host[128];
+	int successes;
+	int failures;
+};
+
+static msn_download_host_history Msn_download_host_history[MSN_MAX_DOWNLOAD_HOSTS] = {};
+
+static bool msn_GetDownloadHost(const char* url, char* host, size_t host_size)
+{
+	if (!url || !host || host_size == 0)
+		return false;
+	const char* host_start = strstr(url, "://");
+	if (!host_start)
+		return false;
+	host_start += 3;
+	const char* host_end = host_start;
+	while (*host_end && *host_end != '/' && *host_end != ':' &&
+		*host_end != '?' && *host_end != '#')
+		++host_end;
+	const size_t host_length = static_cast<size_t>(host_end - host_start);
+	if (host_length == 0 || host_length >= host_size)
+		return false;
+	memcpy(host, host_start, host_length);
+	host[host_length] = '\0';
+	return true;
+}
+
+static int msn_DownloadProtocolTier(const char* url, bool archive_fallback)
+{
+	if (archive_fallback)
+		return 200;
+	if (!strnicmp(url, "https://", 8))
+		return 400;
+	if (!strnicmp(url, "http://", 7))
+		return 300;
+	if (!strnicmp(url, "ftp://", 6))
+		return 100;
+	return -1;
+}
+
+static msn_download_host_history* msn_FindDownloadHostHistory(const char* host,
+	bool create)
+{
+	msn_download_host_history* empty = nullptr;
+	for (int i = 0; i < MSN_MAX_DOWNLOAD_HOSTS; ++i)
+	{
+		if (!Msn_download_host_history[i].host[0])
+		{
+			if (!empty)
+				empty = &Msn_download_host_history[i];
+			continue;
+		}
+		if (!stricmp(Msn_download_host_history[i].host, host))
+			return &Msn_download_host_history[i];
+	}
+	if (!create || !empty)
+		return nullptr;
+	strncpy(empty->host, host, sizeof(empty->host) - 1);
+	empty->host[sizeof(empty->host) - 1] = '\0';
+	return empty;
+}
+
+static bool msn_AddDownloadCandidate(msn_download_candidate* candidates, int* count,
+	const char* url, int authored_order, bool archive_fallback)
+{
+	if (!url || !url[0] || !candidates || !count ||
+		*count >= MSN_MAX_DOWNLOAD_CANDIDATES ||
+		msn_DownloadProtocolTier(url, archive_fallback) < 0)
+		return false;
+	for (int i = 0; i < *count; ++i)
+	{
+		if (!stricmp(candidates[i].url, url))
+			return false;
+	}
+
+	msn_download_candidate& candidate = candidates[(*count)++];
+	strncpy(candidate.url, url, sizeof(candidate.url) - 1);
+	candidate.url[sizeof(candidate.url) - 1] = '\0';
+	if (!msn_GetDownloadHost(candidate.url, candidate.host, sizeof(candidate.host)))
+	{
+		--(*count);
+		return false;
+	}
+	candidate.authored_order = authored_order;
+	candidate.archive_fallback = archive_fallback;
+	candidate.attempted = false;
+	return true;
+}
+
+static int msn_DownloadCandidateScore(const msn_download_candidate& candidate)
+{
+	int score = msn_DownloadProtocolTier(candidate.url, candidate.archive_fallback) * 100;
+	if (msn_download_host_history* history =
+		msn_FindDownloadHostHistory(candidate.host, false))
+	{
+		score += history->successes * 100000;
+		score -= history->failures * 25000;
+	}
+	// Mission-authored order is the stable tie breaker within a tier.
+	return score - candidate.authored_order;
+}
+
+static msn_download_result msn_DownloadFromAvailableSources(msn_urls* urls,
+	char* filename)
+{
+	msn_download_candidate candidates[MSN_MAX_DOWNLOAD_CANDIDATES] = {};
+	int candidate_count = 0;
+	int authored_order = 0;
+
+	for (int i = 0; i < MAX_MISSION_URL_COUNT; ++i)
+	{
+		if (urls->URL[i][0])
+			msn_AddDownloadCandidate(candidates, &candidate_count, urls->URL[i],
+				authored_order++, false);
+	}
+	for (int i = 0; i < MAX_MISSION_URL_COUNT; ++i)
+	{
+		if (!urls->URL[i][0])
+			continue;
+		char fallback_url[MAX_MISSION_URL_LEN];
+		if (msn_BuildArchiveFallbackURL(urls->URL[i], filename, fallback_url,
+			sizeof(fallback_url)))
+		{
+			msn_AddDownloadCandidate(candidates, &candidate_count, fallback_url,
+				authored_order++, true);
+		}
+	}
+	// An authored URL can point at a package whose historical archive name is
+	// unrelated to the mission filename (or a server can advertise no URLs at
+	// all).  Always add the canonical archive lookup by the requested mission
+	// name as the final independent fallback.
+	char mission_fallback_url[MAX_MISSION_URL_LEN];
+	if (msn_BuildArchiveFallbackURL(nullptr, filename, mission_fallback_url,
+		sizeof(mission_fallback_url)))
+	{
+		msn_AddDownloadCandidate(candidates, &candidate_count, mission_fallback_url,
+			authored_order++, true);
+	}
+	AutomatedCaptureLog("mission download candidates=%d mission=%s",
+		candidate_count, filename);
+
+	for (int attempt = 0; attempt < candidate_count; ++attempt)
+	{
+		int selected = -1;
+		int selected_score = INT_MIN;
+		for (int i = 0; i < candidate_count; ++i)
+		{
+			if (candidates[i].attempted)
+				continue;
+			const int score = msn_DownloadCandidateScore(candidates[i]);
+			if (selected == -1 || score > selected_score)
+			{
+				selected = i;
+				selected_score = score;
+			}
+		}
+		if (selected < 0)
+			break;
+
+		msn_download_candidate& candidate = candidates[selected];
+		candidate.attempted = true;
+		mprintf((0, "Mission download attempt %d/%d: %s\n",
+			attempt + 1, candidate_count, candidate.url));
+		AutomatedCaptureLog("mission download automatic attempt=%d total=%d url=%s",
+			attempt + 1, candidate_count, candidate.url);
+		const msn_download_result result = msn_DownloadWithStatusInternal(candidate.url,
+			filename, attempt + 1, candidate_count);
+		msn_download_host_history* history =
+			msn_FindDownloadHostHistory(candidate.host, true);
+		if (result == msn_download_result::succeeded)
+		{
+			if (history)
+				history->successes++;
+			return result;
+		}
+		if (result == msn_download_result::cancelled)
+			return result;
+		if (history)
+			history->failures++;
+	}
+	return msn_download_result::failed;
+}
+
 //Check if a file exists.
 //If it does, return true
 //If it doesn't attempt to download it. On success return true
@@ -700,21 +841,14 @@ int msn_CheckGetMission(network_address* net_addr, char* filename)
 	msn_urls* murls;
 
 	murls = msn_GetURL(net_addr);
-	if (murls)
-	{
-		int sel = msn_ShowDownloadChoices(murls);
-		if (sel != -1)
-		{
-			//Get the item that was selected!
-			mprintf((0, "Downloading missions file from %s\n", murls->URL[sel]));
-			if (msn_DownloadWithStatus(murls->URL[sel], filename))
-				return 1;
-		}
-	}
-	else
-	{
+	msn_urls fallback_urls = {};
+	if (!murls)
+		murls = &fallback_urls;
+	const msn_download_result result = msn_DownloadFromAvailableSources(murls, filename);
+	if (result == msn_download_result::succeeded)
+		return 1;
+	if (result == msn_download_result::failed)
 		DoMessageBox(TXT_ERROR, TXT_FMTCANTDNLD, MSGBOX_OK);
-	}
 	return 0;
 #endif
 }
@@ -825,6 +959,29 @@ int msn_ExtractZipFile(char* zipfilename, char* mn3name)
 		DoMessageBox("Download", "Unable to open zip file, it might be corrupt.", MSGBOX_OK, UICOL_WINDOW_TITLE, UICOL_TEXT_NORMAL);
 		return 0;
 	}
+
+	// Reject a mirror/package alias before extracting any of its contents.  A
+	// stale URL can legitimately point at a different mission archive; letting
+	// that failed candidate unpack first pollutes the user's missions directory
+	// before the automatic queue advances to the correct source.
+	bool contains_requested_mission = false;
+	while ((ze = zfile.ReadNextZipEntry()) != NULL)
+	{
+		if ((ze->compression_method == 0x0000 || ze->compression_method == 0x0008) &&
+			CompareZipFileName(ze->name, mn3name))
+		{
+			contains_requested_mission = true;
+			break;
+		}
+	}
+	zfile.CloseZip();
+	if (!contains_requested_mission)
+	{
+		mprintf((0, "Downloaded archive does not contain requested mission %s\n", mn3name));
+		return 0;
+	}
+	if (!zfile.OpenZip(zipfilename))
+		return 0;
 
 	NewUIGameWindow window;
 	UIConsoleGadget console;

@@ -33,6 +33,10 @@ void RenderCockpitPostPost();
 //	initialization of cockpit information.
 void InitCockpit(int ship_index);
 
+// Session-only art comparison; original cockpits remain the default.
+bool CockpitRefinementEnabled();
+void CockpitSetRefinementEnabled(bool enabled);
+
 //	Forces freeing of cockpit information
 void FreeCockpit();
 

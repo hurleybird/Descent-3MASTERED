@@ -174,7 +174,10 @@ void MultiInstanceCleanupStaleProcessDirectories(const char* parent_directory,
 		return;
 	do
 	{
-		if (!(entry.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
+		// A stale-looking junction can lead outside our scratch directory.
+		// Never enumerate its target, even when the encoded process is gone.
+		if (!(entry.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ||
+			(entry.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT))
 			continue;
 		const size_t prefix_length = strlen(instance_prefix);
 		if (strncmp(entry.cFileName, instance_prefix, prefix_length) != 0)
@@ -195,7 +198,7 @@ void MultiInstanceCleanupStaleProcessDirectories(const char* parent_directory,
 		HANDLE process = OpenProcess(SYNCHRONIZE, FALSE, pid);
 		if (process)
 		{
-			process_is_alive = WaitForSingleObject(process, 0) == WAIT_TIMEOUT;
+			process_is_alive = WaitForSingleObject(process, 0) != WAIT_OBJECT_0;
 			CloseHandle(process);
 		}
 		else if (GetLastError() == ERROR_INVALID_PARAMETER)

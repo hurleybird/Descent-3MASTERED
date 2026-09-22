@@ -670,24 +670,32 @@ void ApplyLightingToExternalRoom(vector* pos, int roomnum, float light_dist, flo
 		// Lightmap width and height
 		int lmw = lm_w(lmi_ptr->lm_handle);
 
-		// Check for backfaces
 		vector subvec = *pos - lmi_ptr->upper_left;
 		float dist_from_plane = fabs(vm_DotProduct(&subvec, &lmi_ptr->normal));
+		vector face_plane_delta = *pos - rp->verts[fp->face_verts[0]];
+		const float signed_face_plane_distance =
+			vm_DotProduct(&face_plane_delta, &fp->normal);
+		// Per-pixel admission follows the actual geometry plane.  Keep the
+		// serialized lightmap plane for the legacy CPU lightmap projection below.
+		const float admission_distance = per_pixel_room_lighting ?
+			fabs(signed_face_plane_distance) : dist_from_plane;
 
-		if (dist_from_plane > light_dist)
+		if (admission_distance > light_dist)
 			continue;
 
 		if (light_direction)
 		{
 			// If this is a directional light, check for backfaces
-			vector norm_vec = *pos - rp->verts[fp->face_verts[0]];
-
-			if ((norm_vec * lmi_ptr->normal) < 0)
+			const float signed_admission_distance = per_pixel_room_lighting ?
+				signed_face_plane_distance :
+				vm_DotProduct(&face_plane_delta, &lmi_ptr->normal);
+			if (signed_admission_distance < 0)
 			{
 				// Backface, skip this light
 				continue;
 			}
 			// Test to see if all vertices are behind the light object, if so then bail
+			vector norm_vec;
 			int in_front = 0;		//
 			for (t = 0; t < fp->num_verts && in_front == 0; t++)
 			{
@@ -1587,24 +1595,32 @@ void ApplyLightingToRooms(vector* pos, int roomnum, float light_dist, float red_
 		// Lightmap width and height
 		int lmw = lm_w(lmi_ptr->lm_handle);
 
-		// Check for backfaces
 		vector subvec = *pos - lmi_ptr->upper_left;
 		float dist_from_plane = fabs(vm_DotProduct(&subvec, &lmi_ptr->normal));
+		vector face_plane_delta = *pos - rp->verts[fp->face_verts[0]];
+		const float signed_face_plane_distance =
+			vm_DotProduct(&face_plane_delta, &fp->normal);
+		// Per-pixel admission follows the actual geometry plane.  Keep the
+		// serialized lightmap plane for the legacy CPU lightmap projection below.
+		const float admission_distance = per_pixel_room_lighting ?
+			fabs(signed_face_plane_distance) : dist_from_plane;
 
-		if (dist_from_plane > light_dist)
+		if (admission_distance > light_dist)
 			continue;
 
 		if (light_direction)
 		{
 			// If this is a directional light, check for backfaces
-			vector norm_vec = *pos - rp->verts[fp->face_verts[0]];
-
-			if ((norm_vec * lmi_ptr->normal) < 0)
+			const float signed_admission_distance = per_pixel_room_lighting ?
+				signed_face_plane_distance :
+				vm_DotProduct(&face_plane_delta, &lmi_ptr->normal);
+			if (signed_admission_distance < 0)
 			{
 				// Backface, skip this light
 				continue;
 			}
 			// Test to see if all vertices are behind the light object, if so then bail
+			vector norm_vec;
 			int in_front = 0;		//
 			for (t = 0; t < fp->num_verts && in_front == 0; t++)
 			{

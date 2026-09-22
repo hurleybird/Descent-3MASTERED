@@ -60,6 +60,10 @@ protected:
 	std::atomic_uint m_iBytesIn;
 	std::atomic_uint m_iBytesTotal;
 	std::atomic_uint m_State;
+	// Published WinINet handles let AbortGet cancel a blocking open/read from
+	// the UI thread instead of waiting for the worker to return on its own.
+	std::atomic<void*> m_InternetSession;
+	std::atomic<void*> m_InternetUrl;
 	bool m_ProxyEnabled;
 	char *m_ProxyIP;
 	char m_URL[MAX_URL_LEN];

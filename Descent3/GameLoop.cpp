@@ -665,6 +665,12 @@ static void BeginAutomatedCaptureFrame()
 		return;
 
 	Automated_capture.gameplay_frame_active = true;
+	if (Automated_capture.gameplay_frame == 0 && FindArg("-capture-headlight") &&
+		Player_num >= 0 && Player_num < MAX_PLAYERS)
+	{
+		Players[Player_num].flags |= PLAYER_FLAGS_HEADLIGHT;
+		AutomatedCaptureLog("capture headlight enabled");
+	}
 	PlaceAutomatedCaptureScorch();
 	if (!Automated_capture.primary_slot_applied &&
 		Automated_capture.force_primary_slot >= 0)

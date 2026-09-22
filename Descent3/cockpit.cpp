@@ -23,6 +23,7 @@
 //			render cockpit
 //			deactivate cockpit.
 #include "cockpit.h"
+#include "args.h"
 #include "game.h"
 #include "polymodel.h"
 #include "hud.h"
@@ -364,8 +365,33 @@ static float GetCockpitDisplaySpread()
 //////////////////////////////////////////////////////////////////////////////
 //	Initializes the cockpit by loading it in and initializing all it's gauges.
 //	initialization of cockpit.
+static bool Cockpit_refinement_enabled = false;
+
+bool CockpitRefinementEnabled()
+{
+	return Cockpit_refinement_enabled;
+}
+
+void CockpitSetRefinementEnabled(bool enabled)
+{
+	if (enabled == Cockpit_refinement_enabled) return;
+	Cockpit_refinement_enabled = enabled;
+	if (!Cockpit_info.model) return;
+	const int ship = Cockpit_info.ship_index;
+	const int state = Cockpit_info.state;
+	FreeCockpit();
+	InitCockpit(ship);
+	if (state != COCKPIT_STATE_DORMANT) QuickOpenCockpit();
+}
+
 void InitCockpit(int ship_index)
 {
+	static bool checked_refinement_argument = false;
+	if (!checked_refinement_argument)
+	{
+		checked_refinement_argument = true;
+		if (FindArg("-refined-cockpits")) Cockpit_refinement_enabled = true;
+	}
 	extern void FreeReticle();
 	tCockpitCfgInfo cfginfo;
 	int i;
@@ -389,7 +415,19 @@ void InitCockpit(int ship_index)
 	}
 	// initialize cockpit.
 	Cockpit_info.ship_index = ship_index;
-	Cockpit_info.model_num = LoadPolyModel(IGNORE_TABLE(cfginfo.modelname), 0);
+	char refined[PSFILENAME_LEN] = {};
+	if (Cockpit_refinement_enabled)
+	{
+		if (!stricmp(cfginfo.modelname, "cockpit.oof")) strcpy(refined, "refpyro.oof");
+		else if (!stricmp(cfginfo.modelname, "AdvCockpit.oof")) strcpy(refined, "refphoenix.oof");
+		else if (!stricmp(cfginfo.modelname, "MagCockpit.oof")) strcpy(refined, "refmagnum.oof");
+	}
+	Cockpit_info.model_num = refined[0] && cfexist(refined) ? LoadPolyModel(IGNORE_TABLE(refined), 0) : -1;
+	if (Cockpit_info.model_num < 0)
+		Cockpit_info.model_num = LoadPolyModel(IGNORE_TABLE(cfginfo.modelname), 0);
+	mprintf((0, "Cockpit art: %s (model %d)\n",
+		Cockpit_refinement_enabled && refined[0] && cfexist(refined) ? refined : cfginfo.modelname,
+		Cockpit_info.model_num));
 	Cockpit_info.model = GetPolymodelPointer(Cockpit_info.model_num);
 	Cockpit_info.frame_time = 0.0f;
 	Cockpit_info.state = COCKPIT_STATE_DORMANT;

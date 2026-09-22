@@ -48,6 +48,20 @@
 #define DATA_CHUNK_SIZE	1024
 #define min(a,b)	( (a) < (b) ) ? (a) : (b)
 
+// zlib owns allocations after inflateInit2 succeeds, including on malformed
+// input and output errors. Every exit must release that state.
+class InflateCleanup
+{
+public:
+	explicit InflateCleanup(z_stream& stream) : stream_(&stream) {}
+	~InflateCleanup() { if (stream_) inflateEnd(stream_); }
+	int End() { z_stream* stream = stream_; stream_ = nullptr; return inflateEnd(stream); }
+	InflateCleanup(const InflateCleanup&) = delete;
+	InflateCleanup& operator=(const InflateCleanup&) = delete;
+private:
+	z_stream* stream_;
+};
+
 // ECD Offsets
 #define ECD_ESIG		0x00
 #define ECD_EDSK		0x04
@@ -483,7 +497,8 @@ int ZIP::ExtractFile(zipentry *ent,const char *filename)
 		}
 
 		int ret = ReadZipDataToFile(ent,output);
-		fclose(output);
+		if (fclose(output) != 0 && ret == 0)
+			ret = -9;
 
 		return ret;
 	}
@@ -519,8 +534,7 @@ int ZIP::ExtractFile(zipentry *ent,const char *filename)
 			return (inf_ret==-2)?-9:-6;
 		}
 
-		fclose(output);
-		return 0;
+		return fclose(output) == 0 ? 0 : -9;
 	}
 
 	fclose(output);
@@ -533,7 +547,7 @@ int ZIP::ReadZipData(zipentry* ent,char* data)
 	if (err!=0)
 		return -2;
 
-	if(fread(data,ent->compressed_size,1,m_fp)!=1)
+	if(fread(data,1,ent->compressed_size,m_fp)!=ent->compressed_size)
 	{
 		return -2;
 	}
@@ -607,6 +621,8 @@ int ZIP::SeekToCompressedData(zipentry* ent)
 // uses zlib to inflate the given data
 int ZIP::InflateFile(FILE* in_file,unsigned in_size,ubyte* out_data,unsigned out_size)
 {
+    const unsigned expected_input = in_size;
+    const unsigned expected_output = out_size;
     int err;
 	unsigned char* in_buffer;
     z_stream d_stream;
@@ -631,6 +647,7 @@ int ZIP::InflateFile(FILE* in_file,unsigned in_size,ubyte* out_data,unsigned out
         return -1;
 	}
 
+	InflateCleanup cleanup(d_stream);
 	in_buffer = (ubyte*)malloc(INFLATE_INPUT_BUFFER_MAX+1);
 	if(!in_buffer)
 		return -1;
@@ -661,7 +678,7 @@ int ZIP::InflateFile(FILE* in_file,unsigned in_size,ubyte* out_data,unsigned out
 		}
     }
 
-    err = inflateEnd(&d_stream);
+    err = cleanup.End();
 	if (err != Z_OK)
 	{
 		free (in_buffer);
@@ -670,7 +687,7 @@ int ZIP::InflateFile(FILE* in_file,unsigned in_size,ubyte* out_data,unsigned out
 
 	free (in_buffer);
 
-	if ((d_stream.avail_out > 0) || (in_size > 0))
+	if (d_stream.total_out != expected_output || d_stream.total_in != expected_input)
 	{
 		return -1;
 	}
@@ -681,6 +698,8 @@ int ZIP::InflateFile(FILE* in_file,unsigned in_size,ubyte* out_data,unsigned out
 // uses zlib to inflate the given data
 int ZIP::InflateFileToFile(FILE* in_file,unsigned in_size,FILE *file,unsigned out_size)
 {
+	const unsigned expected_input = in_size;
+	const unsigned expected_output = out_size;
 	ubyte out_data[DATA_CHUNK_SIZE];
     int err;
 	unsigned int last_out;
@@ -711,6 +730,7 @@ int ZIP::InflateFileToFile(FILE* in_file,unsigned in_size,FILE *file,unsigned ou
 	}
 
 	
+	InflateCleanup cleanup(d_stream);
 	in_buffer = (ubyte*)malloc(DATA_CHUNK_SIZE+1);
 	if(!in_buffer)
 		return -1;
@@ -781,7 +801,7 @@ int ZIP::InflateFileToFile(FILE* in_file,unsigned in_size,FILE *file,unsigned ou
 		}
     }
 
-    err = inflateEnd(&d_stream);
+    err = cleanup.End();
 	if (err != Z_OK)
 	{
 		free (in_buffer);
@@ -790,7 +810,9 @@ int ZIP::InflateFileToFile(FILE* in_file,unsigned in_size,FILE *file,unsigned ou
 
 	free (in_buffer);
 
-	if ((d_stream.avail_out > 0) || (in_size > 0))
+	// avail_out describes only the last output block, not the whole file.
+	// A short stream ending on a block boundary used to pass this check.
+	if (d_stream.total_out != expected_output || d_stream.total_in != expected_input)
 	{
 		return -1;
 	}

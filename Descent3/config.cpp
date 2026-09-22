@@ -19,6 +19,7 @@
 #include "ConfigItem.h"
 #include "player.h"
 #include "config.h"
+#include "cockpit.h"
 #include "ddio.h"
 #include "newui.h"
 #include "3d.h"
@@ -1304,6 +1305,7 @@ struct video_menu
 	bool* mipmapping;
 	bool* per_pixel_lighting;
 	bool* bloom_enabled;
+	bool* refined_cockpits;
 	bool* perf_markers;
 	bool* show_fps;
 	bool* vrr_status;
@@ -1487,6 +1489,8 @@ struct video_menu
 			Render_preferred_state.bloom_enabled = *bloom_enabled;
 			changed = true;
 		}
+		if (refined_cockpits && sheet->HasChanged(refined_cockpits))
+			CockpitSetRefinementEnabled(*refined_cockpits);
 		if (ao && sheet->HasChanged(ao))
 		{
 			ApplyAOPresetFromIndex(*ao);
@@ -1592,6 +1596,7 @@ struct video_menu
 		mipmapping = NULL;
 		per_pixel_lighting = NULL;
 		bloom_enabled = NULL;
+		refined_cockpits = NULL;
 		perf_markers = NULL;
 		show_fps = NULL;
 		vrr_status = NULL;
@@ -1676,6 +1681,7 @@ struct video_menu
 			Render_preferred_state.per_pixel_lighting);
 		bloom_enabled = sheet->AddLongCheckBox("Bloom", Render_preferred_state.bloom_enabled);
 		soft_vis_effects = sheet->AddLongCheckBox("Soft particles", Render_soft_vis_effects);
+		refined_cockpits = sheet->AddLongCheckBox("Refined cockpits (test)", CockpitRefinementEnabled());
 
 #ifndef RELEASE
 		sheet->NewGroup("Debug", 0, 255);
@@ -1732,6 +1738,8 @@ struct video_menu
 			Render_preferred_state.per_pixel_lighting = *per_pixel_lighting;
 		if (bloom_enabled)
 			Render_preferred_state.bloom_enabled = *bloom_enabled;
+		if (refined_cockpits)
+			CockpitSetRefinementEnabled(*refined_cockpits);
 		if (ao)
 			ApplyAOPresetFromIndex(*ao);
 		if (ao_overscan && ao && *ao != 0)

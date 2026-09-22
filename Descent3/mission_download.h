@@ -37,7 +37,6 @@ struct msn_urls
 void msn_DoAskForURL(ubyte *indata,network_address *net_addr);
 void msn_DoCurrMsnURLs(ubyte *data,int len,network_address *net_addr);
 int msn_CheckGetMission(network_address *net_addr,char *filename);
-int msn_ShowDownloadChoices(msn_urls *urls);
 int msn_DownloadWithStatus(char *url,char *filename);
 void msn_ClipURLToWidth(int width,char *string);
 char * msn_SecondsToString(int time_sec);

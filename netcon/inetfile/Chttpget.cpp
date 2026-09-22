@@ -87,6 +87,12 @@ void ChttpGet::AbortGet()
 	OutputDebugString("Aborting....\n");
 #endif
 	m_Aborting = true;
+#ifdef WIN32
+	if (HINTERNET url = static_cast<HINTERNET>(m_InternetUrl.exchange(nullptr)))
+		InternetCloseHandle(url);
+	if (HINTERNET session = static_cast<HINTERNET>(m_InternetSession.exchange(nullptr)))
+		InternetCloseHandle(session);
+#endif
 	while(!m_Aborted) Sleep(10); //Wait for the thread to end
 #ifdef WIN32
 	OutputDebugString("Aborted....\n");
@@ -192,6 +198,8 @@ void ChttpGet::GetFile(const char *URL,const char *localfile)
 	m_iBytesIn = 0;
 	m_iBytesTotal = 0;
 	m_State = HTTP_STATE_STARTUP;;
+	m_InternetSession = nullptr;
+	m_InternetUrl = nullptr;
 	m_Aborting = false;
 	m_Aborted = false;
 	m_ThreadStarted = false;
@@ -298,6 +306,13 @@ void ChttpGet::WorkerThread()
 		}
 		m_State = state;
 	};
+	auto closeInternetHandles = [this]()
+	{
+		if (HINTERNET url = static_cast<HINTERNET>(m_InternetUrl.exchange(nullptr)))
+			InternetCloseHandle(url);
+		if (HINTERNET session = static_cast<HINTERNET>(m_InternetSession.exchange(nullptr)))
+			InternetCloseHandle(session);
+	};
 
 	hInternetSession = InternetOpen("Descent3", INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
 	if (!hInternetSession)
@@ -305,6 +320,24 @@ void ChttpGet::WorkerThread()
 		finish(HTTP_STATE_UNKNOWN_ERROR);
 		return;
 	}
+	m_InternetSession = hInternetSession;
+	if (m_Aborting)
+	{
+		closeInternetHandles();
+		finish(HTTP_STATE_RECV_FAILED);
+		return;
+	}
+	// A dead mission mirror must not hold the download UI (and the source
+	// fallback queue behind it) forever.  WinINet otherwise inherits system
+	// defaults which can wait for minutes on an unresponsive HTTP endpoint.
+	DWORD connectTimeout = 10000;
+	DWORD receiveTimeout = 20000;
+	InternetSetOption(hInternetSession, INTERNET_OPTION_CONNECT_TIMEOUT,
+		&connectTimeout, sizeof(connectTimeout));
+	InternetSetOption(hInternetSession, INTERNET_OPTION_SEND_TIMEOUT,
+		&connectTimeout, sizeof(connectTimeout));
+	InternetSetOption(hInternetSession, INTERNET_OPTION_RECEIVE_TIMEOUT,
+		&receiveTimeout, sizeof(receiveTimeout));
 
 	hURL = InternetOpenUrl(hInternetSession, m_URL, NULL, 0, 0, 0);
 	if (!hURL)
@@ -313,8 +346,15 @@ void ChttpGet::WorkerThread()
 		const unsigned int state = err == ERROR_INTERNET_NAME_NOT_RESOLVED ? HTTP_STATE_HOST_NOT_FOUND :
 			err == ERROR_INTERNET_CANNOT_CONNECT ? HTTP_STATE_CANT_CONNECT :
 			err == ERROR_FILE_NOT_FOUND ? HTTP_STATE_FILE_NOT_FOUND : HTTP_STATE_UNKNOWN_ERROR;
-		InternetCloseHandle(hInternetSession);
+		closeInternetHandles();
 		finish(state);
+		return;
+	}
+	m_InternetUrl = hURL;
+	if (m_Aborting)
+	{
+		closeInternetHandles();
+		finish(HTTP_STATE_RECV_FAILED);
 		return;
 	}
 
@@ -324,8 +364,7 @@ void ChttpGet::WorkerThread()
 	if (!HttpQueryInfo(hURL, HTTP_QUERY_STATUS_CODE | HTTP_QUERY_FLAG_NUMBER, &dwStatusCode, &dwStatusCodeSize, NULL))
 	{
 		DWORD err = GetLastError();
-		InternetCloseHandle(hURL);
-		InternetCloseHandle(hInternetSession);
+		closeInternetHandles();
 		finish(HTTP_STATE_UNKNOWN_ERROR);
 		return;
 	}
@@ -334,8 +373,7 @@ void ChttpGet::WorkerThread()
 	{
 		const unsigned int state =
 			dwStatusCode == 404 ? HTTP_STATE_FILE_NOT_FOUND : HTTP_STATE_UNKNOWN_ERROR;
-		InternetCloseHandle(hURL);
-		InternetCloseHandle(hInternetSession);
+		closeInternetHandles();
 		finish(state);
 		return;
 	}
@@ -352,8 +390,7 @@ void ChttpGet::WorkerThread()
 	{
 		if (m_Aborting)
 		{
-			InternetCloseHandle(hURL);
-			InternetCloseHandle(hInternetSession);
+			closeInternetHandles();
 			finish(HTTP_STATE_RECV_FAILED);
 			return;
 		}
@@ -361,23 +398,20 @@ void ChttpGet::WorkerThread()
 		{
 			DWORD err = GetLastError();
 			mprintf((0,"InternetReadFile error %d\n", err));
-			InternetCloseHandle(hURL);
-			InternetCloseHandle(hInternetSession);
+			closeInternetHandles();
 			finish(HTTP_STATE_RECV_FAILED);
 			return;
 		}
 		if (fwrite(buf, 1, dwBytesRead, LOCALFILE) != dwBytesRead)
 		{
-			InternetCloseHandle(hURL);
-			InternetCloseHandle(hInternetSession);
+			closeInternetHandles();
 			finish(HTTP_STATE_CANT_WRITE_FILE);
 			return;
 		}
 		m_iBytesIn += dwBytesRead;
 	}
 
-	InternetCloseHandle(hURL);
-	InternetCloseHandle(hInternetSession);
+	closeInternetHandles();
 
 	finish(HTTP_STATE_FILE_RECEIVED);
 #else
