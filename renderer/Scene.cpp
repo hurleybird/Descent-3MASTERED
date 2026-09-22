@@ -191,6 +191,12 @@ PresentationRef Presentation::freeze(const FrameData& data) {
     require(data.lighting_quality == LightingQuality::Vertex || data.lighting_quality == LightingQuality::Pixel,
         "Unknown lighting quality");
     std::set<std::tuple<LightSource,uint64_t,uint32_t>> emitters;
+    std::unordered_set<uint32_t> camera_owners;
+    for (const auto& effect : data.camera_perturbations) {
+        require(camera_owners.insert(effect.owner).second,"Duplicate camera perturbation owner");
+        require(finite(effect.rotation) && effect.rotation.position.x == 0 &&
+            effect.rotation.position.y == 0 && effect.rotation.position.z == 0,"Invalid camera perturbation");
+    }
     for (const auto& light : data.lights) {
         require(emitters.emplace(light.id.source,light.id.owner,light.id.channel).second, "Duplicate scene emitter identity");
         require(finite(light.position) && finite(light.color) && finite(light.direction) &&

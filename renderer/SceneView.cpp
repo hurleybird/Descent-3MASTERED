@@ -97,7 +97,18 @@ bool sphereIntersects(const Camera& camera, Vec3 center, float radius) {
         if (distance(plane,center) < -radius-tolerance(plane,center)) return false;
     return true;
 }
-ViewVisibility queryView(const Presentation& frame, const View& view) {
+View resolveView(const Presentation& frame, View view) {
+    if (view.attached_camera) for (const auto& effect : frame.data().camera_perturbations) {
+        if (effect.owner != view.camera_owner) continue;
+        view.camera.right = transformDirection(effect.rotation,view.camera.right);
+        view.camera.up = transformDirection(effect.rotation,view.camera.up);
+        view.camera.forward = transformDirection(effect.rotation,view.camera.forward);
+    }
+    view.attached_camera = false; // resolved views cannot apply an effect twice
+    return view;
+}
+ViewVisibility queryView(const Presentation& frame, const View& request) {
+    const auto view = resolveView(frame,request);
     ViewVisibility result;
     result.camera = prepareCamera(view);
     result.frame_sequence = frame.data().sequence;

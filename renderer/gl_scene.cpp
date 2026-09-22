@@ -303,8 +303,9 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
     scene_shader.Use();
     auto vec = [&](const char* name, d3scene::Vec3 v) { glUniform3f(scene_shader.FindUniform(name),v.x,v.y,v.z); };
-    vec("eye",view.camera.position); vec("camera_right",view.camera.right);
-    vec("camera_up",view.camera.up); vec("camera_forward",view.camera.forward);
+    const auto& camera = visibility.camera.transform;
+    vec("eye",camera.position); vec("camera_right",camera.right);
+    vec("camera_up",camera.up); vec("camera_forward",camera.forward);
     const auto& projection = visibility.camera.projection;
     glUniform4f(scene_shader.FindUniform("projection"),projection.x_scale,projection.y_scale,
         projection.x_offset,projection.y_offset);

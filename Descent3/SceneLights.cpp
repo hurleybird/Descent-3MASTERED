@@ -122,5 +122,11 @@ void PrepareGameSceneLights(d3scene::FrameData& frame) {
         emit(frame,{d3scene::LightSource::Effect,VisEffectGeneration(i),0},effect.roomnum,effect.pos,effect.size*amount*3,
             GR_COLOR_RED(color)/255.f,GR_COLOR_GREEN(color)/255.f,GR_COLOR_BLUE(color)/255.f);
     }
+    // Camera-mounted headlight retains its visual shake without changing the
+    // ship's physical pose, other lights, or geometry seen by another view.
+    for (auto& light : frame.lights) if (light.headlight)
+        for (const auto& effect : frame.camera_perturbations)
+            if (light.id.source == d3scene::LightSource::Object && light.id.owner == effect.owner)
+                light.direction = d3scene::transformDirection(effect.rotation,light.direction);
     d3scene::prepareLightInfluences(frame);
 }

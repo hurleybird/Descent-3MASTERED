@@ -1,5 +1,25 @@
 # Renderer migration checkpoint
 
+## Continuation: camera shake no longer rewrites simulation poses
+
+Removed ShakePlayer/UnshakePlayer and the player-orientation save/restore loop
+around rendering. Simulation advances shake decay and controller feedback once;
+presentation publishes owner-keyed rotation with deterministic visual noise.
+View resolution applies it without moving physical geometry, and the canonical
+headlight direction uses the same rotation. CPU visibility and GPU camera uniforms
+consume the same resolved camera. Detached/other-object views remain unaffected,
+and resolving an already resolved view cannot apply the rotation again.
+The controller shake effect also no longer consumes gameplay RNG.
+
+3,432 scene checks pass, full build passes. All eight `scene-camera-clean` captures
+passed the presentation RNG guard. Seven are pixel-identical to
+`scene-quality-pixel`; save003 is the actual nonzero-shake fixture and intentionally
+uses a different deterministic perturbation (mean RGB delta 14.022338). Its first
+and target logs confirm nonidentity rotation. Saves 002/003 were visually inspected
+and repeat byte-for-byte in `scene-camera-repeat`. This corpus also includes the
+explicit texture-clock change from the preceding checkpoint. Pause/device hardware
+and full cockpit composition still require interactive qualification. No shadows.
+
 ## Continuation: frame lighting quality and material clock
 
 The published frame owns vertex/per-pixel lighting selection. Both shader stages

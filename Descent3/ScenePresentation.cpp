@@ -22,6 +22,8 @@
 #include "door.h"
 #include "doorway.h"
 #include "psrand.h"
+#include "damage.h"
+#include "player.h"
 
 bool SceneGeometryInspection() { return FindArg("-scene-inspection") != 0; }
 
@@ -75,6 +77,9 @@ void prepareImages(d3scene::FrameData& data) {
 void logPreparedModels(const d3scene::FrameData& data) {
     if (!AutomatedCapturePending() && AutomatedCaptureFrameIndex() != 0) return;
     AutomatedCaptureLog("scene probe frame=%d time=%.9g",AutomatedCaptureFrameIndex(),data.simulation_time);
+    for (const auto& effect : data.camera_perturbations)
+        AutomatedCaptureLog("scene camera perturbation owner=%u forward=%.9g,%.9g,%.9g",effect.owner,
+            effect.rotation.forward.x,effect.rotation.forward.y,effect.rotation.forward.z);
     std::unordered_set<int> textures;
     for (const auto& instance : data.objects) if (instance.model) {
         uint64_t hash = 14695981039346656037ull;
@@ -156,6 +161,12 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance_history) {
     auto data = source->data();
     data.lighting_quality = Render_preferred_state.per_pixel_lighting ?
         d3scene::LightingQuality::Pixel : d3scene::LightingQuality::Vertex;
+    if (Player_object) {
+        const auto rotation = PlayerCameraShakeRotation(data.simulation_time,Player_object->handle,data.paused);
+        const auto vector = [](const ::vector& v) { return d3scene::Vec3{v.x,v.y,v.z}; };
+        data.camera_perturbations.push_back({static_cast<uint32_t>(Player_object->handle),
+            {{},vector(rotation.rvec),vector(rotation.uvec),vector(rotation.fvec)}});
+    }
     static d3scene::PresentationRef previous_models;
     static uint64_t material_lifetime = 0;
     if (material_lifetime != data.scene_lifetime) {

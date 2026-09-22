@@ -237,6 +237,10 @@ enum class PendingDomain : uint32_t {
 constexpr uint32_t AllPendingDomains = (1u << 7) - 1;
 
 enum class LightingQuality : uint8_t { Vertex, Pixel };
+struct CameraPerturbation {
+    uint32_t owner = 0;
+    Transform rotation; // world-space rotation only; never moves simulation geometry
+};
 struct FrameData {
     uint64_t sequence = 0, scene_lifetime = 0;
     double simulation_time = 0;
@@ -247,6 +251,7 @@ struct FrameData {
     std::vector<RoomState> rooms;
     std::vector<ObjectState> objects;
     std::vector<Light> lights;
+    std::vector<CameraPerturbation> camera_perturbations;
 };
 
 class Presentation final {
@@ -271,6 +276,8 @@ struct View {
     ViewKind kind = ViewKind::Main;
     uint64_t history_key = 0;
     Transform camera;
+    uint32_t camera_owner = 0;
+    bool attached_camera = false;
     int32_t room = -1;
     uint32_t excluded_object = 0;
     bool exclude_object = false;

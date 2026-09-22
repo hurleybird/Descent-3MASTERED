@@ -64,11 +64,9 @@ void KillObject(object *objp,object *killer,float damage);
 //weapon_id can be -1 for no weapon
 void KillPlayer(object *playerobj,object *killer,float damage_amount,int weapon_id);
 
-// Shakes player by some random amount
-void ShakePlayer ();
-
-// Restores the player orientation matrix after shaking
-void UnshakePlayer ();
+// Advance once per simulation step; visual evaluation never alters an object.
+void AdvancePlayerCameraShake(float delta);
+matrix PlayerCameraShakeRotation(double time, unsigned int owner, bool paused);
 
 //Break the specified (glass) face into shards
 //Parameters:	rp, facenum - the face to break

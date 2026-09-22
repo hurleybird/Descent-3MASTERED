@@ -183,5 +183,20 @@ int runSceneViewTests() {
     windows = d3scene::queryPortalWindows(*d3scene::Presentation::freeze(portals),portal_view,d3scene::prepareCamera(portal_view));
     check(windows[1].visible && windows[1].left < -.79 && windows[1].right > .79,"Multiple portal windows were not unioned");
     check(portal_frame->data().rooms[0].asset->geometry().vertices[0].z == 2,"Portal query changed held scene assets");
+    d3scene::FrameData shaken; shaken.sequence = 3; shaken.scene_lifetime = assets.lifetime();
+    d3scene::Transform rotation; rotation.right = {0,0,-1}; rotation.forward = {1,0,0};
+    shaken.camera_perturbations.push_back({42,rotation});
+    const auto shake_frame = d3scene::Presentation::freeze(shaken);
+    auto attached = view(); attached.camera.position = {1,2,3}; attached.attached_camera = true; attached.camera_owner = 42;
+    auto resolved = d3scene::resolveView(*shake_frame,attached);
+    check(resolved.camera.forward.x == 1 && resolved.camera.position.x == 1 && resolved.camera.position.z == 3,
+        "Camera perturbation moved eye or failed to rotate view");
+    check(d3scene::resolveView(*shake_frame,resolved).camera.forward.x == 1,"Resolved camera applied shake twice");
+    check(attached.camera.forward.z == 1,"Camera preparation mutated input");
+    check(d3scene::queryView(*shake_frame,attached).camera.transform.forward.x == 1,"Visibility ignored prepared camera");
+    attached.camera_owner = 43;
+    check(d3scene::resolveView(*shake_frame,attached).camera.forward.z == 1,"Shake leaked into another object's camera");
+    attached.camera_owner = 42; attached.attached_camera = false;
+    check(d3scene::resolveView(*shake_frame,attached).camera.forward.z == 1,"Detached preview inherited player shake");
     return Checks;
 }

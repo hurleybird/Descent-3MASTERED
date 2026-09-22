@@ -2980,13 +2980,6 @@ void GameRenderFrame(void)
 		ShowProgressScreen(TXT_RECEIVINGDATA, NULL, 0);
 	}
 
-	//Generate "shaken" view for player
-	if (!Game_paused)
-	{
-		PERF_MARKER_SCOPE("ShakePlayer");
-		ShakePlayer();
-	}
-
 	rend_SetZBufferState(1);
 	rend_SetZBufferWriteMask(1);
 
@@ -3115,13 +3108,6 @@ void GameRenderFrame(void)
 		//rend_Flip();
 	}
 	rend_PerfGpuSceneMark(RENDERER_GPU_SCENE_AFTER_UI);
-
-	//Restore normal view
-	if (!Game_paused)
-	{
-		PERF_MARKER_SCOPE("UnshakePlayer");
-		UnshakePlayer();
-	}
 
 	//Done with the dynamic lights
 	{
@@ -3635,6 +3621,7 @@ void GameFrame(void)
 
 		// Process any in-game cinematics
 		Cinematic_Frame();
+		AdvancePlayerCameraShake(Frametime);
 
 		// Do our third quaterframe of IntelliVIBE
 		VIBE_DoQuaterFrame(false);

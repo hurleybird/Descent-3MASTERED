@@ -26,6 +26,7 @@
 #include "weapon.h"
 #include "ddio.h"
 #include "psrand.h"
+#include "../renderer/SceneLighting.h"
 
 extern float Gametime;
 
@@ -492,9 +493,9 @@ void DoForceForShake(float magnitude)
 	if (magnitude < 0.0f) magnitude = 0.0f;
 	if (magnitude > 1.0f) magnitude = 1.0f;
 
-	local_norm.x = (ps_rand() % 5);
-	local_norm.y = (ps_rand() % 5);
-	local_norm.z = (ps_rand() % 5);
+	local_norm.x = float(d3scene::visualNoise(Gametime,0,201) % 5);
+	local_norm.y = float(d3scene::visualNoise(Gametime,0,202) % 5);
+	local_norm.z = float(d3scene::visualNoise(Gametime,0,203) % 5);
 	vm_NormalizeVector(&local_norm);
 
 	ForceEffectsPlay(FORCE_SHIPSHAKE, &magnitude, &local_norm);

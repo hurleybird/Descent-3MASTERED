@@ -46,12 +46,14 @@
 #include "psrand.h"
 #include "vibeinterface.h"
 #include "gameloop.h" //for Gametime;
+#include "../renderer/SceneLighting.h"
+#include <algorithm>
 
 //[ISB] Don't play additional pain sounds within this interval
 constexpr float PAIN_SOUND_INTERVAL = 0.05f;
 
 // Shake variables
-static matrix Old_player_orient;
+static float Presentation_shake_magnitude = 0;
 float Shake_magnitude=0.0;
 
 // Causes an object to deform
@@ -1012,46 +1014,28 @@ void SetShakeMagnitude (float delta)
 
 	ASSERT (delta>=0.0);
 	Shake_magnitude=delta;
+	Presentation_shake_magnitude=delta;
 }
 
 
 #define MAX_SHAKE_MAGNITUDE	120
 
-// Shakes player by some random amount
-void ShakePlayer ()
+void AdvancePlayerCameraShake(float delta)
 {
-	if (Shake_magnitude>MAX_SHAKE_MAGNITUDE)
-		Shake_magnitude=MAX_SHAKE_MAGNITUDE;
-
-	float mag=Shake_magnitude;
-
-	ushort pitch_adjust=((ps_rand()%5)-2)*mag;
-	ushort bank_adjust=((ps_rand()%5)-2)*mag;
-	ushort heading_adjust=((ps_rand()%5)-2)*mag;
-	matrix m,tempm;
-
-	Old_player_orient=Player_object->orient;
-
-   if (Shake_magnitude<.00001)
-		return;
-
-	vm_AnglesToMatrix (&m,pitch_adjust,heading_adjust,bank_adjust);
-
-	DoForceForShake(Shake_magnitude);
-	Shake_magnitude-=(Frametime*(MAX_SHAKE_MAGNITUDE/3));
-
-	if (Shake_magnitude<0)
-		Shake_magnitude=0.0;
-		
-	tempm=m * Player_object->orient;
-
-	ObjSetOrient(Player_object, &tempm);
+	Presentation_shake_magnitude = (std::max)(0.f,(std::min)(Shake_magnitude,float(MAX_SHAKE_MAGNITUDE)));
+	if (Presentation_shake_magnitude >= .00001f) DoForceForShake(Presentation_shake_magnitude);
+	Shake_magnitude = (std::max)(0.f,Presentation_shake_magnitude-(std::max)(0.f,delta)*(MAX_SHAKE_MAGNITUDE/3.f));
 }
 
-// Restores the player orientation matrix after shaking
-void UnshakePlayer ()
+matrix PlayerCameraShakeRotation(double time, unsigned int owner, bool paused)
 {
-	ObjSetOrient(Player_object, &Old_player_orient);
+	if (paused || Presentation_shake_magnitude < .00001f) return Identity_matrix;
+	const auto angle = [&](unsigned int salt) {
+		return static_cast<ushort>(static_cast<int>((static_cast<int>(d3scene::visualNoise(time,owner,salt)%5)-2)*Presentation_shake_magnitude));
+	};
+	matrix rotation;
+	vm_AnglesToMatrix(&rotation,angle(101),angle(103),angle(102));
+	return rotation;
 }
 
 #include "terrain.h"

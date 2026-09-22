@@ -20,6 +20,7 @@ struct Camera {
     std::array<Plane, 5> planes; // left, right, bottom, top, near; world space
 };
 Camera prepareCamera(const View& view);
+View resolveView(const Presentation&, View);
 ClipPosition project(const Camera& camera, Vec3 world);
 bool sphereIntersects(const Camera& camera, Vec3 center, float radius);
 

@@ -163,6 +163,8 @@ d3scene::View MakeGameSceneView(d3scene::ViewKind kind, uint64_t history_key,
     view.kind = kind;
     view.history_key = history_key;
     view.camera = transform(eye, orientation);
+    view.attached_camera = viewer != nullptr;
+    if (viewer) view.camera_owner = static_cast<uint32_t>(viewer->handle);
     if (rear) {
         auto& r = view.camera.right; r = {-r.x, -r.y, -r.z};
         auto& f = view.camera.forward; f = {-f.x, -f.y, -f.z};
