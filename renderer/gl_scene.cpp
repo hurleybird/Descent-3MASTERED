@@ -874,12 +874,13 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
     // Only containment depends on the view. Geometry and the traversal index
     // stay resident until their scene asset revision changes.
     for (size_t index = 0; index < fog_volumes.size(); ++index) {
+        if (view.collection != 0) break;
         const float inside = d3scene::fogContains(fog_volumes[index],camera.position) ? 1.f : 0.f;
         glBufferSubData(GL_TEXTURE_BUFFER,(index*16+12)*sizeof(float),sizeof(float),&inside);
     }
     glActiveTexture(GL_TEXTURE6); glBindTexture(GL_TEXTURE_BUFFER,scene_fog_texture);
     glTexBuffer(GL_TEXTURE_BUFFER,GL_RGBA32F,scene_fog_buffer);
-    glUniform1i(scene_shader.FindUniform("fog_volume_count"),static_cast<GLint>(fog_volumes.size()));
+    glUniform1i(scene_shader.FindUniform("fog_volume_count"),view.collection == 0 ? static_cast<GLint>(fog_volumes.size()) : 0);
     const auto& exterior_fog = presentation.data().exterior_fog;
     vec("exterior_fog_color",exterior_fog.color);
     glUniform2f(scene_shader.FindUniform("exterior_fog_range"),exterior_fog.start,exterior_fog.end);
@@ -1053,7 +1054,7 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
         glUniform1i(scene_shader.FindUniform("multiply_material"),surface.material.blend == d3scene::BlendMode::Multiply);
         const bool exterior = item.terrain || (item.model ? exteriorRoom(presentation.data().model_instances[item.model_instance_index].room) :
             (item.mesh ? exteriorRoom(presentation.data().meshes[item.mesh_index].room) : presentation.data().rooms[item.room_index].exterior));
-        glUniform1i(scene_shader.FindUniform("fog_exterior"),exterior && exterior_fog.enabled);
+        glUniform1i(scene_shader.FindUniform("fog_exterior"),view.collection == 0 && exterior && exterior_fog.enabled);
         vec("model_position",item.world.position); vec("model_right",item.world.right);
         vec("model_up",item.world.up); vec("model_forward",item.world.forward);
         const auto motion = d3scene::surfaceMotion(presentation,item,history.previous_valid);

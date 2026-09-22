@@ -591,6 +591,19 @@ int runSceneViewTests() {
     check(replay.previous_valid && replay.previous.view_projection == first.current.view_projection,
         "Pass replay replaced previous camera with the current one");
     auto auxiliary = main_view; auxiliary.kind = d3scene::ViewKind::Auxiliary;
+    {
+        d3scene::ViewHistory collection_history;
+        auto preview = main_view; preview.kind = d3scene::ViewKind::Preview; preview.collection = 9;
+        auto prior_tick = tick;
+        const auto prior_collection = collection_history.prepare(prior_tick,preview,d3scene::prepareCamera(preview));
+        collection_history.commit(prior_collection);
+        ++prior_tick.sequence;
+        check(collection_history.prepare(prior_tick,preview,d3scene::prepareCamera(preview)).previous_valid,
+            "Stable collection lost its completed view history");
+        ++preview.collection;
+        check(!collection_history.prepare(prior_tick,preview,d3scene::prepareCamera(preview)).previous_valid,
+            "View history crossed content collections");
+    }
     check(!histories.prepare(tick,auxiliary,d3scene::prepareCamera(auxiliary)).previous_valid,
         "Auxiliary view borrowed main-view history through a numeric key collision");
     histories.commit(histories.prepare(tick,auxiliary,d3scene::prepareCamera(auxiliary)));

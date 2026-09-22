@@ -312,7 +312,10 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance_history) {
         unsigned detached = 0;
         for (auto& instance : data.model_instances) if (instance.has_owner && instance.owner == owner) {
             instance.has_owner = false; ++detached;
-            for (auto& mesh : data.meshes) if (mesh.model_instance == instance.identity) mesh.has_owner = false;
+            if (FindArg("-scene-model-collection-probe")) instance.collection = 1;
+            for (auto& mesh : data.meshes) if (mesh.model_instance == instance.identity) {
+                mesh.has_owner = false; mesh.collection = instance.collection;
+            }
         }
         if (!detached) Error("Standalone model fixture found no player model");
         if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
@@ -453,6 +456,16 @@ void RenderGameSceneView(const d3scene::Presentation& frame, d3scene::View view)
     // The gameplay feedback compiler barrier remains until the normal executor
     // and its visibility policy have been migrated.
     d3scene::renderView(frame, view);
+    if (view.kind == d3scene::ViewKind::Main && FindArg("-scene-model-collection-probe")) {
+        // Exercise a second content collection in the same frozen frame. No
+        // second preparation or temporary simulation model/object is involved.
+        auto preview = view;
+        preview.kind = d3scene::ViewKind::Preview; preview.collection = 1;
+        preview.history_key = 0x434f4c4c454354ull;
+        d3scene::renderView(frame,preview);
+        if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
+            AutomatedCaptureLog("scene model collection fixture world=0 preview=1");
+    }
 }
 
 void RenderModuleSceneView(object* viewer, vector* eye, int room, matrix* orientation,

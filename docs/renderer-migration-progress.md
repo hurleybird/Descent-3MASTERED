@@ -1,5 +1,21 @@
 # Renderer migration checkpoint
 
+## Continuation: explicit view content collections
+
+Model/mesh publication and view requests now carry a content collection. Zero is
+world content; other collections reuse the executor without admitting world
+rooms, portals, terrain, sky, fog or gameplay observations. Attachments must share
+their model's collection. Non-world content cannot claim main-world image products
+or feedback. View history invalidates on a collection change, independently of
+camera motion. Non-world queries skip portal traversal and fog containment work.
+
+Full build and 5,260 checks pass. Normal effects 000/003 are pixel-identical to
+model-ownership-effects. The collection fixture renders world and an independently
+owned player model from the same frozen frame, without re-extraction; clean and
+effects captures complete and the effects image was visually inspected. It tests
+content selection/execution, not final cockpit compositing (the fixture's extra
+view is still before world display processing). No migration gate is cleared.
+
 ## Continuation: model instances independent of game objects
 
 Moved geometry/variants/poses/materials out of ObjectState into independently

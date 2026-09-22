@@ -22,7 +22,7 @@ struct ImageMotion {
 inline ImageMotion prepareImageMotion(const FrameData& frame,const ViewHistorySample& camera,
     const ImageMotion& completed) {
     if (camera.sequence != frame.sequence || camera.lifetime != frame.scene_lifetime ||
-        camera.view.kind != ViewKind::Main)
+        camera.view.kind != ViewKind::Main || camera.view.collection != 0)
         throw std::logic_error("Image motion requires this presentation's main camera");
     ImageMotion result;
     result.camera = camera; result.delta_time = frame.delta_time;
@@ -35,6 +35,7 @@ inline ImageMotion prepareImageMotion(const FrameData& frame,const ViewHistorySa
     if (frame.paused && completed.valid && !camera.view.camera_cut &&
         prior.lifetime == camera.lifetime && prior.sequence <= camera.sequence && camera.sequence-prior.sequence <= 1 &&
         prior.view.history_key == camera.view.history_key &&
+        prior.view.collection == camera.view.collection &&
         prior.view.camera_owner == camera.view.camera_owner &&
         prior.view.camera_variant == camera.view.camera_variant &&
         prior.view.viewport.x == camera.view.viewport.x && prior.view.viewport.y == camera.view.viewport.y &&
@@ -60,6 +61,7 @@ class ViewHistory {
     }
     static bool compatible(const ViewHistorySample& a,const ViewHistorySample& b) {
         return a.lifetime == b.lifetime && a.view.camera_owner == b.view.camera_owner &&
+            a.view.collection == b.view.collection &&
             a.view.camera_variant == b.view.camera_variant &&
             sameRect(a.view.viewport,b.view.viewport) && sameRect(a.view.projection_anchor,b.view.projection_anchor) &&
             a.current.projection == b.current.projection;

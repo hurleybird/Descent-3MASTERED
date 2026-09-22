@@ -321,6 +321,25 @@ int runModelSceneTests() {
         attachment.world.position.z = 10; attachment.model_instance = standalone.model_instances[0].identity;
         attachment.model_variant = 0; standalone.meshes.push_back(attachment);
         check(queryView(*Presentation::freeze(standalone),view).surfaces.size() == 3,"Standalone model attachment needed a game owner");
+        auto collections = standalone;
+        collections.model_instances[0].collection = 17;
+        collections.meshes[0].collection = 17;
+        RoomState world_room; world_room.number = 22;
+        world_room.asset = assets.publishRoom(22,asset->geometry().parts[0].geometry);
+        world_room.surfaces.resize(world_room.asset->geometry().polygons.size());
+        collections.rooms.push_back(world_room);
+        const auto collection_frame = Presentation::freeze(collections);
+        auto preview = view; preview.kind = ViewKind::Preview; preview.collection = 17;
+        const auto preview_query = queryView(*collection_frame,preview);
+        check(preview_query.surfaces.size() == 2 && preview_query.room_indices.empty() &&
+            preview_query.object_indices.empty() && !preview_query.exterior_visible,"Collection leaked world content or observations");
+        check(queryView(*collection_frame,view).surfaces.size() == 1,"World query admitted another collection's models or attachments");
+        auto invalid_view = preview; invalid_view.kind = ViewKind::Main;
+        rejects([&] { queryView(*collection_frame,invalid_view); });
+        invalid_view = preview; invalid_view.feedback = Automap;
+        rejects([&] { queryView(*collection_frame,invalid_view); });
+        collections.meshes[0].collection = 0;
+        rejects([&] { Presentation::freeze(collections); });
         standalone.model_instances[0].visible = false;
         check(queryView(*Presentation::freeze(standalone),view).surfaces.size() == 1,"Hidden standalone model left an attachment visible");
         standalone.model_instances[0].identity = standalone.model_instances[1].identity;

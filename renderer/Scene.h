@@ -263,6 +263,7 @@ struct TerrainState {
 enum class MeshAlignment : uint8_t { World, Camera, FacingEye, CameraUpright, Axis };
 struct PreparedMesh {
     MeshAssetRef asset;
+    uint64_t collection = 0; // zero is the world; other collections are isolated view content
     std::vector<Vec3> vertices; // owned frame-local positions; empty uses authored geometry
     SurfaceBinding surface;
     Transform world;
@@ -352,6 +353,7 @@ struct ObjectState {
 // cockpit/preview), while identity and pose belong to this presentation domain.
 struct ModelInstance {
     uint64_t identity = 0; // stable nonzero presentation identity; unique within a scene
+    uint64_t collection = 0;
     uint32_t owner = 0;
     bool has_owner = false, visible = true;
     int32_t room = -1;
@@ -435,6 +437,7 @@ struct View {
     // Explicit diagnostic execution, never a fallback selected by capability.
     bool geometry_inspection = false;
     ViewKind kind = ViewKind::Main;
+    uint64_t collection = 0; // selects content, independently of camera/history/target
     uint64_t history_key = 0;
     Transform camera;
     uint32_t camera_owner = 0;

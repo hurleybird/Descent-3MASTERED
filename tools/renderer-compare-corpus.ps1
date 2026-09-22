@@ -118,6 +118,9 @@ if ([bool]$referenceManifest.model_effects_probe -ne [bool]$actualManifest.model
 if ([bool]$referenceManifest.standalone_model_probe -ne [bool]$actualManifest.standalone_model_probe -and -not $DiagnosticComparison) {
     throw 'Standalone model ownership differs; this is not a parity comparison.'
 }
+if ([bool]$referenceManifest.model_collection_probe -ne [bool]$actualManifest.model_collection_probe -and -not $DiagnosticComparison) {
+    throw 'Model content collections differ; this is not a parity comparison.'
+}
 if ([int]$referenceManifest.model_effects_revision -ne [int]$actualManifest.model_effects_revision -and -not $DiagnosticComparison) {
     throw 'Model effects fixture revision differs; use DiagnosticComparison for intentional fixture changes.'
 }

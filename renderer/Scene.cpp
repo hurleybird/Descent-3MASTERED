@@ -368,7 +368,7 @@ PresentationRef Presentation::freeze(const FrameData& data) {
         if (mesh.receiver_polygon < 0) continue;
         const auto room = rooms.find(mesh.room);
         require(room != rooms.end() && static_cast<size_t>(mesh.receiver_polygon) < room->second->surfaces.size() &&
-            mesh.surface.layer == RenderLayer::World,"Mesh receiver is not a world surface");
+            mesh.collection == 0 && mesh.surface.layer == RenderLayer::World,"Mesh receiver is not a world surface");
     }
     std::unordered_map<uint32_t,const ObjectState*> objects;
     for (const auto& object : data.objects) {
@@ -414,7 +414,8 @@ PresentationRef Presentation::freeze(const FrameData& data) {
         require(!mesh.has_owner || objects.count(mesh.owner),"Mesh owner is not part of this presentation");
         require(mesh.model_variant >= -1 && (mesh.model_instance == 0 ? mesh.model_variant == -1 :
             (model_instances.count(mesh.model_instance) && mesh.model_variant >= 0 &&
-                size_t(mesh.model_variant) < model_instances.at(mesh.model_instance)->models.size())),
+                size_t(mesh.model_variant) < model_instances.at(mesh.model_instance)->models.size() &&
+                mesh.collection == model_instances.at(mesh.model_instance)->collection)),
             "Model attachment references an absent instance variant");
     }
     std::shared_ptr<Presentation> prepared(new Presentation(data));
@@ -474,6 +475,8 @@ void validateView(const View& view) {
     require(view.viewport.width > 0 && view.viewport.height > 0 &&
         view.projection_anchor.width > 0 && view.projection_anchor.height > 0, "Invalid view extent");
     require((view.feedback & ~(Automap | ObjectVisibility | EffectEligibility)) == 0, "Invalid feedback policy");
+    require(view.collection == 0 || (view.kind != ViewKind::Main && view.feedback == NoFeedback),
+        "Non-world collections cannot own main-world products or gameplay feedback");
 }
 // Constructed before main, destroyed after the game's atexit room cleanup.
 // A function-local static first constructed during play would die BEFORE that

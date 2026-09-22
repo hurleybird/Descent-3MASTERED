@@ -221,11 +221,12 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
     result.scene_lifetime = frame.data().scene_lifetime;
     result.history_key = view.history_key;
     const auto& rooms = frame.data().rooms;
-    const auto windows = queryPortalWindows(frame,view,result.camera);
+    const bool world_content = view.collection == 0;
+    const auto windows = world_content ? queryPortalWindows(frame,view,result.camera) : std::vector<PortalWindow>(rooms.size());
     std::unordered_map<int32_t,size_t> room_indices;
-    for (size_t i = 0; i < rooms.size(); ++i) room_indices.emplace(rooms[i].number,i);
+    if (world_content) for (size_t i = 0; i < rooms.size(); ++i) room_indices.emplace(rooms[i].number,i);
     PortalWindow exterior_window{};
-    if (!view.portal_visibility || view.exterior_origin || !room_indices.count(view.room)) exterior_window = {-1,-1,1,1,true};
+    if (world_content && (!view.portal_visibility || view.exterior_origin || !room_indices.count(view.room))) exterior_window = {-1,-1,1,1,true};
     else for (size_t room = 0; room < rooms.size(); ++room) if (rooms[room].exterior && windows[room].visible) {
         const auto& window = windows[room];
         if (!exterior_window.visible) exterior_window = window;
@@ -234,6 +235,7 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
     }
     result.exterior_visible = exterior_window.visible;
     const auto spatialWindow = [&](int32_t room) {
+        if (!world_content) return PortalWindow{-1,-1,1,1,true};
         const auto found = room_indices.find(room);
         if (found != room_indices.end()) return windows[found->second];
         // Nonnegative values identify rooms; -1 is unbound content. Other
@@ -260,6 +262,7 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
         result.surfaces.push_back(item);
     };
     for (size_t r = 0; r < rooms.size(); ++r) {
+        if (!world_content) break;
         ++result.stats.rooms_considered;
         if (!windows[r].visible) continue;
         result.room_indices.push_back(static_cast<uint32_t>(r));
@@ -279,14 +282,15 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
     }
     for (const auto& instance : frame.data().model_instances) {
         instances.emplace(instance.identity,&instance);
-        if (instance.has_owner) model_owners.insert(instance.owner);
+        if (instance.has_owner && instance.collection == view.collection) model_owners.insert(instance.owner);
     }
     const auto eligible = [&](const ModelInstance& instance) {
-        return instance.visible && (!instance.has_owner || (owners.at(instance.owner)->visible &&
+        return instance.collection == view.collection && instance.visible && (!instance.has_owner || (owners.at(instance.owner)->visible &&
             !(view.exclude_object && instance.owner == view.excluded_object)));
     };
     for (size_t i = 0; i < frame.data().objects.size(); ++i) {
         const auto& object = frame.data().objects[i];
+        if (!world_content) break;
         if (model_owners.count(object.handle)) continue;
         if (!object.visible) continue;
         if (view.exclude_object && object.handle == view.excluded_object) continue;
@@ -300,7 +304,7 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
         if (!eligible(object)) continue;
         const auto window = spatialWindow(object.room);
         if (!window.visible || !object.has_render_bounds || boundsOutside(result.camera,object.render_bounds,window)) continue;
-        if (object.has_owner && visible_owners.insert(object.owner).second) result.object_indices.push_back(owner_indices.at(object.owner));
+        if (world_content && object.has_owner && visible_owners.insert(object.owner).second) result.object_indices.push_back(owner_indices.at(object.owner));
         const uint32_t variant = selectModelVariant(object,result.camera);
         const auto& model = object.models[variant];
         if (!model.has_render_bounds || boundsOutside(result.camera,model.render_bounds,window)) continue;
@@ -346,6 +350,7 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
         visible_receivers.insert((uint64_t(surface.room_index)<<32)|surface.polygon_index);
     for (size_t index = 0; index < frame.data().meshes.size(); ++index) {
         const auto& instance = frame.data().meshes[index];
+        if (instance.collection != view.collection) continue;
         if (instance.receiver_polygon >= 0 && !visible_receivers.count(
             (uint64_t(room_indices.at(instance.room))<<32)|uint32_t(instance.receiver_polygon))) continue;
         if (instance.has_owner && ((view.exclude_object && instance.owner == view.excluded_object) ||
