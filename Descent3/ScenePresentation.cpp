@@ -327,7 +327,7 @@ void RenderGameSceneView(const d3scene::Presentation& frame, d3scene::View view)
         view.camera_cut = index == 30;
         AutomatedCaptureLog("scene history fixture frame=%d cut=%d variant=%u",index,view.camera_cut,view.camera_variant);
     }
-    if ((FindArg("-scene-terrain-probe") || FindArg("-scene-sky-probe")) && frame.data().terrain.asset) {
+    if ((FindArg("-scene-terrain-probe") || FindArg("-scene-sky-probe") || FindArg("-scene-satellite-probe")) && frame.data().terrain.asset) {
         const auto& grid = frame.data().terrain.asset->grid();
         const uint32_t x = grid.width/2, z = grid.depth/4;
         view.camera.position = {x*grid.spacing,grid.heights[z*grid.width+x]+120,z*grid.spacing};
@@ -336,6 +336,18 @@ void RenderGameSceneView(const d3scene::Presentation& frame, d3scene::View view)
         if (FindArg("-scene-sky-probe")) {
             view.camera.position.y += 180;
             view.camera.up = {0,.9797959f,-.2f}; view.camera.forward = {0,.2f,.9797959f};
+        }
+    }
+    if (FindArg("-scene-satellite-probe")) {
+        for (const auto& mesh : frame.data().meshes) if (mesh.eye_distance > 0 && mesh.alignment == d3scene::MeshAlignment::FacingEye) {
+            vector direction{mesh.world.position.x-view.camera.position.x,mesh.world.position.y-view.camera.position.y,
+                mesh.world.position.z-view.camera.position.z};
+            if (vm_GetMagnitude(&direction) <= .0001f) continue;
+            matrix orientation; vm_VectorToMatrix(&orientation,&direction,nullptr,nullptr);
+            view.camera.right = {orientation.rvec.x,orientation.rvec.y,orientation.rvec.z};
+            view.camera.up = {orientation.uvec.x,orientation.uvec.y,orientation.uvec.z};
+            view.camera.forward = {orientation.fvec.x,orientation.fvec.y,orientation.fvec.z};
+            break;
         }
     }
     // Diagnostic views do not mark rooms explored or tell AI it was observed.

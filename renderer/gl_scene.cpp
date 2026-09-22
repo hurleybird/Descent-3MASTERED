@@ -20,7 +20,7 @@ static_assert(static_cast<int>(d3scene::OcclusionClass::Default) == RENDERER_AO_
     static_cast<int>(d3scene::OcclusionClass::Model) == RENDERER_AO_CLASS_POLYOBJECT &&
     static_cast<int>(d3scene::OcclusionClass::MineRock) == RENDERER_AO_CLASS_MINE_ROCK &&
     static_cast<int>(d3scene::OcclusionClass::Mine) == RENDERER_AO_CLASS_MINE,"Canvas AO class adapter differs from scene contract");
-struct SceneVertex { d3scene::Vec3 position; float u, v, lu, lv, alpha; d3scene::Vec3 normal, color; };
+struct SceneVertex { d3scene::Vec3 position; float u, v, lu, lv, alpha; d3scene::Vec3 normal, color; d3scene::Vec2 raster_offset; };
 const char* SceneLightingShader = R"GLSL(#version 330 core
 uniform samplerBuffer scene_lights;
 uniform isamplerBuffer scene_influences;
@@ -61,6 +61,8 @@ layout(location=2) in vec2 light_uv;
 layout(location=3) in float alpha;
 layout(location=4) in vec3 normal;
 layout(location=5) in vec3 vertex_color;
+layout(location=6) in vec2 raster_offset;
+uniform vec2 raster_pixel_scale;
 uniform samplerBuffer instance_uvs;
 uniform int use_instance_uvs, instance_uv_offset;
 uniform samplerBuffer instance_positions;
@@ -98,6 +100,7 @@ void main() {
     float z = dot(relative,camera_forward);
     gl_Position = vec4(dot(relative,camera_right)*projection.x + z*projection.z,
                        dot(relative,camera_up)*projection.y + z*projection.w, z-2.0*near_distance,z);
+    gl_Position.xy += raster_offset*raster_pixel_scale*gl_Position.w;
     current_clip = gl_Position;
     vec3 previous_world = previous_position+previous_right*previous_prepared.x+
         previous_up*previous_prepared.y+previous_forward*previous_prepared.z;
@@ -572,16 +575,17 @@ void GL4Renderer::UploadSceneMesh(SceneMeshGpu& gpu, d3scene::AssetId id, const 
                 const auto& c = polygon.corners[corner];
                 vertices.push_back({geometry.vertices[c.vertex],c.u,c.v,c.light_u,c.light_v,c.alpha/255.f,
                     geometry.vertex_normals.empty() ? polygon.normal : geometry.vertex_normals[c.vertex],
-                    geometry.vertex_colors.empty() ? d3scene::Vec3{1,1,1} : geometry.vertex_colors[c.vertex]});
+                    geometry.vertex_colors.empty() ? d3scene::Vec3{1,1,1} : geometry.vertex_colors[c.vertex],
+                    geometry.raster_offsets.empty() ? d3scene::Vec2{} : geometry.raster_offsets[c.vertex]});
         });
         gpu.polygons.emplace_back(first,static_cast<uint32_t>(vertices.size())-first);
     }
     glGenVertexArrays(1,&gpu.vao); glGenBuffers(1,&gpu.buffer);
     glBindVertexArray(gpu.vao); glBindBuffer(GL_ARRAY_BUFFER,gpu.buffer);
     glBufferData(GL_ARRAY_BUFFER,vertices.size()*sizeof(SceneVertex),vertices.data(),GL_STATIC_DRAW);
-    const int counts[6] = {3,2,2,1,3,3};
-    const size_t offsets[6] = {offsetof(SceneVertex,position),offsetof(SceneVertex,u),offsetof(SceneVertex,lu),offsetof(SceneVertex,alpha),offsetof(SceneVertex,normal),offsetof(SceneVertex,color)};
-    for (GLuint attribute = 0; attribute < 6; ++attribute) {
+    const int counts[7] = {3,2,2,1,3,3,2};
+    const size_t offsets[7] = {offsetof(SceneVertex,position),offsetof(SceneVertex,u),offsetof(SceneVertex,lu),offsetof(SceneVertex,alpha),offsetof(SceneVertex,normal),offsetof(SceneVertex,color),offsetof(SceneVertex,raster_offset)};
+    for (GLuint attribute = 0; attribute < 7; ++attribute) {
         glEnableVertexAttribArray(attribute);
         glVertexAttribPointer(attribute,counts[attribute],GL_FLOAT,GL_FALSE,sizeof(SceneVertex),reinterpret_cast<void*>(offsets[attribute]));
     }
@@ -790,6 +794,7 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
     glUniform4f(scene_shader.FindUniform("projection"),projection.x_scale,projection.y_scale,
         projection.x_offset,projection.y_offset);
     glUniform1f(scene_shader.FindUniform("near_distance"),projection.near_distance);
+    glUniform2f(scene_shader.FindUniform("raster_pixel_scale"),2.f/view.viewport.width,2.f/view.viewport.height);
     glUniformMatrix4fv(scene_shader.FindUniform("previous_view_projection"),1,GL_FALSE,history.previous.view_projection.data());
     glUniform1i(scene_shader.FindUniform("lighting_per_pixel"),presentation.data().lighting_quality == d3scene::LightingQuality::Pixel);
     glUniform1i(scene_shader.FindUniform("colortexture"),0);

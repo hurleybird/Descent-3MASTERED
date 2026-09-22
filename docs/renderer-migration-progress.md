@@ -1,5 +1,22 @@
 # Renderer migration checkpoint
 
+## Continuation: owned celestial geometry
+
+Sky publication now supplies satellite quads, authored halos and one batched
+star mesh. View-local placement resolves world-upright facing and radial sky
+anchors without mutating published geometry. Raster-pixel mesh offsets preserve
+small markers without separate legacy line calls; publication restricts this
+stream to background geometry until world depth/history semantics are defined.
+
+Full build and 5,079 CPU checks pass. Eight scene-sky-content-effects captures
+complete; seven are byte-identical to scene-cached-reflection-field, with 002
+mean RGB difference 0.02070 (not proof of full legacy parity). Targeted satellite
+captures 002/003 were visually inspected: textured planet, halo and stars are
+present. Save 004's noisy square is authored texture 0 / bitmap 0 (SAMPLE TEXTURE,
+the missing-image placeholder), confirmed by capture source diagnostics.
+Atmosphere overlays, temporal star streaks and exterior reflection sources
+remain pending. Candidate and Previous Candidate are unchanged.
+
 ## Continuation: published static reflection fields
 
 Moved the existing reflection-family bake from render.cpp into the game-side

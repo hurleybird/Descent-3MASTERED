@@ -132,10 +132,28 @@ Vec3 unproject(const Camera& camera,float x,float y,float depth) {
 }
 Transform resolveMeshTransform(const PreparedMesh& instance,const Camera& camera) {
     auto world = instance.world;
+    auto direction = subtract(world.position,camera.transform.position);
+    const auto length = std::sqrt(dot(direction,direction));
+    direction = length > 1.e-8 ? combine(direction,static_cast<float>(1/length),{},0) : camera.transform.forward;
+    if (instance.eye_distance > 0)
+        world.position = combine(camera.transform.position,1,direction,instance.eye_distance);
     if (instance.alignment == MeshAlignment::Camera) {
         world.right = transformDirection(camera.transform,world.right);
         world.up = transformDirection(camera.transform,world.up);
         world.forward = transformDirection(camera.transform,world.forward);
+    } else if (instance.alignment == MeshAlignment::FacingEye) {
+        Transform facing;
+        facing.forward = direction;
+        if (direction.x == 0 && direction.z == 0) {
+            facing.right = {1,0,0}; facing.up = {0,0,direction.y < 0 ? 1.f : -1.f};
+        } else {
+            const float inverse = 1/std::sqrt(direction.x*direction.x+direction.z*direction.z);
+            facing.right = {direction.z*inverse,0,-direction.x*inverse};
+            facing.up = {direction.y*facing.right.z,direction.z*facing.right.x-direction.x*facing.right.z,-direction.y*facing.right.x};
+        }
+        world.right = transformDirection(facing,world.right);
+        world.up = transformDirection(facing,world.up);
+        world.forward = transformDirection(facing,world.forward);
     }
     world.position.x += instance.camera_translation.x*camera.transform.position.x;
     world.position.y += instance.camera_translation.y*camera.transform.position.y;
@@ -272,8 +290,11 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
             window = windows[room_indices.at(instance.room)];
             if (!window.visible) continue;
         }
-        bool visible = false;
-        for (const auto& polygon : geometry.polygons)
+        // Pixel-expanded markers can straddle a clip boundary while their
+        // centers are outside. Submit the batch; homogeneous GPU clipping sees
+        // the expanded vertices and is authoritative for this representation.
+        bool visible = !geometry.raster_offsets.empty();
+        if (!visible) for (const auto& polygon : geometry.polygons)
             if (!polygonOutside(result.camera,MeshView(geometry),polygon,item.world,window)) { visible = true; break; }
         if (!visible) continue;
         item.layer = instance.surface.material.layer;

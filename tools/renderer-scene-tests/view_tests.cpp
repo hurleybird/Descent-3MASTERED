@@ -252,6 +252,43 @@ int runSceneViewTests() {
     check(billboard.world.up.x == 3 && billboard.world.forward.z == 1,"Billboarding rewrote prepared source transform");
     billboard.alignment = d3scene::MeshAlignment::World;
     check(d3scene::resolveMeshTransform(billboard,d3scene::prepareCamera(side)).up.x == 3,"Planar geometry inherited camera rotation");
+    auto anchored = billboard;
+    anchored.world = {}; anchored.world.position = {100,0,0};
+    anchored.world.right = {2,0,0}; anchored.world.up = {0,3,0};
+    anchored.alignment = d3scene::MeshAlignment::FacingEye; anchored.eye_distance = 50;
+    const auto anchored_world = d3scene::resolveMeshTransform(anchored,d3scene::prepareCamera(view()));
+    check(near(anchored_world.position.x,50) && near(anchored_world.right.z,-2) && near(anchored_world.up.y,3),
+        "View-centered anchor lost radial placement or world-upright facing");
+    auto translated = view(); translated.camera.position = {100,0,-100};
+    const auto translated_anchor = d3scene::resolveMeshTransform(anchored,d3scene::prepareCamera(translated));
+    check(near(translated_anchor.position.x,100) && near(translated_anchor.position.z,-50) && near(translated_anchor.right.x,2),
+        "Second view reused another view's anchor transform");
+    check(anchored.world.position.x == 100 && anchored.world.position.z == 0,"View placement mutated published sky");
+    anchored.world.position = {0,100,0};
+    const auto pole = d3scene::resolveMeshTransform(anchored,d3scene::prepareCamera(view()));
+    check(near(pole.position.y,50) && near(pole.up.z,-3),"Vertical view anchor produced invalid orientation");
+    const auto ring = d3scene::billboardRing(.3f,102,0);
+    check(ring.vertices.size() == 64 && ring.polygons.size() == 32 && ring.polygons.back().corners[1].vertex == 0,
+        "Billboard ring has missing closure or incorrect topology");
+    check(ring.polygons[0].corners[0].alpha == 0 && ring.polygons[0].corners[2].alpha == 102,
+        "Billboard ring lost radial opacity");
+    auto marker_geometry = triangle(100,10);
+    marker_geometry.raster_offsets = {{-.5f,.5f},{.5f,.5f},{0,-.5f}};
+    const auto marker_asset = assets.publishMesh(5,marker_geometry);
+    marker_geometry.raster_offsets[0].x = -1;
+    check(assets.publishMesh(5,marker_geometry)->id() != marker_asset->id(),"Raster offset edit reused stale mesh revision");
+    marker_geometry.raster_offsets.pop_back(); bool rejected_offsets = false;
+    try { assets.publishMesh(5,marker_geometry); } catch (const std::invalid_argument&) { rejected_offsets = true; }
+    check(rejected_offsets,"Incomplete raster marker stream accepted");
+    d3scene::FrameData marker_data; marker_data.sequence = 1; marker_data.scene_lifetime = assets.lifetime();
+    d3scene::PreparedMesh marker; marker.asset = marker_asset; marker.surface.layer = d3scene::RenderLayer::Background;
+    marker_data.meshes.push_back(marker);
+    check(d3scene::queryView(*d3scene::Presentation::freeze(marker_data),view()).surfaces.size() == 1,
+        "Unexpanded marker centers were CPU-clipped instead of submitting the GPU-clipped batch");
+    marker_data.meshes[0].surface.layer = d3scene::RenderLayer::World;
+    bool rejected_marker_layer = false;
+    try { d3scene::Presentation::freeze(marker_data); } catch (const std::invalid_argument&) { rejected_marker_layer = true; }
+    check(rejected_marker_layer,"Raster marker entered unsupported world depth/history path");
     d3scene::FrameData scheduled; scheduled.sequence = 5; scheduled.scene_lifetime = assets.lifetime();
     auto solid = background; solid.surface.layer = d3scene::RenderLayer::World;
     auto soft = solid; soft.surface.soft_depth_range = 2;

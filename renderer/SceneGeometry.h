@@ -20,4 +20,5 @@ template<class Consumer> void forEachTriangleCorner(size_t corners, Consumer con
 // with explicit time/instance/part inputs. No view can advance another's shape.
 std::vector<Vec3> deformMesh(const MeshGeometry&,float range,double time,uint32_t owner,uint32_t part);
 MeshGeometry unitBillboardQuad();
+MeshGeometry billboardRing(float inner_ratio,uint8_t inner_alpha,uint8_t outer_alpha,uint32_t segments = 32);
 }

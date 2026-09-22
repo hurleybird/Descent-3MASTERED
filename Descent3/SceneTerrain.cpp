@@ -4,8 +4,11 @@
 #include "gametexture.h"
 #include "config.h"
 #include "../renderer/SceneTerrain.h"
+#include "../renderer/SceneGeometry.h"
 #include "terrain.h"
 #include "lightmap.h"
+#include "bitmap.h"
+#include "gameloop.h"
 #include "pserror.h"
 #include <algorithm>
 #include <map>
@@ -100,8 +103,9 @@ void PrepareGameSky(d3scene::FrameData& frame) {
     frame.exterior_fog.end = 200.f*TERRAIN_SIZE;
     frame.exterior_fog.start = frame.exterior_fog.end*(std::max)(0.f,(std::min)(.9999f,Terrain_sky.fog_scalar));
     frame.exterior_fog.enabled = Detail_settings.Fog_enabled && (Terrain_sky.flags & TF_FOG);
-    d3scene::Transform rotation;
-    if ((Terrain_sky.flags & TF_ROTATE_SKY) && Terrain_sky.rotate_rate > 0) {
+    const auto skyRotation = [&](unsigned flag) {
+      d3scene::Transform rotation;
+      if ((Terrain_sky.flags & flag) && Terrain_sky.rotate_rate > 0) {
         // A view never advances the sky. All views evaluate the same simulation
         // phase, without progressively rotating the level's authored vectors.
         const double phase = std::fmod(frame.simulation_time*Terrain_sky.rotate_rate*(65536.0/360.0),65536.0);
@@ -111,7 +115,10 @@ void PrepareGameSky(d3scene::FrameData& frame) {
         rotation.right = {m.rvec.x,m.rvec.y,m.rvec.z};
         rotation.up = {m.uvec.x,m.uvec.y,m.uvec.z};
         rotation.forward = {m.fvec.x,m.fvec.y,m.fvec.z};
-    }
+      }
+      return rotation;
+    };
+    const auto rotation = skyRotation(TF_ROTATE_SKY);
     const auto publish = [&](uint32_t slot,d3scene::MeshGeometry geometry,int bitmap) {
         d3scene::PreparedMesh mesh;
         mesh.asset = d3scene::assets().publishMesh(slot,std::move(geometry));
@@ -154,6 +161,68 @@ void PrepareGameSky(d3scene::FrameData& frame) {
     for (int t = 0; t < MAX_HORIZON_PIECES; ++t)
         polygon(horizon,{{t,4},{(t+1)%MAX_HORIZON_PIECES,4},{(t+1)%MAX_HORIZON_PIECES,5},{t,5}},true);
     publish(1,std::move(horizon),-1);
+    if (Terrain_sky.flags & TF_STARS) {
+        d3scene::MeshGeometry stars;
+        const d3scene::Vec2 offsets[4] = {{-.5f,.5f},{.5f,.5f},{.5f,-.5f},{-.5f,-.5f}};
+        for (unsigned index = 0; index < MAX_STARS; ++index) {
+            const auto& position = Terrain_sky.star_vectors[index];
+            d3scene::MeshPolygon marker; marker.normal = {0,0,-1};
+            for (unsigned corner = 0; corner < 4; ++corner) {
+                marker.corners.push_back({static_cast<uint32_t>(stars.vertices.size())});
+                stars.vertices.push_back({position.x,position.y,position.z});
+                stars.vertex_colors.push_back(color(Terrain_sky.star_color[index]));
+                stars.raster_offsets.push_back(offsets[corner]);
+            }
+            stars.polygons.push_back(std::move(marker));
+        }
+        d3scene::PreparedMesh batch;
+        batch.asset = d3scene::assets().publishMesh(4,std::move(stars));
+        batch.world = skyRotation(TF_ROTATE_STARS); batch.camera_translation = {1,1,1};
+        batch.surface.layer = d3scene::RenderLayer::Background;
+        batch.surface.unlit = true; batch.surface.two_sided = true;
+        batch.surface.blend = d3scene::BlendMode::Alpha;
+        frame.meshes.push_back(std::move(batch));
+    }
+    if (Terrain_sky.flags & TF_SATELLITES) {
+        const auto quad = d3scene::assets().publishMesh(2,d3scene::unitBillboardQuad());
+        for (unsigned index = 0; index < Terrain_sky.num_satellites && index < MAX_SATELLITES; ++index) {
+            const int texture = Terrain_sky.satellite_texture[index];
+            if (texture < 0 || texture >= MAX_TEXTURES || !GameTextures[texture].used) continue;
+            const int bitmap = GetTextureBitmapAtTime(texture,0,static_cast<float>(frame.simulation_time));
+            const float size = Terrain_sky.satellite_size[index];
+            const int width = bm_w(bitmap,0), height = bm_h(bitmap,0);
+            if (AutomatedCaptureFrameIndex() == 0)
+                AutomatedCaptureLog("scene satellite index=%u texture=%d name=%s bitmap=%d bitmap_name=%s size=%dx%d flags=%u",
+                    index,texture,GameTextures[texture].name,bitmap,GameBitmaps[bitmap].name,width,height,Terrain_sky.satellite_flags[index]);
+            if (!(size > 0) || !(Terrain_sky.radius > 0) || width <= 0 || height <= 0) continue;
+            d3scene::PreparedMesh satellite;
+            satellite.asset = quad;
+            const auto& position = Terrain_sky.satellite_vectors[index];
+            satellite.world.position = {position.x,position.y,position.z};
+            satellite.world.right = {size,0,0}; satellite.world.up = {0,size*height/width,0};
+            satellite.eye_distance = Terrain_sky.radius*3;
+            satellite.alignment = d3scene::MeshAlignment::FacingEye;
+            satellite.surface.layer = d3scene::RenderLayer::Background;
+            satellite.surface.unlit = true; satellite.surface.two_sided = true;
+            satellite.surface.texture_wrap = false; satellite.surface.texture_alpha = true;
+            satellite.surface.bitmap = bitmap;
+            satellite.surface.alpha = static_cast<unsigned>((std::max)(0.f,(std::min)(1.f,GameTextures[texture].alpha))*255)/255.f;
+            satellite.surface.blend = GameTextures[texture].flags & TF_SATURATE ? d3scene::BlendMode::Additive : d3scene::BlendMode::Alpha;
+            if (Terrain_sky.satellite_flags[index] & TSF_HALO) {
+                auto halo = satellite;
+                halo.asset = d3scene::assets().publishMesh(3,d3scene::billboardRing(.3f,102,0));
+                halo.alignment = d3scene::MeshAlignment::Camera;
+                halo.world.right = {size*1.2f,0,0}; halo.world.up = {0,size*1.2f,0};
+                halo.surface.bitmap = -1; halo.surface.texture_alpha = false;
+                halo.surface.alpha = 1; halo.surface.blend = d3scene::BlendMode::Alpha;
+                const float r = Terrain_sky.satellite_r[index], g = Terrain_sky.satellite_g[index], b = Terrain_sky.satellite_b[index];
+                const float scale = (std::max)(1.f,(std::max)(r,(std::max)(g,b)));
+                halo.surface.color_modulation = {r/scale,g/scale,b/scale};
+                frame.meshes.push_back(std::move(halo));
+            }
+            frame.meshes.push_back(std::move(satellite));
+        }
+    }
 }
 // Simulation (including outdoor damage) and presentation share one authored
 // exposure sampler. The adapter borrows data only for this call.

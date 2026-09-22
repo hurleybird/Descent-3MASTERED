@@ -46,6 +46,7 @@ struct MeshGeometry {
     std::vector<Vec3> vertices;
     std::vector<Vec3> vertex_normals; // empty means authored flat polygon normals
     std::vector<Vec3> vertex_colors; // empty means white; explicit authored Gouraud color
+    std::vector<Vec2> raster_offsets; // optional raster-pixel offsets for batched background markers
     std::vector<MeshPolygon> polygons;
 };
 bool operator==(const MeshGeometry& a, const MeshGeometry& b);
@@ -250,12 +251,13 @@ struct TerrainState {
     std::vector<SurfaceBinding> materials;
     std::vector<std::vector<SurfaceBinding>> patches;
 };
-enum class MeshAlignment : uint8_t { World, Camera };
+enum class MeshAlignment : uint8_t { World, Camera, FacingEye };
 struct PreparedMesh {
     MeshAssetRef asset;
     SurfaceBinding surface;
     Transform world;
     Vec3 camera_translation; // sky follows the eye with authored half-height parallax
+    float eye_distance = 0; // positive projects the world anchor onto a view-centered shell
     MeshAlignment alignment = MeshAlignment::World;
     int32_t room = -1;
 };

@@ -42,6 +42,8 @@ void validateSurface(const SurfaceBinding& surface) {
         std::isfinite(surface.lightmap_u_scale) && std::isfinite(surface.lightmap_v_scale), "Invalid scene material values");
 }
 void validateGeometry(const MeshGeometry& geometry) {
+    require(geometry.raster_offsets.empty() || geometry.raster_offsets.size() == geometry.vertices.size(),"Incomplete raster offsets");
+    for (const auto offset : geometry.raster_offsets) require(std::isfinite(offset.x) && std::isfinite(offset.y),"Invalid raster offset");
     require(geometry.vertex_colors.empty() || geometry.vertex_colors.size() == geometry.vertices.size(),"Incomplete mesh colors");
     for (const auto& color : geometry.vertex_colors) require(finite(color),"Invalid mesh color");
     require(geometry.vertex_normals.empty() || geometry.vertex_normals.size() == geometry.vertices.size(), "Incomplete mesh normals");
@@ -77,6 +79,9 @@ Transform compose(const Transform& parent, const Transform& local) {
 }
 bool operator!=(AssetId a, AssetId b) { return !(a == b); }
 bool operator==(const MeshGeometry& a, const MeshGeometry& b) {
+    if (a.raster_offsets.size() != b.raster_offsets.size()) return false;
+    for (size_t i = 0; i < a.raster_offsets.size(); ++i)
+        if (a.raster_offsets[i].x != b.raster_offsets[i].x || a.raster_offsets[i].y != b.raster_offsets[i].y) return false;
     if (a.vertex_colors.size() != b.vertex_colors.size()) return false;
     for (size_t i = 0; i < a.vertex_colors.size(); ++i) if (!equal(a.vertex_colors[i],b.vertex_colors[i])) return false;
     if (a.vertex_normals.size() != b.vertex_normals.size()) return false;
@@ -156,6 +161,7 @@ ReflectionAssetRef SceneAssets::publishReflection(uint32_t slot,ReflectionData d
 }
 RoomAssetRef SceneAssets::publishRoom(uint32_t slot, MeshGeometry geometry, VolumeGrid volume) {
     validateGeometry(geometry);
+    require(geometry.raster_offsets.empty(),"Room geometry cannot use raster markers");
     require(finite(volume.origin) && std::isfinite(volume.spacing) && volume.spacing > 0, "Invalid volume grid placement");
     if (!volume.colors.empty())
         require(volume.width && volume.height && volume.depth &&
@@ -195,6 +201,7 @@ ModelAssetRef SceneAssets::publishModel(uint32_t slot, ModelGeometry geometry) {
     for (size_t i = 0; i < geometry.parts.size(); ++i) {
         const auto& part = geometry.parts[i];
         validateGeometry(part.geometry);
+        require(part.geometry.raster_offsets.empty(),"Model geometry cannot use raster markers");
         require(finite(part.offset), "Invalid model offset");
         require(part.geometry.vertex_normals.size() == part.geometry.vertices.size(), "Incomplete model vertex normals");
         require(part.polygon_materials.size() == part.geometry.polygons.size() &&
@@ -295,8 +302,12 @@ PresentationRef Presentation::freeze(const FrameData& data) {
     }
     for (const auto& mesh : data.meshes) {
         require(mesh.asset && mesh.asset->id().lifetime == data.scene_lifetime,"Stale generic mesh");
+        require(mesh.asset->geometry().raster_offsets.empty() || mesh.surface.layer == RenderLayer::Background,
+            "Raster markers require a background layer");
         require(finite(mesh.world) && finite(mesh.camera_translation),"Invalid generic mesh transform");
-        require(mesh.alignment == MeshAlignment::World || mesh.alignment == MeshAlignment::Camera,"Invalid mesh alignment");
+        require(std::isfinite(mesh.eye_distance) && mesh.eye_distance >= 0,"Invalid view-relative mesh distance");
+        require(mesh.alignment == MeshAlignment::World || mesh.alignment == MeshAlignment::Camera ||
+            mesh.alignment == MeshAlignment::FacingEye,"Invalid mesh alignment");
         validateSurface(mesh.surface); validateIndices(mesh.surface);
     }
     if (data.terrain.asset) {
