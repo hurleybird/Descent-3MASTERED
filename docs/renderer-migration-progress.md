@@ -8,8 +8,10 @@ owns storage clear, shared depth, resolve and placement over the completed world
 the producer no longer calls legacy begin/start/end cockpit frame brackets.
 The old ABI remains for unmigrated callers, but is not invoked by this path.
 The request rejects empty schedules, target mismatches and world/feedback owners.
-Full build and 5,327 checks pass. Effects cockpit 003 and normal 000/003 captures
-are pixel-identical to the preceding text-batch captures. This is boundary
+Full build and 5,327 checks pass. Effects cockpit 003 and normal 003 captures
+are pixel-identical to the preceding text-batch captures. Normal 000 matches the
+documented alternate pose capture scene-cockpit-normal exactly (rather than
+text-batch-normal; mean difference .0168041, max 48 against that run). This is boundary
 verification, not full HUD/module/cinematic acceptance. All domain gates remain
 set and Candidate is unchanged.
 
