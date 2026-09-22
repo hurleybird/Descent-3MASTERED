@@ -444,7 +444,7 @@ bool GL4Renderer::PixelMotionVectorModeEnabled() const
 
 bool GL4Renderer::MotionVectorsFrozen() const
 {
-	return Game_paused;
+	return !scene_motion.valid || scene_motion.paused;
 }
 
 bool GL4Renderer::MotionVectorWritesEnabled() const
@@ -524,7 +524,7 @@ void GL4Renderer::ApplyPixelMotionBlur(int supersampling_factor)
 		std::min(OpenGL_preferred_state.pixel_motion_blur_strength, 4.0f));
 	float legacy_object_strength = std::max(0.0f,
 		std::min(OpenGL_preferred_state.pixel_motion_blur_legacy_object_strength, 4.0f));
-	const float afterburner_factor = scene_afterburner_factor;
+	const float afterburner_factor = scene_motion.afterburner_factor;
 	const float afterburner_blur_multiplier = std::max(0.0f,
 		std::min(OpenGL_preferred_state.afterburner_pixel_blur_multiplier, 4.0f));
 	const float afterburner_blur_scale = 1.0f + (afterburner_factor * afterburner_blur_multiplier);
@@ -532,7 +532,7 @@ void GL4Renderer::ApplyPixelMotionBlur(int supersampling_factor)
 	legacy_object_strength *= afterburner_blur_scale;
 	if ((scene_strength <= 0.0f && legacy_object_strength <= 0.0f) ||
 		motionblurshader.Handle() == 0 || post_present_framebuffer.Handle() == 0 ||
-		!SceneSurfaceTargetEnabled())
+		!SceneSurfaceTargetEnabled() || !scene_motion.valid)
 	{
 		return;
 	}
@@ -579,7 +579,7 @@ void GL4Renderer::ApplyPixelMotionBlur(int supersampling_factor)
 		glUniform2f(motionblur_velocity_uv_origin, uv_origin_x, uv_origin_y);
 	if (motionblur_velocity_uv_scale != -1)
 		glUniform2f(motionblur_velocity_uv_scale, uv_scale_x, uv_scale_y);
-	float frame_time = scene_delta_time;
+	float frame_time = scene_motion.delta_time;
 	if (frame_time < 0.001f)
 		frame_time = PIXEL_MOTION_BLUR_REFERENCE_FRAME_TIME;
 	float frame_scale = PIXEL_MOTION_BLUR_REFERENCE_FRAME_TIME / frame_time;
@@ -607,20 +607,11 @@ void GL4Renderer::ApplyPixelMotionBlur(int supersampling_factor)
 			samples = 17;
 		glUniform1i(motionblur_sample_count, samples);
 	}
-	const bool use_frozen_static_motion = MotionVectorsFrozen() && frozen_static_motion_valid;
-	const float* reconstruction_projection = use_frozen_static_motion ? frozen_static_motion_projection :
-		(captured_scene_projection_valid ? captured_scene_projection : current_projection);
-	const float* reconstruction_inverse_modelview = use_frozen_static_motion ?
-		frozen_static_motion_inverse_modelview :
-		(captured_scene_inverse_modelview_valid ? captured_scene_inverse_modelview : current_inverse_modelview);
-	const float* reconstruction_previous_view_projection = use_frozen_static_motion ?
-		frozen_static_motion_previous_view_projection : previous_view_projection;
-	const bool has_reconstruction_matrices = use_frozen_static_motion ||
-		(captured_scene_projection_valid && captured_scene_inverse_modelview_valid) ||
-		(have_current_projection && have_current_inverse_modelview);
-	const bool has_static_reconstruction = depth_texture != 0 &&
-		(use_frozen_static_motion || have_previous_view_projection) &&
-		has_reconstruction_matrices;
+	const auto& camera = scene_motion.camera;
+	const float* reconstruction_projection = camera.current.projection.data();
+	const float* reconstruction_inverse_modelview = camera.current.inverse_view.data();
+	const float* reconstruction_previous_view_projection = camera.previous.view_projection.data();
+	const bool has_static_reconstruction = depth_texture != 0 && camera.previous_valid;
 	if (motionblur_current_projection != -1)
 		glUniformMatrix4fv(motionblur_current_projection, 1, GL_FALSE, reconstruction_projection);
 	if (motionblur_current_inverse_modelview != -1)
@@ -635,7 +626,7 @@ void GL4Renderer::ApplyPixelMotionBlur(int supersampling_factor)
 	if (motionblur_player_translation_delta != -1)
 	{
 		glUniform3f(motionblur_player_translation_delta,
-			scene_player_control_delta.x, scene_player_control_delta.y, scene_player_control_delta.z);
+			scene_motion.player_control_delta.x, scene_motion.player_control_delta.y, scene_motion.player_control_delta.z);
 	}
 
 	rend_ClearBoundTextures();
@@ -657,7 +648,7 @@ void GL4Renderer::DrawMotionVectorDebugPreview(int supersampling_factor)
 	debug_sample.mode = SceneSurfaceConsumerActive() ?
 		RENDERER_MOTION_VECTOR_PIXEL : RENDERER_MOTION_VECTOR_OFF;
 
-	if (!OpenGL_preferred_state.motion_vector_debug_preview || Game_mode == GM_NONE ||
+	if (!OpenGL_preferred_state.motion_vector_debug_preview || !scene_motion.valid ||
 		!SceneSurfaceTargetEnabled() || motionvectordebugshader.Handle() == 0 ||
 		post_present_framebuffer.Handle() == 0)
 	{
@@ -758,20 +749,11 @@ void GL4Renderer::DrawMotionVectorDebugPreview(int supersampling_factor)
 		glUniform2f(motionvectordebug_uv_scale, uv_scale_x, uv_scale_y);
 	if (motionvectordebug_screen_size != -1)
 		glUniform2f(motionvectordebug_screen_size, (float)OpenGL_state.screen_width, (float)OpenGL_state.screen_height);
-	const bool use_frozen_static_motion = MotionVectorsFrozen() && frozen_static_motion_valid;
-	const float* reconstruction_projection = use_frozen_static_motion ? frozen_static_motion_projection :
-		(captured_scene_projection_valid ? captured_scene_projection : current_projection);
-	const float* reconstruction_inverse_modelview = use_frozen_static_motion ?
-		frozen_static_motion_inverse_modelview :
-		(captured_scene_inverse_modelview_valid ? captured_scene_inverse_modelview : current_inverse_modelview);
-	const float* reconstruction_previous_view_projection = use_frozen_static_motion ?
-		frozen_static_motion_previous_view_projection : previous_view_projection;
-	const bool has_reconstruction_matrices = use_frozen_static_motion ||
-		(captured_scene_projection_valid && captured_scene_inverse_modelview_valid) ||
-		(have_current_projection && have_current_inverse_modelview);
-	const bool has_static_reconstruction = depth_texture != 0 &&
-		(use_frozen_static_motion || have_previous_view_projection) &&
-		has_reconstruction_matrices;
+	const auto& camera = scene_motion.camera;
+	const float* reconstruction_projection = camera.current.projection.data();
+	const float* reconstruction_inverse_modelview = camera.current.inverse_view.data();
+	const float* reconstruction_previous_view_projection = camera.previous.view_projection.data();
+	const bool has_static_reconstruction = depth_texture != 0 && camera.previous_valid;
 	if (motionvectordebug_current_projection != -1)
 		glUniformMatrix4fv(motionvectordebug_current_projection, 1, GL_FALSE, reconstruction_projection);
 	if (motionvectordebug_current_inverse_modelview != -1)

@@ -516,6 +516,47 @@ int runSceneViewTests() {
     check(second.previous_valid && second.previous.view_projection == first.current.view_projection,
         "Moving view did not retain its own predecessor");
     histories.commit(second);
+    tick.delta_time = .02f; tick.afterburner_factor = .5f; tick.player_control_delta = {1,0,0};
+    const auto exposure = d3scene::prepareImageMotion(tick,second,{});
+    check(exposure.valid && !exposure.paused && exposure.camera.previous_valid && exposure.delta_time == .02f,
+        "Motion exposure lost its explicit main-view inputs");
+    auto pause_tick = tick; pause_tick.sequence++; pause_tick.paused = true;
+    pause_tick.delta_time = 0; pause_tick.afterburner_factor = 0; pause_tick.player_control_delta = {};
+    const auto pause_camera = histories.prepare(pause_tick,main_view,d3scene::prepareCamera(main_view));
+    const auto paused_exposure = d3scene::prepareImageMotion(pause_tick,pause_camera,exposure);
+    check(paused_exposure.paused && paused_exposure.delta_time == .02f && paused_exposure.afterburner_factor == .5f &&
+        paused_exposure.player_control_delta.x == 1 &&
+        paused_exposure.camera.previous.view_projection == first.current.view_projection,
+        "Pause lost the completed exposure or mixed it with new timing inputs");
+    for (int change = 0; change < 8; ++change) {
+        auto changed = pause_camera;
+        if (change == 0) changed.view.camera_owner++;
+        if (change == 1) changed.view.camera_variant++;
+        if (change == 2) changed.view.camera_cut = true;
+        if (change == 3) changed.view.viewport.width++;
+        if (change == 4) changed.current.projection[0] += 1;
+        if (change == 5) changed.current.view_projection[12] += 1;
+        if (change == 6) changed.view.history_key++;
+        if (change == 7) changed.view.projection_anchor.width++;
+        check(d3scene::prepareImageMotion(pause_tick,changed,exposure).delta_time == 0,
+            "Changed paused view borrowed an incompatible exposure");
+    }
+    bool rejected_motion_camera = false;
+    auto wrong_camera = second; wrong_camera.view.kind = d3scene::ViewKind::Auxiliary;
+    try { d3scene::prepareImageMotion(tick,wrong_camera,exposure); }
+    catch (const std::logic_error&) { rejected_motion_camera = true; }
+    check(rejected_motion_camera,"Auxiliary camera became the world motion product");
+    rejected_motion_camera = false;
+    try { d3scene::prepareImageMotion(pause_tick,second,exposure); }
+    catch (const std::logic_error&) { rejected_motion_camera = true; }
+    check(rejected_motion_camera,"Motion exposure combined different presentation sequences");
+    auto interrupted_tick = pause_tick; interrupted_tick.sequence++;
+    auto interrupted_camera = pause_camera; interrupted_camera.sequence++;
+    check(d3scene::prepareImageMotion(interrupted_tick,interrupted_camera,exposure).delta_time == 0,
+        "Pause inherited an exposure from a skipped presentation");
+    interrupted_tick.scene_lifetime++; interrupted_camera.lifetime++;
+    check(d3scene::prepareImageMotion(interrupted_tick,interrupted_camera,exposure).delta_time == 0,
+        "Reload inherited a prior level's exposure");
     const auto replay = histories.prepare(tick,main_view,d3scene::prepareCamera(main_view));
     check(replay.previous_valid && replay.previous.view_projection == first.current.view_projection,
         "Pass replay replaced previous camera with the current one");

@@ -11,6 +11,46 @@ struct ViewHistorySample {
     ViewMatrices current, previous;
     bool previous_valid = false;
 };
+// Image-space consumers receive a complete camera pair and its time/movement
+// inputs. They may not reconstruct these from the most recent canvas draw.
+struct ImageMotion {
+    ViewHistorySample camera;
+    float delta_time = 0, afterburner_factor = 0;
+    Vec3 player_control_delta;
+    bool valid = false, paused = false;
+};
+inline ImageMotion prepareImageMotion(const FrameData& frame,const ViewHistorySample& camera,
+    const ImageMotion& completed) {
+    if (camera.sequence != frame.sequence || camera.lifetime != frame.scene_lifetime ||
+        camera.view.kind != ViewKind::Main)
+        throw std::logic_error("Image motion requires this presentation's main camera");
+    ImageMotion result;
+    result.camera = camera; result.delta_time = frame.delta_time;
+    result.afterburner_factor = frame.afterburner_factor;
+    result.player_control_delta = frame.player_control_delta;
+    result.valid = true; result.paused = frame.paused;
+    // Pause repeats the last exposure, but never borrows it across a camera
+    // switch, resize, cut, reload or changed paused camera.
+    const auto& prior = completed.camera;
+    if (frame.paused && completed.valid && !camera.view.camera_cut &&
+        prior.lifetime == camera.lifetime && prior.sequence <= camera.sequence && camera.sequence-prior.sequence <= 1 &&
+        prior.view.history_key == camera.view.history_key &&
+        prior.view.camera_owner == camera.view.camera_owner &&
+        prior.view.camera_variant == camera.view.camera_variant &&
+        prior.view.viewport.x == camera.view.viewport.x && prior.view.viewport.y == camera.view.viewport.y &&
+        prior.view.viewport.width == camera.view.viewport.width && prior.view.viewport.height == camera.view.viewport.height &&
+        prior.view.projection_anchor.x == camera.view.projection_anchor.x && prior.view.projection_anchor.y == camera.view.projection_anchor.y &&
+        prior.view.projection_anchor.width == camera.view.projection_anchor.width && prior.view.projection_anchor.height == camera.view.projection_anchor.height &&
+        prior.current.projection == camera.current.projection &&
+        prior.current.view_projection == camera.current.view_projection) {
+        result.camera.previous = prior.previous;
+        result.camera.previous_valid = prior.previous_valid;
+        result.delta_time = completed.delta_time;
+        result.afterburner_factor = completed.afterburner_factor;
+        result.player_control_delta = completed.player_control_delta;
+    }
+    return result;
+}
 // History advances only when a view has completed. Querying another view,
 // constructing a preview, or replaying a pass cannot replace its predecessor.
 class ViewHistory {

@@ -237,22 +237,11 @@ class GL4Renderer : public IRenderer
 	//Cached projection matrix and near/far for AO. Updated on every
 	//UpdateCommon(depth=0) call so the AO pass uses the main world projection.
 	float last_projection[16] = {};
-	float captured_scene_projection[16] = {};
-	float captured_scene_view_projection[16] = {};
-	float captured_scene_inverse_modelview[16] = {};
-	float frozen_static_motion_projection[16] = {};
-	float frozen_static_motion_inverse_modelview[16] = {};
-	float frozen_static_motion_previous_view_projection[16] = {};
 	float last_nearz = 1.0f;
 	float last_farz = 10000.f;
-	bool captured_scene_projection_valid = false;
-	bool captured_scene_view_projection_valid = false;
-	bool captured_scene_inverse_modelview_valid = false;
-	bool frozen_static_motion_valid = false;
 	bool cockpit_scene_frame_active = false;
 	float presentation_gamma = 1.0f;
-	float scene_delta_time = 0, scene_afterburner_factor = 0;
-	d3scene::Vec3 scene_player_control_delta;
+	d3scene::ImageMotion scene_motion, completed_scene_motion;
 	float current_projection[16] = {};
 	float current_view_projection[16] = {};
 	float current_inverse_view_projection[16] = {};
@@ -625,7 +614,7 @@ private:
 	void ApplyPixelMotionBlur(int supersampling_factor);
 	void DrawMotionVectorDebugPreview(int supersampling_factor);
 	void UseSceneDrawBuffers();
-	void ExportOpaqueScene(const d3scene::Camera&);
+	void ExportOpaqueScene();
 	d3scene::ViewHistory scene_view_history;
 	bool scene_temporal_reset = true;
 	bool scene_sample_resolve_verified = false;

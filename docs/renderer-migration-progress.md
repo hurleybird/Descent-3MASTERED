@@ -1,5 +1,22 @@
 # Renderer migration checkpoint
 
+## Continuation: owned image-space camera/exposure
+
+AO and motion now consume the explicit main-view camera/history product. Removed
+captured/current-matrix fallback selection, legacy-canvas advancement of world
+camera history, and the separate frozen matrix arrays. Renderer motion no longer
+reads Game_paused or Game_mode. Paused exposure reuse retains its timing and
+player movement together and rejects camera changes, cuts, reloads and gaps.
+Surface-record clearing belongs to main-scene execution, not canvas StartFrame.
+
+Full build and 5,214 checks pass. Eight camera-product-effects captures complete:
+seven are exact against shared-reduction-effects; 002 has the recurring localized
+robot difference. Moving-camera 000/002 complete; differences against the preceding
+run are confined to robot regions (means .0373/.0238); 002's logged Buddybot pose
+hash differs with unchanged position. Its final PNG was visually inspected.
+Pause/cut compatibility is unit-tested, not yet a full interactive F2 test.
+Candidate and Previous Candidate remain untouched; all migration gates stay open.
+
 ## Continuation: presentation-owned movement inputs
 
 Motion composition now consumes frozen frame time, realized player-control

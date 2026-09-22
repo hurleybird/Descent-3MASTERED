@@ -1635,7 +1635,7 @@ int GL4Renderer::SetPreferredState(renderer_preferred_state* pref_state)
 			{
 				have_previous_view_projection = false;
 				have_cockpit_previous_view_projection = false;
-				frozen_static_motion_valid = false;
+				scene_motion = {}; completed_scene_motion = {};
 			}
 			else if (new_motion_vectors_needed)
 			{
@@ -1825,12 +1825,6 @@ void GL4Renderer::StartFrame(int x1, int y1, int x2, int y2, int clear_flags)
 			post_protection_mask_dirty = false;
 			post_protection_mask_cleared_this_frame = true;
 			terrain_post_mask_default_initialized = false;
-		}
-		if (SceneSurfaceTargetEnabled() && !MotionVectorsFrozen() && !motion_vectors_cleared_this_frame)
-		{
-			surface_records.ClearAttached(framebuffers[framebuffer_current_draw].Handle());
-			motion_vectors_dirty = false;
-			motion_vectors_cleared_this_frame = true;
 		}
 		UseSceneDrawBuffers();
 	}
@@ -2205,34 +2199,7 @@ bool GL4Renderer::BeginPostPresentFrame()
 
 	GL4PerfGpuSplitMark(GL4_GPU_SPLIT_AFTER_BLOOM);
 
-	if (!MotionVectorsFrozen() && framebuffer_ok && SceneSurfaceTargetEnabled() &&
-		have_previous_view_projection)
-	{
-		const bool have_captured_static_matrices =
-			captured_scene_projection_valid && captured_scene_inverse_modelview_valid;
-		const bool have_current_static_matrices =
-			have_current_projection && have_current_inverse_modelview;
-		if (have_captured_static_matrices || have_current_static_matrices)
-		{
-			memcpy(frozen_static_motion_projection,
-				have_captured_static_matrices ? captured_scene_projection : current_projection,
-				sizeof(frozen_static_motion_projection));
-			memcpy(frozen_static_motion_inverse_modelview,
-				have_captured_static_matrices ? captured_scene_inverse_modelview : current_inverse_modelview,
-				sizeof(frozen_static_motion_inverse_modelview));
-			memcpy(frozen_static_motion_previous_view_projection, previous_view_projection,
-				sizeof(frozen_static_motion_previous_view_projection));
-			frozen_static_motion_valid = true;
-		}
-	}
-
-	// Scene history is committed by its own view identity. Legacy-only canvas
-	// presentation must not overwrite that predecessor during main-view post.
-	if (!captured_scene_view_projection_valid && !MotionVectorsFrozen() && framebuffer_ok && have_current_view_projection)
-	{
-		memcpy(previous_view_projection, current_view_projection, sizeof(previous_view_projection));
-		have_previous_view_projection = true;
-	}
+	if (scene_motion.valid) completed_scene_motion = scene_motion;
 
 	UseDrawVAO();
 
@@ -2665,8 +2632,7 @@ void GL4Renderer::EndPostPresentFrame()
 		cockpit_scene_frame_active = false;
 		// Presentation inputs expire with the composed frame. Menu/canvas frames
 		// must not reuse movement from the last world view.
-		scene_delta_time = scene_afterburner_factor = 0;
-		scene_player_control_delta = {};
+		scene_motion = {};
 	}
 	if (msaa_downshift_release_frames > 0)
 	{
@@ -2920,16 +2886,13 @@ void GL4Renderer::EndFrame(void)
 {
 }
 
-void GL4Renderer::ExportOpaqueScene(const d3scene::Camera& camera)
+void GL4Renderer::ExportOpaqueScene()
 {
 	FlushFontBatch();
 
 	bloom_source_valid = false;
 	ao_scene_valid = false;
 	captured_scene_draw_count_valid = false;
-	captured_scene_projection_valid = false;
-	captured_scene_view_projection_valid = false;
-	captured_scene_inverse_modelview_valid = false;
 
 	const bool ao_enabled = OpenGL_preferred_state.ao_enabled && framebuffer_ok;
 	const bool bloom_enabled = OpenGL_preferred_state.bloom_enabled;
@@ -2948,12 +2911,6 @@ void GL4Renderer::ExportOpaqueScene(const d3scene::Camera& camera)
 
 	if (framebuffer_ok)
 	{
-		const auto matrices = d3scene::viewMatrices(camera);
-		memcpy(captured_scene_view_projection, matrices.view_projection.data(), sizeof(captured_scene_view_projection));
-		memcpy(captured_scene_projection, matrices.projection.data(), sizeof(captured_scene_projection));
-		memcpy(captured_scene_inverse_modelview, matrices.inverse_view.data(), sizeof(captured_scene_inverse_modelview));
-		captured_scene_view_projection_valid = captured_scene_projection_valid = captured_scene_inverse_modelview_valid = true;
-
 		if (late_post_enabled && OpenGL_state.screen_width > 0 && OpenGL_state.screen_height > 0)
 		{
 			GLint old_read = 0, old_draw = 0;
@@ -4355,7 +4312,7 @@ void GL4Renderer::CloseFramebuffer(void)
 	bloom_source_valid = false;
 	ao_scene_valid = false;
 	surface_records.Destroy();
-	frozen_static_motion_valid = false;
+	scene_motion = {}; completed_scene_motion = {};
 	post_protection_mask.Destroy();
 	if (room_fog_portal_buffer != 0)
 	{

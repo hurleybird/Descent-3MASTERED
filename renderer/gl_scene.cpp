@@ -327,8 +327,7 @@ void main() {
 
 void GL4Renderer::DestroySceneResources() {
     scene_view_history.clear();
-    scene_delta_time = scene_afterburner_factor = 0;
-    scene_player_control_delta = {};
+    scene_motion = {}; completed_scene_motion = {};
     scene_temporal_reset = true;
     if (scene_ao_radiance_texture) {
         GLint target; glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING,&target);
@@ -640,13 +639,13 @@ void GL4Renderer::CompositeSceneRadiance(bool paused) {
     // AO is a world-light operation. Apply it to full raster-resolution
     // radiance before nonlinear display resampling or later canvas layers.
     // Those layers therefore need no inferred alpha/protection correction.
-    if (!ao_scene_valid || !bloom_source_valid || !captured_scene_projection_valid ||
-        !captured_scene_inverse_modelview_valid)
+    if (!ao_scene_valid || !bloom_source_valid || !scene_motion.valid)
         Error("World occlusion requires the scheduled opaque scene product");
     const auto source = framebuffers[framebuffer_current_draw].Handle();
     const auto records = surface_records.TextureForRead(source);
     const auto identities = surface_records.ObjectIdTextureForRead(source);
-    const auto* projection = captured_scene_projection;
+    const auto& camera = scene_motion.camera;
+    const auto* projection = camera.current.projection.data();
     const float near_denominator = -projection[11]-projection[10];
     const float far_denominator = projection[11]-projection[10];
     const float near_z = fabsf(projection[14]/near_denominator);
@@ -658,8 +657,8 @@ void GL4Renderer::CompositeSceneRadiance(bool paused) {
         0,records,false,0,0,0,0,framebuffer_logical_offset_x,
         framebuffer_logical_height-OpenGL_state.screen_height-framebuffer_logical_offset_y,
         records,identities,surface_records.width,surface_records.height,SupersamplingFactor(),
-        projection,captured_scene_inverse_modelview,previous_view_projection,
-        moving && have_previous_view_projection,moving,scene_temporal_reset);
+        projection,camera.current.inverse_view.data(),camera.previous.view_projection.data(),
+        moving && camera.previous_valid,moving,scene_temporal_reset);
     if (!result.ao_texture) Error("Scheduled world occlusion did not produce its required image");
     if (measure) glQueryCounter(timings[2],GL_TIMESTAMP);
     ao_compositeshader.Use();
@@ -739,9 +738,7 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
     }
     const auto history = scene_view_history.prepare(presentation.data(),view,visibility.camera);
     if (view.kind == d3scene::ViewKind::Main) {
-        scene_delta_time = presentation.data().delta_time;
-        scene_afterburner_factor = presentation.data().afterburner_factor;
-        scene_player_control_delta = presentation.data().player_control_delta;
+        scene_motion = d3scene::prepareImageMotion(presentation.data(),history,completed_scene_motion);
         scene_temporal_reset = !history.previous_valid;
         have_previous_view_projection = history.previous_valid;
         std::memcpy(previous_view_projection,history.previous.view_projection.data(),sizeof(previous_view_projection));
@@ -780,7 +777,14 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
         glDisablei(GL_BLEND,1); glDisablei(GL_BLEND,4);
     };
     bind_outputs();
-    if (writes_motion) { surface_records.MarkDirty(); motion_vectors_dirty = true; }
+    if (writes_motion) {
+        // This product belongs to the main scene, not StartFrame's legacy
+        // canvas state. Clear background identity/velocity on every execution.
+        surface_records.ClearAttached(framebuffers[framebuffer_current_draw].Handle());
+        bind_outputs();
+        surface_records.MarkDirty(); motion_vectors_dirty = true;
+        motion_vectors_cleared_this_frame = true;
+    }
     post_protection_mask.resolve_valid = false;
     if (visibility.exterior_visible && presentation.data().sky_enabled) {
         // Clear only this view's color attachment. Background geometry never
@@ -872,7 +876,7 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
       }
       if (pass.kind == d3scene::ViewPassKind::ExportOpaqueScene) {
         GLint viewport[4]; glGetIntegerv(GL_VIEWPORT,viewport);
-        ExportOpaqueScene(visibility.camera);
+        ExportOpaqueScene();
         // Read the actual scene outputs at a few capture boundaries, including
         // the history fixture's cut. This never runs in interactive rendering.
         const int capture_frame = AutomatedCaptureFrameIndex();
