@@ -245,6 +245,31 @@ differ; capture probes also show differing Guide-Bot pose inputs, so those delta
 are not an isolated visibility-parity measurement. Gameplay feedback remains a
 compiler barrier; no AI/automap/effect timing is silently changed by this query.
 
+## Continuation: immutable image assets
+
+Scene surfaces now retain revisioned color/baked image assets, including authored
+mips, truecolor bytes and lightmap storage extents. Publication compares borrowed
+source bytes once per referenced image per frame and clones only changed revisions.
+Held frames survive source edits and level unload. Scene execution no longer calls
+BindBitmap/BindLightmap or reads GameBitmaps/GameLightmaps; renderer-owned GL images
+are uploaded by asset identity. The remaining canvas cache is explicitly invalidated
+at the boundary. Missing prepared images fail execution rather than selecting a
+legacy upload fallback.
+
+An ownership bug in old FreeImages was corrected: it deleted assumed sequential
+GL IDs, not the actual names allocated to that cache. Cleanup now deletes its
+recorded names, leaving scene/framebuffer resources alone.
+
+2,403 CPU checks pass, including exhaustive 65,536-value conversion comparisons
+for both packed formats, immutable revisions/mips/truecolor and malformed inputs.
+Initial `scene-image-corpus-clean` exposed widespread one/two-level color changes
+from driver 5-bit expansion. The compiler now preserves the original float-to-byte
+truncation. All eight `scene-image-byte-exact` captures pass; six match the portal
+checkpoint exactly. 000/002 retain the documented differing input/pose captures.
+Lightmap padding is explicitly zero, not uninitialized upload-buffer contents.
+Procedural texture evaluation still needs isolation from gameplay RNG/time and is
+the next preparation-boundary work; image ownership alone does not fix that.
+
 ## Preserved room-inspection test build
 
 - Runtime: `C:/tmp/D3RendererVerification/scene-test` (separate 2 GB copy).

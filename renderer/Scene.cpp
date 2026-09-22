@@ -92,6 +92,7 @@ void SceneAssets::reset() {
         throw std::overflow_error("Scene lifetime exhausted");
     rooms_.clear();
     models_.clear();
+    images_.clear();
     lifetime_ = lifetime;
     revision_ = 0;
 }
@@ -186,6 +187,8 @@ PresentationRef Presentation::freeze(const FrameData& data) {
     }
     const auto validateIndices = [&](const SurfaceBinding& surface) {
         for (auto index : surface.light_indices) require(index < data.lights.size(), "Surface references missing emitter");
+        for (const auto& image : {surface.color_image,surface.baked_image})
+            require(!image || image->id().lifetime == data.scene_lifetime,"Stale image asset in frame");
     };
     std::unordered_set<int32_t> rooms;
     for (const auto& room : data.rooms) {

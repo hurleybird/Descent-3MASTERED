@@ -93,6 +93,30 @@ private:
 };
 using ModelAssetRef = std::shared_ptr<const ModelAsset>;
 
+enum class ImageFormat : uint8_t { ARGB1555, ARGB4444, RGBA8 };
+struct ImageMip {
+    uint32_t width = 0, height = 0;
+    std::vector<uint8_t> pixels;
+};
+struct ImageSource;
+class ImageAsset final {
+public:
+    AssetId id() const { return id_; }
+    ImageFormat format() const { return format_; }
+    const std::vector<ImageMip>& mips() const { return mips_; }
+    uint32_t generatedLevels() const { return generated_levels_; }
+    uint32_t paddedExtent() const { return padded_extent_; }
+private:
+    friend class SceneAssets;
+    ImageAsset(AssetId,const ImageSource&);
+    AssetId id_;
+    ImageFormat format_;
+    std::vector<ImageMip> mips_;
+    uint32_t generated_levels_ = 0;
+    uint32_t padded_extent_ = 0;
+};
+using ImageAssetRef = std::shared_ptr<const ImageAsset>;
+
 // Immutable revisions keep already-published frames alive across level unload,
 // slot reuse, and geometry changes. Reset never invalidates an existing frame.
 class SceneAssets final {
@@ -105,12 +129,15 @@ public:
     ModelAssetRef model(uint32_t slot) const;
     ModelAssetRef publishModel(uint32_t slot, ModelGeometry geometry);
     void removeModel(uint32_t slot);
+    ImageAssetRef image(uint32_t slot) const;
+    ImageAssetRef publishImage(uint32_t slot,const ImageSource&);
     uint64_t lifetime() const { return lifetime_; }
 private:
     uint64_t lifetime_ = 0;
     uint64_t revision_ = 0;
     std::vector<RoomAssetRef> rooms_;
     std::vector<ModelAssetRef> models_;
+    std::vector<ImageAssetRef> images_;
 };
 
 // These are authoring bindings, not alternate material implementations. The
@@ -124,6 +151,8 @@ struct SurfaceBinding {
     Vec3 base_color{1, 1, 1};
     Vec3 color_modulation{1,1,1};
     int32_t bitmap = -1, lightmap_bitmap = -1;
+    ImageAssetRef color_image, baked_image;
+    bool lightmap_wrap = false;
     float lightmap_u_scale = 1, lightmap_v_scale = 1;
     float u_offset = 0, v_offset = 0, alpha = 1;
     bool draw_surface = true, additive = false, texture_alpha = false;

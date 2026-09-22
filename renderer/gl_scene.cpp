@@ -3,6 +3,8 @@
 #include "gl_mesh.h"
 #include "SceneView.h"
 #include "SceneGeometry.h"
+#include "SceneImages.h"
+#include <cstring>
 #include <cmath>
 extern int Last_texel_unit_set;
 
@@ -89,6 +91,8 @@ void main() {
 }
 
 void GL4Renderer::DestroySceneResources() {
+    for (auto& image : scene_images) if (image.second.texture) glDeleteTextures(1,&image.second.texture);
+    scene_images.clear();
     for (auto& room : scene_rooms) {
         if (room.vao) glDeleteVertexArrays(1, &room.vao);
         if (room.buffer) glDeleteBuffers(1, &room.buffer);
@@ -116,6 +120,52 @@ void GL4Renderer::DestroySceneResources() {
     scene_light_ranges.clear();
     scene_asset_lifetime = 0;
     scene_shader.Destroy();
+}
+
+void GL4Renderer::BindSceneImage(const d3scene::ImageAsset& image,int unit,bool wrap,bool baked) {
+    auto& gpu = scene_images[image.id().slot];
+    glActiveTexture(GL_TEXTURE0+unit);
+    if (gpu.id != image.id()) {
+        if (gpu.texture) glDeleteTextures(1,&gpu.texture);
+        glGenTextures(1,&gpu.texture); gpu.id = image.id();
+        glBindTexture(GL_TEXTURE_2D,gpu.texture);
+        glPixelStorei(GL_UNPACK_ALIGNMENT,1);
+        for (size_t level = 0; level < image.mips().size(); ++level) {
+            const auto& mip = image.mips()[level];
+            const uint32_t width = image.paddedExtent() ? image.paddedExtent() : mip.width;
+            const uint32_t height = image.paddedExtent() ? image.paddedExtent() : mip.height;
+            if (image.format() == d3scene::ImageFormat::RGBA8) {
+                std::vector<uint8_t> padded;
+                const auto* pixels = mip.pixels.data();
+                if (image.paddedExtent()) {
+                    padded.resize(size_t(width)*height*4,0);
+                    for (uint32_t y = 0; y < mip.height; ++y)
+                        std::memcpy(padded.data()+size_t(y)*width*4,pixels+size_t(y)*mip.width*4,size_t(mip.width)*4);
+                    pixels = padded.data();
+                }
+                glTexImage2D(GL_TEXTURE_2D,static_cast<GLint>(level),GL_RGBA8,width,height,0,GL_RGBA,GL_UNSIGNED_BYTE,pixels);
+            } else {
+                std::vector<uint8_t> pixels(size_t(width)*height*4,0);
+                for (uint32_t y = 0; y < mip.height; ++y) for (uint32_t x = 0; x < mip.width; ++x) {
+                    uint16_t pixel; std::memcpy(&pixel,mip.pixels.data()+(size_t(y)*mip.width+x)*2,2);
+                    const auto rgba = d3scene::imageRgbaPixel(image.format(),pixel);
+                    std::memcpy(pixels.data()+(size_t(y)*width+x)*4,rgba.data(),4);
+                }
+                glTexImage2D(GL_TEXTURE_2D,static_cast<GLint>(level),GL_RGBA8,width,height,0,GL_RGBA,GL_UNSIGNED_BYTE,pixels.data());
+            }
+        }
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAX_LEVEL,image.generatedLevels() ? image.generatedLevels()-1 : static_cast<GLint>(image.mips().size())-1);
+        if (image.generatedLevels()) glGenerateMipmap(GL_TEXTURE_2D);
+        glPixelStorei(GL_UNPACK_ALIGNMENT,2);
+    } else glBindTexture(GL_TEXTURE_2D,gpu.texture);
+    const bool filter = baked || OpenGL_preferred_state.filtering;
+    const bool mip = !baked && OpenGL_preferred_state.mipping && (image.generatedLevels() > 1 || image.mips().size() > 1);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,wrap ? GL_REPEAT : GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,wrap ? GL_REPEAT : GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,filter ? GL_LINEAR : GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,mip ? (filter ? GL_LINEAR_MIPMAP_LINEAR : GL_NEAREST_MIPMAP_NEAREST) : (filter ? GL_LINEAR : GL_NEAREST));
+    if (OpenGL_max_anisotropy > 1)
+        glTexParameterf(GL_TEXTURE_2D,GL_TEXTURE_MAX_ANISOTROPY_EXT,mip ? std::min(OpenGL_max_anisotropy,std::max(1.f,static_cast<float>(OpenGL_preferred_state.anisotropy))) : 1);
 }
 
 void GL4Renderer::UploadSceneFrame(const d3scene::Presentation& frame) {
@@ -277,9 +327,11 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
             binding = &room.surfaces[item.polygon_index];
         }
         const auto& surface = *binding;
+        if ((surface.bitmap >= 0 && !surface.color_image) || (surface.lightmap_bitmap >= 0 && !surface.baked_image))
+            Error("Scene surface reached execution without prepared image assets");
         const auto& gpu = *mesh;
-        if (surface.bitmap >= 0) BindBitmap(surface.bitmap);
-        if(surface.lightmap_bitmap>=0) BindLightmap(surface.lightmap_bitmap);
+        if (surface.color_image) BindSceneImage(*surface.color_image,0,true,false);
+        if (surface.baked_image) BindSceneImage(*surface.baked_image,1,surface.lightmap_wrap,true);
         scene_shader.Use();
         const auto influences = scene_light_ranges.at(binding);
         glUniform1i(scene_shader.FindUniform("influence_offset"),influences.offset);
@@ -291,8 +343,8 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
         vec("ambient_color",surface.ambient_color); vec("ambient_direction",surface.ambient_direction);
         glUniform1i(scene_shader.FindUniform("directional_ambient"),surface.directional_ambient);
         glUniform1f(scene_shader.FindUniform("lighting_modulation"),surface.lighting_modulation);
-        glUniform1i(scene_shader.FindUniform("use_texture"),surface.bitmap>=0);
-        glUniform1i(scene_shader.FindUniform("use_lightmap"),surface.lightmap_bitmap>=0);
+        glUniform1i(scene_shader.FindUniform("use_texture"),surface.color_image != nullptr);
+        glUniform1i(scene_shader.FindUniform("use_lightmap"),surface.baked_image != nullptr);
         glUniform1i(scene_shader.FindUniform("use_texture_alpha"),surface.texture_alpha);
         glUniform2f(scene_shader.FindUniform("light_scale"),surface.lightmap_u_scale,surface.lightmap_v_scale);
         glUniform2f(scene_shader.FindUniform("texture_offset"),surface.u_offset,surface.v_offset);
@@ -313,6 +365,10 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
     }
     glDepthMask(GL_TRUE); glDisable(GL_BLEND);
     ShaderProgram::ClearBinding();
+    // The remaining canvas adapter maintains its own texture binding cache.
+    // Invalidate that cache rather than lying about scene-owned GL names.
+    ClearBoundTextures();
+    glActiveTexture(GL_TEXTURE0); Last_texel_unit_set = 0;
     rendTEMP_UnbindVertexBuffer();
     rend_NotifyDepthBufferWrite();
     // Broad-phase geometry inspection is NOT gameplay visibility. Do not mark

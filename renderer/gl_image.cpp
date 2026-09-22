@@ -63,15 +63,11 @@ void GL4Renderer::InitImages()
 
 void GL4Renderer::FreeImages()
 {
-	uint* delete_list = (uint*)mem_malloc(Cur_texture_object_num * sizeof(int));
-	ASSERT(delete_list);
-	for (int i = 1; i < Cur_texture_object_num; i++)
-		delete_list[i] = i;
-
-	if (Cur_texture_object_num > 1)
-		glDeleteTextures(Cur_texture_object_num, (const uint*)delete_list);
-
-	mem_free(delete_list);
+	// GL names are not sequential cache indices. Scene/framebuffer textures share
+	// the context; deleting [1,count] can delete someone else's resource.
+	glDeleteTextures(static_cast<GLsizei>(sizeof(texture_name_list)/sizeof(texture_name_list[0])),texture_name_list);
+	memset(texture_name_list,0,sizeof(texture_name_list));
+	Cur_texture_object_num = 1;
 }
 
 void GL4Renderer::DestroyRetainedRoomLightmaps()

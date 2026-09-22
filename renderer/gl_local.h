@@ -139,6 +139,9 @@ class GL4Renderer : public IRenderer
 	std::unordered_map<const d3scene::SurfaceBinding*, ElementRange> scene_uv_ranges;
 	std::unordered_map<const d3scene::PreparedModelPart*, ElementRange> scene_position_ranges;
 	void UploadSceneFrame(const d3scene::Presentation&);
+	struct SceneImageGpu { d3scene::AssetId id; GLuint texture = 0; };
+	std::unordered_map<uint32_t,SceneImageGpu> scene_images;
+	void BindSceneImage(const d3scene::ImageAsset&,int unit,bool wrap,bool baked);
 	void DestroySceneResources();
 	//MAIN
 	oeApplication* ParentApplication = nullptr;

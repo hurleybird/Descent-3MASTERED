@@ -2,11 +2,13 @@
 #include "SceneExtraction.h"
 #include "SceneMaterialBindings.h"
 #include "../renderer/SceneLighting.h"
+#include "../renderer/SceneImages.h"
 #include "descent.h"
 #include "bitmap.h"
 #include <cmath>
 #include <cstring>
 #include <unordered_set>
+#include <unordered_map>
 #include "game.h"
 #include "gameloop.h"
 #include "gametexture.h"
@@ -23,6 +25,50 @@
 bool SceneGeometryInspection() { return FindArg("-scene-inspection") != 0; }
 
 namespace {
+void prepareImages(d3scene::FrameData& data) {
+    std::unordered_map<int,d3scene::ImageAssetRef> images;
+    const auto image = [&](int handle,bool baked) -> d3scene::ImageAssetRef {
+        const int slot = handle+(baked ? MAX_BITMAPS : 0);
+        const auto found = images.find(slot);
+        if (found != images.end()) return found->second;
+        d3scene::ImageSource source;
+        if (baked) {
+            const auto& lightmap = GameLightmaps[handle];
+            source.padded_extent = lightmap.square_res;
+            source.mips.push_back({lightmap.width,lightmap.height,reinterpret_cast<const uint8_t*>(lm_data(handle)),
+                size_t(lightmap.width)*lightmap.height*2});
+        } else {
+            const int width = bm_w(handle,0), height = bm_h(handle,0); // make resident before borrowing data
+            const auto* rgba = bm_data_truecolor(handle);
+            if (rgba) {
+                source.format = d3scene::ImageFormat::RGBA8;
+                source.mips.push_back({static_cast<uint32_t>(width),static_cast<uint32_t>(height),rgba,size_t(width)*height*4});
+                if (bm_mipped(handle)) source.generated_levels = NUM_MIP_LEVELS;
+            } else {
+                source.format = bm_format(handle) == BITMAP_FORMAT_4444 ? d3scene::ImageFormat::ARGB4444 : d3scene::ImageFormat::ARGB1555;
+                const int levels = bm_mipped(handle) ? NUM_MIP_LEVELS : 1;
+                for (int mip = 0; mip < levels; ++mip) {
+                    const int w = bm_w(handle,mip), h = bm_h(handle,mip);
+                    if (w < 1 || h < 1) break;
+                    source.mips.push_back({static_cast<uint32_t>(w),static_cast<uint32_t>(h),
+                        reinterpret_cast<const uint8_t*>(bm_data(handle,mip)),size_t(w)*h*2});
+                }
+            }
+        }
+        auto asset = d3scene::assets().publishImage(slot,source);
+        images.emplace(slot,asset);
+        return asset;
+    };
+    const auto prepare = [&](d3scene::SurfaceBinding& surface) {
+        if (surface.bitmap >= 0) surface.color_image = image(surface.bitmap,false);
+        if (surface.lightmap_bitmap >= 0) {
+            surface.baked_image = image(surface.lightmap_bitmap,true);
+            surface.lightmap_wrap = (GameLightmaps[surface.lightmap_bitmap].flags & LF_WRAP) != 0;
+        }
+    };
+    for (auto& room : data.rooms) for (auto& surface : room.surfaces) prepare(surface);
+    for (auto& object : data.objects) for (auto& part : object.parts) for (auto& surface : part.surfaces) prepare(surface);
+}
 // Field-wise fingerprints diagnose state-vs-pixel variation; never hash padding
 // or use diagnostic hashes as asset identities.
 void logPreparedModels(const d3scene::FrameData& data) {
@@ -134,6 +180,7 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance_history) {
     for (auto& object : data.objects) for (auto& part : object.parts) for (auto& surface : part.surfaces)
         resolveMaterial(surface,static_cast<float>(data.simulation_time),true);
     PrepareGameSceneLights(data);
+    prepareImages(data);
     logPreparedModels(data);
     // No domain is declared complete by a diagnostic subset of its consumers.
     auto prepared = d3scene::Presentation::freeze(data);
