@@ -171,6 +171,18 @@ void SceneAssets::removeModel(uint32_t slot) {
     if (slot < models_.size()) models_[slot].reset();
 }
 
+MaterialPolicy compileMaterialPolicy(const SurfaceBinding& surface, const MeshPolygon& polygon) {
+    MaterialPolicy result;
+    if (surface.texture_alpha || surface.additive) {
+        result.texture_alpha = surface.color_image && surface.color_image->format() != ImageFormat::ARGB1555 ?
+            TextureAlpha::Continuous : TextureAlpha::Cutout;
+    }
+    bool fractional = surface.alpha < 1 || result.texture_alpha == TextureAlpha::Continuous;
+    for (const auto& corner : polygon.corners) fractional = fractional || corner.alpha < 255;
+    result.blend = surface.additive ? BlendMode::Additive : fractional ? BlendMode::Alpha : BlendMode::Solid;
+    return result;
+}
+
 PresentationRef Presentation::freeze(const FrameData& data) {
     require(data.sequence != 0 && data.scene_lifetime != 0, "Unidentified presentation frame");
     require(std::isfinite(data.simulation_time) && std::isfinite(data.delta_time) && data.delta_time >= 0,
@@ -233,7 +245,16 @@ PresentationRef Presentation::freeze(const FrameData& data) {
             }
         } else require(object.parts.empty(), "Model pose has no asset");
     }
-    return PresentationRef(new Presentation(data));
+    std::shared_ptr<Presentation> prepared(new Presentation(data));
+    for (auto& room : prepared->data_.rooms)
+        for (size_t face = 0; face < room.surfaces.size(); ++face)
+            room.surfaces[face].material = compileMaterialPolicy(room.surfaces[face],room.asset->geometry().polygons[face]);
+    for (auto& object : prepared->data_.objects)
+        for (size_t part = 0; part < object.parts.size(); ++part)
+            for (size_t face = 0; face < object.parts[part].surfaces.size(); ++face)
+                object.parts[part].surfaces[face].material = compileMaterialPolicy(object.parts[part].surfaces[face],
+                    object.model->geometry().parts[part].geometry.polygons[face]);
+    return prepared;
 }
 void Presentation::requireExecutable() const {
     if (data_.pending_domains != 0)

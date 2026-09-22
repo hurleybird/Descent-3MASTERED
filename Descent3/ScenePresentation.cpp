@@ -175,17 +175,18 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance_history) {
         if (surface.portal >= 0 && surface.portal < static_cast<int>(room.portals.size()))
             surface.draw_surface = surface.draw_surface && (room.portals[surface.portal].flags & PF_RENDER_FACES);
       }
-      for (auto& portal : room.portals) {
-          const auto& surface = room.surfaces[portal.polygon];
-          portal.traversable = !(portal.flags & PF_RENDER_FACES) || surface.alpha < 1 || surface.additive ||
-              surface.texture_alpha || (GameTextures[surface.texture].flags & TF_PROCEDURAL);
-      }
     }
     PrepareGameModelInstances(data, previous_models ? &previous_models->data() : nullptr);
     for (auto& object : data.objects) for (auto& part : object.parts) for (auto& surface : part.surfaces)
         resolveMaterial(surface,static_cast<float>(data.simulation_time),true);
     PrepareGameSceneLights(data);
     prepareImages(data);
+    for (auto& room : data.rooms) for (auto& portal : room.portals) {
+        const auto& surface = room.surfaces[portal.polygon];
+        const auto material = d3scene::compileMaterialPolicy(surface,room.asset->geometry().polygons[portal.polygon]);
+        portal.traversable = !(portal.flags & PF_RENDER_FACES) || material.allowsBehind() ||
+            (GameTextures[surface.texture].flags & TF_PROCEDURAL);
+    }
     logPreparedModels(data);
     // No domain is declared complete by a diagnostic subset of its consumers.
     auto prepared = d3scene::Presentation::freeze(data);

@@ -1,5 +1,21 @@
 # Renderer migration checkpoint
 
+## Continuation: published material coverage policy
+
+Publication now compiles solid/cutout/alpha/additive policy from surface, image
+format and vertex alpha. Visibility sorting, GPU blending/depth writes and portal
+transparency consume this contract instead of independently inferring state.
+Fractional texture alpha no longer silently uses opaque depth writes; additive
+materials consume their texture alpha even without TF_TMAP2. Room 4444 specular
+masks remain explicitly excluded from color coverage by material authoring.
+
+3,424 checks pass; the full build and all eight `scene-material-clean` captures
+pass. Seven saves are pixel-identical to `scene-procedural-rng-guard`; save002 has
+mean RGB delta 0.026181, and its Guide-Bot pose fingerprint differs. That image was
+visually inspected. The corpus does not establish GPU coverage for every alpha
+format; those policies have CPU tests and need dedicated visual fixtures as the
+remaining effects/material families migrate. No pending domain marked complete.
+
 ## Continuation: procedural evaluation inputs
 
 Procedural kernels now receive a local evaluation context carrying canonical

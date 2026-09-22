@@ -121,8 +121,7 @@ ViewVisibility queryView(const Presentation& frame, const View& view) {
             ++result.stats.surfaces_outside;
             return;
         }
-        item.blended = surface.alpha < .999f || surface.additive;
-        for (const auto& corner : polygon.corners) item.blended = item.blended || corner.alpha < 255;
+        item.blended = surface.material.blended();
         item.depth = static_cast<float>(dot(view.camera.forward,subtract(point,view.camera.position)));
         result.surfaces.push_back(item);
     };

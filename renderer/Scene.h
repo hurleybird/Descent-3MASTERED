@@ -140,9 +140,20 @@ private:
     std::vector<ImageAssetRef> images_;
 };
 
+enum class BlendMode : uint8_t { Solid, Alpha, Additive };
+enum class TextureAlpha : uint8_t { Ignore, Cutout, Continuous };
+struct MaterialPolicy {
+    BlendMode blend = BlendMode::Solid;
+    TextureAlpha texture_alpha = TextureAlpha::Ignore;
+    float alpha_cutoff = .01f;
+    bool blended() const { return blend != BlendMode::Solid; }
+    bool writesSolidDepth() const { return !blended(); }
+    bool allowsBehind() const { return blended() || texture_alpha != TextureAlpha::Ignore; }
+};
 // These are authoring bindings, not alternate material implementations. The
 // material compiler must resolve them before execution is enabled.
 struct SurfaceBinding {
+    MaterialPolicy material; // compiled by publication, shared by all consumers
     std::vector<uint32_t> light_indices;
     std::vector<Vec2> baked_uvs; // optional per-instance corner UVs, never shared model scratch
     Vec3 ambient_color{1,1,1}, ambient_direction{0,-1,0};
@@ -160,6 +171,7 @@ struct SurfaceBinding {
     uint32_t authored_flags = 0;
     uint8_t light_multiple = 0;
 };
+MaterialPolicy compileMaterialPolicy(const SurfaceBinding&, const MeshPolygon&);
 struct Portal {
     int32_t polygon = -1, destination_room = -1, destination_portal = -1;
     int32_t combine_master = -1;

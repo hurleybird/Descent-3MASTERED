@@ -53,6 +53,7 @@ uniform vec3 base_color;
 uniform vec3 color_modulation;
 uniform vec2 light_scale, texture_offset;
 uniform float material_alpha;
+uniform float alpha_cutoff;
 uniform float lighting_modulation;
 uniform samplerBuffer scene_lights;
 uniform isamplerBuffer scene_influences;
@@ -65,7 +66,7 @@ layout(location=0) out vec4 color;
 void main() {
     vec4 base=use_texture != 0 ? texture(colortexture,texcoord+texture_offset) : vec4(base_color,1);
     base.a=(use_texture_alpha != 0 ? base.a : 1.0)*vertex_alpha*material_alpha;
-    if(base.a < 0.01) discard;
+    if(base.a < alpha_cutoff) discard;
     vec3 illumination = use_lightmap != 0 ? texture(lightmaptexture,lightcoord*light_scale).rgb : ambient;
     vec3 dynamic_color = vec3(0);
     for (int index = 0; index < influence_count; ++index) {
@@ -345,14 +346,16 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
         glUniform1f(scene_shader.FindUniform("lighting_modulation"),surface.lighting_modulation);
         glUniform1i(scene_shader.FindUniform("use_texture"),surface.color_image != nullptr);
         glUniform1i(scene_shader.FindUniform("use_lightmap"),surface.baked_image != nullptr);
-        glUniform1i(scene_shader.FindUniform("use_texture_alpha"),surface.texture_alpha);
+        glUniform1i(scene_shader.FindUniform("use_texture_alpha"),surface.material.texture_alpha != d3scene::TextureAlpha::Ignore);
+        glUniform1f(scene_shader.FindUniform("alpha_cutoff"),surface.material.alpha_cutoff);
         glUniform2f(scene_shader.FindUniform("light_scale"),surface.lightmap_u_scale,surface.lightmap_v_scale);
         glUniform2f(scene_shader.FindUniform("texture_offset"),surface.u_offset,surface.v_offset);
         glUniform1f(scene_shader.FindUniform("material_alpha"),surface.alpha);
-        if(item.blended) {
-            glEnable(GL_BLEND); glBlendFunc(GL_SRC_ALPHA,surface.additive?GL_ONE:GL_ONE_MINUS_SRC_ALPHA);
-            glDepthMask(GL_FALSE);
-        } else { glDisable(GL_BLEND); glDepthMask(GL_TRUE); }
+        if(surface.material.blended()) {
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA,surface.material.blend == d3scene::BlendMode::Additive ? GL_ONE : GL_ONE_MINUS_SRC_ALPHA);
+        } else glDisable(GL_BLEND);
+        glDepthMask(surface.material.writesSolidDepth() ? GL_TRUE : GL_FALSE);
         glBindVertexArray(gpu.vao);
         const auto range=gpu.polygons[item.polygon_index];
         const auto uv_range = scene_uv_ranges.at(binding);
