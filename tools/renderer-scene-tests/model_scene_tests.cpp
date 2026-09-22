@@ -92,26 +92,28 @@ int runModelSceneTests() {
     check(asset->geometry().parts[0].geometry.vertices[0].x == -1, "Model publication retained mutable geometry");
     FrameData data;
     data.sequence = 1; data.scene_lifetime = assets.lifetime();
-    ObjectState object;
+    ModelInstance object;
     object.models.emplace_back();
-    object.handle = 42; object.models[0].asset = asset; object.current.position.z = 12;
-    object.radius = 1;
+    object.identity = 42; object.models[0].asset = asset; object.current.position.z = 12;
+    object.has_owner = true; object.owner = 42;
+    ObjectState owner; owner.handle = 42; owner.radius = 1; owner.current = object.current;
+    data.objects.push_back(owner); owner.handle = 43; data.objects.push_back(owner);
     PreparedModelPart part;
     part.current.position.z = -2;
     part.surfaces.resize(1); // intentionally flat-color, no bitmap
     part.surfaces[0].baked_uvs = {{0,0},{.5f,1},{1,0}};
     object.models[0].parts.push_back(part);
-    data.objects.push_back(object);
-    data.objects.push_back(object); data.objects[1].handle = 43;
-    data.objects[1].current.position.z = 20;
-    data.objects[1].models[0].parts[0].surfaces[0].alpha = 0.5f;
+    data.model_instances.push_back(object);
+    data.model_instances.push_back(object); data.model_instances[1].identity = 43; data.model_instances[1].owner = 43;
+    data.model_instances[1].current.position.z = 20;
+    data.model_instances[1].models[0].parts[0].surfaces[0].alpha = 0.5f;
     auto frame = Presentation::freeze(data);
-    check(frame->data().objects[0].has_render_bounds && frame->data().objects[0].render_bounds.minimum.z == 10 &&
-        frame->data().objects[0].render_bounds.maximum.x == 1,"Publication did not compile world-space posed bounds");
-    data.objects[0].models[0].parts[0].surfaces[0].baked_uvs[0].x = 99;
-    check(frame->data().objects[0].models[0].parts[0].surfaces[0].baked_uvs[0].x == 0,"Instance baked UVs not owned by frame");
-    data.objects[0].models[0].parts[0].current.position.z = 55;
-    check(frame->data().objects[0].models[0].parts[0].current.position.z == -2, "Held frame pose changed");
+    check(frame->data().model_instances[0].has_render_bounds && frame->data().model_instances[0].render_bounds.minimum.z == 10 &&
+        frame->data().model_instances[0].render_bounds.maximum.x == 1,"Publication did not compile world-space posed bounds");
+    data.model_instances[0].models[0].parts[0].surfaces[0].baked_uvs[0].x = 99;
+    check(frame->data().model_instances[0].models[0].parts[0].surfaces[0].baked_uvs[0].x == 0,"Instance baked UVs not owned by frame");
+    data.model_instances[0].models[0].parts[0].current.position.z = 55;
+    check(frame->data().model_instances[0].models[0].parts[0].current.position.z == -2, "Held frame pose changed");
     View view;
     view.history_key = 1; view.viewport = view.projection_anchor = {0,0,1280,720};
     auto result = queryView(*frame,view);
@@ -120,38 +122,39 @@ int runModelSceneTests() {
     check(result.surfaces[1].blended && result.surfaces[1].world.position.z == 18, "Instance material leaked between objects");
     view.exclude_object = true; view.excluded_object = 42;
     auto excluded = queryView(*frame,view);
-    check(excluded.surfaces.size() == 1 && excluded.surfaces[0].object_index == 1, "Excluded viewer mesh was rendered");
+    check(excluded.surfaces.size() == 1 && excluded.surfaces[0].model_instance_index == 1, "Excluded viewer mesh was rendered");
     check(result.surfaces.size() == 2, "Auxiliary query changed prior surface list");
     view.exclude_object = false; view.camera.position.x = 100;
     check(queryView(*frame,view).surfaces.empty(), "Offscreen posed geometry not rejected");
     // A pose can extend outside an obsolete source sphere. Both geometry and
     // the candidate object list must use the published rendering bounds.
     auto displaced = frame->data();
+    displaced.model_instances.resize(1); displaced.model_instances[0].current.position.x = 100;
     displaced.objects.resize(1); displaced.objects[0].current.position.x = 100;
-    displaced.objects[0].models[0].parts[0].current.position.x = -100;
+    displaced.model_instances[0].models[0].parts[0].current.position.x = -100;
     view.camera.position.x = 0;
     auto candidates = queryView(*Presentation::freeze(displaced),view);
     check(candidates.object_indices.size() == 1 && candidates.surfaces.size() == 1, "Source sphere incorrectly culled posed mesh");
-    displaced.objects[0].models[0].parts[0].current.position.x = 0;
-    displaced.objects[0].models[0].parts[0].vertices = {{-101,-1,0},{-100,1,0},{-99,-1,0}};
+    displaced.model_instances[0].models[0].parts[0].current.position.x = 0;
+    displaced.model_instances[0].models[0].parts[0].vertices = {{-101,-1,0},{-100,1,0},{-99,-1,0}};
     auto frozen_shape = Presentation::freeze(displaced);
-    check(frozen_shape->data().objects[0].render_bounds.minimum.x == -1 &&
-        frozen_shape->data().objects[0].render_bounds.maximum.x == 1,"Deformation bounds used authored positions");
+    check(frozen_shape->data().model_instances[0].render_bounds.minimum.x == -1 &&
+        frozen_shape->data().model_instances[0].render_bounds.maximum.x == 1,"Deformation bounds used authored positions");
     check(queryView(*frozen_shape,view).surfaces.size() == 1,"Visibility did not consume prepared positions");
-    displaced.objects[0].models[0].parts[0].vertices[0].x = 400;
-    check(frozen_shape->data().objects[0].models[0].parts[0].vertices[0].x == -101,"Published deformation retained mutable input");
-    auto hidden = frozen_shape->data(); hidden.objects[0].models[0].parts[0].draw = false;
+    displaced.model_instances[0].models[0].parts[0].vertices[0].x = 400;
+    check(frozen_shape->data().model_instances[0].models[0].parts[0].vertices[0].x == -101,"Published deformation retained mutable input");
+    auto hidden = frozen_shape->data(); hidden.model_instances[0].models[0].parts[0].draw = false;
     const auto hidden_frame = Presentation::freeze(hidden);
-    check(!hidden_frame->data().objects[0].has_render_bounds && queryView(*hidden_frame,view).object_indices.empty(),
+    check(!hidden_frame->data().model_instances[0].has_render_bounds && queryView(*hidden_frame,view).object_indices.empty(),
         "Hidden part retained stale rendering bounds");
     auto rotated = frozen_shape->data();
-    rotated.objects[0].current = {};
-    auto& rotated_part = rotated.objects[0].models[0].parts[0];
+    rotated.model_instances[0].current = {};
+    auto& rotated_part = rotated.model_instances[0].models[0].parts[0];
     rotated_part.vertices = {{-1,-1,0},{0,1,0},{1,-1,0}};
     rotated_part.current.position = {0,0,10};
     rotated_part.current.right = {0,2,0}; rotated_part.current.up = {-3,0,0};
     const auto rotated_frame = Presentation::freeze(rotated);
-    const auto bounds = rotated_frame->data().objects[0].render_bounds;
+    const auto bounds = rotated_frame->data().model_instances[0].render_bounds;
     check(bounds.minimum.x == -3 && bounds.maximum.x == 3 && bounds.minimum.y == -2 && bounds.maximum.y == 2,
         "Rotated/scaled part bounds were not transformed");
     check(queryView(*rotated_frame,view).surfaces.size() == 1,"Valid transformed bounds hid visible geometry");
@@ -160,7 +163,7 @@ int runModelSceneTests() {
     // deformed vertices outside the simulation sphere.
     for (int sample = 0; sample < 160; ++sample) {
         auto posed = rotated;
-        auto& instance = posed.objects[0];
+        auto& instance = posed.model_instances[0];
         instance.current.position = {float(sample%13-6)*4,float(sample%7-3)*3,float(sample%19)-9};
         instance.models[0].parts[0].vertices[1].x += float(sample%5)*2;
         const auto transform = compose(instance.current,instance.models[0].parts[0].current);
@@ -177,35 +180,35 @@ int runModelSceneTests() {
     }
     auto lit_shape = frozen_shape->data();
     Light light; light.id.owner = 1; light.radius = 15; light.position = {0,0,10}; light.color = {1,1,1};
-    lit_shape.lights.push_back(light); lit_shape.objects[0].room = -1;
+    lit_shape.lights.push_back(light); lit_shape.model_instances[0].room = -1;
     prepareLightInfluences(lit_shape);
-    check(lit_shape.objects[0].models[0].parts[0].surfaces[0].light_indices.size() == 1,"Light query used undeformed geometry");
+    check(lit_shape.model_instances[0].models[0].parts[0].surfaces[0].light_indices.size() == 1,"Light query used undeformed geometry");
     auto invalid = modelGeometry(); invalid.parts[0].parent = 0;
     rejects([&] { assets.publishModel(4,invalid); });
     invalid = modelGeometry(); invalid.parts[0].polygon_materials[0] = 0;
     rejects([&] { assets.publishModel(4,invalid); });
     invalid = modelGeometry(); invalid.parts[0].geometry.vertex_normals.clear();
     rejects([&] { assets.publishModel(4,invalid); });
-    auto malformed = frame->data(); malformed.objects[0].models[0].parts.clear();
+    auto malformed = frame->data(); malformed.model_instances[0].models[0].parts.clear();
     rejects([&] { Presentation::freeze(malformed); });
-    malformed = frame->data(); malformed.objects[0].models[0].parts[0].vertices = {{0,0,0}};
+    malformed = frame->data(); malformed.model_instances[0].models[0].parts[0].vertices = {{0,0,0}};
     rejects([&] { Presentation::freeze(malformed); });
-    malformed = frame->data(); malformed.objects[0].models[0].parts[0].surfaces[0].baked_uvs.pop_back();
+    malformed = frame->data(); malformed.model_instances[0].models[0].parts[0].surfaces[0].baked_uvs.pop_back();
     rejects([&] { Presentation::freeze(malformed); });
-    malformed = frame->data(); malformed.objects[0].models[0].parts[0].surfaces[0].alpha = std::numeric_limits<float>::quiet_NaN();
+    malformed = frame->data(); malformed.model_instances[0].models[0].parts[0].surfaces[0].alpha = std::numeric_limits<float>::quiet_NaN();
     rejects([&] { Presentation::freeze(malformed); });
     auto motion_data = frame->data();
     malformed = frame->data();
-    malformed.objects[0].models[0].parts[0].surfaces[0].occlusion_class = static_cast<OcclusionClass>(255);
+    malformed.model_instances[0].models[0].parts[0].surfaces[0].occlusion_class = static_cast<OcclusionClass>(255);
     rejects([&] { Presentation::freeze(malformed); });
-    motion_data.objects[0].models[0].parts[0].surfaces[0].occlusion_class = OcclusionClass::Model;
-    check(Presentation::freeze(motion_data)->data().objects[0].models[0].parts[0].surfaces[0].occlusion_class == OcclusionClass::Model,
+    motion_data.model_instances[0].models[0].parts[0].surfaces[0].occlusion_class = OcclusionClass::Model;
+    check(Presentation::freeze(motion_data)->data().model_instances[0].models[0].parts[0].surfaces[0].occlusion_class == OcclusionClass::Model,
         "Publication lost explicit material occlusion semantics");
-    auto& moving = motion_data.objects[0];
+    auto& moving = motion_data.model_instances[0];
     moving.has_previous = true; moving.models[0].parts[0].has_previous = true;
     moving.previous.position = {2,3,4}; moving.models[0].parts[0].previous.position = {5,6,7};
     auto moving_frame = Presentation::freeze(motion_data);
-    VisibleSurface moving_surface; moving_surface.model = true; moving_surface.object_index = 0; moving_surface.part_index = 0;
+    VisibleSurface moving_surface; moving_surface.model = true; moving_surface.model_instance_index = 0; moving_surface.part_index = 0;
     const auto motion = surfaceMotion(*moving_frame,moving_surface,true);
     check(motion.valid && motion.identity != 0 && motion.previous.position.x == 7 && motion.previous.position.z == 11,
         "Motion did not compose previous object and hierarchical part transforms");
@@ -232,8 +235,8 @@ int runModelSceneTests() {
     check(!projectMotion({2,4,0,10},{1,2,0,10},false).valid,"Missing pose history fabricated a zero-motion correspondence");
     // Every camera selects from one immutable set, including variant-owned
     // glow/facing attachments. No query can swap the object's shared model.
-    auto lod_data = frame->data(); lod_data.objects.resize(1);
-    auto& lod_object = lod_data.objects[0];
+    auto lod_data = frame->data(); lod_data.model_instances.resize(1); lod_data.objects.resize(1);
+    auto& lod_object = lod_data.model_instances[0];
     lod_object.models.resize(3,lod_object.models[0]);
     lod_object.lod_distances = {20,40}; lod_object.lod_models = {{0,1,2}};
     for (uint32_t variant = 0; variant < 3; ++variant) {
@@ -242,7 +245,8 @@ int runModelSceneTests() {
         attachment.asset = assets.publishMesh(9,unitBillboardQuad());
         attachment.world.position = {0,0,10};
         attachment.surface.bitmap = 1; attachment.surface.unlit = true; attachment.surface.two_sided = true;
-        attachment.has_owner = true; attachment.owner = lod_object.handle; attachment.owner_model_variant = variant;
+        attachment.has_owner = true; attachment.owner = lod_object.owner;
+        attachment.model_instance = lod_object.identity; attachment.model_variant = variant;
         lod_data.meshes.push_back(attachment);
     }
     const auto lod_frame = Presentation::freeze(lod_data);
@@ -258,7 +262,7 @@ int runModelSceneTests() {
             }
             if (surface.mesh) {
                 ++attachments;
-                check(lod_frame->data().meshes[surface.mesh_index].owner_model_variant == int(variant),
+                check(lod_frame->data().meshes[surface.mesh_index].model_variant == int(variant),
                     "LOD query rendered an attachment from another variant");
             }
         }
@@ -266,19 +270,19 @@ int runModelSceneTests() {
     }
     check(queryView(*lod_frame,view).surfaces[0].model_variant == 0,"Secondary view mutated main-view LOD selection");
     auto variant_motion = lod_frame->data();
-    variant_motion.objects[0].has_previous = true;
+    variant_motion.model_instances[0].has_previous = true;
     for (uint32_t variant = 0; variant < 3; ++variant) {
-        auto& pose = variant_motion.objects[0].models[variant].parts[0];
+        auto& pose = variant_motion.model_instances[0].models[variant].parts[0];
         pose.has_previous = true; pose.previous.position.x = float(variant+1);
     }
     const auto variant_motion_frame = Presentation::freeze(variant_motion);
     for (uint32_t variant = 0; variant < 3; ++variant) {
         VisibleSurface surface; surface.model = true; surface.model_variant = variant;
-        const auto motion = surfaceMotion(*variant_motion_frame,surface,true);
-        check(motion.valid && motion.previous.position.x == float(variant+1),"LOD motion borrowed another variant's pose");
+        const auto variant_surface_motion = surfaceMotion(*variant_motion_frame,surface,true);
+        check(variant_surface_motion.valid && variant_surface_motion.previous.position.x == float(variant+1),"LOD motion borrowed another variant's pose");
     }
     auto bounded_lod = lod_frame->data();
-    bounded_lod.objects[0].models[1].parts[0].current.position.x = 100;
+    bounded_lod.model_instances[0].models[1].parts[0].current.position.x = 100;
     auto medium_view = view; medium_view.camera.position.z = -20;
     const auto bounded_query = queryView(*Presentation::freeze(bounded_lod),medium_view);
     bool wrong_bounds = false;
@@ -293,15 +297,50 @@ int runModelSceneTests() {
     lod_object.lod_models[2] = 3;
     rejects([&] { Presentation::freeze(lod_data); });
     lod_object.lod_models[2] = 2;
-    lod_data.meshes[0].owner_model_variant = 3;
+    lod_data.meshes[0].model_variant = 3;
     rejects([&] { Presentation::freeze(lod_data); });
-    lod_data.meshes[0].owner_model_variant = 0; lod_data.meshes[0].has_owner = false;
+    lod_data.meshes[0].model_variant = 0; lod_data.meshes[0].model_instance = 0;
     rejects([&] { Presentation::freeze(lod_data); });
     lod_data.meshes[0].has_owner = true;
     lod_object.lod_distances.x = std::numeric_limits<float>::infinity();
     rejects([&] { Presentation::freeze(lod_data); });
+    {
+        auto standalone = frame->data();
+        standalone.objects.clear();
+        for (auto& instance : standalone.model_instances) instance.has_owner = false;
+        const auto standalone_frame = Presentation::freeze(standalone);
+        const auto standalone_query = queryView(*standalone_frame,view);
+        check(standalone_query.surfaces.size() == 2 && standalone_query.object_indices.empty(),
+            "Standalone models required or invented gameplay objects");
+        auto excluded_view = view; excluded_view.exclude_object = true; excluded_view.excluded_object = 42;
+        check(queryView(*standalone_frame,excluded_view).surfaces.size() == 2,"Object exclusion hid an unrelated standalone model");
+        VisibleSurface standalone_surface; standalone_surface.model = true;
+        check(!surfaceMotion(*standalone_frame,standalone_surface,true).valid &&
+            surfaceMotion(*standalone_frame,standalone_surface,true).identity == 0,"Standalone model borrowed game motion identity");
+        PreparedMesh attachment; attachment.asset = assets.publishMesh(19,unitBillboardQuad());
+        attachment.world.position.z = 10; attachment.model_instance = standalone.model_instances[0].identity;
+        attachment.model_variant = 0; standalone.meshes.push_back(attachment);
+        check(queryView(*Presentation::freeze(standalone),view).surfaces.size() == 3,"Standalone model attachment needed a game owner");
+        standalone.model_instances[0].visible = false;
+        check(queryView(*Presentation::freeze(standalone),view).surfaces.size() == 1,"Hidden standalone model left an attachment visible");
+        standalone.model_instances[0].identity = standalone.model_instances[1].identity;
+        rejects([&] { Presentation::freeze(standalone); });
+        standalone = frame->data(); standalone.model_instances[0].identity = 0;
+        rejects([&] { Presentation::freeze(standalone); });
+        standalone = frame->data(); standalone.model_instances[0].owner = 999;
+        rejects([&] { Presentation::freeze(standalone); });
+        standalone = frame->data(); standalone.model_instances[0].models.clear();
+        rejects([&] { Presentation::freeze(standalone); });
+        auto multi = frame->data(); multi.objects.resize(1);
+        multi.model_instances[1].owner = multi.model_instances[0].owner;
+        const auto multi_query = queryView(*Presentation::freeze(multi),view);
+        check(multi_query.surfaces.size() == 2 && multi_query.object_indices.size() == 1,
+            "Multiple model instances duplicated their game observation owner");
+        check(queryView(*Presentation::freeze(multi),excluded_view).surfaces.empty(),
+            "Owner exclusion failed to exclude all its model instances");
+    }
     assets.removeModel(3);
-    check(!assets.model(3) && frame->data().objects[0].models[0].asset == asset, "Model unload invalidated held frame");
+    check(!assets.model(3) && frame->data().model_instances[0].models[0].asset == asset, "Model unload invalidated held frame");
     assets.reset();
     check(assets.publishModel(3,modelGeometry())->id().lifetime != asset->id().lifetime, "Model slot reuse kept old lifetime");
     malformed = frame->data(); malformed.scene_lifetime = assets.lifetime();

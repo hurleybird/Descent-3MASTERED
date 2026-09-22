@@ -375,6 +375,13 @@ PresentationRef Presentation::freeze(const FrameData& data) {
         require(objects.emplace(object.handle,&object).second, "Duplicate object lifetime in scene");
         require(finite(object.current) && finite(object.previous) && std::isfinite(object.radius) && object.radius >= 0,
             "Invalid object transform or radius");
+    }
+    std::unordered_map<uint64_t,const ModelInstance*> model_instances;
+    for (const auto& object : data.model_instances) {
+        require(object.identity && model_instances.emplace(object.identity,&object).second,"Duplicate or absent model instance identity");
+        require(!object.has_owner || objects.count(object.owner),"Model owner is not part of this presentation");
+        require(finite(object.current) && finite(object.previous),"Invalid model placement");
+        require(!object.models.empty(),"Model instance has no variants");
         require(std::isfinite(object.lod_distances.x) && std::isfinite(object.lod_distances.y) &&
             object.lod_distances.x >= 0 && object.lod_distances.y >= 0,"Invalid model LOD distances");
         for (const auto index : object.lod_models)
@@ -405,9 +412,10 @@ PresentationRef Presentation::freeze(const FrameData& data) {
     }
     for (const auto& mesh : data.meshes) {
         require(!mesh.has_owner || objects.count(mesh.owner),"Mesh owner is not part of this presentation");
-        require(mesh.owner_model_variant >= -1 && (mesh.owner_model_variant < 0 ||
-            (mesh.has_owner && size_t(mesh.owner_model_variant) < objects.at(mesh.owner)->models.size())),
-            "Model attachment references an absent owner variant");
+        require(mesh.model_variant >= -1 && (mesh.model_instance == 0 ? mesh.model_variant == -1 :
+            (model_instances.count(mesh.model_instance) && mesh.model_variant >= 0 &&
+                size_t(mesh.model_variant) < model_instances.at(mesh.model_instance)->models.size())),
+            "Model attachment references an absent instance variant");
     }
     std::shared_ptr<Presentation> prepared(new Presentation(data));
     for (auto& mesh : prepared->data_.meshes) {
@@ -424,7 +432,7 @@ PresentationRef Presentation::freeze(const FrameData& data) {
     for (auto& room : prepared->data_.rooms)
         for (size_t face = 0; face < room.surfaces.size(); ++face)
             room.surfaces[face].material = compileMaterialPolicy(room.surfaces[face],room.asset->geometry().polygons[face]);
-    for (auto& object : prepared->data_.objects) {
+    for (auto& object : prepared->data_.model_instances) {
         object.has_render_bounds = false;
         const auto include = [](Bounds& bounds,bool& valid,Vec3 point) {
             require(finite(point),"Non-finite posed model position");

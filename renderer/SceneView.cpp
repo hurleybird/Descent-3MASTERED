@@ -209,7 +209,7 @@ View resolveView(const Presentation& frame, View view) {
     view.attached_camera = false; // resolved views cannot apply an effect twice
     return view;
 }
-uint32_t selectModelVariant(const ObjectState& object,const Camera& camera) {
+uint32_t selectModelVariant(const ModelInstance& object,const Camera& camera) {
     const auto depth = dot(camera.transform.forward,subtract(object.current.position,camera.transform.position));
     return object.lod_models[depth < object.lod_distances.x ? 0 : depth < object.lod_distances.y ? 1 : 2];
 }
@@ -269,16 +269,38 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
             consider(MeshView(geometry),room.surfaces[f],{static_cast<uint32_t>(r),static_cast<uint32_t>(f)},windows[r]);
         }
     }
+    std::unordered_map<uint32_t,const ObjectState*> owners;
+    std::unordered_map<uint32_t,uint32_t> owner_indices;
+    std::unordered_map<uint64_t,const ModelInstance*> instances;
+    std::unordered_set<uint32_t> model_owners, visible_owners;
+    for (size_t i = 0; i < frame.data().objects.size(); ++i) {
+        const auto& owner = frame.data().objects[i];
+        owners.emplace(owner.handle,&owner); owner_indices.emplace(owner.handle,static_cast<uint32_t>(i));
+    }
+    for (const auto& instance : frame.data().model_instances) {
+        instances.emplace(instance.identity,&instance);
+        if (instance.has_owner) model_owners.insert(instance.owner);
+    }
+    const auto eligible = [&](const ModelInstance& instance) {
+        return instance.visible && (!instance.has_owner || (owners.at(instance.owner)->visible &&
+            !(view.exclude_object && instance.owner == view.excluded_object)));
+    };
     for (size_t i = 0; i < frame.data().objects.size(); ++i) {
         const auto& object = frame.data().objects[i];
+        if (model_owners.count(object.handle)) continue;
         if (!object.visible) continue;
         if (view.exclude_object && object.handle == view.excluded_object) continue;
         const auto window = spatialWindow(object.room);
         if (!window.visible) continue;
-        if (!object.models.empty() && (!object.has_render_bounds || boundsOutside(result.camera,object.render_bounds,window))) continue;
-        if (!object.models.empty() || sphereIntersects(result.camera,object.current.position,object.radius))
+        if (sphereIntersects(result.camera,object.current.position,object.radius))
             result.object_indices.push_back(static_cast<uint32_t>(i));
-        if (object.models.empty()) continue;
+    }
+    for (size_t i = 0; i < frame.data().model_instances.size(); ++i) {
+        const auto& object = frame.data().model_instances[i];
+        if (!eligible(object)) continue;
+        const auto window = spatialWindow(object.room);
+        if (!window.visible || !object.has_render_bounds || boundsOutside(result.camera,object.render_bounds,window)) continue;
+        if (object.has_owner && visible_owners.insert(object.owner).second) result.object_indices.push_back(owner_indices.at(object.owner));
         const uint32_t variant = selectModelVariant(object,result.camera);
         const auto& model = object.models[variant];
         if (!model.has_render_bounds || boundsOutside(result.camera,model.render_bounds,window)) continue;
@@ -291,7 +313,7 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
             const auto& geometry = model.asset->geometry().parts[part].geometry;
             for (size_t face = 0; face < geometry.polygons.size(); ++face) {
                 VisibleSurface item;
-                item.model = true; item.object_index = static_cast<uint32_t>(i);
+                item.model = true; item.model_instance_index = static_cast<uint32_t>(i);
                 item.model_variant = variant;
                 item.part_index = static_cast<uint32_t>(part); item.polygon_index = static_cast<uint32_t>(face);
                 item.world = world;
@@ -319,19 +341,19 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
             }
         }
     }
-    std::unordered_map<uint32_t,const ObjectState*> owners;
     std::unordered_set<uint64_t> visible_receivers;
     for (const auto& surface : result.surfaces) if (!surface.model && !surface.terrain && !surface.mesh)
         visible_receivers.insert((uint64_t(surface.room_index)<<32)|surface.polygon_index);
-    for (const auto& object : frame.data().objects) owners.emplace(object.handle,&object);
     for (size_t index = 0; index < frame.data().meshes.size(); ++index) {
         const auto& instance = frame.data().meshes[index];
         if (instance.receiver_polygon >= 0 && !visible_receivers.count(
             (uint64_t(room_indices.at(instance.room))<<32)|uint32_t(instance.receiver_polygon))) continue;
         if (instance.has_owner && ((view.exclude_object && instance.owner == view.excluded_object) ||
             !owners.at(instance.owner)->visible)) continue;
-        if (instance.owner_model_variant >= 0 &&
-            uint32_t(instance.owner_model_variant) != selectModelVariant(*owners.at(instance.owner),result.camera)) continue;
+        if (instance.model_instance) {
+            const auto& model = *instances.at(instance.model_instance);
+            if (!eligible(model) || uint32_t(instance.model_variant) != selectModelVariant(model,result.camera)) continue;
+        }
         const auto& geometry = instance.asset->geometry();
         if (!instance.surface.draw_surface || geometry.polygons.empty() ||
             (instance.surface.material.layer == RenderLayer::Background && !result.exterior_visible)) continue;
@@ -355,6 +377,7 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
         item.depth = static_cast<float>(dot(view.camera.forward,subtract(item.world.position,view.camera.position)));
         result.surfaces.push_back(item);
     }
+    std::sort(result.object_indices.begin(),result.object_indices.end());
     std::stable_sort(result.surfaces.begin(),result.surfaces.end(),[](const VisibleSurface& a,const VisibleSurface& b) {
         if (a.layer != b.layer) return a.layer == RenderLayer::Background;
         if (a.layer == RenderLayer::Background) return false; // retain authored compositing order
@@ -367,7 +390,7 @@ const SurfaceBinding& visibleSurfaceBinding(const Presentation& frame,const Visi
     const auto& data = frame.data();
     if (item.mesh) return data.meshes[item.mesh_index].surface;
     if (item.terrain) return data.terrain.patches[item.terrain_patch][item.terrain_batch];
-    if (item.model) return data.objects[item.object_index].models[item.model_variant].parts[item.part_index].surfaces[item.polygon_index];
+    if (item.model) return data.model_instances[item.model_instance_index].models[item.model_variant].parts[item.part_index].surfaces[item.polygon_index];
     return data.rooms[item.room_index].surfaces[item.polygon_index];
 }
 std::vector<ViewPass> buildViewPasses(const Presentation& frame,const ViewVisibility& view,ViewProducts products) {

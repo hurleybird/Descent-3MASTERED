@@ -118,7 +118,7 @@ void prepareLightInfluences(FrameData& data) {
         }
     };
     for (auto& room : data.rooms) assign(room.number,MeshView(room.asset->geometry()),{},room.surfaces);
-    for (auto& object : data.objects) for (auto& model : object.models) for (size_t part = 0; part < model.parts.size(); ++part)
+    for (auto& object : data.model_instances) for (auto& model : object.models) for (size_t part = 0; part < model.parts.size(); ++part)
         assign(object.room,MeshView(model.asset->geometry().parts[part].geometry,model.parts[part].vertices),compose(object.current,model.parts[part].current),
             model.parts[part].surfaces);
     if (data.terrain.asset) for (size_t patch = 0; patch < data.terrain.patches.size(); ++patch) {

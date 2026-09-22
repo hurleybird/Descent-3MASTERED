@@ -470,7 +470,7 @@ void GL4Renderer::UploadSceneFrame(const d3scene::Presentation& frame) {
         for (const auto& room : frame.data().rooms) for (const auto& surface : room.surfaces) collect(surface);
         for (const auto& patch : frame.data().terrain.patches) for (const auto& surface : patch) collect(surface);
         for (const auto& mesh : frame.data().meshes) collect(mesh.surface);
-        for (const auto& object : frame.data().objects) for (const auto& model : object.models) for (const auto& part : model.parts)
+        for (const auto& object : frame.data().model_instances) for (const auto& model : object.models) for (const auto& part : model.parts)
             for (const auto& surface : part.surfaces) collect(surface);
         std::sort(reflection_revisions.begin(),reflection_revisions.end());
         reflection_revisions.erase(std::unique(reflection_revisions.begin(),reflection_revisions.end()),reflection_revisions.end());
@@ -523,7 +523,7 @@ void GL4Renderer::UploadSceneFrame(const d3scene::Presentation& frame) {
         for (const auto& room : frame.data().rooms) for (const auto& surface : room.surfaces) add(surface);
         for (const auto& patch : frame.data().terrain.patches) for (const auto& surface : patch) add(surface);
         for (const auto& mesh : frame.data().meshes) add(mesh.surface);
-        for (const auto& object : frame.data().objects) for (const auto& model : object.models) for (const auto& part : model.parts)
+        for (const auto& object : frame.data().model_instances) for (const auto& model : object.models) for (const auto& part : model.parts)
             for (const auto& surface : part.surfaces) add(surface);
         std::vector<d3scene::PositionPair> positions;
         scene_position_ranges.clear();
@@ -536,7 +536,7 @@ void GL4Renderer::UploadSceneFrame(const d3scene::Presentation& frame) {
             positions.insert(positions.end(),pairs.begin(),pairs.end());
             scene_position_ranges.emplace(&mesh,ElementRange(start,static_cast<uint32_t>(positions.size())-start));
         }
-        for (const auto& object : frame.data().objects) for (const auto& model : object.models) for (size_t i = 0; i < model.parts.size(); ++i) {
+        for (const auto& object : frame.data().model_instances) for (const auto& model : object.models) for (size_t i = 0; i < model.parts.size(); ++i) {
             const auto& part = model.parts[i];
             const auto pairs = d3scene::modelPositionPairs(model.asset->geometry().parts[i].geometry,part);
             if (pairs.empty()) continue;
@@ -731,13 +731,13 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
         Error("Scene executor migration incomplete: only explicit geometry inspection is currently supported.");
     const auto visibility = d3scene::queryView(presentation,view);
     if (FindArg("-scene-lod-probe") && (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)) {
-        std::vector<unsigned> polygons(presentation.data().objects.size(),0);
-        for (const auto& item : visibility.surfaces) if (item.model) ++polygons[item.object_index];
+        std::vector<unsigned> polygons(presentation.data().model_instances.size(),0);
+        for (const auto& item : visibility.surfaces) if (item.model) ++polygons[item.model_instance_index];
         for (size_t i = 0; i < polygons.size(); ++i) if (polygons[i]) {
-            const auto& object = presentation.data().objects[i];
+            const auto& object = presentation.data().model_instances[i];
             const auto variant = d3scene::selectModelVariant(object,visibility.camera);
             AutomatedCaptureLog("scene LOD visible owner=%u variant=%u asset=%u polygons=%u",
-                object.handle,variant,object.models[variant].asset->id().slot,polygons[i]);
+                object.owner,variant,object.models[variant].asset->id().slot,polygons[i]);
         }
     }
     if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0) {
@@ -1009,7 +1009,7 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
             UploadSceneMesh(*mesh,terrain.asset->id(),terrain.asset->patches()[item.terrain_patch].batches[item.terrain_batch].geometry);
             binding = &terrain.patches[item.terrain_patch][item.terrain_batch];
         } else if (item.model) {
-            const auto& object = presentation.data().objects[item.object_index];
+            const auto& object = presentation.data().model_instances[item.model_instance_index];
             const auto& model = object.models[item.model_variant];
             const auto id = model.asset->id();
             if (scene_models.size() <= id.slot) scene_models.resize(static_cast<size_t>(id.slot)+1);
@@ -1051,7 +1051,7 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
         glUniform1i(scene_shader.FindUniform("fog_enabled"),surface.material.layer == d3scene::RenderLayer::World);
         glUniform1i(scene_shader.FindUniform("fog_additive"),surface.material.blend == d3scene::BlendMode::Additive);
         glUniform1i(scene_shader.FindUniform("multiply_material"),surface.material.blend == d3scene::BlendMode::Multiply);
-        const bool exterior = item.terrain || (item.model ? exteriorRoom(presentation.data().objects[item.object_index].room) :
+        const bool exterior = item.terrain || (item.model ? exteriorRoom(presentation.data().model_instances[item.model_instance_index].room) :
             (item.mesh ? exteriorRoom(presentation.data().meshes[item.mesh_index].room) : presentation.data().rooms[item.room_index].exterior));
         glUniform1i(scene_shader.FindUniform("fog_exterior"),exterior && exterior_fog.enabled);
         vec("model_position",item.world.position); vec("model_right",item.world.right);

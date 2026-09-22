@@ -196,22 +196,26 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::FrameDat
     std::unordered_map<int, d3scene::ModelAssetRef> frame_assets;
     RoomTable rooms;
     for (const auto& room : data.rooms) rooms.emplace(room.number,&room);
-    std::unordered_map<uint32_t, const d3scene::ObjectState*> prior;
+    std::unordered_map<uint64_t, const d3scene::ModelInstance*> prior;
     if (previous && previous->scene_lifetime == data.scene_lifetime && previous->simulation_time <= data.simulation_time)
-        for (const auto& object : previous->objects) prior.emplace(object.handle, &object);
-    for (auto& instance : data.objects) {
-        auto* source = ObjGet(instance.handle);
+        for (const auto& instance : previous->model_instances) prior.emplace(instance.identity, &instance);
+    for (auto& owner : data.objects) {
+        auto* source = ObjGet(owner.handle);
         if (!source) throw std::logic_error("Object changed during presentation preparation");
-        instance.visible = source->type != OBJ_DUMMY;
+        owner.visible = source->type != OBJ_DUMMY;
         if (source->flags & OF_ATTACHED) {
             const auto* parent = ObjGet(source->attach_ultimate_handle);
-            instance.visible = instance.visible && parent && !(parent->render_type == RT_NONE && parent->type != OBJ_POWERUP &&
+            owner.visible = owner.visible && parent && !(parent->render_type == RT_NONE && parent->type != OBJ_POWERUP &&
                 (parent->type == OBJ_PLAYER || parent->movement_type != MT_NONE));
         }
-        if (!instance.visible) continue;
+        if (!owner.visible) continue;
         if (source->render_type != RT_POLYOBJ && source->render_type != RT_WEAPON) continue;
         if (source->render_type == RT_WEAPON && (Weapons[source->id].flags &
             (WF_IMAGE_BITMAP | WF_IMAGE_VCLIP | WF_INVISIBLE | WF_ELECTRICAL))) continue;
+        d3scene::ModelInstance instance;
+        instance.identity = uint64_t(owner.handle)+1;
+        instance.owner = owner.handle; instance.has_owner = true; instance.room = owner.room;
+        instance.current = owner.current; instance.previous = owner.previous; instance.has_previous = owner.has_previous;
         int model_number = source->type == OBJ_MARKER ? Marker_polynum : source->rtype.pobj_info.model_num;
         if (source->type == OBJ_BUILDING && (source->flags & OF_USE_DESTROYED_POLYMODEL) &&
             Object_info[source->id].lo_render_handle >= 0) model_number = Object_info[source->id].lo_render_handle;
@@ -282,7 +286,7 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::FrameDat
             }
             const auto pose = EvaluateModelPose(*model, input, static_cast<float>(data.simulation_time));
             const auto transforms = ComposeModelPose(*model, pose);
-            const auto old = prior.find(instance.handle);
+            const auto old = prior.find(instance.identity);
             const d3scene::PreparedModel* history = nullptr;
             if (old != prior.end()) for (const auto& previous_variant : old->second->models)
                 if (previous_variant.asset->id() == variant.asset->id()) { history = &previous_variant; break; }
@@ -293,17 +297,19 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::FrameDat
                 part.current = value(transforms.submodels[i]);
                 part.previous = history ? history->parts[i].current : part.current;
                 part.has_previous = history && history->parts[i].draw && instance.has_previous;
-                part.vertices = d3scene::deformMesh(asset_part.geometry,effect.deformation,data.simulation_time,instance.handle,static_cast<uint32_t>(i));
+                part.vertices = d3scene::deformMesh(asset_part.geometry,effect.deformation,data.simulation_time,owner.handle,static_cast<uint32_t>(i));
                 part.previous_vertices = history ? history->parts[i].vertices : part.vertices;
                 const auto role = roles[i];
                 part.draw = role == SceneModelPartRole::Surface;
                 const auto attachment_begin = data.meshes.size();
                 if (role == SceneModelPartRole::Facing)
-                    prepareFacingPart(data,instance,*model,i,d3scene::compose(instance.current,part.current));
+                    prepareFacingPart(data,owner,*model,i,d3scene::compose(instance.current,part.current));
                 if (role == SceneModelPartRole::Glow)
-                    prepareGlowPart(data,instance,*source,*model,i,d3scene::compose(instance.current,part.current));
-                for (size_t attachment = attachment_begin; attachment < data.meshes.size(); ++attachment)
-                    data.meshes[attachment].owner_model_variant = static_cast<int32_t>(variant_index);
+                    prepareGlowPart(data,owner,*source,*model,i,d3scene::compose(instance.current,part.current));
+                for (size_t attachment = attachment_begin; attachment < data.meshes.size(); ++attachment) {
+                    data.meshes[attachment].model_instance = instance.identity;
+                    data.meshes[attachment].model_variant = static_cast<int32_t>(variant_index);
+                }
                 for (size_t j = 0; j < asset_part.geometry.polygons.size(); ++j) {
                     d3scene::SurfaceBinding binding;
                     binding.occlusion_class = d3scene::OcclusionClass::Model;
@@ -336,5 +342,6 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::FrameDat
             }
             instance.models.push_back(std::move(variant));
         }
+        if (!instance.models.empty()) data.model_instances.push_back(std::move(instance));
     }
 }

@@ -2,12 +2,14 @@ param(
     [Parameter(Mandatory=$true)][string]$Reference,
     [Parameter(Mandatory=$true)][string]$Actual,
     [Parameter(Mandatory=$true)][string]$Report,
+    [string]$Save,
     [switch]$DiagnosticComparison
 )
 $ErrorActionPreference = 'Stop'
 if ($PSVersionTable.PSEdition -eq 'Core') {
     $forwarded = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$PSCommandPath,'-Reference',$Reference,'-Actual',$Actual,'-Report',$Report)
     if ($DiagnosticComparison) { $forwarded += '-DiagnosticComparison' }
+    if ($Save) { $forwarded += @('-Save',$Save) }
     & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" @forwarded
     if ($LASTEXITCODE -ne 0) { throw 'Image comparison failed in Windows PowerShell.' }
     return
@@ -63,6 +65,14 @@ $referencePath = (Resolve-Path -LiteralPath $Reference).Path
 $actualPath = (Resolve-Path -LiteralPath $Actual).Path
 $referenceManifest = Get-Content -LiteralPath (Join-Path $referencePath 'manifest.json') -Raw | ConvertFrom-Json
 $actualManifest = Get-Content -LiteralPath (Join-Path $actualPath 'manifest.json') -Raw | ConvertFrom-Json
+if ($Save) {
+    $selectedReference = @($referenceManifest.results | Where-Object save -eq $Save)
+    $selectedActual = @($actualManifest.results | Where-Object save -eq $Save)
+    if ($selectedReference.Count -ne 1 -or $selectedActual.Count -ne 1) { throw 'Requested save must occur exactly once in each corpus.' }
+    # Filter only the in-memory comparison, never rewrite capture evidence.
+    $referenceManifest.results = $selectedReference
+    $actualManifest.results = $selectedActual
+}
 $referenceScale = if ($referenceManifest.supersampling) { $referenceManifest.supersampling } elseif ($referenceManifest.profile -eq 'clean') { 1 } else { 2 }
 $actualScale = if ($actualManifest.supersampling) { $actualManifest.supersampling } elseif ($actualManifest.profile -eq 'clean') { 1 } else { 2 }
 if ($referenceScale -ne $actualScale -and -not $DiagnosticComparison) { throw 'Supersampling differs; this is not a parity comparison.' }
@@ -104,6 +114,9 @@ if ([int]$referenceManifest.ring_probe_revision -ne [int]$actualManifest.ring_pr
 }
 if ([bool]$referenceManifest.model_effects_probe -ne [bool]$actualManifest.model_effects_probe -and -not $DiagnosticComparison) {
     throw 'Model effects fixture differs; use DiagnosticComparison for intentional fixture changes.'
+}
+if ([bool]$referenceManifest.standalone_model_probe -ne [bool]$actualManifest.standalone_model_probe -and -not $DiagnosticComparison) {
+    throw 'Standalone model ownership differs; this is not a parity comparison.'
 }
 if ([int]$referenceManifest.model_effects_revision -ne [int]$actualManifest.model_effects_revision -and -not $DiagnosticComparison) {
     throw 'Model effects fixture revision differs; use DiagnosticComparison for intentional fixture changes.'

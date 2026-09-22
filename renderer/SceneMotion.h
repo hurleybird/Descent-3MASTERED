@@ -26,11 +26,12 @@ struct SurfaceMotion {
 inline SurfaceMotion surfaceMotion(const Presentation& frame,const VisibleSurface& item,bool camera_history) {
     SurfaceMotion result; result.previous = item.world;
     if (!item.model) return result; // static world uses camera reconstruction
-    const auto& object = frame.data().objects[item.object_index];
+    const auto& object = frame.data().model_instances[item.model_instance_index];
     const auto& part = object.models[item.model_variant].parts[item.part_index];
     result.previous = compose(object.previous,part.previous);
     // Preserve the canvas adapter's zero/static and high-bit blur-policy ABI.
-    result.identity = (object.handle+1u)&0x7fffffffu;
+    if (!object.has_owner) return result; // standalone model history is view/layer-owned
+    result.identity = (object.owner+1u)&0x7fffffffu;
     if (!result.identity) result.identity = 1;
     result.valid = camera_history && object.has_previous && part.has_previous;
     return result;

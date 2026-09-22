@@ -18,6 +18,7 @@ param(
     [switch]$AxisProbe,
     [switch]$RingProbe,
     [switch]$ModelEffectsProbe,
+    [switch]$StandaloneModelProbe,
     [switch]$ScorchProbe,
     [switch]$ScorchViewProbe,
     [switch]$MotionBlur,
@@ -32,6 +33,10 @@ param(
 # at Candidate or the normal installation: the game may write local cache files.
 $ErrorActionPreference = 'Stop'
 if ($AtmosphereProbe) { $SatelliteProbe = $true }
+if ($StandaloneModelProbe) {
+    if (-not $SceneInspection) { throw 'Standalone model probe requires scene inspection.' }
+    $ModelEffectsProbe = $true
+}
 if ($LayerProbe -and -not $SceneInspection) { throw 'Layer probe requires scene inspection.' }
 if ($RingProbe -and -not $SceneInspection) { throw 'Ring probe requires scene inspection.' }
 if ($ResourceProbe -and -not $SceneInspection) { throw 'Resource probe requires scene inspection.' }
@@ -87,6 +92,7 @@ $manifest = [ordered]@{
     ring_probe = [bool]$RingProbe
     ring_probe_revision = $(if ($RingProbe) { 2 } else { 0 })
     model_effects_probe = [bool]$ModelEffectsProbe
+    standalone_model_probe = [bool]$StandaloneModelProbe
     scorch_probe = [bool]$ScorchProbe
     scorch_view_probe = [bool]$ScorchViewProbe
     motion_blur = [bool]$MotionBlur
@@ -134,6 +140,7 @@ try {
         if ($SatelliteProbe) { $arguments += '-scene-satellite-probe' }
         if ($AtmosphereProbe) { $arguments += '-scene-atmosphere-probe' }
         if ($AxisProbe) { $arguments += '-scene-axis-probe' }
+        if ($StandaloneModelProbe) { $arguments += '-scene-standalone-model-probe' }
         if ($RingProbe) { $arguments += '-scene-ring-probe' }
         if ($ModelEffectsProbe) { $arguments += '-scene-model-effects-probe' }
         if ($ScorchProbe) { $arguments += '-capture-scorch' }
@@ -158,6 +165,7 @@ try {
         $process.WaitForExit()
         $logText = if (Test-Path -LiteralPath $log) { Get-Content -LiteralPath $log -Raw } else { '' }
         $resourceValidated = $true
+        if ($StandaloneModelProbe) { $resourceValidated = $logText.Contains('scene standalone model fixture instances=1') }
         if ($RingProbe) { $resourceValidated = $logText.Contains('scene ring fixture facing=1 planar_reverse=1 object=1 gravity=1') }
         if ($LodProbeTier -ge 0) {
             $resourceValidated = $logText.Contains("scene LOD fixture tier=$LodProbeTier ") -and $logText.Contains('scene LOD visible ')

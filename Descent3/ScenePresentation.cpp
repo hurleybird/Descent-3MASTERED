@@ -92,7 +92,7 @@ void prepareImages(d3scene::FrameData& data) {
         }
     };
     for (auto& room : data.rooms) for (auto& surface : room.surfaces) prepare(surface);
-    for (auto& object : data.objects) for (auto& model : object.models) for (auto& part : model.parts) for (auto& surface : part.surfaces) prepare(surface);
+    for (auto& object : data.model_instances) for (auto& model : object.models) for (auto& part : model.parts) for (auto& surface : part.surfaces) prepare(surface);
     for (auto& surface : data.terrain.materials) prepare(surface);
     for (auto& mesh : data.meshes) prepare(mesh.surface);
 }
@@ -116,7 +116,7 @@ void logPreparedModels(const d3scene::FrameData& data) {
         AutomatedCaptureLog("scene camera perturbation owner=%u forward=%.9g,%.9g,%.9g",effect.owner,
             effect.rotation.forward.x,effect.rotation.forward.y,effect.rotation.forward.z);
     std::unordered_set<int> textures;
-    for (const auto& instance : data.objects) for (const auto& model : instance.models) {
+    for (const auto& instance : data.model_instances) for (const auto& model : instance.models) {
         uint64_t hash = 14695981039346656037ull;
         const auto number = [&](float value) {
             uint32_t bits; std::memcpy(&bits,&value,sizeof(bits));
@@ -129,10 +129,13 @@ void logPreparedModels(const d3scene::FrameData& data) {
             transform(part.current);
             for (const auto& surface : part.surfaces) if (surface.texture >= 0) textures.insert(surface.texture);
         }
+        const auto owner = std::find_if(data.objects.begin(),data.objects.end(),
+            [&](const d3scene::ObjectState& object) { return instance.has_owner && object.handle == instance.owner; });
+        const unsigned type = owner == data.objects.end() ? OBJ_NONE : owner->type;
         AutomatedCaptureLog("scene pose object=%u model=%u name=%s type=%u hash=%llu position=%.9g,%.9g,%.9g",
-            instance.handle,model.asset->id().slot,Poly_models[model.asset->id().slot].name,instance.type,hash,
+            instance.owner,model.asset->id().slot,Poly_models[model.asset->id().slot].name,type,hash,
             instance.current.position.x,instance.current.position.y,instance.current.position.z);
-        if (instance.type == OBJ_PLAYER)
+        if (type == OBJ_PLAYER)
             AutomatedCaptureLog("scene player direction=%.9g,%.9g,%.9g",
                 instance.current.forward.x,instance.current.forward.y,instance.current.forward.z);
     }
@@ -140,7 +143,7 @@ void logPreparedModels(const d3scene::FrameData& data) {
         // Resolve was already performed. Reading the source bitmap here must not
         // call GetTextureBitmap again (which can advance procedural state).
         const d3scene::SurfaceBinding* binding = nullptr;
-        for (const auto& instance : data.objects) for (const auto& model : instance.models) for (const auto& part : model.parts)
+        for (const auto& instance : data.model_instances) for (const auto& model : instance.models) for (const auto& part : model.parts)
             for (const auto& surface : part.surfaces) if (surface.texture == texture) binding = &surface;
         if (!binding || binding->bitmap < 0) continue;
         const int bitmap = binding->bitmap;
@@ -304,8 +307,19 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance_history) {
     PrepareGameModelInstances(data, previous_models ? &previous_models->data() : nullptr);
     PrepareGameObjectEffects(data);
     PrepareGameScorches(data);
+    if (SceneGeometryInspection() && FindArg("-scene-standalone-model-probe") && Player_object) {
+        const auto owner = uint32_t(Player_object->handle);
+        unsigned detached = 0;
+        for (auto& instance : data.model_instances) if (instance.has_owner && instance.owner == owner) {
+            instance.has_owner = false; ++detached;
+            for (auto& mesh : data.meshes) if (mesh.model_instance == instance.identity) mesh.has_owner = false;
+        }
+        if (!detached) Error("Standalone model fixture found no player model");
+        if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
+            AutomatedCaptureLog("scene standalone model fixture instances=%u",detached);
+    }
     for (auto& surface : data.terrain.materials) resolveMaterial(surface,static_cast<float>(data.simulation_time),false,true);
-    for (auto& object : data.objects) for (auto& model : object.models) for (auto& part : model.parts) for (auto& surface : part.surfaces)
+    for (auto& object : data.model_instances) for (auto& model : object.models) for (auto& part : model.parts) for (auto& surface : part.surfaces)
         resolveMaterial(surface,static_cast<float>(data.simulation_time),true);
     prepareImages(data);
     d3scene::prepareTerrainPatches(data.terrain);
@@ -327,6 +341,8 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance_history) {
         const auto owner = uint32_t(Player_object->handle);
         data.objects.erase(std::remove_if(data.objects.begin(),data.objects.end(),
             [&](const d3scene::ObjectState& object) { return object.handle != owner; }),data.objects.end());
+        data.model_instances.erase(std::remove_if(data.model_instances.begin(),data.model_instances.end(),
+            [&](const d3scene::ModelInstance& instance) { return !instance.has_owner || instance.owner != owner; }),data.model_instances.end());
         data.meshes.erase(std::remove_if(data.meshes.begin(),data.meshes.end(),
             [&](const d3scene::PreparedMesh& mesh) { return !mesh.has_owner || mesh.owner != owner; }),data.meshes.end());
         data.rooms.clear(); data.terrain = {}; data.fog.reset(); data.exterior_fog = {};
@@ -382,9 +398,9 @@ void RenderGameSceneView(const d3scene::Presentation& frame, d3scene::View view)
     }
     const int lod_probe = FindArg("-scene-lod-probe");
     if ((FindArg("-scene-model-effects-probe") || lod_probe) && Player_object) {
-        for (const auto& object : frame.data().objects) if (object.handle == static_cast<uint32_t>(Player_object->handle)) {
+        for (const auto& object : frame.data().model_instances) if (object.identity == uint64_t(uint32_t(Player_object->handle))+1) {
             const auto& pose = object.current;
-            float distance = object.radius*4+2;
+            float distance = Player_object->size*4+2;
             if (lod_probe) {
                 const auto* argument = GetArg(lod_probe+1);
                 if (!argument || argument[0] < '0' || argument[0] > '2' || argument[1])

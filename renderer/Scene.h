@@ -276,7 +276,8 @@ struct PreparedMesh {
     int32_t receiver_polygon = -1; // optional room-surface visibility dependency (decals)
     uint32_t owner = 0;
     bool has_owner = false; // same allocation-generation identity as ObjectState
-    int32_t owner_model_variant = -1; // optional attachment to one prepared LOD variant
+    uint64_t model_instance = 0; // optional dependency on a prepared model, not a game object
+    int32_t model_variant = -1;
 };
 struct Portal {
     int32_t polygon = -1, destination_room = -1, destination_portal = -1;
@@ -335,9 +336,8 @@ struct PreparedModel {
     Bounds render_bounds;
     bool has_render_bounds = false;
 };
-// Object identity includes the game's allocation generation, not just its slot.
-// Preparation will replace source classifications with asset/pose/material
-// records. Unprepared objects MUST NOT be sent to a legacy draw fallback.
+// Game observation/camera identity includes allocation generation, not just its
+// slot. Render geometry is independently published in ModelInstance/PreparedMesh.
 struct ObjectState {
     uint32_t handle = 0;
     bool visible = true; // presentation eligibility, independent of a camera query
@@ -347,6 +347,16 @@ struct ObjectState {
     Transform current, previous;
     bool has_previous = false;
     float radius = 0;
+};
+// A renderable model is not a simulation object. Ownership is optional (e.g.
+// cockpit/preview), while identity and pose belong to this presentation domain.
+struct ModelInstance {
+    uint64_t identity = 0; // stable nonzero presentation identity; unique within a scene
+    uint32_t owner = 0;
+    bool has_owner = false, visible = true;
+    int32_t room = -1;
+    Transform current, previous;
+    bool has_previous = false;
     // All eligible variants exist before any camera query. LOD selection is
     // view-local; prepared attachments identify their owning variant as well.
     std::vector<PreparedModel> models;
@@ -394,6 +404,7 @@ struct FrameData {
     uint32_t pending_domains = AllPendingDomains;
     std::vector<RoomState> rooms;
     std::vector<ObjectState> objects;
+    std::vector<ModelInstance> model_instances;
     std::vector<Light> lights;
     std::vector<CameraPerturbation> camera_perturbations;
     TerrainState terrain;

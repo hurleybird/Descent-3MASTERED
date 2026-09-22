@@ -1,5 +1,28 @@
 # Renderer migration checkpoint
 
+## Continuation: model instances independent of game objects
+
+Moved geometry/variants/poses/materials out of ObjectState into independently
+identified ModelInstance records. Gameplay objects remain camera/observation
+owners, not mandatory containers for every rendered model. Optional ownership
+controls exclusion and observation deduplication; standalone instances need no
+fake object. Attachments reference a model instance/variant directly. Preparation,
+light selection, image publication, culling, deformation upload and execution all
+use the new ownership. No alias of the old embedded-model contract remains.
+
+Full build and 5,253 checks pass, including ownerless models and attachments,
+multiple models sharing one game owner, missing/duplicate identities, exclusion,
+and no invented gameplay observations or motion identity. Eight normal captures
+complete: seven exact against procedural-effects; 003 differs by mean .0153,
+but is exact against the immediately preceding rings-normal 003 (the difference
+predates this ownership change). Ownerless-player inspection and far-LOD captures
+complete and were visually inspected, as was normal 003. Standalone-vs-owned
+diagnostic comparison has mean .00192/max 4; standalone motion identity is
+deliberately absent. No standalone temporal-history qualification is claimed.
+The comparison harness can select one save without editing either manifest.
+Cockpit/gauge extraction and composition are still pending; this is their common
+model foundation, not completion of that domain. Candidate remains unchanged.
+
 ## Continuation: owned procedural positions and blast rings
 
 Generic meshes now carry optional frame-owned positions against persistent

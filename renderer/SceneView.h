@@ -37,7 +37,7 @@ struct VisibleSurface {
     float depth = 0;
     bool blended = false;
     bool model = false;
-    uint32_t object_index = 0, part_index = 0;
+    uint32_t model_instance_index = 0, part_index = 0;
     uint32_t model_variant = 0;
     Transform world;
     bool terrain = false;
@@ -66,7 +66,7 @@ struct ViewPass {
     uint32_t begin = 0, end = 0; // half-open range in this view's visible surfaces
 };
 const SurfaceBinding& visibleSurfaceBinding(const Presentation&,const VisibleSurface&);
-uint32_t selectModelVariant(const ObjectState&,const Camera&);
+uint32_t selectModelVariant(const ModelInstance&,const Camera&);
 std::vector<ViewPass> buildViewPasses(const Presentation&,const ViewVisibility&,ViewProducts products = {});
 
 // Pure conservative frustum query over the complete published scene. Results
