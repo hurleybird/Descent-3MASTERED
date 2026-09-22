@@ -629,6 +629,7 @@ private:
 	void ExportOpaqueScene(const d3scene::Camera&);
 	d3scene::ViewHistory scene_view_history;
 	bool scene_temporal_reset = true;
+	bool scene_sample_resolve_verified = false;
 	// AO changes surface radiance, never fog/emissive radiance. This image stays
 	// in lockstep with scene compositing instead of estimating it from color.
 	GLuint scene_ao_radiance_texture = 0;

@@ -4,6 +4,7 @@
 #include "../../renderer/SceneGeometry.h"
 #include "../../renderer/SceneCompositing.h"
 #include "../../renderer/SceneHistory.h"
+#include "../../renderer/SceneSamples.h"
 #include <cmath>
 #include <stdexcept>
 
@@ -370,5 +371,8 @@ int runSceneViewTests() {
     histories.clear(); tick.scene_lifetime--;
     check(!histories.prepare(tick,main_view,d3scene::prepareCamera(main_view)).previous_valid,
         "Renderer reset retained temporal camera state");
+    check(d3scene::nearestDepthSample({.8f,.2f,.2f,.8f}) == 1,"Depth tie did not select a deterministic surface record");
+    check(d3scene::nearestDepthSample({1,1,1,1}) == 0,"Background resolve has no stable sample");
+    check(d3scene::nearestDepthSample({.7f,.6f,.5f,.4f,.3f,.2f,.1f,0}) == 7,"Resolve silently capped the sample count");
     return Checks;
 }

@@ -493,6 +493,11 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
     check_scene_error("entry");
     FlushFontBatch();
     check_scene_error("font flush");
+    if (!scene_sample_resolve_verified) {
+        GL_VerifySceneSampleResolve();
+        scene_sample_resolve_verified = true;
+        check_scene_error("sample resolve self-test");
+    }
     if (scene_asset_lifetime != presentation.data().scene_lifetime) {
         DestroySceneResources();
         scene_asset_lifetime = presentation.data().scene_lifetime;
@@ -651,7 +656,10 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
         glFramebufferTexture2D(GL_FRAMEBUFFER,GL_DEPTH_ATTACHMENT,GL_TEXTURE_2D,scene_depth_snapshot,0);
         glDrawBuffer(GL_NONE); glReadBuffer(GL_NONE);
         if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) Error("Scene opaque-depth snapshot is incomplete");
-        glBindFramebuffer(GL_READ_FRAMEBUFFER,previous_draw);
+        // All depth consumers share nearest-surface sample selection. A raw
+        // MSAA depth blit can choose a different sample from motion/identity.
+        framebuffers[framebuffer_current_draw].DepthTextureForRead();
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER,scene_depth_framebuffer);
         const GLboolean scissor = glIsEnabled(GL_SCISSOR_TEST);
         glDisable(GL_SCISSOR_TEST);
         glBlitFramebuffer(viewport[0],viewport[1],viewport[0]+viewport[2],viewport[1]+viewport[3],0,0,viewport[2],viewport[3],GL_DEPTH_BUFFER_BIT,GL_NEAREST);

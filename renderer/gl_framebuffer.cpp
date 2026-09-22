@@ -17,6 +17,8 @@
 */
 #include "gl_local.h"
 #include "gameloop.h"
+#include "SceneSamples.h"
+#include <string>
 
 static GLuint fbVAOName;
 static GLuint fbVBOName;
@@ -252,7 +254,6 @@ Framebuffer::Framebuffer()
 	m_name = m_subname = m_colorname = m_subcolorname = m_depthname = m_subdepthname = 0;
 	m_samples = 0;
 	m_requested_samples = 0;
-	m_msaa_renderbuffer_storage = false;
 	m_subcolor_dirty = true;
 	m_subdepth_dirty = true;
 }
@@ -353,21 +354,20 @@ bool Framebuffer::Allocate(int width, int height, int msaa_samples)
 	glGenFramebuffers(1, &m_name);
 
 	GLenum textureType = msaa ? GL_TEXTURE_2D_MULTISAMPLE : GL_TEXTURE_2D;
-	m_msaa_renderbuffer_storage = msaa;
 
 	if (msaa)
 	{
-		glGenRenderbuffers(1, &m_colorname);
-		glGenRenderbuffers(1, &m_depthname);
+		glGenTextures(1, &m_colorname);
+		glGenTextures(1, &m_depthname);
 		glGenTextures(1, &m_subcolorname);
 		glGenTextures(1, &m_subdepthname);
 		glGenFramebuffers(1, &m_subname);
 
-		glBindRenderbuffer(GL_RENDERBUFFER, m_colorname);
-		glRenderbufferStorageMultisample(GL_RENDERBUFFER, msaa_samples, GL_RGBA8, width, height);
+		glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, m_colorname);
+		glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, msaa_samples, GL_RGBA8, width, height, GL_TRUE);
 
-		glBindRenderbuffer(GL_RENDERBUFFER, m_depthname);
-		glRenderbufferStorageMultisample(GL_RENDERBUFFER, msaa_samples, GL_DEPTH_COMPONENT32F, width, height);
+		glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, m_depthname);
+		glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, msaa_samples, GL_DEPTH_COMPONENT32F, width, height, GL_TRUE);
 
 		glBindTexture(GL_TEXTURE_2D, m_subcolorname);
 		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
@@ -417,16 +417,8 @@ bool Framebuffer::Allocate(int width, int height, int msaa_samples)
 	glBindRenderbuffer(GL_RENDERBUFFER, 0);
 
 	glBindFramebuffer(GL_FRAMEBUFFER, m_name);
-	if (msaa)
-	{
-		glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, m_colorname);
-		glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, m_depthname);
-	}
-	else
-	{
-		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, textureType, m_colorname, 0);
-		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, textureType, m_depthname, 0);
-	}
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, textureType, m_colorname, 0);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, textureType, m_depthname, 0);
 	GLenum fbstatus = glCheckFramebufferStatus(GL_FRAMEBUFFER);
 	if (fbstatus != GL_FRAMEBUFFER_COMPLETE)
 	{
@@ -517,16 +509,9 @@ void Framebuffer::Destroy()
 {
 	glDeleteFramebuffers(1, &m_name);
 	glDeleteFramebuffers(1, &m_subname);
-	if (m_msaa_renderbuffer_storage)
-	{
-		glDeleteRenderbuffers(1, &m_colorname);
-		glDeleteRenderbuffers(1, &m_depthname);
-	}
-	else
-	{
-		glDeleteTextures(1, &m_colorname);
-		glDeleteTextures(1, &m_depthname);
-	}
+	m_depth_resolve_shader.Destroy();
+	glDeleteTextures(1, &m_colorname);
+	glDeleteTextures(1, &m_depthname);
 	glDeleteTextures(1, &m_subcolorname);
 	glDeleteTextures(1, &m_subdepthname);
 	m_name = m_colorname = m_depthname = 0;
@@ -534,9 +519,70 @@ void Framebuffer::Destroy()
 	m_width = m_height = 0;
 	m_samples = 0;
 	m_requested_samples = 0;
-	m_msaa_renderbuffer_storage = false;
 	m_subcolor_dirty = true;
 	m_subdepth_dirty = true;
+}
+
+namespace {
+// Resolve is a resource operation, not a legacy game draw. Restore the small
+// set of GL bindings it owns so all callers see the same pass state afterward.
+struct SampleResolveScope {
+    GLint read, draw, viewport[4], vao, active, textures[3], depth_function;
+    GLboolean depth, depth_mask, cull, scissor, blend[2], color_mask[2][4];
+    ShaderProgram* shader;
+    SampleResolveScope() : shader(ShaderProgram::Current()) {
+        glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING,&read); glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING,&draw);
+        glGetIntegerv(GL_VIEWPORT,viewport); glGetIntegerv(GL_VERTEX_ARRAY_BINDING,&vao);
+        glGetIntegerv(GL_ACTIVE_TEXTURE,&active); glGetIntegerv(GL_DEPTH_FUNC,&depth_function);
+        depth = glIsEnabled(GL_DEPTH_TEST); cull = glIsEnabled(GL_CULL_FACE); scissor = glIsEnabled(GL_SCISSOR_TEST);
+        glGetBooleanv(GL_DEPTH_WRITEMASK,&depth_mask);
+        for (int i = 0; i < 3; ++i) {
+            glActiveTexture(GL_TEXTURE0+i); glGetIntegerv(GL_TEXTURE_BINDING_2D_MULTISAMPLE,&textures[i]);
+        }
+        for (int i = 0; i < 2; ++i) {
+            blend[i] = glIsEnabledi(GL_BLEND,i); glGetBooleani_v(GL_COLOR_WRITEMASK,i,color_mask[i]);
+            glDisablei(GL_BLEND,i); glColorMaski(i,GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);
+        }
+        glDisable(GL_DEPTH_TEST); glDepthMask(GL_FALSE); glDisable(GL_CULL_FACE); glDisable(GL_SCISSOR_TEST);
+        glBindVertexArray(GL_GetFramebufferVAO());
+    }
+    ~SampleResolveScope() {
+        glBindFramebuffer(GL_READ_FRAMEBUFFER,read); glBindFramebuffer(GL_DRAW_FRAMEBUFFER,draw);
+        glViewport(viewport[0],viewport[1],viewport[2],viewport[3]); glBindVertexArray(vao);
+        glDepthFunc(depth_function); glDepthMask(depth_mask);
+        GL_SetEnabledState(GL_DEPTH_TEST,depth); GL_SetEnabledState(GL_CULL_FACE,cull); GL_SetEnabledState(GL_SCISSOR_TEST,scissor);
+        for (int i = 0; i < 2; ++i) {
+            if (blend[i]) glEnablei(GL_BLEND,i); else glDisablei(GL_BLEND,i);
+            glColorMaski(i,color_mask[i][0],color_mask[i][1],color_mask[i][2],color_mask[i][3]);
+        }
+        for (int i = 0; i < 3; ++i) { glActiveTexture(GL_TEXTURE0+i); glBindTexture(GL_TEXTURE_2D_MULTISAMPLE,textures[i]); }
+        glActiveTexture(active);
+        if (shader) shader->Use(); else ShaderProgram::ClearBinding();
+    }
+};
+}
+
+void Framebuffer::ResolveDepth() {
+    SampleResolveScope scope;
+    if (!m_depth_resolve_shader.Handle()) {
+        extern const char* blitVertexSrc;
+        const auto fragment = std::string(d3scene::SampleResolveGlsl)+R"GLSL(
+uniform sampler2DMS source_depth;
+void main() {
+    ivec2 pixel = ivec2(gl_FragCoord.xy);
+    gl_FragDepth = texelFetch(source_depth,pixel,nearestDepthSample(source_depth,pixel)).r;
+}
+)GLSL";
+        m_depth_resolve_shader.AttachSource(blitVertexSrc,fragment.c_str());
+    }
+    m_depth_resolve_shader.Use();
+    glUniform1i(m_depth_resolve_shader.FindUniform("source_depth"),0);
+    glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D_MULTISAMPLE,m_depthname);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER,m_subname); glDrawBuffer(GL_NONE);
+    glViewport(0,0,m_width,m_height);
+    glEnable(GL_DEPTH_TEST); glDepthFunc(GL_ALWAYS); glDepthMask(GL_TRUE);
+    glDrawArrays(GL_TRIANGLES,0,3); rend_RecordDrawCall(RENDERER_DRAW_CALL_POSTPROCESS);
+    glDrawBuffer(GL_COLOR_ATTACHMENT0);
 }
 
 void Framebuffer::SubFramebufferBlit(GLbitfield mask)
@@ -565,8 +611,9 @@ void Framebuffer::SubFramebufferBlit(GLbitfield mask)
 
 		glBindFramebuffer(GL_READ_FRAMEBUFFER, m_name);
 		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_subname);
-		glBlitFramebuffer(0, 0, m_width, m_height, 0, 0,
-			m_width, m_height, to_resolve, GL_NEAREST);
+		if (to_resolve & GL_COLOR_BUFFER_BIT)
+			glBlitFramebuffer(0, 0, m_width, m_height, 0, 0,m_width, m_height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+		if (to_resolve & GL_DEPTH_BUFFER_BIT) ResolveDepth();
 		if ((to_resolve & (GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)) == (GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT))
 			GLFramebufferPerfGpuDrain("GPU.Resolve.ColorDepth");
 		else if (to_resolve & GL_COLOR_BUFFER_BIT)
@@ -810,9 +857,7 @@ void MotionVectorResources::Update(uint32_t new_width, uint32_t new_height, uint
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
-		glGenFramebuffers(1, &object_id_resolve_framebuffer);
-		glBindFramebuffer(GL_FRAMEBUFFER, object_id_resolve_framebuffer);
-		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, object_id_resolved_texture, 0);
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, object_id_resolved_texture, 0);
 		glDrawBuffer(GL_COLOR_ATTACHMENT0);
 		glReadBuffer(GL_COLOR_ATTACHMENT0);
 	}
@@ -839,9 +884,7 @@ void MotionVectorResources::Update(uint32_t new_width, uint32_t new_height, uint
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
-		glGenFramebuffers(1, &object_id_resolve_framebuffer);
-		glBindFramebuffer(GL_FRAMEBUFFER, object_id_resolve_framebuffer);
-		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, object_id_texture, 0);
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, object_id_texture, 0);
 		glDrawBuffer(GL_COLOR_ATTACHMENT0);
 		glReadBuffer(GL_COLOR_ATTACHMENT0);
 	}
@@ -852,8 +895,8 @@ void MotionVectorResources::Update(uint32_t new_width, uint32_t new_height, uint
 
 void MotionVectorResources::Destroy()
 {
+	resolve_shader.Destroy();
 	glDeleteFramebuffers(1, &resolve_framebuffer);
-	glDeleteFramebuffers(1, &object_id_resolve_framebuffer);
 	glDeleteTextures(1, &velocity_texture);
 	glDeleteTextures(1, &resolved_texture);
 	glDeleteTextures(1, &object_id_texture);
@@ -863,7 +906,6 @@ void MotionVectorResources::Destroy()
 	resolve_framebuffer = 0;
 	object_id_texture = 0;
 	object_id_resolved_texture = 0;
-	object_id_resolve_framebuffer = 0;
 	width = height = samples = 0;
 	velocity_resolve_valid = false;
 	object_id_resolve_valid = false;
@@ -924,56 +966,113 @@ void MotionVectorResources::MarkDirty()
 	object_id_resolve_valid = false;
 }
 
+void MotionVectorResources::Resolve(GLuint source_framebuffer)
+{
+    if (samples < 2 || !velocity_texture || (velocity_resolve_valid && object_id_resolve_valid)) return;
+    SampleResolveScope scope;
+    glBindFramebuffer(GL_READ_FRAMEBUFFER,source_framebuffer);
+    GLint depth = 0, type = 0;
+    glGetFramebufferAttachmentParameteriv(GL_READ_FRAMEBUFFER,GL_DEPTH_ATTACHMENT,GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE,&type);
+    glGetFramebufferAttachmentParameteriv(GL_READ_FRAMEBUFFER,GL_DEPTH_ATTACHMENT,GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME,&depth);
+    if (type != GL_TEXTURE || depth == 0) Error("Motion resolve requires the scene's multisample depth texture");
+    if (!resolve_shader.Handle()) {
+        extern const char* blitVertexSrc;
+        const auto fragment = std::string(d3scene::SampleResolveGlsl)+R"GLSL(
+uniform sampler2DMS source_depth, source_velocity;
+uniform usampler2DMS source_identity;
+layout(location=0) out vec2 velocity;
+layout(location=1) out uint identity;
+void main() {
+    ivec2 pixel = ivec2(gl_FragCoord.xy);
+    int selected = nearestDepthSample(source_depth,pixel);
+    velocity = texelFetch(source_velocity,pixel,selected).xy;
+    identity = texelFetch(source_identity,pixel,selected).r;
+}
+)GLSL";
+        resolve_shader.AttachSource(blitVertexSrc,fragment.c_str());
+    }
+    resolve_shader.Use();
+    glUniform1i(resolve_shader.FindUniform("source_depth"),0);
+    glUniform1i(resolve_shader.FindUniform("source_velocity"),1);
+    glUniform1i(resolve_shader.FindUniform("source_identity"),2);
+    glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D_MULTISAMPLE,depth);
+    glActiveTexture(GL_TEXTURE1); glBindTexture(GL_TEXTURE_2D_MULTISAMPLE,velocity_texture);
+    glActiveTexture(GL_TEXTURE2); glBindTexture(GL_TEXTURE_2D_MULTISAMPLE,object_id_texture);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER,resolve_framebuffer);
+    const GLenum targets[2] = {GL_COLOR_ATTACHMENT0,GL_COLOR_ATTACHMENT1};
+    glDrawBuffers(2,targets);
+    if (glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) Error("Motion sample product is incomplete");
+    glViewport(0,0,width,height);
+    glDrawArrays(GL_TRIANGLES,0,3); rend_RecordDrawCall(RENDERER_DRAW_CALL_POSTPROCESS);
+    velocity_resolve_valid = object_id_resolve_valid = true;
+}
+
 GLuint MotionVectorResources::TextureForRead(GLuint source_framebuffer)
 {
-	if (velocity_texture == 0)
-		return 0;
-
-	if (samples < 2)
-		return velocity_texture;
-	if (velocity_resolve_valid)
-		return resolved_texture;
-
-	GLint old_read = 0, old_draw = 0;
-	glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &old_read);
-	glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &old_draw);
-
-	glBindFramebuffer(GL_READ_FRAMEBUFFER, source_framebuffer);
-	glReadBuffer(GL_COLOR_ATTACHMENT1);
-	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, resolve_framebuffer);
-	glDrawBuffer(GL_COLOR_ATTACHMENT0);
-	glBlitFramebuffer(0, 0, width, height, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
-	glReadBuffer(GL_COLOR_ATTACHMENT0);
-	glBindFramebuffer(GL_READ_FRAMEBUFFER, old_read);
-	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, old_draw);
-	velocity_resolve_valid = true;
-	return resolved_texture;
+    if (!velocity_texture) return 0;
+    Resolve(source_framebuffer);
+    return samples >= 2 ? resolved_texture : velocity_texture;
 }
 
 GLuint MotionVectorResources::ObjectIdTextureForRead(GLuint source_framebuffer)
 {
-	if (object_id_texture == 0)
-		return 0;
+    if (!object_id_texture) return 0;
+    Resolve(source_framebuffer);
+    return samples >= 2 ? object_id_resolved_texture : object_id_texture;
+}
 
-	if (samples < 2)
-		return object_id_texture;
-	if (object_id_resolve_valid)
-		return object_id_resolved_texture;
-
-	GLint old_read = 0, old_draw = 0;
-	glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &old_read);
-	glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &old_draw);
-
-	glBindFramebuffer(GL_READ_FRAMEBUFFER, source_framebuffer);
-	glReadBuffer(GL_COLOR_ATTACHMENT4);
-	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, object_id_resolve_framebuffer);
-	glDrawBuffer(GL_COLOR_ATTACHMENT0);
-	glBlitFramebuffer(0, 0, width, height, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
-	glReadBuffer(GL_COLOR_ATTACHMENT0);
-	glBindFramebuffer(GL_READ_FRAMEBUFFER, old_read);
-	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, old_draw);
-	object_id_resolve_valid = true;
-	return object_id_resolved_texture;
+void GL_VerifySceneSampleResolve()
+{
+    SampleResolveScope scope;
+    const auto sample_shading = glIsEnabled(GL_SAMPLE_SHADING);
+    const auto multisample = glIsEnabled(GL_MULTISAMPLE);
+    GLfloat minimum; glGetFloatv(GL_MIN_SAMPLE_SHADING_VALUE,&minimum);
+    Framebuffer target;
+    target.Update(1,1,4);
+    if (target.Samples() < 2) Error("Scene sample test requires multisample storage");
+    MotionVectorResources motion;
+    motion.Update(1,1,target.Samples());
+    motion.AttachToFramebuffer(target.Handle());
+    const GLenum outputs[5] = {GL_COLOR_ATTACHMENT0,GL_COLOR_ATTACHMENT1,GL_NONE,GL_NONE,GL_COLOR_ATTACHMENT4};
+    glDrawBuffers(5,outputs);
+    glViewport(0,0,1,1);
+    glEnable(GL_MULTISAMPLE); glEnable(GL_SAMPLE_SHADING); glMinSampleShading(1);
+    glEnable(GL_DEPTH_TEST); glDepthMask(GL_TRUE); glDepthFunc(GL_ALWAYS);
+    extern const char* blitVertexSrc;
+    ShaderProgram shader;
+    shader.AttachSource(blitVertexSrc,R"GLSL(#version 450 core
+layout(location=0) out vec4 color;
+layout(location=1) out vec2 velocity;
+layout(location=4) out uint identity;
+void main() {
+    int sample_index = gl_SampleID;
+    gl_FragDepth = sample_index == 1 || sample_index == 2 ? .2 : .8;
+    color = vec4(1);
+    velocity = vec2(sample_index,10+sample_index);
+    identity = uint(100+sample_index);
+}
+)GLSL");
+    shader.Use(); glBindVertexArray(GL_GetFramebufferVAO());
+    glDrawArrays(GL_TRIANGLES,0,3);
+    target.MarkAllDirty(); motion.MarkDirty();
+    target.DepthTextureForRead();
+    float resolved_depth = 0;
+    glReadPixels(0,0,1,1,GL_DEPTH_COMPONENT,GL_FLOAT,&resolved_depth);
+    motion.Resolve(target.Handle());
+    glBindFramebuffer(GL_READ_FRAMEBUFFER,motion.resolve_framebuffer);
+    glReadBuffer(GL_COLOR_ATTACHMENT0);
+    float velocity[2] = {};
+    glReadPixels(0,0,1,1,GL_RG,GL_FLOAT,velocity);
+    glReadBuffer(GL_COLOR_ATTACHMENT1);
+    GLuint identity = 0;
+    glReadPixels(0,0,1,1,GL_RED_INTEGER,GL_UNSIGNED_INT,&identity);
+    glReadBuffer(GL_COLOR_ATTACHMENT0);
+    if (fabsf(resolved_depth-.2f) > .00001f || velocity[0] != 1 || velocity[1] != 11 || identity != 101)
+        Error("Scene sample resolve mixed surfaces: depth=%g velocity=%g,%g identity=%u",resolved_depth,velocity[0],velocity[1],identity);
+    shader.Destroy(); motion.Destroy(); target.Destroy();
+    glMinSampleShading(minimum);
+    GL_SetEnabledState(GL_SAMPLE_SHADING,sample_shading); GL_SetEnabledState(GL_MULTISAMPLE,multisample);
+    AutomatedCaptureLog("scene sample resolve verified: nearest sample=1 depth=0.2 velocity=1,11 identity=101");
 }
 
 void PostProtectionMaskResources::Update(uint32_t new_width, uint32_t new_height, uint32_t msaa_samples)

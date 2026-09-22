@@ -1,5 +1,25 @@
 # Renderer migration checkpoint
 
+## Continuation: coherent multisample surface records
+
+Scene framebuffer color/depth attachments are now texture-backed even under
+MSAA. A shared nearest-depth-sample kernel defines the resolved surface. Depth,
+soft-particle depth, velocity and integer identity use that same rule; velocity
+and identity resolve together, replacing two independent blits that could pair
+averaged velocity with another sample's object ID. Opaque motion resolves before
+later canvas work can clear live depth. Color still uses normal sample averaging.
+
+An inspection-only GPU self-test writes deliberately conflicting per-sample
+depths, vectors and IDs, including a depth tie. Actual GPU readback confirms
+sample 1 / depth 0.2 / velocity (1,11) / identity 101. No game assets or simulation
+state are involved. Full build and 4,875 CPU checks pass; all eight clean and all
+eight effects captures complete in `scene-sample-resolve-clean` and
+`scene-sample-resolve-corpus`. Seven clean images are identical to the radiance
+checkpoint; save 002 has the previously observed Buddybot pose variation.
+Effects changes are small overall but include expected depth-edge changes;
+001/002 were visually inspected. This does not complete dynamic-model motion,
+AO material-class sample selection or performance qualification.
+
 ## Continuation: view-owned temporal history
 
 A pure history store keys completed views by kind and history identity. Preparing

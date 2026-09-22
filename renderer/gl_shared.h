@@ -140,7 +140,7 @@ class Framebuffer
 	uint32_t	m_width, m_height;
 	uint32_t	m_samples;
 	uint32_t	m_requested_samples;
-	bool		m_msaa_renderbuffer_storage;
+	ShaderProgram m_depth_resolve_shader;
 	//Track whether the MSAA->sub resolve is up to date. Each MSAA resolve blit
 	//costs W*H*samples of bandwidth, and multiple post-process stages can ask
 	//for the resolved depth/color in a single frame. We skip the blit when the
@@ -152,6 +152,7 @@ class Framebuffer
 	//Used when multisampling is enabled. Blits the requested buffers to the non-multisample sub framebuffer.
 	//Leaves the sub framebuffer bound for reading to finish the blit.
 	void SubFramebufferBlit(GLbitfield mask);
+	void ResolveDepth();
 public:
 	Framebuffer();
 	void Update(int width, int height, int msaa_samples);
@@ -215,7 +216,7 @@ public:
 
 	bool UsesMsaaRenderbufferStorage() const
 	{
-		return m_msaa_renderbuffer_storage;
+		return false; // all scene samples are texture-backed and queryable
 	}
 };
 
@@ -250,12 +251,12 @@ public:
 
 struct MotionVectorResources
 {
+	ShaderProgram resolve_shader;
 	GLuint velocity_texture = 0;
 	GLuint resolved_texture = 0;
 	GLuint resolve_framebuffer = 0;
 	GLuint object_id_texture = 0;
 	GLuint object_id_resolved_texture = 0;
-	GLuint object_id_resolve_framebuffer = 0;
 	uint32_t width = 0;
 	uint32_t height = 0;
 	uint32_t samples = 0;
@@ -267,6 +268,7 @@ struct MotionVectorResources
 	void AttachToFramebuffer(GLuint framebuffer);
 	void ClearAttached(GLuint framebuffer);
 	void MarkDirty();
+	void Resolve(GLuint source_framebuffer);
 	GLuint TextureForRead(GLuint source_framebuffer);
 	GLuint ObjectIdTextureForRead(GLuint source_framebuffer);
 };
@@ -297,6 +299,7 @@ void GL_UnbindFramebufferTextures();
 void GL_ConfigurePostMaskBlend();
 void GL_DrawFramebufferQuad(GLuint target, unsigned int x, unsigned int y, unsigned int w, unsigned int h);
 void GL_DrawFramebufferQuadNoClear(GLuint target, unsigned int x, unsigned int y, unsigned int w, unsigned int h);
+void GL_VerifySceneSampleResolve();
 int GL_GetSupportedMsaaSamples(int requested_samples);
 //Lazy accessor for the framebuffer fullscreen-triangle VAO. Initialises it if
 //needed. Use this when you need to draw a fullscreen triangle to a target you

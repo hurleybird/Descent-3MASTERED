@@ -3335,6 +3335,9 @@ void GL4Renderer::ExportOpaqueScene(const d3scene::Camera& camera)
 		UseSceneDrawBuffers();
 		if (MotionVectorTargetEnabled() && !MotionVectorsFrozen())
 		{
+			// Resolve the complete surface record while opaque scene depth is
+			// still live, before canvas setup can clear that attachment.
+			motion_vectors.Resolve(framebuffers[framebuffer_current_draw].Handle());
 			motion_vectors_capture_locked = true;
 			UseSceneDrawBuffers();
 		}
