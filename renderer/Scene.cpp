@@ -24,6 +24,8 @@ void require(bool condition, const char* message) {
     if (!condition) throw std::invalid_argument(message);
 }
 void validateSurface(const SurfaceBinding& surface) {
+    require(finite(surface.raster_stripe) && (surface.raster_stripe.x == 0 || surface.raster_stripe.x >= 1) &&
+        surface.raster_stripe.z >= 0 && surface.raster_stripe.z <= 1,"Invalid raster stripe coverage");
     require(std::isfinite(surface.specular_strength) && surface.specular_strength >= 0 &&
         std::isfinite(surface.static_specular_strength) && surface.static_specular_strength >= 0 &&
         std::isfinite(surface.specular_exponent) && surface.specular_exponent >= 1 && surface.specular_exponent <= 128 &&
@@ -477,6 +479,9 @@ void Presentation::requireExecutable() const {
         throw std::logic_error("Renderer migration incomplete: presentation contains unprepared domains");
 }
 void validateView(const View& view) {
+    require(view.ordering == ViewOrdering::Depth || view.ordering == ViewOrdering::Compositing, "Invalid view ordering");
+    require(view.ordering != ViewOrdering::Compositing || (view.kind != ViewKind::Main && view.feedback == NoFeedback),
+        "Compositing views cannot own main-world products or gameplay feedback");
     require(view.target == ViewTarget::Scene || view.target == ViewTarget::Display, "Invalid view target");
     require(view.target != ViewTarget::Display || (view.kind != ViewKind::Main && view.feedback == NoFeedback),
         "Display views cannot own main-world products or gameplay feedback");

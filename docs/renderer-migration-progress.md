@@ -1,5 +1,30 @@
 # Renderer migration checkpoint
 
+## Continuation: ordered gauge graphics and monitor coverage
+
+Added explicit depth-independent compositing views and per-surface composition
+order. Stable ties preserve publication order; the schedule does not regroup
+these surfaces into world opaque/transparent passes. Depth/soft-depth dependence
+and opaque-world image exports are rejected. History invalidates when ordering
+changes. This is the shared ordered-coverage contract for forthcoming canvas/text
+consumers, not a gauge-specific renderer path.
+
+CockpitProbe revision 3 publishes weapon images, shield/ship gauges, energy and
+afterburner bars (including authored UV splits), cloak/ship pulse inputs, and
+optional scanline monitor backing. Quads share persistent topology with owned
+positions. Alternate monitor surfaces precede cockpit geometry; gauge graphics
+remain between authored base/over-gauge masks. The scanline is a generic raster
+coverage material, with legacy spacing/phase compiled by the game producer.
+The original transparent-arm predicate now checks unquantized source alpha.
+
+Full build and 5,293 CPU checks pass. Effects captures 000/003 without backing
+and 003 with backing were visually inspected; clean/native final 003 was also
+inspected. Effects backing captures 002/003 complete normally. Normal 003 is
+pixel-identical to cockpit-normal; normal 000 differs by exactly the previously
+recorded pose-dependent region. Gauge text and other HUD content are absent;
+other ships, moving cockpit, non-full gauges and cloak/invulnerability behavior
+still require explicit visual qualification. No domain gate is cleared.
+
 ## Continuation: cockpit model publication and layered execution
 
 The opt-in CockpitProbe publishes the existing cockpit as independently owned,

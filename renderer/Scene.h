@@ -236,6 +236,10 @@ struct SurfaceBinding {
     bool unlit = false, two_sided = false;
     BlendMode blend = BlendMode::Solid; // non-solid modes explicitly request compositing
     DepthMode depth = DepthMode::Automatic;
+    int32_t composition_order = 0; // only consulted by explicit compositing views
+    // Optional repeating horizontal coverage in raster pixels: period, phase,
+    // covered fraction. Zero period disables it; no application/widget identity.
+    Vec3 raster_stripe;
     bool texture_wrap = true;
     float soft_depth_range = 0; // zero disables intersection fading; positive requires opaque depth
     // Authored translucent effect depth in eye units, not a geometry/fog shift.
@@ -437,6 +441,7 @@ using PresentationRef = std::shared_ptr<const Presentation>;
 
 enum class ViewKind { Main, Auxiliary, Mirror, SaveThumbnail, Automap, Preview };
 enum class ViewTarget { Scene, Display };
+enum class ViewOrdering { Depth, Compositing };
 struct Rect { int32_t x = 0, y = 0, width = 0, height = 0; };
 enum Feedback : uint8_t { NoFeedback = 0, Automap = 1, ObjectVisibility = 2, EffectEligibility = 4 };
 struct View {
@@ -444,6 +449,7 @@ struct View {
     bool geometry_inspection = false;
     ViewKind kind = ViewKind::Main;
     ViewTarget target = ViewTarget::Scene;
+    ViewOrdering ordering = ViewOrdering::Depth;
     bool clear_depth = false; // scoped to this view's raster viewport
     uint64_t collection = 0; // selects content, independently of camera/history/target
     uint64_t history_key = 0;

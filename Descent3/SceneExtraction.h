@@ -4,6 +4,7 @@
 #include "vecmat.h"
 
 struct object;
+struct ModelTransforms;
 
 // One extraction per presentation, shared by main and auxiliary views. This
 // reads simulation state but does not draw, advance RNG, or mark visibility.
@@ -19,6 +20,9 @@ void PrepareGameScorches(d3scene::FrameData&);
 constexpr uint64_t SceneCockpitBase = 0x434f434b50495401ull;
 constexpr uint64_t SceneCockpitLate = 0x434f434b50495402ull;
 constexpr uint64_t SceneCockpitAfterGauges = 0x434f434b50495403ull;
+constexpr uint64_t SceneCockpitGauges = 0x434f434b50495404ull;
+constexpr uint64_t SceneCockpitMonitorBacking = 0x434f434b50495405ull;
+void PrepareGameCockpitGauges(d3scene::FrameData&,const ModelTransforms&,const d3scene::Transform&);
 void PrepareGameCockpit(d3scene::FrameData&, bool advance);
 void RenderPreparedCockpit(const d3scene::Presentation&, d3scene::Rect viewport, float zoom);
 d3scene::PresentationRef PrepareGamePresentation(bool advance_history = true);

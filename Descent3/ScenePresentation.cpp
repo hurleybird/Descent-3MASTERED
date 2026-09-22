@@ -481,11 +481,15 @@ void RenderGameSceneView(const d3scene::Presentation& frame, d3scene::View view)
 
 void RenderPreparedCockpit(const d3scene::Presentation& frame, d3scene::Rect viewport, float zoom) {
     if (!SceneGeometryInspection()) Error("Cockpit migration has not passed gameplay acceptance");
-    bool base = false, layered = false, late = false;
+    bool base = false, layered = false, late = false, gauges = false, monitors = false;
     for (const auto& instance : frame.data().model_instances) {
         base = base || instance.collection == SceneCockpitBase;
         layered = layered || instance.collection == SceneCockpitAfterGauges;
         late = late || instance.collection == SceneCockpitLate;
+    }
+    for (const auto& mesh : frame.data().meshes) {
+        gauges = gauges || mesh.collection == SceneCockpitGauges;
+        monitors = monitors || mesh.collection == SceneCockpitMonitorBacking;
     }
     if (!base && !layered && !late) Error("Cockpit fixture has no prepared cockpit model");
     d3scene::View view;
@@ -496,12 +500,22 @@ void RenderPreparedCockpit(const d3scene::Presentation& frame, d3scene::Rect vie
     // The layer allocation is cleared by its compositor. Geometry execution
     // owns the requested viewport and does not invoke any legacy model draw.
     rend_StartFrame(viewport.x,viewport.y,viewport.x+viewport.width,viewport.y+viewport.height,0);
+    if (monitors) {
+        view.collection = view.history_key = SceneCockpitMonitorBacking;
+        view.ordering = d3scene::ViewOrdering::Compositing;
+        d3scene::renderView(frame,view);
+        view.ordering = d3scene::ViewOrdering::Depth;
+    }
     if (base) {
         view.collection = view.history_key = SceneCockpitBase;
         d3scene::renderView(frame,view);
     }
-    // Gauge publication belongs between the authored under/over masks. Until
-    // it is migrated the diagnostic keeps these distinct, without fake gauges.
+    if (gauges) {
+        view.collection = view.history_key = SceneCockpitGauges;
+        view.ordering = d3scene::ViewOrdering::Compositing;
+        d3scene::renderView(frame,view);
+        view.ordering = d3scene::ViewOrdering::Depth;
+    }
     if (layered) {
         view.collection = view.history_key = SceneCockpitAfterGauges;
         d3scene::renderView(frame,view);
@@ -513,7 +527,7 @@ void RenderPreparedCockpit(const d3scene::Presentation& frame, d3scene::Rect vie
         d3scene::renderView(frame,view);
     }
     if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
-        AutomatedCaptureLog("scene cockpit composed base=%d late=%d gauges=0",base,late);
+        AutomatedCaptureLog("scene cockpit composed base=%d late=%d gauges=%d text=0",base,late,gauges);
 }
 
 void RenderModuleSceneView(object* viewer, vector* eye, int room, matrix* orientation,

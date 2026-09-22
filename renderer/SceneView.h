@@ -57,6 +57,7 @@ struct ViewQueryStats {
     uint32_t surfaces_backfacing = 0, surfaces_outside = 0;
 };
 struct ViewVisibility {
+    ViewOrdering ordering = ViewOrdering::Depth;
     uint64_t frame_sequence = 0, scene_lifetime = 0, history_key = 0;
     Camera camera;
     std::vector<VisibleSurface> surfaces;
@@ -65,7 +66,7 @@ struct ViewVisibility {
     ViewQueryStats stats;
     bool exterior_visible = false;
 };
-enum class ViewPassKind { Background, OpaqueWorld, SnapshotOpaqueDepth, ExportOpaqueScene, LateWorld, CompositeWorldOcclusion };
+enum class ViewPassKind { Background, OpaqueWorld, SnapshotOpaqueDepth, ExportOpaqueScene, LateWorld, CompositeWorldOcclusion, CompositeSurfaces };
 struct ViewProducts { bool opaque_scene = false, occlusion_radiance = false; };
 struct ViewPass {
     ViewPassKind kind;

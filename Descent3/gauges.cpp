@@ -35,6 +35,13 @@
 #include "3d.h"
 #include "weapon.h"
 #include "stringtable.h"
+#include "SceneExtraction.h"
+#include "../model/ModelPose.h"
+#include "../renderer/SceneGeometry.h"
+#include "gameloop.h"
+#include <array>
+#include <cmath>
+#include <stdexcept>
 
 #include <algorithm>
 #include <vector>
@@ -127,6 +134,115 @@ void RenderEnergyMonitor(tGauge* gauge, int orient, bool modified);
 
 //	renders the ship gauge monitor
 void RenderAfterburnMonitor(tGauge* gauge, bool modified);
+
+// Gauges publish frame-owned quads from the same immutable cockpit transforms.
+inline int GAUGE_INDEX(tStatMask mask);
+static constexpr float GAUGE_INVSHIPRING_DELTA = .06f;
+// No g3 projection, renderer-state capture, or shared model pose is involved.
+void PrepareGameCockpitGauges(d3scene::FrameData& frame,const ModelTransforms& transforms,
+    const d3scene::Transform& placement)
+{
+    using Quad = std::array<d3scene::Vec3,4>;
+    const auto asset = d3scene::assets().publishMesh(2,d3scene::unitBillboardQuad());
+    int order = 0;
+    const auto mix = [](d3scene::Vec3 a,d3scene::Vec3 b,float t) {
+        return d3scene::Vec3{a.x+(b.x-a.x)*t,a.y+(b.y-a.y)*t,a.z+(b.z-a.z)*t};
+    };
+    const auto append = [&](const Quad& points,int bitmap,float alpha,bool additive,
+        bool texture_alpha,float u0,float v0,float u1,float v1) {
+        d3scene::PreparedMesh mesh;
+        mesh.asset = asset; mesh.collection = SceneCockpitGauges;
+        mesh.vertices.assign(points.begin(),points.end());
+        auto& surface = mesh.surface;
+        surface.composition_order = order++;
+        surface.bitmap = bitmap < 0 ? BAD_BITMAP_HANDLE : bitmap;
+        surface.unlit = true; surface.two_sided = true; surface.depth = d3scene::DepthMode::Disabled;
+        surface.blend = additive ? d3scene::BlendMode::Additive : d3scene::BlendMode::Alpha;
+        surface.alpha = alpha; surface.texture_alpha = texture_alpha;
+        surface.texture_wrap = false;
+        surface.u_offset = u0; surface.v_offset = v0; surface.texture_scale = {u1-u0,v1-v0};
+        frame.meshes.push_back(std::move(mesh));
+    };
+    const auto image = [&](const Quad& points,int bitmap,float alpha = 1.f,bool additive = false) {
+        append(points,bitmap,alpha,additive,true,0,0,1,1);
+    };
+    const tStatMask masks[] = {STAT_PRIMARYLOAD,STAT_SECONDARYLOAD,STAT_SHIELDS,STAT_SHIP,STAT_ENERGY,STAT_AFTERBURN};
+    for (const auto mask : masks) {
+      if (!(Gauge_mask & mask)) continue;
+      const int first = GAUGE_INDEX(mask);
+      if (first < 0) throw std::logic_error("Prepared cockpit gauge has no registered monitor");
+      for (int side = 0; side < (mask == STAT_ENERGY ? 2 : 1); ++side) {
+        const auto& gauge = Gauge_list[first+side];
+        if (!gauge.monitor || !gauge.functional) continue;
+        const int part = static_cast<int>(gauge.monitor-gauge.cockpit->submodel);
+        if (part < 0 || part >= transforms.count || gauge.monitor->num_faces != 1 || gauge.monitor->faces[0].nverts != 4)
+            throw std::logic_error("Prepared cockpit gauge has invalid quad topology");
+        Quad points;
+        for (int i = 0; i < 4; ++i) {
+            const int vertex = gauge.monitor->faces[0].vertnums[(gauge.first_vert+i)%4];
+            const auto root = TransformModelPoint(transforms.submodels[part],gauge.monitor->verts[vertex]);
+            points[i] = d3scene::transformPoint(placement,{root.x,root.y,root.z});
+        }
+        if (mask == STAT_PRIMARYLOAD || mask == STAT_SECONDARYLOAD) {
+            const bool primary = mask == STAT_PRIMARYLOAD;
+            if ((primary && Disable_primary_monitor) || (!primary && Disable_secondary_monitor)) continue;
+            if (Cockpit_alt_mode) {
+                d3scene::Vec3 center;
+                for (const auto point : points) { center.x += point.x*.25f; center.y += point.y*.25f; center.z += point.z*.25f; }
+                auto expanded = points;
+                for (auto& point : expanded) point = mix(center,point,1.1f);
+                append(expanded,BAD_BITMAP_HANDLE,.2f*.7f,false,false,0,0,1,1);
+                auto& backing = frame.meshes.back();
+                backing.collection = SceneCockpitMonitorBacking;
+                backing.surface.bitmap = -1; backing.surface.base_color = {0,0,0};
+                backing.surface.raster_stripe = {3.f*ConfigNormalizeSupersamplingFactor(Render_preferred_state.supersampling_factor),
+                    static_cast<float>(frame.simulation_time)*14,.5f};
+            }
+            append(points,get_weapon_hud_image(Player_num,primary ? PW_PRIMARY : PW_SECONDARY),127.f/255,false,false,0,0,1,1);
+            if (Cockpit_alt_mode) frame.meshes.back().collection = SceneCockpitMonitorBacking;
+        } else if (mask == STAT_SHIELDS) {
+            const float amount = (std::min)(1.f,Objects[Players[Player_num].objnum].shields/INITIAL_SHIELDS);
+            int index = static_cast<int>(std::ceil((1.f-amount-.1f)*NUM_SHIELD_GAUGE_FRAMES));
+            if (index < NUM_SHIELD_GAUGE_FRAMES) image(points,HUD_resources.shield_bmp[(std::max)(0,index)]);
+        } else if (mask == STAT_ENERGY) {
+            const float amount = (std::min)(1.f,Players[Player_num].energy/INITIAL_ENERGY);
+            auto used = points, left = points;
+            used[3] = mix(points[3],points[0],amount); used[2] = mix(points[2],points[1],amount);
+            left[0] = mix(points[0],points[3],1-amount); left[1] = mix(points[1],points[2],1-amount);
+            append(used,HUD_resources.energy_bmp,64.f/255,false,true,side ? 1.f : 0.f,0,side ? 0.f : 1.f,1-amount);
+            append(left,HUD_resources.energy_bmp,1,false,true,side ? 1.f : 0.f,1-amount,side ? 0.f : 1.f,1);
+        } else if (mask == STAT_AFTERBURN) {
+            const float amount = Players[Player_num].afterburn_time_left/AFTERBURN_TIME;
+            auto used = points, left = points;
+            used[3] = mix(points[3],points[2],amount); used[0] = mix(points[0],points[1],amount);
+            left[1] = mix(points[1],points[0],1-amount); left[2] = mix(points[2],points[3],1-amount);
+            append(used,HUD_resources.afterburn_bmp,64.f/255,false,true,amount,0,1,1);
+            append(left,HUD_resources.afterburn_bmp,1,false,true,0,0,amount,1);
+        } else if (mask == STAT_SHIP) {
+            unsigned char alpha = 255;
+            const auto* effect = Objects[Players[Player_num].objnum].effect_info;
+            if (effect && (effect->type_flags & EF_CLOAKED)) {
+                const float time = effect->cloak_time;
+                alpha = time < HUD_CLOAKEND_TIME ? static_cast<unsigned char>(128-127*FixCos(65536.f*(time-int(time)))) : 0;
+            }
+            image(points,HUD_resources.ship_bmp,alpha/255.f);
+            image(points,HUD_resources.ship_bmp,alpha/255.f,true);
+            if (Players[Player_num].flags & PLAYER_FLAGS_INVULNERABLE) {
+                const float phase = static_cast<float>(frame.simulation_time-std::floor(frame.simulation_time));
+                const float aspect = float(Game_window_w)/Game_window_h, amount = phase*GAUGE_INVSHIPRING_DELTA;
+                const float x = aspect >= 1 ? amount/aspect : amount, y = aspect >= 1 ? amount : amount*aspect;
+                auto pulse = points;
+                pulse[0].x -= x; pulse[0].y += y; pulse[1].x += x; pulse[1].y += y;
+                pulse[2].x += x; pulse[2].y -= y; pulse[3].x -= x; pulse[3].y -= y;
+                const float fade = static_cast<unsigned char>(255*(1-phase/2))/255.f;
+                image(pulse,HUD_resources.invpulse_bmp,fade); image(pulse,HUD_resources.invpulse_bmp,fade,true);
+            }
+        }
+      }
+    }
+    if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
+        AutomatedCaptureLog("scene gauge graphics prepared quads=%d text=0 backing=%d",order,Cockpit_alt_mode ? 1 : 0);
+}
 
 //	renders a monitor style quad 
 void DrawGaugeMonitor(g3Point* pts, int bm, float brightness, float* alphas);
@@ -775,7 +891,6 @@ void RenderAfterburnMonitor(tGauge* gauge, bool modified)
 
 
 //	renders the ship gauge monitor
-#define GAUGE_INVSHIPRING_DELTA	0.06f
 void RenderShipMonitor(tGauge* gauge, bool modified)
 {
 	if (!gauge->functional)

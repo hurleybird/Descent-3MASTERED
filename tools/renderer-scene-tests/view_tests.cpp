@@ -45,6 +45,53 @@ void appendRoom(d3scene::SceneAssets& assets,d3scene::FrameData& data,d3scene::M
 
 int runSceneViewTests() {
     {
+        d3scene::SceneAssets overlay_assets;
+        d3scene::FrameData overlay_data;
+        overlay_data.sequence = 1; overlay_data.scene_lifetime = overlay_assets.lifetime();
+        for (int i = 0; i < 3; ++i) {
+            d3scene::PreparedMesh mesh;
+            mesh.asset = overlay_assets.publishMesh(i,triangle(0,2.f+i)); mesh.collection = 7;
+            mesh.surface.depth = d3scene::DepthMode::Disabled;
+            mesh.surface.blend = i == 1 ? d3scene::BlendMode::Solid : d3scene::BlendMode::Alpha;
+            mesh.surface.composition_order = i == 1 ? -1 : 0;
+            overlay_data.meshes.push_back(mesh);
+        }
+        auto overlay_view = view(); overlay_view.collection = 7; overlay_view.kind = d3scene::ViewKind::Preview;
+        overlay_view.ordering = d3scene::ViewOrdering::Compositing;
+        const auto overlay_frame = d3scene::Presentation::freeze(overlay_data);
+        const auto visible = d3scene::queryView(*overlay_frame,overlay_view);
+        check(visible.surfaces.size() == 3 && visible.surfaces[0].mesh_index == 1 &&
+            visible.surfaces[1].mesh_index == 0 && visible.surfaces[2].mesh_index == 2,
+            "Compositing lost authored order/ties or grouped by alpha/depth");
+        const auto schedule = d3scene::buildViewPasses(*overlay_frame,visible);
+        check(schedule.size() == 1 && schedule[0].kind == d3scene::ViewPassKind::CompositeSurfaces &&
+            schedule[0].begin == 0 && schedule[0].end == 3,"Compositing split its ordered coverage into world passes");
+        bool rejected = false;
+        try { d3scene::buildViewPasses(*overlay_frame,visible,{true,false}); }
+        catch (const std::invalid_argument&) { rejected = true; }
+        check(rejected,"Compositing claimed an opaque world image product");
+        overlay_data.meshes[0].surface.depth = d3scene::DepthMode::ReadOnly;
+        const auto invalid_frame = d3scene::Presentation::freeze(overlay_data);
+        rejected = false;
+        try { d3scene::buildViewPasses(*invalid_frame,d3scene::queryView(*invalid_frame,overlay_view)); }
+        catch (const std::invalid_argument&) { rejected = true; }
+        check(rejected,"Depth-dependent geometry entered a depth-independent compositing view");
+        d3scene::ViewHistory history;
+        history.commit(history.prepare(overlay_data,overlay_view,d3scene::prepareCamera(overlay_view)));
+        ++overlay_data.sequence; overlay_view.ordering = d3scene::ViewOrdering::Depth;
+        check(!history.prepare(overlay_data,overlay_view,d3scene::prepareCamera(overlay_view)).previous_valid,
+            "View history crossed a compositing-order change");
+        overlay_data.meshes[0].surface.raster_stripe = {6,14,.5f};
+        check(d3scene::Presentation::freeze(overlay_data)->data().meshes[0].surface.raster_stripe.x == 6,
+            "Raster coverage was not preserved in the immutable material");
+        for (const auto stripe : {d3scene::Vec3{.5f,0,.5f},d3scene::Vec3{3,0,2},
+            d3scene::Vec3{3,std::numeric_limits<float>::infinity(),.5f}}) {
+            overlay_data.meshes[0].surface.raster_stripe = stripe; rejected = false;
+            try { d3scene::Presentation::freeze(overlay_data); } catch (const std::invalid_argument&) { rejected = true; }
+            check(rejected,"Invalid raster stripe reached publication");
+        }
+    }
+    {
         const auto normal = d3scene::rasterViewport({20,30,800,600},1440,2);
         check(normal.x == 40 && normal.y == 180 && normal.width == 1600 && normal.height == 1200,
             "Scene viewport lost supersampling or top-left conversion");

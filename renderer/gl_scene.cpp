@@ -148,6 +148,7 @@ uniform vec2 exterior_fog_range;
 uniform vec3 base_color;
 uniform vec3 color_modulation;
 uniform vec2 light_scale, texture_offset, texture_scale;
+uniform vec3 raster_stripe;
 uniform float material_alpha;
 uniform float alpha_cutoff;
 uniform float lighting_modulation;
@@ -257,6 +258,10 @@ void main() {
     vec2 material_uv=texcoord*texture_scale+texture_offset;
     vec4 base=use_texture != 0 ? texture(colortexture,material_uv) : vec4(base_color,1);
     base.a=(use_texture_alpha != 0 ? base.a : 1.0)*vertex_alpha*material_alpha;
+    if (raster_stripe.x > 0.0) {
+        float row = mod(floor(gl_FragCoord.y+raster_stripe.y),raster_stripe.x);
+        base.a *= step(row/raster_stripe.x,raster_stripe.z);
+    }
     if (soft_depth_range > 0.0) {
         ivec2 size = textureSize(opaque_depth,0);
         ivec2 pixel = clamp(ivec2(gl_FragCoord.xy)-depth_snapshot_origin,ivec2(0),size-ivec2(1));
@@ -1097,6 +1102,7 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
         glUniform2f(scene_shader.FindUniform("light_scale"),surface.lightmap_u_scale,surface.lightmap_v_scale);
         glUniform2f(scene_shader.FindUniform("texture_offset"),surface.u_offset,surface.v_offset);
         glUniform2f(scene_shader.FindUniform("texture_scale"),surface.texture_scale.x,surface.texture_scale.y);
+        vec("raster_stripe",surface.raster_stripe);
         glUniform1f(scene_shader.FindUniform("material_alpha"),surface.alpha);
         glUniform1f(scene_shader.FindUniform("effect_depth_offset"),surface.effect_depth_offset);
         if(surface.material.blended()) {

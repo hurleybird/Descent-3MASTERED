@@ -127,6 +127,9 @@ if ([bool]$referenceManifest.display_view_probe -ne [bool]$actualManifest.displa
 if ([bool]$referenceManifest.cockpit_probe -ne [bool]$actualManifest.cockpit_probe -and -not $DiagnosticComparison) {
     throw 'Cockpit fixture mismatch requires DiagnosticComparison.'
 }
+if ([int]$referenceManifest.cockpit_probe_revision -ne [int]$actualManifest.cockpit_probe_revision -and -not $DiagnosticComparison) {
+    throw 'Cockpit fixture revision mismatch requires DiagnosticComparison.'
+}
 if ([bool]$referenceManifest.model_collection_probe -ne [bool]$actualManifest.model_collection_probe -and -not $DiagnosticComparison) {
     throw 'Model content collections differ; this is not a parity comparison.'
 }

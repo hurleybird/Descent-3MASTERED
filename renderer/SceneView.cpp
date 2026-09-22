@@ -229,6 +229,7 @@ uint32_t selectModelVariant(const ModelInstance& object,const Camera& camera) {
 ViewVisibility queryView(const Presentation& frame, const View& request) {
     const auto view = resolveView(frame,request);
     ViewVisibility result;
+    result.ordering = view.ordering;
     result.camera = prepareCamera(view);
     result.frame_sequence = frame.data().sequence;
     result.scene_lifetime = frame.data().scene_lifetime;
@@ -399,7 +400,9 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
         result.surfaces.push_back(item);
     }
     std::sort(result.object_indices.begin(),result.object_indices.end());
-    std::stable_sort(result.surfaces.begin(),result.surfaces.end(),[](const VisibleSurface& a,const VisibleSurface& b) {
+    std::stable_sort(result.surfaces.begin(),result.surfaces.end(),[&](const VisibleSurface& a,const VisibleSurface& b) {
+        if (view.ordering == ViewOrdering::Compositing)
+            return visibleSurfaceBinding(frame,a).composition_order < visibleSurfaceBinding(frame,b).composition_order;
         if (a.layer != b.layer) return a.layer == RenderLayer::Background;
         if (a.layer == RenderLayer::Background) return false; // retain authored compositing order
         if (a.late != b.late) return !a.late;
@@ -415,6 +418,17 @@ const SurfaceBinding& visibleSurfaceBinding(const Presentation& frame,const Visi
     return data.rooms[item.room_index].surfaces[item.polygon_index];
 }
 std::vector<ViewPass> buildViewPasses(const Presentation& frame,const ViewVisibility& view,ViewProducts products) {
+    if (view.ordering == ViewOrdering::Compositing) {
+        if (products.opaque_scene || products.occlusion_radiance)
+            throw std::invalid_argument("Compositing surfaces cannot export opaque world products");
+        for (const auto& item : view.surfaces) {
+            const auto& surface = visibleSurfaceBinding(frame,item);
+            if (surface.material.testsDepth() || surface.soft_depth_range > 0 || item.layer == RenderLayer::Background)
+                throw std::invalid_argument("Compositing surfaces require explicit depth-independent coverage");
+        }
+        if (view.surfaces.empty()) return {};
+        return {{ViewPassKind::CompositeSurfaces,0,static_cast<uint32_t>(view.surfaces.size())}};
+    }
     if (products.occlusion_radiance && !products.opaque_scene)
         throw std::invalid_argument("World occlusion requires an opaque scene product");
     std::vector<ViewPass> passes;

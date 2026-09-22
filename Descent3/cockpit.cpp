@@ -910,8 +910,9 @@ void PrepareGameCockpit(d3scene::FrameData& frame, bool advance)
                         const auto& material = GameTextures[surface.texture];
                         transparent = (material.flags&(TF_ALPHA|TF_SATURATE|TF_BREAKABLE)) || material.alpha < .99f;
                     }
-                    for (const auto& corner : geometry.geometry.polygons[face].corners)
-                        transparent = transparent || corner.alpha < 253;
+                    const auto& authored = model.submodel[i];
+                    if (authored.alpha) for (const auto& corner : geometry.geometry.polygons[face].corners)
+                        transparent = transparent || authored.alpha[corner.vertex] < .99f;
                     surface.draw_surface = !transparent;
                 }
                 part.surfaces.push_back(surface);
@@ -924,6 +925,7 @@ void PrepareGameCockpit(d3scene::FrameData& frame, bool advance)
     if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
         AutomatedCaptureLog("scene cockpit prepared model=%d keyframe=%.6g base=%u layered=%u late=%u gauges=0",
             Cockpit_info.model_num,keyframe,masks[0],masks[1],masks[2]);
+    PrepareGameCockpitGauges(frame,transforms,placement);
 }
 
 bool CockpitHasPostPostElements()
