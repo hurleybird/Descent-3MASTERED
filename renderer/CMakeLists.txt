@@ -1,4 +1,6 @@
 SET (RENDERER_SOURCES
+		renderer/Scene.h
+		renderer/Scene.cpp
 		renderer/HardwareInternal.h
 		renderer/RendererConfig.h
 		renderer/globalvars.cpp

@@ -27,6 +27,7 @@
 #include <cmath>
 #include <vector>
 #include "gameloop.h"
+#include "SceneExtraction.h"
 #include "game.h"
 #include "render.h"
 #include "descent.h"
@@ -2756,80 +2757,8 @@ void ProcessKeys()
 extern void DrawRoomVisPnts(object* obj);
 #endif
 
-void GameRenderWorld(object* viewer, vector* viewer_eye, int viewer_roomnum, matrix* viewer_orient, float zoom, bool rear_view,
-					 int anchor_x, int anchor_y, int anchor_w, int anchor_h)
-{
-	PERF_MARKER_SCOPE("GameRenderWorld");
-	matrix temp_orient, save_orient;
-
-	//Get the viewer orientation
-	if (rear_view) {
-		temp_orient.fvec = -viewer_orient->fvec;
-		temp_orient.rvec = -viewer_orient->rvec;
-		temp_orient.uvec = viewer_orient->uvec;
-		viewer_orient = &temp_orient;
-		save_orient = viewer->orient;
-		viewer->orient = temp_orient;
-	}
-
-	//Start the 3D
-	{
-		PERF_MARKER_SCOPE("g3_StartFrame.World");
-		if (anchor_w > 0 && anchor_h > 0)
-			g3_StartFrameAnchored(viewer_eye, viewer_orient, zoom, anchor_x, anchor_y, anchor_w, anchor_h);
-		else
-			g3_StartFrame(viewer_eye, viewer_orient, zoom);
-	}
-	rend_PerfGpuSceneMark(RENDERER_GPU_SCENE_AFTER_WORLD_START);
-
-	// Reset fog,zbuffer
-	Num_fogged_rooms_this_frame = 0;
-	rend_SetZBufferState(1);
-	rend_SetZBufferWriteMask(1);
-
-	// Reset our postrenderings
-	ResetPostrenderList();
-
-	//Render!
-	if (ROOMNUM_OUTSIDE(viewer_roomnum))
-		RenderTerrain(0);
-	else
-	{
-		bool flag_automap = (viewer != NULL) ? (viewer->type != OBJ_ROBOT) : 0;
-		RenderMine(viewer_roomnum, flag_automap, 0);
-
-#ifdef _DEBUG
-		if (Game_show_portal_vis_pnts)
-		{
-			DrawRoomVisPnts(Player_object);
-		}
-#endif
-
-	}
-	rend_PerfGpuSceneMark(RENDERER_GPU_SCENE_AFTER_WORLD_GEOMETRY);
-
-	//Done with 3D
-	{
-		PERF_MARKER_SCOPE("PostRender.World");
-		PostRender(viewer_roomnum);
-	}
-	if (Rendering_main_view)
-	{
-		PERF_MARKER_SCOPE("QueueMultiplayerPlayerNamesOnHud");
-		QueueMultiplayerPlayerNamesOnHud();
-	}
-	rend_PerfGpuSceneMark(RENDERER_GPU_SCENE_AFTER_WORLD_POSTRENDER);
-	{
-		PERF_MARKER_SCOPE("g3_EndFrame.World");
-		g3_EndFrame();
-	}
-	rend_PerfGpuSceneMark(RENDERER_GPU_SCENE_AFTER_WORLD_END);
-
-	// Restore viewer orientation
-	if (rear_view)
-		viewer->orient = save_orient;
-
-}
+// GameRenderWorld's stateful world execution has been removed. World views
+// below consume the presentation extracted once by GameRenderFrame.
 
 static void GetMainViewOverscanFrame(int* x1, int* y1, int* x2, int* y2, int* anchor_x, int* anchor_y)
 {
@@ -2870,7 +2799,7 @@ static void GetMainViewOverscanFrame(int* x1, int* y1, int* x2, int* y2, int* an
 }
 
 //Render into the big window
-void GameDrawMainView()
+void GameDrawMainView(const d3scene::Presentation& presentation)
 {
 	PERF_MARKER_SCOPE("GameDrawMainView");
 	extern bool Guided_missile_smallview;					// smallviews.cpp
@@ -2904,8 +2833,11 @@ void GameDrawMainView()
 	Rendering_main_view = true;
 	{
 		PERF_MARKER_SCOPE("GameRenderWorld.MainView");
-		GameRenderWorld(Viewer_object, &Viewer_object->pos, Viewer_object->roomnum, &Viewer_object->orient,
-			Render_zoom, rear_view, main_view_anchor_x, main_view_anchor_y, Game_window_w, Game_window_h);
+		const auto view = MakeGameSceneView(d3scene::ViewKind::Main, 1, Viewer_object,
+			Viewer_object->pos, Viewer_object->roomnum, Viewer_object->orient, Render_zoom, rear_view,
+			{main_view_x1, main_view_y1, main_view_x2 - main_view_x1, main_view_y2 - main_view_y1},
+			{main_view_anchor_x, main_view_anchor_y, Game_window_w, Game_window_h});
+		CommitGameVisibility(presentation, d3scene::renderView(presentation, view));
 	}
 	rend_PerfGpuSceneMark(RENDERER_GPU_SCENE_AFTER_MAIN_WORLD);
 	Rendering_main_view = false;
@@ -3095,17 +3027,21 @@ void GameRenderFrame(void)
 			UpdatePerPixelLightmapRendererData();
 		}
 
+		// Publish once. Every world view below sees this same owned scene, not
+		// a second traversal of mutable simulation state.
+		const auto presentation = ExtractGamePresentation(Gametime, Frametime, Game_paused);
+
 		// Draw the big 3d view
 		{
 			PERF_MARKER_SCOPE("GameDrawMainView.Total");
-			GameDrawMainView();
+			GameDrawMainView(*presentation);
 		}
 		rend_PerfGpuSceneMark(RENDERER_GPU_SCENE_AFTER_MAIN_VIEW);
 
 		//Do the small views.  These should be before GameDrawHUD() for the small windows
 		{
 			PERF_MARKER_SCOPE("DrawSmallViews");
-			DrawSmallViews();
+			DrawSmallViews(*presentation);
 		}
 		rend_PerfGpuSceneMark(RENDERER_GPU_SCENE_AFTER_SMALL_VIEWS);
 

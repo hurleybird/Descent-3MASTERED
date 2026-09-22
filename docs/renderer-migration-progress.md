@@ -4,10 +4,87 @@
 
 The user approved renderer rearchitecture and background save-game comparisons,
 with an explicit gate: **do not touch shadows until the new renderer is verified**.
-No renderer replacement or shadow implementation has been made at this checkpoint.
-The completed work is baseline preservation, a clean-source build, and validation
-of the screenshot comparison harness. The migration and full acceptance corpus
-remain unfinished. Do not mistake these baseline results for new-renderer results.
+The replacement has started at the game/renderer scene boundary. The development
+game target is intentionally **not buildable** while downstream code is migrated.
+The independent scene/extraction tests build and pass. No new renderer executable
+has been produced or visually verified, and no shadow implementation was added.
+Do not mistake the frozen baseline results below for new-renderer results.
+
+## First replacement cut
+
+- `renderer/Scene.h/.cpp`: an engine/GL-independent owned scene contract,
+  renderer-owned room assets with lifetime/revision identities, immutable
+  presentation publication, explicit camera/view requests, and visibility
+  reports. Old published frames retain assets safely across update/unload/reuse.
+- `Descent3/SceneExtraction.h/.cpp`: reads all used rooms and all live objects,
+  independently of camera visibility. Publishes room geometry only when source
+  geometry/UVs change, snapshots material/portal/fog bindings per presentation,
+  and tracks object transforms by allocation handle rather than slot. History
+  advances once per successful extraction, not per camera. This does NOT yet
+  prepare polymodel poses, effects, lights, materials or terrain.
+- Removed the implementation of `GameRenderWorld`. Main and auxiliary views now
+  receive the same extracted presentation. Rear-view orientation is copied into
+  the view, not temporarily written into a simulation object. Small views no
+  longer swap `Viewer_object`, restore global g3 camera state, or temporarily
+  disable global dynamic lighting; auxiliary lighting policy is explicit.
+- Room unload resets the scene lifetime and presentation history. The original
+  `RenderRoomClustersFreeLevel` cleanup (including the Level 2 regression fix)
+  remains in place. The scene store's destruction order allows atexit room
+  cleanup; it is not a late-constructed function-local static.
+- Pending scene domains reject execution. `IRenderer::RenderSceneView` is pure
+  virtual, with no legacy replay implementation. Old `GameRenderWorld` and
+  `RenderMine` declarations are compile-time barriers, not selectable fallbacks.
+
+Geometry revision detection currently compares source geometry fields once per
+extraction because the simulation has no authoritative geometry revision counter.
+This scans, but does not clone, unchanged level geometry. Its CPU cost is NOT yet
+benchmarked. It must be measured before acceptance. Asset publication must not
+be changed to pointer equality or a hash-only correctness test.
+
+### Verified first-cut tests
+
+Standalone target `tools/renderer-scene-tests` compiles the real scene core and
+real game extraction against minimal simulation globals, without linking any
+draw, RNG, GL or game-runtime implementation. Release checks are ordinary test
+conditions, not `assert` removed by NDEBUG.
+
+```text
+cmake -S tools/renderer-scene-tests -B out/build/scene-tests -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build out/build/scene-tests
+ctest --test-dir out/build/scene-tests --output-on-failure
+```
+
+Checks cover immutable asset/frame ownership, unchanged-geometry sharing,
+geometry/material updates, removal and slot/level reuse, invalid topology/NaNs,
+duplicate identities, incomplete bindings and execution refusal, presentation
+history, object allocation generations, clock rewind, non-mutating rear views,
+auxiliary policy and exclusion of transient camera/specular face marks.
+
+### Explicit build blockers / migration queue
+
+The full game build was attempted with Ninja `-k 0` to expose all compilation
+failures rather than stop at the first. Log: `out/renderer-migration-build.log`.
+The observed blockers are:
+
+1. `renderer/renderer.cpp`: GL4 is abstract until the new scene executor exists.
+2. Main/small-view callers: `CommitGameVisibility` is deleted pending the explicit
+   feedback implementation. No guessed feedback policy is being used.
+3. `gamesave.cpp`: save thumbnails still call the deleted world entry; migrate
+   them to an explicit non-gameplay view without advancing main-view history.
+4. `Game2DLL.cpp` exports `GameRenderWorld` in its function table. Preserve this
+   slot and binary calling convention with the module adapter. **Do not remove
+   the slot or restore the old core implementation to silence the error.**
+5. `terrainrender.cpp` calls deleted `RenderMine`; split terrain/portal visibility
+   from execution and port to the scene owner.
+6. `render.cpp` still defines the deleted mine function. Its useful traversal and
+   appearance algorithms must be migrated, then obsolete execution removed.
+
+The material, object preparation, terrain, effects, lights, decals and cockpit
+domain bits remain pending. GPU/pass/compatibility migration has NOT happened.
+Most old implementation files remain as migration source; removal is not done.
+Multiplayer name queuing formerly inside GameRenderWorld must move to the
+feedback/HUD preparation step. No screenshot comparison is meaningful until the
+new executor can render; keep the accepted baseline frozen meanwhile.
 
 ## Locations and provenance
 
@@ -125,8 +202,10 @@ diagnosed; do not hide future coherent artifacts behind a global noise threshold
 
 ## Next work / no completion claim
 
-Finish stage 0's remaining view-feedback/module/rare-material inventory, missing
-coverage fixtures and performance budgets. Then replace the top-level core scene
-contract and migrate its consumers as planned, with no old-world fallback.
+Continue the replacement through scene preparation, view-local visibility,
+feedback and GPU execution. Resolve the explicit build blockers above without
+reconnecting the removed world draw path. Remaining coverage fixtures, rare
+materials, module behavior and performance budgets are still acceptance work;
+do not restart with more baseline preparation instead of implementing.
 Keep the baseline runtimes/captures frozen while the development branch is broken.
 Renderer verification and deletion audit must complete before any shadow work.

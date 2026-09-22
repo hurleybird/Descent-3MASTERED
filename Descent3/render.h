@@ -111,7 +111,9 @@ extern g3Point SolidFogPoints[],AlphaFogPoints[];
 //Parameters:	viewer_roomnum - what room the viewer is in
 //					flag_automap - if true, flag segments as visited when rendered
 //					called_from_terrain - set if calling this routine from the terrain renderer
-void RenderMine(int viewer_roomnum,int flag_automap=0,int called_from_terrain=0);
+// Migration barrier. Port traversal/visibility out of this implementation;
+// do not restore it as a fallback behind the scene executor.
+void RenderMine(int viewer_roomnum,int flag_automap=0,int called_from_terrain=0) = delete;
 // Compile renderer-only Euclidean room clusters for the newly loaded level.
 // The authored portal graph remains authoritative for gameplay systems.
 void RenderRoomClustersInitNewLevel();

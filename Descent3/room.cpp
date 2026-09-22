@@ -17,6 +17,7 @@
 */
 
 #include "room.h"
+#include "SceneExtraction.h"
 #include "mono.h"
 #include "vecmat.h"
 #include "gametexture.h"
@@ -340,6 +341,7 @@ void FreeRoom(room* rp)
 //Frees all the rooms currently in use, deallocating their memory and marking them as unused
 void FreeAllRooms()
 {
+	ResetGamePresentationScene();
 	int rn;
 	room* rp;
 	mprintf((1, "Freeing rooms...Higest_room_index %d\n", Highest_room_index));

@@ -19,6 +19,7 @@
 #pragma once
 
 #include "renderer.h"
+#include "Scene.h"
 
 //Base renderer interface. 
 //Renderer.cpp will call into this abstractly. 
@@ -26,6 +27,11 @@ class IRenderer
 {
 public:
 	virtual ~IRenderer() = default;
+
+	// Required replacement entry. No default that replays game draw commands.
+	// GL4 remains deliberately abstract until its scene executor is migrated.
+	virtual d3scene::VisibilityReport RenderSceneView(const d3scene::Presentation& frame,
+		const d3scene::View& view) = 0;
 
 	//INITIALIZATION
 

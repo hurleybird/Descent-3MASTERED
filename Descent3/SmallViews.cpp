@@ -17,6 +17,7 @@
 */
 
 #include "SmallViews.h"
+#include "SceneExtraction.h"
 
 #include "descent.h"
 #include "pserror.h"
@@ -205,7 +206,7 @@ static void DrawSmallViewScanlineOverlay(int width, int height, bool cockpit_emb
 }
 
 //Render into one of the small windows
-void RenderSmallWindow(int left, int top, int right, int bot, object* viewer, vector* viewer_eye, int viewer_roomnum, matrix* viewer_orient, int flags, float zoom, ddgr_color outline_color, char* label, float timer, bool cockpit_embedded)
+void RenderSmallWindow(const d3scene::Presentation& presentation, int view_slot, int left, int top, int right, int bot, object* viewer, vector* viewer_eye, int viewer_roomnum, matrix* viewer_orient, int flags, float zoom, ddgr_color outline_color, char* label, float timer, bool cockpit_embedded)
 {
 	int width = right - left, height = bot - top;
 
@@ -256,22 +257,11 @@ void RenderSmallWindow(int left, int top, int right, int bot, object* viewer, ve
 		//draw 3D view
 		ASSERT(viewer != NULL);
 		ASSERT(viewer_eye != NULL);
-		object* save_viewer_object = Viewer_object;
 		bool rear_view = ((flags & SVF_REARVIEW) != 0);
-
-		// Reset facings for mine stuff
-		ResetFacings();
-
-		//Set the viewer for this render
-		Viewer_object = viewer;
-
-		//Render the world
-		rend_SuspendMotionVectorWrites();
-		GameRenderWorld(viewer, viewer_eye, viewer_roomnum, viewer_orient, zoom, rear_view);
-		rend_ResumeMotionVectorWrites();
-
-		//Restore the viewer
-		Viewer_object = save_viewer_object;
+		const auto view = MakeGameSceneView(d3scene::ViewKind::Auxiliary,
+			static_cast<uint64_t>(view_slot) + 2, viewer, *viewer_eye, viewer_roomnum,
+			*viewer_orient, zoom, rear_view, {left, top, width, height}, {0, 0, width, height});
+		CommitGameVisibility(presentation, d3scene::renderView(presentation, view));
 	}
 
 	DrawSmallViewScanlineOverlay(width, height, cockpit_embedded);
@@ -339,7 +329,7 @@ int GetGunRoom(vector* p0, int roomnum, int objnum, vector* p1)
 extern int Point_visible_last_frame;
 
 //Draw all the active small views
-void DrawSmallViews()
+void DrawSmallViews(const d3scene::Presentation& presentation)
 {
 	int v;
 	small_view* svp;
@@ -347,20 +337,11 @@ void DrawSmallViews()
 	ddgr_color outline_color;
 	vector* viewer_eye, gun_pos;
 	matrix* viewer_orient, gun_orient;
-	matrix save_orient;
-	vector save_eye;
 	int viewer_roomnum;
 
 	//if letterbox, don't draw the small views
 	if (GetHUDMode() == HUD_LETTERBOX)
 		return;
-
-	bool lsave = Detail_settings.Dynamic_lighting;
-
-	g3_GetUnscaledMatrix(&save_orient);
-	g3_GetViewPosition(&save_eye);
-
-	Detail_settings.Dynamic_lighting = false;
 
 	for (v = 0, svp = Small_views; v < NUM_SMALL_VIEWS; v++, svp++)
 	{
@@ -471,7 +452,7 @@ void DrawSmallViews()
 
 		//Let's render
 		Point_visible_last_frame = -1;
-		RenderSmallWindow(left, top, right, bot, viewer, viewer_eye, viewer_roomnum, viewer_orient, flags, svp->zoom, outline_color, svp->label, svp->timer, cockpit_embedded);
+		RenderSmallWindow(presentation, v, left, top, right, bot, viewer, viewer_eye, viewer_roomnum, viewer_orient, flags, svp->zoom, outline_color, svp->label, svp->timer, cockpit_embedded);
 		Point_visible_last_frame = -1;
 
 		//Update time for this view
@@ -485,11 +466,6 @@ void DrawSmallViews()
 		}
 	}
 
-	Detail_settings.Dynamic_lighting = lsave;
-
-	// Resets aspect ratio
-	g3_StartFrame(&save_eye, &save_orient, Render_zoom);
-	g3_EndFrame();
 }
 
 //Parameters:	window - the window to get rid of

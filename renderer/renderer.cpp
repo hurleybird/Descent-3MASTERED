@@ -26,6 +26,13 @@ int RendererOpenGLMajorVersion = 0;
 int RendererOpenGLMinorVersion = 0;
 char RendererOpenGLVersionString[128] = "";
 static IRenderer* renderer_inst;
+
+d3scene::VisibilityReport d3scene::renderView(const Presentation& frame, const View& view)
+{
+	frame.requireExecutable();
+	validateView(view);
+	return renderer_inst->RenderSceneView(frame, view);
+}
 static oeApplication* Renderer_app;
 static renderer_preferred_state Renderer_last_preferred_state;
 static bool Renderer_last_preferred_state_valid = false;
