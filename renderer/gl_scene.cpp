@@ -11,6 +11,7 @@
 #include <cstring>
 #include <cmath>
 #include <string>
+#include <algorithm>
 extern int Last_texel_unit_set;
 
 namespace {
@@ -66,7 +67,10 @@ uniform samplerBuffer instance_positions;
 uniform int use_instance_positions, instance_position_offset;
 uniform samplerBuffer scene_reflections;
 uniform int reflection_normal_offset, use_reflection_normals;
+uniform int reflection_field_offset, use_reflection_field;
 out vec3 reflection_normal;
+out vec3 field_centers[4], field_colors[4];
+out vec3 field_modulation;
 uniform vec3 ambient_color, ambient_direction;
 uniform int directional_ambient;
 uniform vec3 eye, camera_right, camera_up, camera_forward;
@@ -102,6 +106,16 @@ void main() {
     if (use_instance_uvs != 0) lightcoord = texelFetch(instance_uvs,gl_VertexID+instance_uv_offset).rg;
     vec3 world_normal = model_right*normal.x + model_up*normal.y + model_forward*normal.z;
     reflection_normal = use_reflection_normals != 0 ? texelFetch(scene_reflections,gl_VertexID+reflection_normal_offset).rgb : world_normal;
+    field_modulation = vec3(1);
+    for (int lobe = 0; lobe < 4; ++lobe) { field_centers[lobe] = vec3(0); field_colors[lobe] = vec3(0); }
+    if (use_reflection_field != 0) {
+        int record = reflection_field_offset+gl_VertexID*9;
+        for (int lobe = 0; lobe < 4; ++lobe) {
+            field_centers[lobe] = texelFetch(scene_reflections,record+lobe*2).rgb;
+            field_colors[lobe] = texelFetch(scene_reflections,record+lobe*2+1).rgb;
+        }
+        field_modulation = texelFetch(scene_reflections,record+8).rgb;
+    }
     float shade = directional_ambient != 0 && lighting_per_pixel == 0 ? clamp((1.0-dot(world_normal,ambient_direction))*0.5,0.0,1.0) : 1.0;
     ambient = ambient_color*shade;
 }
@@ -139,6 +153,9 @@ uniform float static_specular_strength;
 uniform vec3 ambient_direction;
 uniform int directional_ambient;
 in vec3 reflection_normal;
+uniform int use_reflection_field;
+in vec3 field_centers[4], field_colors[4];
+in vec3 field_modulation;
 in vec3 world_position;
 in vec3 ambient;
 in vec3 vertex_dynamic;
@@ -261,9 +278,14 @@ void main() {
         vec3 v = view_delta/max(length(view_delta),1.e-8);
         vec3 reflected = vec3(0);
         const float weights[4] = float[4](1.0,.66,.33,.25);
+        if (use_reflection_field != 0) for (int lobe = 0; lobe < 4; ++lobe) {
+            vec3 delta = field_centers[lobe]-world_position;
+            vec3 direction = delta/max(length(delta),1.e-8);
+            reflected += field_colors[lobe]*pow(max(0.0,dot(v,direction)),specular_response.y);
+        }
         // Four ranked authored lobes are a content convention, not a limit on
         // the shared dynamic emitter list.
-        for (int i = 0; i < min(reflection_count,4); ++i) {
+        for (int i = 0; use_reflection_field == 0 && i < min(reflection_count,4); ++i) {
             vec3 incident = world_position-texelFetch(scene_reflections,reflection_offset+i*2).rgb;
             float distance = length(incident);
             if (distance <= 1.e-8) continue;
@@ -278,7 +300,7 @@ void main() {
             float response = pow(max(0.0,dot(v,reflect(incident,n))),specular_response.y);
             reflected += texelFetch(scene_lights,light+1).rgb*attenuation*response*texelFetch(scene_lights,light+3).z;
         }
-        reflected *= mix(vec3(1),baked,specular_response.z);
+        reflected *= mix(vec3(1),clamp(use_reflection_field != 0 ? field_modulation : baked,vec3(0),vec3(1)),specular_response.z);
         float mask = texture(specular_texture,texcoord+texture_offset).a;
         color.rgb += clamp(reflected*specular_response.x,vec3(0),vec3(1))*
             clamp(mask*specular_response.w*vertex_alpha,0.0,1.0);
@@ -357,6 +379,8 @@ void GL4Renderer::DestroySceneResources() {
     if (scene_reflection_texture) glDeleteTextures(1,&scene_reflection_texture);
     scene_reflection_buffer = scene_reflection_texture = 0;
     scene_reflection_ranges.clear(); scene_normal_ranges.clear();
+    scene_field_ranges.clear();
+    scene_reflection_assets.clear(); scene_reflection_revisions.clear();
     scene_light_buffer = scene_influence_buffer = scene_light_texture = scene_influence_texture = 0;
     scene_frame_sequence = 0;
     scene_light_ranges.clear();
@@ -431,22 +455,57 @@ void GL4Renderer::UploadSceneFrame(const d3scene::Presentation& frame) {
         std::vector<int32_t> indices;
         std::vector<d3scene::Vec2> uvs;
         std::vector<d3scene::Vec3> reflections;
+        std::vector<uint64_t> reflection_revisions{0}; // also initializes the empty GPU buffer once
+        const auto collect = [&](const d3scene::SurfaceBinding& surface) {
+            if (surface.reflection && surface.specular_strength > 0) reflection_revisions.push_back(surface.reflection->id().revision);
+        };
+        for (const auto& room : frame.data().rooms) for (const auto& surface : room.surfaces) collect(surface);
+        for (const auto& patch : frame.data().terrain.patches) for (const auto& surface : patch) collect(surface);
+        for (const auto& mesh : frame.data().meshes) collect(mesh.surface);
+        for (const auto& object : frame.data().objects) for (const auto& part : object.parts)
+            for (const auto& surface : part.surfaces) collect(surface);
+        std::sort(reflection_revisions.begin(),reflection_revisions.end());
+        reflection_revisions.erase(std::unique(reflection_revisions.begin(),reflection_revisions.end()),reflection_revisions.end());
+        const bool rebuild_reflections = reflection_revisions != scene_reflection_revisions;
+        if (rebuild_reflections) scene_reflection_assets.clear();
         scene_reflection_ranges.clear(); scene_normal_ranges.clear();
+        scene_field_ranges.clear();
         scene_light_ranges.clear();
         scene_uv_ranges.clear();
         const auto add = [&](const d3scene::SurfaceBinding& surface) {
+            SceneReflectionRanges reflection_ranges{};
+            if (surface.reflection && surface.specular_strength > 0) {
+            const auto revision = surface.reflection->id().revision;
+            const auto cached = scene_reflection_assets.find(revision);
+            if (cached != scene_reflection_assets.end()) reflection_ranges = cached->second;
+            else {
             const uint32_t reflection_start = static_cast<uint32_t>(reflections.size());
             if (surface.reflection) for (const auto& source : surface.reflection->data().sources) {
                 if (source.color.x == 0 && source.color.y == 0 && source.color.z == 0) continue;
                 reflections.push_back(source.position); reflections.push_back(source.color);
             }
-            scene_reflection_ranges.emplace(&surface,ElementRange(reflection_start,static_cast<uint32_t>(reflections.size()-reflection_start)/2));
+            reflection_ranges.sources = ElementRange(reflection_start,static_cast<uint32_t>(reflections.size()-reflection_start)/2);
             const uint32_t normal_start = static_cast<uint32_t>(reflections.size());
             if (surface.reflection) {
                 const auto& normals = surface.reflection->data().corner_normals;
                 d3scene::forEachTriangleCorner(normals.size(),[&](size_t corner) { reflections.push_back(normals[corner]); });
             }
-            scene_normal_ranges.emplace(&surface,ElementRange(normal_start,static_cast<uint32_t>(reflections.size())-normal_start));
+            reflection_ranges.normals = ElementRange(normal_start,static_cast<uint32_t>(reflections.size())-normal_start);
+            const uint32_t field_start = static_cast<uint32_t>(reflections.size());
+            if (surface.reflection) {
+                const auto& corners = surface.reflection->data().field_corners;
+                d3scene::forEachTriangleCorner(corners.size(),[&](size_t corner) {
+                    for (const auto& lobe : corners[corner].lobes) { reflections.push_back(lobe.position); reflections.push_back(lobe.color); }
+                    reflections.push_back(corners[corner].baked_modulation);
+                });
+            }
+            reflection_ranges.field = ElementRange(field_start,static_cast<uint32_t>(reflections.size())-field_start);
+            scene_reflection_assets.emplace(revision,reflection_ranges);
+            }
+            }
+            scene_reflection_ranges.emplace(&surface,reflection_ranges.sources);
+            scene_normal_ranges.emplace(&surface,reflection_ranges.normals);
+            scene_field_ranges.emplace(&surface,reflection_ranges.field);
             scene_light_ranges.emplace(&surface,ElementRange(static_cast<uint32_t>(indices.size()),static_cast<uint32_t>(surface.light_indices.size())));
             for (uint32_t index : surface.light_indices) indices.push_back(static_cast<int32_t>(index));
             const uint32_t start = static_cast<uint32_t>(uvs.size());
@@ -469,9 +528,12 @@ void GL4Renderer::UploadSceneFrame(const d3scene::Presentation& frame) {
             scene_position_ranges.emplace(&part,ElementRange(start,static_cast<uint32_t>(positions.size())-start));
         }
         if (positions.empty()) positions.push_back({});
-        if (reflections.empty()) reflections.push_back({});
-        glBindBuffer(GL_TEXTURE_BUFFER,scene_reflection_buffer);
-        glBufferData(GL_TEXTURE_BUFFER,reflections.size()*sizeof(d3scene::Vec3),reflections.data(),GL_STREAM_DRAW);
+        if (rebuild_reflections) {
+            if (reflections.empty()) reflections.push_back({});
+            glBindBuffer(GL_TEXTURE_BUFFER,scene_reflection_buffer);
+            glBufferData(GL_TEXTURE_BUFFER,reflections.size()*sizeof(d3scene::Vec3),reflections.data(),GL_STATIC_DRAW);
+            scene_reflection_revisions = std::move(reflection_revisions);
+        }
         glBindBuffer(GL_TEXTURE_BUFFER,scene_position_buffer);
         glBufferData(GL_TEXTURE_BUFFER,positions.size()*sizeof(d3scene::PositionPair),positions.data(),GL_STREAM_DRAW);
         if (indices.empty()) indices.push_back(0);
@@ -993,6 +1055,9 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
         const auto range = item.terrain || item.mesh ? ElementRange(0,gpu.polygons.back().offset+gpu.polygons.back().count) : gpu.polygons[item.polygon_index];
         const auto uv_range = scene_uv_ranges.at(binding);
         const auto normals = scene_normal_ranges.at(binding);
+        const auto field = scene_field_ranges.at(binding);
+        glUniform1i(scene_shader.FindUniform("use_reflection_field"),field.count != 0);
+        glUniform1i(scene_shader.FindUniform("reflection_field_offset"),static_cast<int>(field.offset)-static_cast<int>(range.offset)*9);
         glUniform1i(scene_shader.FindUniform("use_reflection_normals"),normals.count != 0);
         glUniform1i(scene_shader.FindUniform("reflection_normal_offset"),static_cast<int>(normals.offset)-static_cast<int>(range.offset));
         glUniform1i(scene_shader.FindUniform("use_instance_uvs"),uv_range.count != 0);

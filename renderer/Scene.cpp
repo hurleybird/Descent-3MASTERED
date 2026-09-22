@@ -126,13 +126,25 @@ ReflectionAssetRef SceneAssets::publishReflection(uint32_t slot,ReflectionData d
         require(finite(source.position) && finite(source.color) && source.color.x >= 0 && source.color.y >= 0 && source.color.z >= 0,
             "Invalid authored reflection source");
     for (const auto& normal : data.corner_normals) require(finite(normal),"Invalid reflection normal");
+    for (const auto& corner : data.field_corners) {
+        require(finite(corner.baked_modulation),"Invalid reflection field modulation");
+        for (const auto& lobe : corner.lobes) require(finite(lobe.position) && finite(lobe.color) &&
+            lobe.color.x >= 0 && lobe.color.y >= 0 && lobe.color.z >= 0,"Invalid reflected field lobe");
+    }
     const auto previous = slot < reflections_.size() ? reflections_[slot] : nullptr;
     if (previous) {
         const auto& old = previous->data();
-        bool same = old.sources.size() == data.sources.size() && old.corner_normals.size() == data.corner_normals.size();
+        bool same = old.sources.size() == data.sources.size() && old.corner_normals.size() == data.corner_normals.size() &&
+            old.field_corners.size() == data.field_corners.size();
         for (size_t i = 0; same && i < old.sources.size(); ++i)
             same = equal(old.sources[i].position,data.sources[i].position) && equal(old.sources[i].color,data.sources[i].color);
         for (size_t i = 0; same && i < old.corner_normals.size(); ++i) same = equal(old.corner_normals[i],data.corner_normals[i]);
+        for (size_t i = 0; same && i < old.field_corners.size(); ++i) {
+            same = equal(old.field_corners[i].baked_modulation,data.field_corners[i].baked_modulation);
+            for (size_t lobe = 0; same && lobe < 4; ++lobe)
+                same = equal(old.field_corners[i].lobes[lobe].position,data.field_corners[i].lobes[lobe].position) &&
+                    equal(old.field_corners[i].lobes[lobe].color,data.field_corners[i].lobes[lobe].color);
+        }
         if (same) return previous;
     }
     if (revision_ == std::numeric_limits<uint64_t>::max()) throw std::overflow_error("Scene revision exhausted");
@@ -310,6 +322,9 @@ PresentationRef Presentation::freeze(const FrameData& data) {
             require(!reflection || reflection->data().corner_normals.empty() ||
                 reflection->data().corner_normals.size() == room.asset->geometry().polygons[face].corners.size(),
                 "Incomplete room reflection normals");
+            require(!reflection || reflection->data().field_corners.empty() ||
+                reflection->data().field_corners.size() == room.asset->geometry().polygons[face].corners.size(),
+                "Incomplete room reflection field");
         }
         require(finite(room.fog_color) && std::isfinite(room.fog_depth), "Invalid room fog");
         require(std::isfinite(room.light_scalar) && room.light_scalar >= 0, "Invalid room illumination");

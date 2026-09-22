@@ -1,5 +1,25 @@
 # Renderer migration checkpoint
 
+## Continuation: published static reflection fields
+
+Moved the existing reflection-family bake from render.cpp into the game-side
+SceneReflectionBake asset compiler, preserving its accepted math. Publication
+now exports corner lobes, resolved normals and baked modulation as immutable
+reflection assets. The shared material shader consumes reflected lobes directly
+(without reflecting them again); split-texture mask eligibility checks the
+specular image rather than the diffuse image. Old draw consumers still have
+temporary access to bake intermediates pending their removal.
+
+Bake publication reuses assets until rebake/lifetime change. GPU packing is
+rebuilt only when the live asset revision set changes, rather than streaming
+the static field every presentation. Full build and 5,069 CPU checks pass.
+All eight scene-owned-reflection-field effects captures complete; 003/007 were
+inspected. The final scene-cached-reflection-field captures are byte-identical
+across all eight saves (scene-cached-field-parity.json). This verifies the cache
+change, not full visual parity with the original complete renderer. Exterior
+satellite reflections, vertex-specular compatibility and remaining material
+cases still require migration/verification. Candidate remains unchanged.
+
 ## Continuation: frozen posed bounds
 
 Publication compiles world-space bounds from each drawn part's actual current

@@ -140,6 +140,10 @@ class GL4Renderer : public IRenderer
 	GLuint scene_position_buffer = 0, scene_position_texture = 0;
 	GLuint scene_reflection_buffer = 0, scene_reflection_texture = 0;
 	std::unordered_map<const d3scene::SurfaceBinding*, ElementRange> scene_reflection_ranges, scene_normal_ranges;
+	std::unordered_map<const d3scene::SurfaceBinding*, ElementRange> scene_field_ranges;
+	struct SceneReflectionRanges { ElementRange sources, normals, field; };
+	std::unordered_map<uint64_t, SceneReflectionRanges> scene_reflection_assets;
+	std::vector<uint64_t> scene_reflection_revisions;
 	GLuint scene_fog_buffer = 0, scene_fog_texture = 0;
 	d3scene::AssetId scene_fog_id;
 	GLuint scene_depth_snapshot = 0, scene_depth_framebuffer = 0;

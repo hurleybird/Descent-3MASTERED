@@ -1,6 +1,7 @@
 // Descent 3MASTERED - GPL-3.0-or-later
 #include "SceneExtraction.h"
 #include "SceneMaterialBindings.h"
+#include "SceneReflectionBake.h"
 #include "../renderer/SceneLighting.h"
 #include "../renderer/SceneImages.h"
 #include "../renderer/SceneTerrain.h"
@@ -152,18 +153,16 @@ void logPreparedModels(const d3scene::FrameData& data) {
 }
 // One material resolver for all prepared mesh surfaces. Source-domain rules
 // are explicit authoring conventions, not state inferred from a draw call.
-void resolveMaterial(d3scene::SurfaceBinding& surface, float time, bool model) {
+void resolveMaterial(d3scene::SurfaceBinding& surface, float time, bool model, bool exterior = false) {
     if (!(surface.texture < 0 && model)) { // flat polygons may still carry baked light
     if (surface.texture < 0 || surface.texture >= MAX_TEXTURES || !GameTextures[surface.texture].used)
         Error("Scene material references missing texture %d", surface.texture);
     int base_texture = surface.texture;
     const auto& authored = GameTextures[surface.texture];
+    const auto pair = SplitSpecularTexturePathEnabled() ? FindSplitSpecularTexturePair(surface.texture) : SplitSpecularTexturePair{};
     if (!model && (surface.authored_flags & FF_DESTROYED) && (authored.flags & TF_DESTROYABLE))
         base_texture = authored.destroy_handle;
-    else if (SplitSpecularTexturePathEnabled()) {
-        const auto pair = FindSplitSpecularTexturePair(surface.texture);
-        if (pair.valid) base_texture = pair.base_tmap;
-    }
+    else if (pair.valid) base_texture = pair.base_tmap;
     if (base_texture < 0 || base_texture >= MAX_TEXTURES || !GameTextures[base_texture].used)
         Error("Scene material references missing base texture %d", base_texture);
     const auto& texture = GameTextures[base_texture];
@@ -176,28 +175,29 @@ void resolveMaterial(d3scene::SurfaceBinding& surface, float time, bool model) {
     // can be authored in that format. Keep the distinction at compilation.
     surface.texture_alpha = (texture.flags & TF_TMAP2) != 0 &&
         (model || bm_format(surface.bitmap) != BITMAP_FORMAT_4444);
-    const bool opaque_mask = bm_format(surface.bitmap) == BITMAP_FORMAT_4444 && !surface.texture_alpha &&
-        surface.blend == d3scene::BlendMode::Solid && surface.lightmap >= 0;
-    const bool split_specular = SplitSpecularTexturePathEnabled() && FindSplitSpecularTexturePair(surface.texture).valid;
-    if (!model && Detail_settings.Specular_lighting && ((authored.flags & TF_SPECULAR) ||
-        (opaque_mask && (split_specular || Render_per_pixel_field_static_specular)))) {
+    if (!model && Detail_settings.Specular_lighting) {
         int specular_texture = surface.texture;
         int specular_bitmap = -1;
         if ((surface.authored_flags & FF_DESTROYED) && (authored.flags & TF_DESTROYABLE))
             specular_texture = authored.destroy_handle;
-        else if (SplitSpecularTexturePathEnabled()) {
-            const auto pair = FindSplitSpecularTexturePair(surface.texture);
-            if (pair.valid) { specular_texture = pair.spec_tmap; specular_bitmap = pair.spec_bm; }
-        }
+        else if (pair.valid) { specular_texture = pair.spec_tmap; specular_bitmap = pair.spec_bm; }
         if (specular_texture >= 0 && specular_texture < MAX_TEXTURES && GameTextures[specular_texture].used) {
             const auto& specular = GameTextures[specular_texture];
-            surface.specular_bitmap = specular_bitmap >= 0 ? specular_bitmap : GetTextureBitmapAtTime(specular_texture,0,time);
+            if (specular_bitmap < 0) specular_bitmap = GetTextureBitmapAtTime(specular_texture,0,time);
+            const bool opaque_mask = bm_format(specular_bitmap) == BITMAP_FORMAT_4444 && texture.alpha >= 1 &&
+                surface.blend == d3scene::BlendMode::Solid && surface.lightmap >= 0 && (surface.authored_flags & FF_LIGHTMAP);
+            const bool authored_path = (authored.flags & TF_SPECULAR) && (surface.special >= 0 || exterior);
+            const bool generated_path = !exterior && opaque_mask && (pair.valid ||
+                (Render_preferred_state.per_pixel_lighting && Render_per_pixel_field_static_specular));
+            if (authored_path || generated_path) {
+            surface.specular_bitmap = specular_bitmap;
             const float exponent = (specular.flags & TF_PLASTIC) ? 14.f : ((specular.flags & TF_MARBLE) ? 4.f : 6.f);
-            surface.specular_exponent = (std::max)(1.f,(std::min)(128.f,std::floor(exponent*Render_per_pixel_specular_sharpness+.5f)));
+            surface.specular_exponent = (std::max)(1.f,(std::min)(128.f,std::floor(exponent*ConfigNormalizePerPixelSpecularSharpness(Render_per_pixel_specular_sharpness)+.5f)));
             surface.specular_strength = Render_per_pixel_specular_strength*specular.reflectivity*1.5f;
             surface.static_specular_strength = Render_per_pixel_static_specular_strength;
             surface.specular_lightmap_mix = Render_per_pixel_specular_lightmap_mix;
             surface.specular_alpha_strength = Render_per_pixel_specular_alpha_strength;
+            }
         }
     }
     }
@@ -233,6 +233,7 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance_history) {
     // Capture mutable authoring tables at the game/renderer boundary. Retained
     // presentations keep their own revision even if a face is edited or freed.
     std::unordered_map<int,d3scene::ReflectionAssetRef> reflections;
+    uint32_t reflection_slot = MAX_SPECIAL_FACES;
     for (auto& room : data.rooms) {
       room.exterior = (room.authored_flags & RF_EXTERNAL) != 0;
       room.fog_enabled = Detail_settings.Fog_enabled && (room.authored_flags & RF_FOG) && GetFunctionMode() != EDITOR_MODE;
@@ -243,6 +244,7 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance_history) {
           room.pulse_offset,room.number,(room.authored_flags & RF_STROBE) != 0,
           (room.authored_flags & RF_FLICKER) != 0,GetFunctionMode() == EDITOR_MODE);
       for (auto& surface : room.surfaces) {
+        const uint32_t baked_reflection_slot = reflection_slot++;
         if (surface.special >= 0 && surface.special < MAX_SPECIAL_FACES) {
             const auto& authored = SpecialFaces[surface.special];
             if (authored.used && authored.type == SFT_SPECULAR) {
@@ -270,8 +272,13 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance_history) {
                 surface.reflection = found->second;
             }
         }
+        if (!room.exterior && data.lighting_quality == d3scene::LightingQuality::Pixel) {
+            const auto baked = PublishRoomReflectionBake(room.number,static_cast<int>(&surface-room.surfaces.data()),
+                baked_reflection_slot,Render_per_pixel_field_static_specular,Render_split_specular_textures);
+            if (baked) surface.reflection = baked;
+        }
         surface.occlusion_class = SceneRoomOcclusionClass(surface.texture,room.exterior);
-        resolveMaterial(surface,static_cast<float>(data.simulation_time),false);
+        resolveMaterial(surface,static_cast<float>(data.simulation_time),false,room.exterior);
         surface.lighting_modulation = room.light_scalar;
         surface.draw_surface = !(surface.authored_flags & FF_FLOATING_TRIG);
         if (surface.portal >= 0 && surface.portal < static_cast<int>(room.portals.size()))
@@ -282,7 +289,7 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance_history) {
     PrepareGameSky(data);
     PrepareGameEffects(data);
     PrepareGameModelInstances(data, previous_models ? &previous_models->data() : nullptr);
-    for (auto& surface : data.terrain.materials) resolveMaterial(surface,static_cast<float>(data.simulation_time),false);
+    for (auto& surface : data.terrain.materials) resolveMaterial(surface,static_cast<float>(data.simulation_time),false,true);
     for (auto& object : data.objects) for (auto& part : object.parts) for (auto& surface : part.surfaces)
         resolveMaterial(surface,static_cast<float>(data.simulation_time),true);
     prepareImages(data);

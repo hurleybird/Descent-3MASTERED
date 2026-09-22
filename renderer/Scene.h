@@ -7,6 +7,7 @@
 #include <memory>
 #include <vector>
 #include <utility>
+#include <array>
 
 namespace d3scene {
 
@@ -133,9 +134,16 @@ using ImageAssetRef = std::shared_ptr<const ImageAsset>;
 // Authored reflection anchors are baked appearance data, not dynamic emitters.
 // Positions and optional corner normals are world-space for room surfaces.
 struct ReflectionSource { Vec3 position, color; };
+// Baked reflected lobes are not point lights: each virtual center encodes a
+// reflected direction at its corner. Never reflect it a second time.
+struct ReflectionCorner {
+    std::array<ReflectionSource,4> lobes{};
+    Vec3 baked_modulation{1,1,1};
+};
 struct ReflectionData {
     std::vector<ReflectionSource> sources;
     std::vector<Vec3> corner_normals;
+    std::vector<ReflectionCorner> field_corners;
 };
 class ReflectionAsset final {
 public:

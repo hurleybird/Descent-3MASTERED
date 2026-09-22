@@ -8,6 +8,8 @@ SET (MAIN_SOURCES
 		Descent3/SceneEffects.cpp
 		Descent3/SceneMaterialBindings.h
 		Descent3/SceneMaterialBindings.cpp
+		Descent3/SceneReflectionBake.h
+		Descent3/SceneReflectionBake.cpp
 		Descent3/aiambient.h
 		Descent3/AIGoal.h
 		Descent3/AIMain.h

@@ -88,6 +88,21 @@ void frameTests() {
     data.rooms[0].surfaces[0].reflection = assets.publishReflection(7,reflection);
     rejects([&] { d3scene::Presentation::freeze(data); },"Incomplete reflection normals accepted");
     check(reflected->data().rooms[0].surfaces[0].reflection == original_reflection,"Frame lost immutable reflection data");
+    reflection = original_reflection->data(); reflection.field_corners.resize(3);
+    reflection.field_corners[0].lobes[0] = {{5,6,7},{.1f,.2f,.3f}};
+    const auto field = assets.publishReflection(8,reflection);
+    check(assets.publishReflection(8,reflection) == field,"Unchanged field allocated new revision");
+    data.rooms[0].surfaces[0].reflection = field;
+    const auto field_frame = d3scene::Presentation::freeze(data);
+    reflection.field_corners[0].lobes[0].position.x = 99;
+    check(assets.publishReflection(8,reflection)->id() != field->id(),"Changed field reused revision");
+    check(field_frame->data().rooms[0].surfaces[0].reflection->data().field_corners[0].lobes[0].position.x == 5,
+        "Reflection field aliases mutable bake inputs");
+    reflection.field_corners.pop_back();
+    data.rooms[0].surfaces[0].reflection = assets.publishReflection(8,reflection);
+    rejects([&] { d3scene::Presentation::freeze(data); },"Incomplete field corners accepted");
+    reflection.field_corners[0].lobes[0].color.y = std::numeric_limits<float>::quiet_NaN();
+    rejects([&] { assets.publishReflection(8,reflection); },"Nonfinite field color accepted");
     d3scene::SceneAssets other_assets;
     data.rooms[0].surfaces[0].reflection = other_assets.publishReflection(7,{});
     rejects([&] { d3scene::Presentation::freeze(data); },"Cross-level reflection accepted");
