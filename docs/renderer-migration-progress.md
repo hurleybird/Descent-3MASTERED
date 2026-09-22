@@ -1,5 +1,23 @@
 # Renderer migration checkpoint
 
+## Continuation: scheduled opaque-image contract
+
+Replaced bloom-named capture storage with an owned opaque-scene product. Removed
+the unused resolve allocation and the draw-count heuristic that could substitute
+opaque color for finished world color. AO accepts explicit resolved images,
+surface records, extents and camera history; no canvas state, optional camera
+pointers or live game-mode query. Motion requires the opaque depth product instead
+of falling back to depth possibly cleared by a later canvas. Opaque image reduction
+uses the shared reduction schedule. AO without bloom no longer copies/downsamples
+unused scene color; the capture harness has an occlusion-only profile.
+
+Full build and 5,214 checks pass. All eight opaque-contract-effects captures are
+pixel-identical to camera-product-effects. AO-only 000/003 captures before/after
+removing color copies complete: 003 exact; 000 mean error .00509 with differing
+logged Buddybot pose/position. AO-only 003 was visually inspected. Motion-enabled
+002 and 4x SSAA/8x MSAA 003 complete; the latter was visually inspected. This is
+inspection qualification, not a completed renderer or Candidate deployment.
+
 ## Continuation: owned image-space camera/exposure
 
 AO and motion now consume the explicit main-view camera/history product. Removed

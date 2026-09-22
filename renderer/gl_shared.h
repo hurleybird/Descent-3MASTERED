@@ -23,6 +23,7 @@
 #pragma once
 #include <glad/gl.h>
 #include "pserror.h"
+#include "SceneView.h"
 
 //uncomment to express your love for the best graphics API ever designed and enable extra error checking to show your love.
 //#define I_LOVE_OPENGL
@@ -362,6 +363,16 @@ struct AOResult
 	int debug_channel = 0;
 };
 
+// Explicit resolved opaque images and the surface records belonging to them.
+// No live canvas state or optional camera reconstruction fallback enters AO.
+struct AOInputs {
+	GLuint depth = 0, highlight_color = 0, surface_records = 0, object_ids = 0;
+	int width = 0, height = 0, raster_width = 0, raster_height = 0, raster_scale = 1;
+	d3scene::Rect viewport; // logical coordinates, bottom-left origin
+	d3scene::ViewMatrices current, previous;
+	bool previous_valid = false, moving = false, reset_history = false;
+};
+
 //Ambient occlusion. Produces depth-driven visibility and temporal history.
 //Scene color is modified only by the explicit world-composition pass.
 //Reconstructs view-space normals from the depth buffer (we have no normals G-buffer).
@@ -475,20 +486,7 @@ struct AOResources
 	void Destroy();
 	// Produces occlusion/history products without modifying scene color.
 	// Composition belongs exclusively to the scheduled world-light pass.
-	AOResult Evaluate(Framebuffer* source, const renderer_preferred_state& pref_state,
-		const rendering_state& render_state, const float* projection,
-		float nearz, float farz, GLuint suppression_mask_texture, GLuint ao_weight_texture,
-		bool ao_weight_is_direct,
-		int source_visible_x = 0, int source_visible_y = 0,
-		int source_visible_w = 0, int source_visible_h = 0,
-		int noise_origin_x = 0, int noise_origin_y = 0,
-		GLuint velocity_texture = 0, GLuint object_id_texture = 0,
-		int velocity_width = 0, int velocity_height = 0, int velocity_scale = 1,
-		const float* current_projection = nullptr,
-		const float* current_inverse_modelview = nullptr,
-		const float* previous_view_projection = nullptr,
-		bool has_static_reconstruction = false, bool has_dynamic_velocity = false,
-		bool reset_temporal_history = false);
+	AOResult Evaluate(const AOInputs&, const renderer_preferred_state&);
 };
 
 inline int RendererSupersamplingFactor(const renderer_preferred_state& state)

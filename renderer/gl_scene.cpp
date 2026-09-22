@@ -639,26 +639,29 @@ void GL4Renderer::CompositeSceneRadiance(bool paused) {
     // AO is a world-light operation. Apply it to full raster-resolution
     // radiance before nonlinear display resampling or later canvas layers.
     // Those layers therefore need no inferred alpha/protection correction.
-    if (!ao_scene_valid || !bloom_source_valid || !scene_motion.valid)
+    if (!opaque_scene.ready || !scene_motion.valid ||
+        (OpenGL_preferred_state.bloom_enabled && !opaque_scene.has_color))
         Error("World occlusion requires the scheduled opaque scene product");
     const auto source = framebuffers[framebuffer_current_draw].Handle();
     const auto records = surface_records.TextureForRead(source);
     const auto identities = surface_records.ObjectIdTextureForRead(source);
     const auto& camera = scene_motion.camera;
-    const auto* projection = camera.current.projection.data();
-    const float near_denominator = -projection[11]-projection[10];
-    const float far_denominator = projection[11]-projection[10];
-    const float near_z = fabsf(projection[14]/near_denominator);
-    const float far_z = fabsf(far_denominator) > 1.e-6f ? fabsf(projection[14]/far_denominator) : 10000.f;
     const bool temporal = OpenGL_preferred_state.ao_temporal_blend > 0 || OpenGL_preferred_state.ao_temporal_debug_preview;
-    const bool moving = temporal && !paused;
-    if (measure) glQueryCounter(timings[1],GL_TIMESTAMP);
-    const auto result = ao.Evaluate(&bloom_source_framebuffer,OpenGL_preferred_state,OpenGL_state,projection,near_z,far_z,
-        0,records,false,0,0,0,0,framebuffer_logical_offset_x,
+    AOInputs inputs;
+    inputs.depth = opaque_scene.images.DepthTextureForRead();
+    inputs.highlight_color = OpenGL_preferred_state.bloom_enabled ? opaque_scene.images.ColorTextureForRead() : 0;
+    inputs.surface_records = records; inputs.object_ids = identities;
+    inputs.width = opaque_scene.images.Width(); inputs.height = opaque_scene.images.Height();
+    inputs.raster_width = surface_records.width; inputs.raster_height = surface_records.height;
+    inputs.raster_scale = SupersamplingFactor();
+    inputs.viewport = {framebuffer_logical_offset_x,
         framebuffer_logical_height-OpenGL_state.screen_height-framebuffer_logical_offset_y,
-        records,identities,surface_records.width,surface_records.height,SupersamplingFactor(),
-        projection,camera.current.inverse_view.data(),camera.previous.view_projection.data(),
-        moving && camera.previous_valid,moving,scene_temporal_reset);
+        OpenGL_state.screen_width,OpenGL_state.screen_height};
+    inputs.current = camera.current; inputs.previous = camera.previous;
+    inputs.previous_valid = camera.previous_valid;
+    inputs.moving = temporal && !paused; inputs.reset_history = scene_temporal_reset;
+    if (measure) glQueryCounter(timings[1],GL_TIMESTAMP);
+    const auto result = ao.Evaluate(inputs,OpenGL_preferred_state);
     if (!result.ao_texture) Error("Scheduled world occlusion did not produce its required image");
     if (measure) glQueryCounter(timings[2],GL_TIMESTAMP);
     ao_compositeshader.Use();

@@ -6,7 +6,7 @@ param(
     [int]$Frame = 60,
     [uint32]$Seed = 12345,
     [int]$TimeoutSeconds = 120,
-    [ValidateSet('clean','antialias','effects')][string]$Profile = 'effects',
+    [ValidateSet('clean','antialias','effects','occlusion')][string]$Profile = 'effects',
     [ValidateSet(0,1,2,4)][int]$Supersampling = 0,
     [ValidateSet(-1,0,2,4,8)][int]$MsaaSamples = -1,
     [switch]$SceneInspection,
@@ -109,8 +109,9 @@ try {
             '-perpixellighting')
         if ($MotionBlur) { $arguments += '-motion-blur-new' }
         else { $arguments += '-nomotionblur' }
-        if ($Profile -ne 'effects') { $arguments += @('-noao','-nobloom') }
-        else { $arguments += @('-ao','-bloom') }
+        if ($Profile -eq 'effects') { $arguments += @('-ao','-bloom') }
+        elseif ($Profile -eq 'occlusion') { $arguments += @('-ao','-nobloom') }
+        else { $arguments += @('-noao','-nobloom') }
         $arguments += @('-ssaa',"$sampleScale",'-msaa',"$msaaCount")
         if ($SceneInspection) { $arguments += '-scene-inspection' }
         if ($HistoryProbe) { $arguments += '-scene-history-probe' }

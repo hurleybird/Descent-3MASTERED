@@ -539,9 +539,8 @@ void GL4Renderer::ApplyPixelMotionBlur(int supersampling_factor)
 
 	if (surface_records.width == 0 || surface_records.height == 0)
 		return;
-	GLuint depth_texture = bloom_source_valid && bloom_source_framebuffer.Handle() != 0 ?
-		bloom_source_framebuffer.DepthTextureForRead() :
-		framebuffers[framebuffer_current_draw].DepthTextureForRead();
+	if (!opaque_scene.ready) Error("Motion composition requires the opaque scene depth product");
+	const GLuint depth_texture = opaque_scene.images.DepthTextureForRead();
 	const bool has_dynamic_velocity = motion_vectors_dirty;
 	if (scene_strength <= 0.0f && !has_dynamic_velocity)
 		return;
@@ -662,9 +661,8 @@ void GL4Renderer::DrawMotionVectorDebugPreview(int supersampling_factor)
 		rend_SetMotionVectorDebugSample(&debug_sample);
 		return;
 	}
-	GLuint depth_texture = bloom_source_valid && bloom_source_framebuffer.Handle() != 0 ?
-		bloom_source_framebuffer.DepthTextureForRead() :
-		framebuffers[framebuffer_current_draw].DepthTextureForRead();
+	if (!opaque_scene.ready) Error("Motion inspection requires the opaque scene depth product");
+	const GLuint depth_texture = opaque_scene.images.DepthTextureForRead();
 	GLuint object_id_texture = surface_records.ObjectIdTextureForRead(framebuffers[framebuffer_current_draw].Handle());
 
 	if (supersampling_factor < 1)
@@ -3638,8 +3636,6 @@ void GL4Renderer::DrawScaledBitmapWithZ(int x1, int y1, int x2, int y2,
 // Fills a rectangle on the display
 void GL4Renderer::FillRect(ddgr_color color, int x1, int y1, int x2, int y2)
 {
-	captured_scene_draw_count_valid = false;
-
 	int r = GR_COLOR_RED(color);
 	int g = GR_COLOR_GREEN(color);
 	int b = GR_COLOR_BLUE(color);

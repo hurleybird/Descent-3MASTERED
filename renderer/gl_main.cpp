@@ -1799,12 +1799,6 @@ void GL4Renderer::StartFrame(int x1, int y1, int x2, int y2, int clear_flags)
 		glClearColor(0.0, 0.0, 0.0, 1.0);
 		glclearflags |= GL_COLOR_BUFFER_BIT;
 	}
-	// HUD setup deliberately clears the live scene depth after the opaque
-	// color/depth pair has been captured. The captured depth is the canonical
-	// post-processing input, so only a color clear makes that capture stale.
-	if (glclearflags & GL_COLOR_BUFFER_BIT)
-		captured_scene_draw_count_valid = false;
-
 	if (framebuffer_ok)
 	{
 		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, framebuffers[framebuffer_current_draw].Handle());
@@ -2087,20 +2081,9 @@ bool GL4Renderer::BeginPostPresentFrame()
 	const int post_visible_width = OpenGL_state.screen_width;
 	const int post_visible_height = OpenGL_state.screen_height;
 	post_present_framebuffer.Update(OpenGL_state.screen_width, OpenGL_state.screen_height, 0);
-	const bool captured_scene_unchanged = ao_scene_valid && bloom_source_valid &&
-		captured_scene_draw_count_valid &&
-		captured_scene_draw_count == rend_GetCurrentDrawCallCount() &&
-		bloom_source_framebuffer.Width() == (uint32_t)framebuffer_logical_width &&
-		bloom_source_framebuffer.Height() == (uint32_t)framebuffer_logical_height;
-	if (captured_scene_unchanged)
-	{
-		// The scene schedule already produced this exact display-resolution
-		// color/depth pair. Reusing it avoids resolving and downsampling the
-		// unchanged MSAA/SSAA scene a second time.
-		bloom_source_framebuffer.ClearAlphaToZero();
-		present_framebuffer = &bloom_source_framebuffer;
-	}
-	else if (supersampling_factor >= 2)
+	// Display composition always consumes completed world color, never an
+	// opaque capture guessed equivalent from a global draw counter.
+	if (supersampling_factor >= 2)
 	{
 		Framebuffer* source = &framebuffers[framebuffer_current_draw];
 		for (const auto step : d3scene::imageReductionSteps(supersampling_factor)) {
@@ -2132,15 +2115,14 @@ bool GL4Renderer::BeginPostPresentFrame()
 
 	if (late_post_enabled)
 	{
-		if (present_framebuffer != &bloom_source_framebuffer && bloom_source_valid)
+		if (opaque_scene.ready)
 		{
 			PERF_MARKER_SCOPE("Post.PresentDepth");
-			bloom_source_framebuffer.BlitDepthTo(present_framebuffer->Handle(), 0, 0,
+			opaque_scene.images.BlitDepthTo(present_framebuffer->Handle(), 0, 0,
 				present_framebuffer->Width(), present_framebuffer->Height());
 			GL4PerfGpuDrain("GPU.PresentDepth");
 		}
-		else if (present_framebuffer != &bloom_source_framebuffer &&
-			present_framebuffer != &framebuffers[framebuffer_current_draw])
+		else if (present_framebuffer != &framebuffers[framebuffer_current_draw])
 		{
 			PERF_MARKER_SCOPE("Post.PresentDepth");
 			framebuffers[framebuffer_current_draw].BlitDepthTo(present_framebuffer->Handle(), 0, 0,
@@ -2622,8 +2604,8 @@ void GL4Renderer::EndPostPresentFrame()
 		//Scene rendering is about to write to this framebuffer's MSAA attachments,
 		//so any cached resolve from the previous time we used this slot is stale.
 		framebuffers[framebuffer_current_draw].MarkAllDirty();
-		bloom_source_valid = false;
-		ao_scene_valid = false;
+		opaque_scene.ready = false;
+		opaque_scene.has_color = false;
 		post_protection_mask_dirty = false;
 		post_protection_mask_cleared_this_frame = false;
 		motion_vectors_cleared_this_frame = false;
@@ -2890,9 +2872,8 @@ void GL4Renderer::ExportOpaqueScene()
 {
 	FlushFontBatch();
 
-	bloom_source_valid = false;
-	ao_scene_valid = false;
-	captured_scene_draw_count_valid = false;
+	opaque_scene.ready = false;
+	opaque_scene.has_color = false;
 
 	const bool ao_enabled = OpenGL_preferred_state.ao_enabled && framebuffer_ok;
 	const bool bloom_enabled = OpenGL_preferred_state.bloom_enabled;
@@ -2904,9 +2885,7 @@ void GL4Renderer::ExportOpaqueScene()
 
 	if (!late_post_enabled)
 	{
-		bloom_source_framebuffer.Destroy();
-		bloom_source_resolved_framebuffer.Destroy();
-		bloom_source_downscale_framebuffer.Destroy();
+		opaque_scene.Destroy();
 	}
 
 	if (framebuffer_ok)
@@ -2917,8 +2896,8 @@ void GL4Renderer::ExportOpaqueScene()
 			glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &old_read);
 			glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &old_draw);
 
-			bloom_source_framebuffer.Update(framebuffer_logical_width, framebuffer_logical_height, 0);
-			if (ao_enabled)
+			opaque_scene.images.Update(framebuffer_logical_width, framebuffer_logical_height, 0);
+			if (ao_enabled && bloom_enabled)
 			{
 				int supersampling_factor = SupersamplingFactor();
 				float display_gamma = OpenGL_preferred_state.gamma != 0.0f ? 1.f / OpenGL_preferred_state.gamma : 1.f;
@@ -2928,53 +2907,41 @@ void GL4Renderer::ExportOpaqueScene()
 				const int visible_origin_y = framebuffer_logical_bottom_offset;
 				const int visible_width = OpenGL_state.screen_width;
 				const int visible_height = OpenGL_state.screen_height;
-				if (supersampling_factor >= 4)
+				if (supersampling_factor >= 2)
 				{
-					bloom_source_downscale_framebuffer.Update(framebuffer_logical_width * 2, framebuffer_logical_height * 2, 0);
-					downsampleshader.Use();
-					framebuffers[framebuffer_current_draw].DownsampleTo(bloom_source_downscale_framebuffer.Handle(), 0, 0,
-						bloom_source_downscale_framebuffer.Width(), bloom_source_downscale_framebuffer.Height(),
-						downsampleshader_gamma, display_gamma, downsampleshader_dest_origin,
-						downsampleshader_source_visible_origin, downsampleshader_source_visible_size,
-						visible_origin_x * 4, visible_origin_y * 4, visible_width * 4, visible_height * 4);
-					GL4PerfGpuDrain("GPU.CaptureDownsample.4xTo2x");
-					downsampleshader.Use();
-					bloom_source_downscale_framebuffer.DownsampleTo(bloom_source_framebuffer.Handle(), 0, 0,
-						bloom_source_framebuffer.Width(), bloom_source_framebuffer.Height(),
-						downsampleshader_gamma, display_gamma, downsampleshader_dest_origin,
-						downsampleshader_source_visible_origin, downsampleshader_source_visible_size,
-						visible_origin_x * 2, visible_origin_y * 2, visible_width * 2, visible_height * 2);
-					GL4PerfGpuDrain("GPU.CaptureDownsample.2xTo1x");
-				}
-				else if (supersampling_factor >= 2)
-				{
-					downsampleshader.Use();
-					framebuffers[framebuffer_current_draw].DownsampleTo(bloom_source_framebuffer.Handle(), 0, 0,
-						bloom_source_framebuffer.Width(), bloom_source_framebuffer.Height(),
-						downsampleshader_gamma, display_gamma, downsampleshader_dest_origin,
-						downsampleshader_source_visible_origin, downsampleshader_source_visible_size,
-						visible_origin_x * 2, visible_origin_y * 2, visible_width * 2, visible_height * 2);
-					GL4PerfGpuDrain("GPU.CaptureDownsample.2xTo1x");
+					Framebuffer* source = &framebuffers[framebuffer_current_draw];
+					for (const auto step : d3scene::imageReductionSteps(supersampling_factor)) {
+						Framebuffer& destination = step.destination_scale == 1 ? opaque_scene.images : opaque_scene.reduction;
+						destination.Update(framebuffer_logical_width*step.destination_scale,framebuffer_logical_height*step.destination_scale,0);
+						downsampleshader.Use();
+						source->DownsampleTo(destination.Handle(),0,0,destination.Width(),destination.Height(),
+							downsampleshader_gamma,display_gamma,downsampleshader_dest_origin,
+							downsampleshader_source_visible_origin,downsampleshader_source_visible_size,
+							visible_origin_x*step.source_scale,visible_origin_y*step.source_scale,
+							visible_width*step.source_scale,visible_height*step.source_scale);
+						GL4PerfGpuDrain("GPU.OpaqueImageReduction");
+						source = &destination;
+					}
 				}
 				else
 				{
-					framebuffers[framebuffer_current_draw].BlitToRaw(bloom_source_framebuffer.Handle(), 0, 0,
-						bloom_source_framebuffer.Width(), bloom_source_framebuffer.Height(), GL_NEAREST);
+					framebuffers[framebuffer_current_draw].BlitToRaw(opaque_scene.images.Handle(), 0, 0,
+						opaque_scene.images.Width(), opaque_scene.images.Height(), GL_NEAREST);
 					GL4PerfGpuDrain("GPU.CaptureBlit");
 				}
-				ao_scene_valid = true;
+				opaque_scene.has_color = true;
 			}
 			GL4PerfGpuSplitMark(GL4_GPU_SPLIT_CAPTURE_AFTER_COLOR);
 			{
 				PERF_MARKER_SCOPE("Post.CaptureDepth");
-				framebuffers[framebuffer_current_draw].BlitDepthTo(bloom_source_framebuffer.Handle(), 0, 0,
-					bloom_source_framebuffer.Width(), bloom_source_framebuffer.Height());
+				framebuffers[framebuffer_current_draw].BlitDepthTo(opaque_scene.images.Handle(), 0, 0,
+					opaque_scene.images.Width(), opaque_scene.images.Height());
 			}
 			GL4PerfGpuDrain("GPU.CaptureDepth");
 			GL4PerfGpuSplitMark(GL4_GPU_SPLIT_CAPTURE_AFTER_DEPTH);
 			glBindFramebuffer(GL_READ_FRAMEBUFFER, old_read);
 			glBindFramebuffer(GL_DRAW_FRAMEBUFFER, old_draw);
-			bloom_source_valid = true;
+			opaque_scene.ready = true;
 		}
 
 		framebuffers[framebuffer_current_draw].ClearAlphaToZero();
@@ -2986,11 +2953,6 @@ void GL4Renderer::ExportOpaqueScene()
 			surface_records.Resolve(framebuffers[framebuffer_current_draw].Handle());
 			motion_vectors_capture_locked = true;
 			UseSceneDrawBuffers();
-		}
-		if (bloom_source_valid && ao_scene_valid)
-		{
-			captured_scene_draw_count = rend_GetCurrentDrawCallCount();
-			captured_scene_draw_count_valid = true;
 		}
 	}
 
@@ -3408,7 +3370,6 @@ void GL4Renderer::SetOverlayType(ubyte type)
 // Clears the display to a specified color
 void GL4Renderer::ClearScreen(ddgr_color color)
 {
-	captured_scene_draw_count_valid = false;
 	FlushFontBatch();
 
 	int r = (color >> 16 & 0xFF);
@@ -4180,9 +4141,7 @@ void GL4Renderer::UpdateFramebuffer(void)
 		resolved_framebuffer.Destroy();
 		downscale_framebuffer.Destroy();
 		bloom.DestroyFramebuffers();
-		bloom_source_framebuffer.Destroy();
-		bloom_source_resolved_framebuffer.Destroy();
-		bloom_source_downscale_framebuffer.Destroy();
+		opaque_scene.Destroy();
 		post_present_framebuffer.Destroy();
 		post_composite_framebuffer.Destroy();
 		motion_blur_framebuffer.Destroy();
@@ -4243,8 +4202,8 @@ void GL4Renderer::UpdateFramebuffer(void)
 	post_composite_framebuffer.Destroy();
 	motion_blur_framebuffer.Destroy();
 
-	bloom_source_valid = false;
-	ao_scene_valid = false;
+	opaque_scene.ready = false;
+	opaque_scene.has_color = false;
 	legacy_draw_uniforms_dirty = true;
 	post_protection_mask_dirty = false;
 	post_protection_mask_cleared_this_frame = false;
@@ -4298,9 +4257,7 @@ void GL4Renderer::CloseFramebuffer(void)
 	downscale_framebuffer.Destroy();
 	bloom.DestroyFramebuffers();
 	ao.DestroyFramebuffers();
-	bloom_source_framebuffer.Destroy();
-	bloom_source_resolved_framebuffer.Destroy();
-	bloom_source_downscale_framebuffer.Destroy();
+	opaque_scene.Destroy();
 	post_present_framebuffer.Destroy();
 	post_composite_framebuffer.Destroy();
 	motion_blur_framebuffer.Destroy();
@@ -4309,8 +4266,8 @@ void GL4Renderer::CloseFramebuffer(void)
 	modal_ui_composite_pending = false;
 	soft_particle_depth_copy_valid = false;
 	soft_particle_depth_source_framebuffer = 0;
-	bloom_source_valid = false;
-	ao_scene_valid = false;
+	opaque_scene.ready = false;
+	opaque_scene.has_color = false;
 	surface_records.Destroy();
 	scene_motion = {}; completed_scene_motion = {};
 	post_protection_mask.Destroy();

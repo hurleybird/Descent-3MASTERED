@@ -17,7 +17,6 @@
 */
 #include "gl_local.h"
 #include "gameloop.h"
-#include "game.h"
 #include <math.h>
 #include <stdint.h>
 
@@ -337,21 +336,10 @@ void AOResources::Destroy()
 	DestroyShaders();
 }
 
-AOResult AOResources::Evaluate(Framebuffer* source, const renderer_preferred_state& pref_state,
-	const rendering_state& render_state, const float* projection,
-	float nearz, float farz, GLuint suppression_mask_texture, GLuint ao_weight_texture,
-	bool ao_weight_is_direct,
-	int source_visible_x, int source_visible_y, int source_visible_w, int source_visible_h,
-	int noise_origin_x, int noise_origin_y,
-	GLuint velocity_texture, GLuint object_id_texture,
-	int velocity_width, int velocity_height, int velocity_scale,
-	const float* current_projection, const float* current_inverse_modelview,
-	const float* previous_view_projection,
-	bool has_static_reconstruction, bool has_dynamic_velocity,
-	bool reset_temporal_history)
+AOResult AOResources::Evaluate(const AOInputs& inputs, const renderer_preferred_state& pref_state)
 {
 	AOResult result{};
-	if (!source || !pref_state.ao_enabled)
+	if (!pref_state.ao_enabled)
 	{
 		if (HasFramebuffers())
 		{
@@ -362,38 +350,34 @@ AOResult AOResources::Evaluate(Framebuffer* source, const renderer_preferred_sta
 	}
 
 	PERF_MARKER_SCOPE("AO.Total");
+	if (!inputs.depth || !inputs.surface_records || !inputs.object_ids || inputs.width <= 0 || inputs.height <= 0 ||
+		inputs.raster_width <= 0 || inputs.raster_height <= 0 || inputs.raster_scale < 1 ||
+		inputs.viewport.width <= 0 || inputs.viewport.height <= 0)
+		Error("AO requires resolved opaque depth, surface records and an explicit image extent");
+	const int source_width = inputs.width, source_height = inputs.height;
+	const int source_visible_x = 0, source_visible_y = 0;
+	const int source_visible_w = source_width, source_visible_h = source_height;
+	const bool use_source_visible_rect = false;
+	const int noise_origin_x = inputs.viewport.x, noise_origin_y = inputs.viewport.y;
+	const GLuint velocity_texture = inputs.surface_records, object_id_texture = inputs.object_ids;
+	const GLuint ao_weight_texture = inputs.surface_records;
+	const bool ao_weight_is_direct = false;
+	const int velocity_width = inputs.raster_width, velocity_height = inputs.raster_height;
+	const int velocity_scale = inputs.raster_scale;
+	const auto* projection = inputs.current.projection.data();
+	const auto* current_projection = projection;
+	const auto* current_inverse_modelview = inputs.current.inverse_view.data();
+	const auto* previous_view_projection = inputs.previous.view_projection.data();
+	const bool has_static_reconstruction = inputs.moving && inputs.previous_valid;
+	const bool has_dynamic_velocity = inputs.moving;
+	const bool reset_temporal_history = inputs.reset_history;
+	const float nearz = fabsf(projection[14]/(-projection[11]-projection[10]));
+	const float far_denominator = projection[11]-projection[10];
+	const float farz = fabsf(far_denominator) > 1.e-6f ? fabsf(projection[14]/far_denominator) : 10000.f;
 
-	int source_width = (int)source->Width();
-	int source_height = (int)source->Height();
-	if (source_width <= 0 || source_height <= 0)
-		return result;
-
-	if (source_visible_w <= 0 || source_visible_h <= 0)
-	{
-		source_visible_x = 0;
-		source_visible_y = 0;
-		source_visible_w = source_width;
-		source_visible_h = source_height;
-	}
-	source_visible_x = ClampInt(source_visible_x, 0, source_width - 1);
-	source_visible_y = ClampInt(source_visible_y, 0, source_height - 1);
-	source_visible_w = ClampInt(source_visible_w, 1, source_width - source_visible_x);
-	source_visible_h = ClampInt(source_visible_h, 1, source_height - source_visible_y);
-	const bool use_source_visible_rect =
-		source_visible_x != 0 || source_visible_y != 0 ||
-		source_visible_w != source_width || source_visible_h != source_height;
-
-	int ao_base_width = source_width;
-	int ao_base_height = source_height;
-	if (ao_base_width <= 0 || ao_base_height <= 0)
-	{
-		ao_base_width = source_width;
-		ao_base_height = source_height;
-	}
-
-	int ao_scale = AOResolutionScale(pref_state, ao_base_width, ao_base_height);
-	int ao_width = (ao_base_width + ao_scale - 1) / ao_scale;
-	int ao_height = (ao_base_height + ao_scale - 1) / ao_scale;
+	int ao_scale = AOResolutionScale(pref_state, source_width, source_height);
+	int ao_width = (source_width + ao_scale - 1) / ao_scale;
+	int ao_height = (source_height + ao_scale - 1) / ao_scale;
 	if (ao_width <= 0) ao_width = 1;
 	if (ao_height <= 0) ao_height = 1;
 
@@ -406,11 +390,8 @@ AOResult AOResources::Evaluate(Framebuffer* source, const renderer_preferred_sta
 		DestroyFramebuffers();
 	}
 
-	//Run AO at an internal resolution decoupled from SSAA/MSAA source size.
-	//The source may be supersampled; AO sample counts are defined relative
-	//to the display resolution so they do not become 4xSSAA-resolution AO.
-	//Depth is first reduced to this resolution so MSAA resolves are paid once
-	//per AO pixel instead of inside every horizon sample.
+	// The opaque export is resolved at logical resolution. AO may reduce it
+	// further; its kernel never scales up to the SSAA surface-record extent.
 	ao_depth_framebuffer.Update(ao_width, ao_height, GL_RG32F, GL_RG, GL_FLOAT);
 	//These buffers store AO plus linear depth; half-float depth avoids
 	//depth-edge ghosts from 8-bit quantization in the bilateral blur.
@@ -440,12 +421,8 @@ AOResult AOResources::Evaluate(Framebuffer* source, const renderer_preferred_sta
 	GLboolean color_mask[4];
 	glGetBooleanv(GL_COLOR_WRITEMASK, color_mask);
 
-	int source_samples = (int)source->Samples();
-	bool msaa_source = source_samples >= 2;
-	GLuint depth_texture = msaa_source ? source->DepthTextureForRead() : source->DepthTextureRaw();
-	GLuint scene_color_texture = 0;
-	if (pref_state.bloom_enabled)
-		scene_color_texture = msaa_source ? source->ColorTextureForRead() : source->ColorTextureRaw();
+	const GLuint depth_texture = inputs.depth;
+	const GLuint scene_color_texture = inputs.highlight_color;
 	//AO reads resolved 2D inputs. Hardware resolves are much cheaper than
 	//doing source-block * sample-count loops in the AO/suppression shaders.
 	int input_samples = 0;
@@ -469,8 +446,8 @@ AOResult AOResources::Evaluate(Framebuffer* source, const renderer_preferred_sta
 	//Equivalent to: r_pixels = radius * 0.5 * (h / tan(fov/2)).
 	//Since m11 = 1 / tan(half_y_fov_with_aspect_compensation), pixel size is:
 	float radius_pixels = radius * 0.5f * (float)ao_height * m11;
-	const int visible_width = render_state.screen_width > 0 ? render_state.screen_width : source_width;
-	const int visible_height = render_state.screen_height > 0 ? render_state.screen_height : source_height;
+	const int visible_width = inputs.viewport.width;
+	const int visible_height = inputs.viewport.height;
 	const int visible_ao_width = (visible_width + ao_scale - 1) / ao_scale;
 	const int visible_ao_height = (visible_height + ao_scale - 1) / ao_scale;
 	float max_radius_pixels = 128.0f * sqrtf((float)(visible_ao_width * visible_ao_height) / (1080.0f * 1920.0f));
@@ -633,7 +610,7 @@ AOResult AOResources::Evaluate(Framebuffer* source, const renderer_preferred_sta
 		ao_history_valid = false;
 
 	const float temporal_blend = ClampFloat(pref_state.ao_temporal_blend, 0.0f, 0.995f);
-	const bool temporal_debug = pref_state.ao_temporal_debug_preview && Game_mode != GM_NONE;
+	const bool temporal_debug = pref_state.ao_temporal_debug_preview;
 	const bool use_temporal = temporal_shader.Handle() != 0 && (temporal_blend > 0.0f || temporal_debug);
 	if (use_temporal)
 	{
@@ -658,8 +635,6 @@ AOResult AOResources::Evaluate(Framebuffer* source, const renderer_preferred_sta
 			&ao_history_framebuffers[history_read] : apply_source;
 		ColorFramebuffer* temporal_target = &ao_history_framebuffers[history_write];
 
-		if (velocity_scale < 1)
-			velocity_scale = 1;
 		const bool use_dynamic_velocity =
 			has_dynamic_velocity && velocity_texture != 0 && object_id_texture != 0 &&
 			velocity_width > 0 && velocity_height > 0;
@@ -730,7 +705,7 @@ AOResult AOResources::Evaluate(Framebuffer* source, const renderer_preferred_sta
 	// Pass 5: Build the final AO suppression mask.
 	//-------------------------------------------------------------------------
 	GLuint final_suppression_mask = 0;
-	GLuint ao_exclusion_mask_texture = suppression_mask_texture;
+	const GLuint ao_exclusion_mask_texture = 0; // eligibility belongs to surface radiance, not a canvas mask
 	bool bloom_mask_enabled = pref_state.bloom_enabled && scene_color_texture != 0;
 	if (suppression_shader.Handle() != 0 && (ao_exclusion_mask_texture != 0 || bloom_mask_enabled))
 	{
@@ -769,8 +744,7 @@ AOResult AOResources::Evaluate(Framebuffer* source, const renderer_preferred_sta
 		final_suppression_mask = suppression_framebuffer.ColorTextureForRead();
 	}
 	const bool debug_display_ao_only =
-		(pref_state.ao_debug_preview || pref_state.ao_temporal_debug_preview) &&
-		Game_mode != GM_NONE;
+		(pref_state.ao_debug_preview || pref_state.ao_temporal_debug_preview);
 	result.ao_texture = apply_source->ColorTextureForRead();
 	result.suppression_texture = debug_display_ao_only ? 0 : final_suppression_mask;
 	result.debug_display = debug_display_ao_only;

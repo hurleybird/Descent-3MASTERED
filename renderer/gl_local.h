@@ -168,9 +168,13 @@ class GL4Renderer : public IRenderer
 	Framebuffer framebuffers[NUM_GL4_FBOS];
 	Framebuffer resolved_framebuffer;
 	Framebuffer downscale_framebuffer;
-	Framebuffer bloom_source_framebuffer;
-	Framebuffer bloom_source_resolved_framebuffer;
-	Framebuffer bloom_source_downscale_framebuffer;
+	// Produced only at the scheduled opaque boundary. Color is needed for
+	// authored AO highlight protection; depth also serves motion and bloom.
+	struct OpaqueSceneImages {
+		Framebuffer images, reduction;
+		bool ready = false, has_color = false;
+		void Destroy() { images.Destroy(); reduction.Destroy(); ready = has_color = false; }
+	} opaque_scene;
 	Framebuffer post_present_framebuffer;
 	Framebuffer post_composite_framebuffer;
 	Framebuffer motion_blur_framebuffer;
@@ -205,10 +209,6 @@ class GL4Renderer : public IRenderer
 	void SubmitFramePacingFence();
 	void DestroyFramePacingFences();
 	int framebuffer_current_draw = 0;
-	bool bloom_source_valid = false;
-	bool ao_scene_valid = false;
-	bool captured_scene_draw_count_valid = false;
-	uint32_t captured_scene_draw_count = 0;
 	int framebuffer_logical_width = 0;
 	int framebuffer_logical_height = 0;
 	int framebuffer_logical_offset_x = 0;
