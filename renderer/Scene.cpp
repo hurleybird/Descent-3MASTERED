@@ -23,6 +23,9 @@ void require(bool condition, const char* message) {
     if (!condition) throw std::invalid_argument(message);
 }
 void validateSurface(const SurfaceBinding& surface) {
+    require(std::isfinite(surface.soft_depth_range) && surface.soft_depth_range >= 0,"Invalid soft intersection range");
+    require(surface.blend == BlendMode::Solid || surface.blend == BlendMode::Alpha || surface.blend == BlendMode::Additive ||
+        surface.blend == BlendMode::Multiply,"Invalid material blend mode");
     require(surface.layer == RenderLayer::World || surface.layer == RenderLayer::Background,"Invalid material layer");
     require(finite(surface.base_color) && finite(surface.color_modulation) && finite(surface.ambient_color) && finite(surface.ambient_direction) &&
         std::isfinite(surface.alpha) && surface.alpha >= 0 && surface.alpha <= 1 &&
@@ -193,13 +196,13 @@ MeshAssetRef SceneAssets::publishMesh(uint32_t slot,MeshGeometry geometry) {
 MaterialPolicy compileMaterialPolicy(const SurfaceBinding& surface, const MeshPolygon& polygon) {
     MaterialPolicy result;
     result.layer = surface.layer;
-    if (surface.texture_alpha || surface.additive) {
+    if (surface.texture_alpha || surface.blend == BlendMode::Additive || surface.blend == BlendMode::Multiply) {
         result.texture_alpha = surface.color_image && surface.color_image->format() != ImageFormat::ARGB1555 ?
             TextureAlpha::Continuous : TextureAlpha::Cutout;
     }
-    bool fractional = surface.alpha < 1 || result.texture_alpha == TextureAlpha::Continuous;
+    bool fractional = surface.alpha < 1 || result.texture_alpha == TextureAlpha::Continuous || surface.soft_depth_range > 0;
     for (const auto& corner : polygon.corners) fractional = fractional || corner.alpha < 255;
-    result.blend = surface.additive ? BlendMode::Additive : fractional ? BlendMode::Alpha : BlendMode::Solid;
+    result.blend = surface.blend != BlendMode::Solid ? surface.blend : fractional ? BlendMode::Alpha : BlendMode::Solid;
     return result;
 }
 
@@ -249,6 +252,7 @@ PresentationRef Presentation::freeze(const FrameData& data) {
     for (const auto& mesh : data.meshes) {
         require(mesh.asset && mesh.asset->id().lifetime == data.scene_lifetime,"Stale generic mesh");
         require(finite(mesh.world) && finite(mesh.camera_translation),"Invalid generic mesh transform");
+        require(mesh.alignment == MeshAlignment::World || mesh.alignment == MeshAlignment::Camera,"Invalid mesh alignment");
         validateSurface(mesh.surface); validateIndices(mesh.surface);
     }
     if (data.terrain.asset) {

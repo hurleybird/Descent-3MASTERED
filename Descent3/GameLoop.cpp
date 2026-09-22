@@ -29,6 +29,7 @@
 #include "gameloop.h"
 #include "SceneExtraction.h"
 #include "../renderer/SceneLighting.h"
+#include "../renderer/SceneAnimation.h"
 #include "game.h"
 #include "render.h"
 #include "descent.h"
@@ -135,11 +136,7 @@ int Get60HzVisualTick()
 
 int Get60HzVisualAngle(float units_per_frame, int offset)
 {
-	double phase = fmod(Get60HzVisualFrame() * units_per_frame + offset,
-		65536.0);
-	if (phase < 0.0)
-		phase += 65536.0;
-	return (int)phase;
+	return d3scene::visualAngle(Gametime,units_per_frame,offset);
 }
 
 uint32_t Get60HzVisualNoise(uint32_t key, uint32_t salt)

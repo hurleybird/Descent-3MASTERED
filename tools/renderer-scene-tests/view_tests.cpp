@@ -1,6 +1,7 @@
 // Descent 3MASTERED - GPL-3.0-or-later
 #include "../../renderer/SceneView.h"
 #include "../../renderer/ScenePortals.h"
+#include "../../renderer/SceneGeometry.h"
 #include <cmath>
 #include <stdexcept>
 
@@ -236,5 +237,33 @@ int runSceneViewTests() {
     colored.vertex_colors.pop_back(); bool rejected_colors = false;
     try { assets.publishMesh(1,colored); } catch (const std::invalid_argument&) { rejected_colors = true; }
     check(rejected_colors,"Incomplete authored mesh color stream was accepted");
+    d3scene::PreparedMesh billboard;
+    billboard.asset = assets.publishMesh(2,d3scene::unitBillboardQuad());
+    billboard.alignment = d3scene::MeshAlignment::Camera;
+    billboard.world.position = {10,2,3};
+    billboard.world.right = {0,-2,0}; billboard.world.up = {3,0,0}; // rotated, non-square sprite
+    auto side = view(); side.camera.right = {0,0,-1}; side.camera.forward = {1,0,0};
+    const auto oriented = d3scene::resolveMeshTransform(billboard,d3scene::prepareCamera(side));
+    check(oriented.position.x == 10 && oriented.position.y == 2 && oriented.position.z == 3,"Billboarding moved world-space center");
+    check(oriented.right.y == -2 && oriented.up.z == -3 && oriented.forward.x == 1,"Billboard lost authored spin or aspect ratio");
+    check(billboard.world.up.x == 3 && billboard.world.forward.z == 1,"Billboarding rewrote prepared source transform");
+    billboard.alignment = d3scene::MeshAlignment::World;
+    check(d3scene::resolveMeshTransform(billboard,d3scene::prepareCamera(side)).up.x == 3,"Planar geometry inherited camera rotation");
+    d3scene::FrameData scheduled; scheduled.sequence = 5; scheduled.scene_lifetime = assets.lifetime();
+    auto solid = background; solid.surface.layer = d3scene::RenderLayer::World;
+    auto soft = solid; soft.surface.soft_depth_range = 2;
+    scheduled.meshes = {soft,solid,background};
+    const auto scheduled_frame = d3scene::Presentation::freeze(scheduled);
+    const auto scheduled_visibility = d3scene::queryView(*scheduled_frame,view());
+    const auto passes = d3scene::buildViewPasses(*scheduled_frame,scheduled_visibility);
+    check(passes.size() == 4 && passes[0].kind == d3scene::ViewPassKind::Background &&
+        passes[1].kind == d3scene::ViewPassKind::OpaqueWorld && passes[2].kind == d3scene::ViewPassKind::SnapshotOpaqueDepth &&
+        passes[3].kind == d3scene::ViewPassKind::BlendedWorld,"Opaque depth dependency was scheduled after its consumer");
+    check(passes[0].begin == 0 && passes[0].end == 1 && passes[1].begin == 1 && passes[1].end == 2 &&
+        passes[2].begin == passes[2].end && passes[3].begin == 2 && passes[3].end == 3,"View pass ranges overlap or omit surfaces");
+    scheduled.meshes[0].surface.soft_depth_range = 0; scheduled.meshes[0].surface.blend = d3scene::BlendMode::Alpha;
+    const auto no_depth_frame = d3scene::Presentation::freeze(scheduled);
+    check(d3scene::buildViewPasses(*no_depth_frame,d3scene::queryView(*no_depth_frame,view())).size() == 3,
+        "Unconsumed opaque depth was copied");
     return Checks;
 }

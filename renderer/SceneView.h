@@ -21,6 +21,7 @@ struct Camera {
 };
 Camera prepareCamera(const View& view);
 View resolveView(const Presentation&, View);
+Transform resolveMeshTransform(const PreparedMesh&,const Camera&);
 ClipPosition project(const Camera& camera, Vec3 world);
 bool sphereIntersects(const Camera& camera, Vec3 center, float radius);
 
@@ -50,6 +51,13 @@ struct ViewVisibility {
     ViewQueryStats stats;
     bool exterior_visible = false;
 };
+enum class ViewPassKind { Background, OpaqueWorld, SnapshotOpaqueDepth, BlendedWorld };
+struct ViewPass {
+    ViewPassKind kind;
+    uint32_t begin = 0, end = 0; // half-open range in this view's visible surfaces
+};
+const SurfaceBinding& visibleSurfaceBinding(const Presentation&,const VisibleSurface&);
+std::vector<ViewPass> buildViewPasses(const Presentation&,const ViewVisibility&);
 
 // Pure conservative frustum query over the complete published scene. Results
 // are view-local indices, never marks written into shared faces/objects.

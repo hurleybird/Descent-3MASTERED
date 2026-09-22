@@ -544,6 +544,10 @@ void GL4Renderer::GetInformation()
 #if defined(WIN32) && !defined(SDL3)
 void APIENTRY GL_LogDebugMsg(GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length, const GLchar* msg, const void* user)
 {
+    if (user) {
+        if (type == GL_DEBUG_TYPE_ERROR) Error("Scene inspection GL diagnostic: %s",msg);
+        return;
+    }
 	mprintf((0, "OpenGL debug msg %d: %s\n", id, msg));
 }
 #endif
@@ -627,6 +631,10 @@ int GL4Renderer::Init(oeApplication* app, renderer_preferred_state* pref_state)
 #else
 	OpenGL_debugging_enabled = false;
 #endif
+    if (FindArg("-scene-inspection") && (GLAD_GL_VERSION_4_5 || CheckExtension("GL_KHR_debug"))) {
+        glEnable(GL_DEBUG_OUTPUT); glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
+        glDebugMessageCallback(GL_LogDebugMsg,reinterpret_cast<const void*>(1));
+    }
 
 	OpenGL_buffer_storage_enabled = CheckExtension("GL_ARB_buffer_storage");
 

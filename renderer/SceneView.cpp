@@ -85,6 +85,18 @@ Camera prepareCamera(const View& view) {
     }};
     return camera;
 }
+Transform resolveMeshTransform(const PreparedMesh& instance,const Camera& camera) {
+    auto world = instance.world;
+    if (instance.alignment == MeshAlignment::Camera) {
+        world.right = transformDirection(camera.transform,world.right);
+        world.up = transformDirection(camera.transform,world.up);
+        world.forward = transformDirection(camera.transform,world.forward);
+    }
+    world.position.x += instance.camera_translation.x*camera.transform.position.x;
+    world.position.y += instance.camera_translation.y*camera.transform.position.y;
+    world.position.z += instance.camera_translation.z*camera.transform.position.z;
+    return world;
+}
 ClipPosition project(const Camera& camera, Vec3 world) {
     const auto p = subtract(world,camera.transform.position);
     const double x = dot(p,camera.transform.right), y = dot(p,camera.transform.up), z = dot(p,camera.transform.forward);
@@ -213,13 +225,15 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
         if (!instance.surface.draw_surface || geometry.polygons.empty() ||
             (instance.surface.material.layer == RenderLayer::Background && !result.exterior_visible)) continue;
         VisibleSurface item; item.mesh = true; item.mesh_index = static_cast<uint32_t>(index);
-        item.world = instance.world;
-        item.world.position.x += instance.camera_translation.x*view.camera.position.x;
-        item.world.position.y += instance.camera_translation.y*view.camera.position.y;
-        item.world.position.z += instance.camera_translation.z*view.camera.position.z;
+        item.world = resolveMeshTransform(instance,result.camera);
+        PortalWindow window{-1,-1,1,1,true};
+        if (instance.surface.material.layer == RenderLayer::World && view.portal_visibility && room_indices.count(instance.room)) {
+            window = windows[room_indices.at(instance.room)];
+            if (!window.visible) continue;
+        }
         bool visible = false;
         for (const auto& polygon : geometry.polygons)
-            if (!polygonOutside(result.camera,MeshView(geometry),polygon,item.world,{-1,-1,1,1,true})) { visible = true; break; }
+            if (!polygonOutside(result.camera,MeshView(geometry),polygon,item.world,window)) { visible = true; break; }
         if (!visible) continue;
         item.layer = instance.surface.material.layer;
         item.blended = instance.surface.material.blended();
@@ -233,5 +247,27 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
         return a.blended ? a.depth > b.depth : a.depth < b.depth;
     });
     return result;
+}
+const SurfaceBinding& visibleSurfaceBinding(const Presentation& frame,const VisibleSurface& item) {
+    const auto& data = frame.data();
+    if (item.mesh) return data.meshes[item.mesh_index].surface;
+    if (item.terrain) return data.terrain.patches[item.terrain_patch][item.terrain_batch];
+    if (item.model) return data.objects[item.object_index].parts[item.part_index].surfaces[item.polygon_index];
+    return data.rooms[item.room_index].surfaces[item.polygon_index];
+}
+std::vector<ViewPass> buildViewPasses(const Presentation& frame,const ViewVisibility& view) {
+    std::vector<ViewPass> passes;
+    uint32_t index = 0;
+    while (index < view.surfaces.size() && view.surfaces[index].layer == RenderLayer::Background) ++index;
+    if (index) passes.push_back({ViewPassKind::Background,0,index});
+    const auto opaque = index;
+    while (index < view.surfaces.size() && !view.surfaces[index].blended) ++index;
+    if (index > opaque) passes.push_back({ViewPassKind::OpaqueWorld,opaque,index});
+    bool depth_required = false;
+    for (size_t i = index; i < view.surfaces.size(); ++i)
+        depth_required = depth_required || visibleSurfaceBinding(frame,view.surfaces[i]).soft_depth_range > 0;
+    if (depth_required) passes.push_back({ViewPassKind::SnapshotOpaqueDepth,index,index});
+    if (index < view.surfaces.size()) passes.push_back({ViewPassKind::BlendedWorld,index,static_cast<uint32_t>(view.surfaces.size())});
+    return passes;
 }
 } // namespace d3scene

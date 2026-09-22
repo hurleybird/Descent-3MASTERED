@@ -168,7 +168,7 @@ private:
 };
 
 enum class RenderLayer : uint8_t { Background, World };
-enum class BlendMode : uint8_t { Solid, Alpha, Additive };
+enum class BlendMode : uint8_t { Solid, Alpha, Additive, Multiply };
 enum class TextureAlpha : uint8_t { Ignore, Cutout, Continuous };
 struct MaterialPolicy {
     RenderLayer layer = RenderLayer::World;
@@ -186,6 +186,9 @@ struct SurfaceBinding {
     MaterialPolicy material; // compiled by publication, shared by all consumers
     RenderLayer layer = RenderLayer::World;
     bool unlit = false, two_sided = false;
+    BlendMode blend = BlendMode::Solid; // non-solid modes explicitly request compositing
+    bool texture_wrap = true;
+    float soft_depth_range = 0; // zero disables intersection fading; positive requires opaque depth
     std::vector<uint32_t> light_indices;
     std::vector<Vec2> baked_uvs; // optional per-instance corner UVs, never shared model scratch
     Vec3 ambient_color{1,1,1}, ambient_direction{0,-1,0};
@@ -198,7 +201,7 @@ struct SurfaceBinding {
     bool lightmap_wrap = false;
     float lightmap_u_scale = 1, lightmap_v_scale = 1;
     float u_offset = 0, v_offset = 0, alpha = 1;
-    bool draw_surface = true, additive = false, texture_alpha = false;
+    bool draw_surface = true, texture_alpha = false;
     int32_t texture = -1, lightmap = -1, special = -1, portal = -1;
     uint32_t authored_flags = 0;
     uint8_t light_multiple = 0;
@@ -209,11 +212,14 @@ struct TerrainState {
     std::vector<SurfaceBinding> materials;
     std::vector<std::vector<SurfaceBinding>> patches;
 };
+enum class MeshAlignment : uint8_t { World, Camera };
 struct PreparedMesh {
     MeshAssetRef asset;
     SurfaceBinding surface;
     Transform world;
     Vec3 camera_translation; // sky follows the eye with authored half-height parallax
+    MeshAlignment alignment = MeshAlignment::World;
+    int32_t room = -1;
 };
 struct Portal {
     int32_t polygon = -1, destination_room = -1, destination_portal = -1;

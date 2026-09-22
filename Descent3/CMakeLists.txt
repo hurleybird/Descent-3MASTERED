@@ -5,6 +5,7 @@ SET (MAIN_SOURCES
 		Descent3/SceneModels.cpp
 		Descent3/SceneLights.cpp
 		Descent3/SceneTerrain.cpp
+		Descent3/SceneEffects.cpp
 		Descent3/SceneMaterialBindings.h
 		Descent3/SceneMaterialBindings.cpp
 		Descent3/aiambient.h

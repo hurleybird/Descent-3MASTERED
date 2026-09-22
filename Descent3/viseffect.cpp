@@ -44,6 +44,7 @@
 #include "polymodel.h"
 #include "renderer.h"
 #include "../renderer/HardwareInternal.h"
+#include "../renderer/SceneAnimation.h"
 #include "psrand.h"
 #include "mem.h"
 
@@ -1892,54 +1893,10 @@ static bool VisEffectShouldUseSoftSnowParticles(bool zbuffer_state)
 	return Render_soft_vis_effects && zbuffer_state;
 }
 
-struct VisEffectVClipFrameBlend
+using VisEffectVClipFrameBlend = d3scene::AnimationFrames;
+static VisEffectVClipFrameBlend VisEffectCalcVClipFrameBlend(const vclip* vc,float normalized_time,bool loop)
 {
-	int frame0;
-	int frame1;
-	float frame1_weight;
-	bool has_frame1;
-};
-
-static VisEffectVClipFrameBlend VisEffectCalcVClipFrameBlend(const vclip* vc, float norm_time, bool loop)
-{
-	VisEffectVClipFrameBlend blend = {};
-	blend.frame0 = 0;
-	blend.frame1 = 0;
-	blend.frame1_weight = 0.0f;
-	blend.has_frame1 = false;
-
-	if (!vc || vc->num_frames <= 0)
-		return blend;
-
-	float frame_pos = vc->num_frames * norm_time;
-	if (frame_pos < 0.0f)
-		frame_pos = 0.0f;
-	if (frame_pos >= vc->num_frames)
-		frame_pos = vc->num_frames - 0.00001f;
-
-	blend.frame0 = (int)frame_pos;
-	if (blend.frame0 < 0)
-		blend.frame0 = 0;
-	if (blend.frame0 >= vc->num_frames)
-		blend.frame0 = vc->num_frames - 1;
-
-	if (vc->num_frames <= 1)
-		return blend;
-
-	blend.frame1_weight = frame_pos - blend.frame0;
-	if (blend.frame1_weight <= 0.001f)
-		return blend;
-
-	blend.frame1 = blend.frame0 + 1;
-	if (blend.frame1 >= vc->num_frames)
-	{
-		if (!loop)
-			return blend;
-		blend.frame1 = 0;
-	}
-
-	blend.has_frame1 = true;
-	return blend;
+    return d3scene::animationFrames(vc ? vc->num_frames : 0,normalized_time,loop);
 }
 
 static int VisEffectNextPowerOfTwo(int value)

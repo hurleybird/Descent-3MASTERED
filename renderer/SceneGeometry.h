@@ -19,4 +19,5 @@ template<class Consumer> void forEachTriangleCorner(size_t corners, Consumer con
 // Preserves D3's radial jitter shape, but replaces draw-order RNG consumption
 // with explicit time/instance/part inputs. No view can advance another's shape.
 std::vector<Vec3> deformMesh(const MeshGeometry&,float range,double time,uint32_t owner,uint32_t part);
+MeshGeometry unitBillboardQuad();
 }

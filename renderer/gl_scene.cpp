@@ -86,6 +86,10 @@ uniform int use_texture;
 uniform int unlit;
 uniform samplerBuffer scene_fog;
 uniform int fog_volume_count, fog_enabled, fog_additive, fog_exterior;
+uniform int multiply_material;
+uniform sampler2D opaque_depth;
+uniform float soft_depth_range, near_distance;
+uniform ivec2 depth_snapshot_origin;
 uniform vec3 eye, camera_forward, exterior_fog_color;
 uniform vec2 exterior_fog_range;
 uniform vec3 base_color;
@@ -143,7 +147,7 @@ vec3 applySceneFog(vec3 radiance) {
     float forward_scale = max(0.0,dot(direction,camera_forward));
     if (fog_exterior != 0) {
         float amount = clamp((distance*forward_scale-exterior_fog_range.x)/(exterior_fog_range.y-exterior_fog_range.x),0.0,1.0);
-        radiance = mix(radiance,fog_additive != 0 ? vec3(0) : exterior_fog_color,amount);
+        radiance = mix(radiance,multiply_material != 0 ? vec3(1) : (fog_additive != 0 ? vec3(0) : exterior_fog_color),amount);
     }
     float optical_depth = 0.0;
     vec3 weighted_color = vec3(0);
@@ -174,18 +178,29 @@ vec3 applySceneFog(vec3 radiance) {
         optical_depth += amount; weighted_color += appearance.rgb*amount;
     }
     if (optical_depth > 0.0)
-        radiance = mix(radiance,fog_additive != 0 ? vec3(0) : weighted_color/optical_depth,clamp(optical_depth,0.0,1.0));
+        radiance = mix(radiance,multiply_material != 0 ? vec3(1) : (fog_additive != 0 ? vec3(0) : weighted_color/optical_depth),clamp(optical_depth,0.0,1.0));
     return radiance;
 }
 void main() {
     vec4 base=use_texture != 0 ? texture(colortexture,texcoord+texture_offset) : vec4(base_color,1);
     base.a=(use_texture_alpha != 0 ? base.a : 1.0)*vertex_alpha*material_alpha;
+    if (soft_depth_range > 0.0) {
+        ivec2 size = textureSize(opaque_depth,0);
+        ivec2 pixel = clamp(ivec2(gl_FragCoord.xy)-depth_snapshot_origin,ivec2(0),size-ivec2(1));
+        float depth = texelFetch(opaque_depth,pixel,0).r;
+        if (depth < 1.0) {
+            float surface_depth = near_distance/max(1.e-8,1.0-depth);
+            float particle_depth = dot(world_position-eye,camera_forward);
+            base.a *= clamp((surface_depth-particle_depth)/soft_depth_range,0.0,1.0);
+        }
+    }
     if(base.a < alpha_cutoff) discard;
     vec3 illumination = use_lightmap != 0 ? texture(lightmaptexture,lightcoord*light_scale).rgb : ambient;
     vec3 dynamic_color = lighting_per_pixel != 0 ? sceneDynamicLighting(world_position) : vertex_dynamic;
     illumination = clamp(illumination+dynamic_color,vec3(0),vec3(1));
     if (unlit != 0) illumination = vec3(1);
     color=vec4(base.rgb*color_modulation*authored_color*illumination*lighting_modulation,base.a);
+    if (multiply_material != 0) color.rgb = mix(vec3(1),color.rgb,color.a);
     color.rgb = applySceneFog(color.rgb);
 }
 )GLSL";
@@ -218,6 +233,10 @@ void GL4Renderer::DestroySceneResources() {
     if (scene_fog_texture) glDeleteTextures(1,&scene_fog_texture);
     scene_fog_buffer = scene_fog_texture = 0;
     scene_fog_id = {};
+    if (scene_depth_snapshot) glDeleteTextures(1,&scene_depth_snapshot);
+    if (scene_depth_framebuffer) glDeleteFramebuffers(1,&scene_depth_framebuffer);
+    scene_depth_snapshot = scene_depth_framebuffer = 0;
+    scene_depth_width = scene_depth_height = 0;
     if (scene_light_buffer) glDeleteBuffers(1,&scene_light_buffer);
     if (scene_influence_buffer) glDeleteBuffers(1,&scene_influence_buffer);
     if (scene_light_texture) glDeleteTextures(1,&scene_light_texture);
@@ -385,13 +404,17 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
     if (!view.geometry_inspection)
         Error("Scene executor migration incomplete: only explicit geometry inspection is currently supported.");
     const auto visibility = d3scene::queryView(presentation,view);
+    const auto check_scene_error = [](const char* stage) { const auto error = glGetError(); if (error != GL_NO_ERROR) Error("Scene GL error 0x%x at %s",error,stage); };
+    check_scene_error("entry");
     FlushFontBatch();
+    check_scene_error("font flush");
     if (scene_asset_lifetime != presentation.data().scene_lifetime) {
         DestroySceneResources();
         scene_asset_lifetime = presentation.data().scene_lifetime;
     }
     if (!scene_shader.Handle()) scene_shader.AttachSource(SceneVertexShader.c_str(), SceneFragmentShader.c_str());
     UploadSceneFrame(presentation);
+    check_scene_error("frame upload");
 
     // The pass owns depth/blend/culling policy. No game draw-state capture and
     // no invocation of RenderMine/RenderTerrain/RenderObject occurs here.
@@ -484,7 +507,48 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
         return true;
     };
 
-    for (const auto& item : visibility.surfaces) {
+    const auto passes = d3scene::buildViewPasses(presentation,visibility);
+    check_scene_error("pass setup");
+    for (const auto& pass : passes) {
+      if (pass.kind == d3scene::ViewPassKind::SnapshotOpaqueDepth) {
+        const auto incoming_error = glGetError();
+        if (incoming_error != GL_NO_ERROR) Error("Scene reached opaque-depth snapshot with prior GL error 0x%x",incoming_error);
+        GLint viewport[4], previous_read, previous_draw;
+        glGetIntegerv(GL_VIEWPORT,viewport);
+        glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING,&previous_read);
+        glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING,&previous_draw);
+        if (!scene_depth_snapshot) glGenTextures(1,&scene_depth_snapshot);
+        if (!scene_depth_framebuffer) glGenFramebuffers(1,&scene_depth_framebuffer);
+        glActiveTexture(GL_TEXTURE7); glBindTexture(GL_TEXTURE_2D,scene_depth_snapshot);
+        if (scene_depth_width != viewport[2] || scene_depth_height != viewport[3]) {
+            scene_depth_width = viewport[2]; scene_depth_height = viewport[3];
+            // Scene render targets use 32-bit float depth, including MSAA. The
+            // snapshot has identical pixel extent and resolves depth only.
+            glTexImage2D(GL_TEXTURE_2D,0,GL_DEPTH_COMPONENT32F,viewport[2],viewport[3],0,GL_DEPTH_COMPONENT,GL_FLOAT,nullptr);
+            glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
+        }
+        glBindFramebuffer(GL_FRAMEBUFFER,scene_depth_framebuffer);
+        glFramebufferTexture2D(GL_FRAMEBUFFER,GL_DEPTH_ATTACHMENT,GL_TEXTURE_2D,scene_depth_snapshot,0);
+        glDrawBuffer(GL_NONE); glReadBuffer(GL_NONE);
+        if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) Error("Scene opaque-depth snapshot is incomplete");
+        glBindFramebuffer(GL_READ_FRAMEBUFFER,previous_draw);
+        const GLboolean scissor = glIsEnabled(GL_SCISSOR_TEST);
+        glDisable(GL_SCISSOR_TEST);
+        glBlitFramebuffer(viewport[0],viewport[1],viewport[0]+viewport[2],viewport[1]+viewport[3],0,0,viewport[2],viewport[3],GL_DEPTH_BUFFER_BIT,GL_NEAREST);
+        if (scissor) glEnable(GL_SCISSOR_TEST);
+        glBindFramebuffer(GL_READ_FRAMEBUFFER,previous_read); glBindFramebuffer(GL_DRAW_FRAMEBUFFER,previous_draw);
+        const auto snapshot_error = glGetError();
+        if (snapshot_error != GL_NO_ERROR) Error("Scene opaque-depth snapshot failed: GL 0x%x source=%d viewport=%d,%d,%d,%d",
+            snapshot_error,previous_draw,viewport[0],viewport[1],viewport[2],viewport[3]);
+        glUniform1i(scene_shader.FindUniform("opaque_depth"),7);
+        glUniform2i(scene_shader.FindUniform("depth_snapshot_origin"),viewport[0],viewport[1]);
+        continue;
+      }
+      for (uint32_t item_index = pass.begin; item_index < pass.end; ++item_index) {
+        const auto& item = visibility.surfaces[item_index];
         const d3scene::SurfaceBinding* binding;
         SceneMeshGpu* mesh;
         ElementRange prepared_positions(0,0);
@@ -524,17 +588,19 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
         if ((surface.bitmap >= 0 && !surface.color_image) || (surface.lightmap_bitmap >= 0 && !surface.baked_image))
             Error("Scene surface reached execution without prepared image assets");
         const auto& gpu = *mesh;
-        if (surface.color_image) BindSceneImage(*surface.color_image,0,true,false);
+        if (surface.color_image) BindSceneImage(*surface.color_image,0,surface.texture_wrap,false);
         if (surface.baked_image) BindSceneImage(*surface.baked_image,1,surface.lightmap_wrap,true);
         scene_shader.Use();
         const auto influences = scene_light_ranges.at(binding);
         glUniform1i(scene_shader.FindUniform("influence_offset"),influences.offset);
         glUniform1i(scene_shader.FindUniform("influence_count"),view.dynamic_lighting && !surface.unlit ? influences.count : 0);
         glUniform1i(scene_shader.FindUniform("unlit"),surface.unlit);
+        glUniform1f(scene_shader.FindUniform("soft_depth_range"),surface.material.layer == d3scene::RenderLayer::World ? surface.soft_depth_range : 0);
         glUniform1i(scene_shader.FindUniform("fog_enabled"),surface.material.layer == d3scene::RenderLayer::World);
         glUniform1i(scene_shader.FindUniform("fog_additive"),surface.material.blend == d3scene::BlendMode::Additive);
+        glUniform1i(scene_shader.FindUniform("multiply_material"),surface.material.blend == d3scene::BlendMode::Multiply);
         const bool exterior = item.terrain || (item.model ? exteriorRoom(presentation.data().objects[item.object_index].room) :
-            (!item.mesh && presentation.data().rooms[item.room_index].exterior));
+            (item.mesh ? exteriorRoom(presentation.data().meshes[item.mesh_index].room) : presentation.data().rooms[item.room_index].exterior));
         glUniform1i(scene_shader.FindUniform("fog_exterior"),exterior && exterior_fog.enabled);
         vec("model_position",item.world.position); vec("model_right",item.world.right);
         vec("model_up",item.world.up); vec("model_forward",item.world.forward);
@@ -552,7 +618,9 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
         glUniform1f(scene_shader.FindUniform("material_alpha"),surface.alpha);
         if(surface.material.blended()) {
             glEnable(GL_BLEND);
-            glBlendFunc(GL_SRC_ALPHA,surface.material.blend == d3scene::BlendMode::Additive ? GL_ONE : GL_ONE_MINUS_SRC_ALPHA);
+            if (surface.material.blend == d3scene::BlendMode::Multiply) glBlendFuncSeparate(GL_DST_COLOR,GL_ZERO,GL_ZERO,GL_ONE);
+            else glBlendFuncSeparate(GL_SRC_ALPHA,surface.material.blend == d3scene::BlendMode::Additive ? GL_ONE : GL_ONE_MINUS_SRC_ALPHA,
+                GL_ONE,GL_ONE_MINUS_SRC_ALPHA);
         } else glDisable(GL_BLEND);
         glDepthMask(surface.material.writesSolidDepth() ? GL_TRUE : GL_FALSE);
         if (surface.material.testsDepth()) glEnable(GL_DEPTH_TEST); else glDisable(GL_DEPTH_TEST);
@@ -567,6 +635,7 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
         else glDisable(GL_CULL_FACE);
         glDrawArrays(GL_TRIANGLES,range.offset,range.count);
         rend_RecordDrawCall(RENDERER_DRAW_CALL_3D);
+      }
     }
     glDepthMask(GL_TRUE); glEnable(GL_DEPTH_TEST); glDisable(GL_BLEND); glDisable(GL_CULL_FACE);
     ShaderProgram::ClearBinding();

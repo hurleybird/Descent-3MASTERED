@@ -4,6 +4,14 @@
 #include <cmath>
 #include <stdexcept>
 namespace d3scene {
+MeshGeometry unitBillboardQuad() {
+    MeshGeometry mesh;
+    mesh.vertices = {{-1,1,0},{1,1,0},{1,-1,0},{-1,-1,0}};
+    MeshPolygon face; face.normal = {0,0,-1};
+    face.corners = {{0,0,0},{1,1,0},{2,1,1},{3,0,1}};
+    mesh.polygons.push_back(std::move(face));
+    return mesh;
+}
 std::vector<Vec3> deformMesh(const MeshGeometry& mesh,float range,double time,uint32_t owner,uint32_t part) {
     if (!std::isfinite(range) || !std::isfinite(time)) throw std::invalid_argument("Invalid mesh deformation");
     std::vector<Vec3> positions;

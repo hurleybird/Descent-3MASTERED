@@ -1,5 +1,35 @@
 # Renderer migration checkpoint
 
+## Continuation: owned billboards, material blending and pass dependencies
+
+Visual-effect extraction now publishes immutable sprite instances, explicit
+animation frames and material blend modes over one shared quad. Camera-facing
+alignment is resolved from the same view transform in CPU visibility and GPU
+execution; planar effects retain a world basis. Unsupported beams/weather remain
+counted as pending, not dispatched through old drawing callbacks. Animation time
+and angle selection share pure kernels with the remaining simulation adapters.
+
+The view schedule owns background, opaque, depth-snapshot and blended phases.
+Soft particles consume an explicit opaque-depth product, including MSAA resolve,
+instead of reading a moving render target. Indexed geometry and typed material
+policy are shared with rooms, models and terrain. Four legacy draw-only helpers
+incorrectly changed read-buffer state; those side effects are removed. Strict GL
+error diagnostics in scene inspection now pass all eight saved views and both
+smoke-heavy views with 4x MSAA / 2x supersampling.
+
+Full build and 4,838 CPU checks pass. `scene-effects-final-clean` completes all
+eight saves; 001/002/007 screenshots were inspected. Repeat 001/007 images are
+byte-identical. The small 000 delta coincides with a different Buddybot pose hash
+and position (also present in earlier captures); it is not certified pixel parity.
+`scene-effects-antialias` 001/002 were inspected without AO/bloom. Combined
+`scene-effects-msaa` captures expose a real remaining composition gap: the new
+scene lacks the old compositor's coverage contract, and its opaque capture occurs
+after translucency. Fogged walls are incorrectly darkened by AO. The next change
+must move scene outputs/pass ownership upstream, not special-case these saves.
+
+This is still inspection-only, not a complete playable renderer. Candidate and
+Previous Candidate are untouched. No shadows were added.
+
 ## Continuation: fog belongs to immutable connected scene space
 
 Fog-enabled rooms with matching authored color/depth connect through reciprocal

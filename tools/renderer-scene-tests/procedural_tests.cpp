@@ -1,11 +1,22 @@
 // Descent 3MASTERED - GPL-3.0-or-later
 #include "../../renderer/SceneProcedural.h"
+#include "../../renderer/SceneAnimation.h"
 #include <stdexcept>
 #include <climits>
 int runProceduralTests() {
     using namespace d3scene;
     int checks = 0;
     const auto check = [&](bool value) { ++checks; if (!value) throw std::runtime_error("Procedural clock/random contract"); };
+    check(visualAngle(1,160,5000) == 14600);
+    check(visualAngle(-1,160) == 55936);
+    check(visualAngle(65536,1) == 0);
+    const auto first = animationFrames(10,0,false), halfway = animationFrames(10,.25f,false);
+    check(first.frame0 == 0 && !first.has_frame1);
+    check(halfway.frame0 == 2 && halfway.frame1 == 3 && halfway.frame1_weight == .5f && halfway.has_frame1);
+    check(!animationFrames(10,.99f,false).has_frame1);
+    check(animationFrames(10,.99f,true).frame1 == 0 && animationFrames(10,.99f,true).has_frame1);
+    check(animationFrames(10,-1,true).frame0 == 0 && animationFrames(10,2,false).frame0 == 9);
+    check(!animationFrames(1,.3f,true).has_frame1 && !animationFrames(0,.3f,true).has_frame1);
     check(proceduralSteps(-1, 700, true) == 1);
     check(proceduralSteps(-1, 0, false) == 1);
     check(proceduralSteps(10, 10, true) == 0);

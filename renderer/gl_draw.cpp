@@ -266,7 +266,6 @@ static void GL4UseSceneColorDrawBuffer()
 {
 	const GLenum draw_buffer = GL_COLOR_ATTACHMENT0;
 	glDrawBuffers(1, &draw_buffer);
-	glReadBuffer(GL_COLOR_ATTACHMENT0);
 }
 
 bool GL4Renderer::UsesExactRoomFogMultiply() const

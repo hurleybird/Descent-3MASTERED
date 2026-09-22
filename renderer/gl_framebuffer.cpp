@@ -1120,7 +1120,6 @@ void PostProtectionMaskResources::UseSceneDrawBuffers(GLuint framebuffer, bool i
 		glDrawBuffer(GL_COLOR_ATTACHMENT0);
 	GL_ConfigurePostMaskBlend();
 	glColorMaski(2, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-	glReadBuffer(GL_COLOR_ATTACHMENT0);
 }
 
 void GL_ConfigurePostMaskBlend()

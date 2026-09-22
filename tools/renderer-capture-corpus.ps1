@@ -6,7 +6,7 @@ param(
     [int]$Frame = 60,
     [uint32]$Seed = 12345,
     [int]$TimeoutSeconds = 120,
-    [ValidateSet('clean','effects')][string]$Profile = 'effects',
+    [ValidateSet('clean','antialias','effects')][string]$Profile = 'effects',
     [switch]$SceneInspection,
     [switch]$VertexLighting,
     [switch]$TerrainProbe,
@@ -69,6 +69,7 @@ try {
             '-capture-output',('"{0}"' -f $png),'-render-resolution','1280','720',
             '-perpixellighting','-nomotionblur')
         if ($Profile -eq 'clean') { $arguments += @('-msaa','0','-ssaa','1','-noao','-nobloom') }
+        elseif ($Profile -eq 'antialias') { $arguments += @('-msaa','4','-ssaa','2','-noao','-nobloom') }
         else { $arguments += @('-msaa','4','-ssaa','2','-ao','-bloom') }
         if ($SceneInspection) { $arguments += '-scene-inspection' }
         if ($VertexLighting) { $arguments += '-noperpixellighting' }

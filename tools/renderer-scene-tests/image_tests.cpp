@@ -60,10 +60,15 @@ int runSceneImageTests() {
     surface.texture_alpha = false;
     policy = compileMaterialPolicy(surface,polygon);
     check(policy.texture_alpha == TextureAlpha::Ignore && !policy.blended(),"Ignored texture alpha changed pass");
-    surface.additive = true;
+    surface.blend = BlendMode::Additive;
     policy = compileMaterialPolicy(surface,polygon);
     check(policy.blend == BlendMode::Additive && policy.texture_alpha == TextureAlpha::Continuous && !policy.writesSolidDepth(),"Additive texture alpha/depth policy");
-    surface.additive = false; surface.alpha = .9999f;
+    surface.blend = BlendMode::Multiply;
+    policy = compileMaterialPolicy(surface,polygon);
+    check(policy.blend == BlendMode::Multiply && policy.blended() && !policy.writesSolidDepth(),"Multiply material lost compositing/depth semantics");
+    surface.blend = BlendMode::Alpha; surface.color_image.reset();
+    check(compileMaterialPolicy(surface,polygon).blended(),"Explicit alpha compositor became a depth-writing opaque material");
+    surface.blend = BlendMode::Solid; surface.alpha = .9999f;
     check(compileMaterialPolicy(surface,polygon).blended(),"Almost-opaque alpha incorrectly wrote solid depth");
     surface.alpha = 1; polygon.corners[0].alpha = 254;
     check(compileMaterialPolicy(surface,polygon).blended(),"Vertex alpha absent from material policy");

@@ -1812,7 +1812,8 @@ void GL4Renderer::StartFrame(int x1, int y1, int x2, int y2, int clear_flags)
 		{
 			const GLenum draw_buffer = GL_COLOR_ATTACHMENT0;
 			glDrawBuffers(1, &draw_buffer);
-			glReadBuffer(GL_COLOR_ATTACHMENT0);
+			// A color clear owns the draw target only. The read target may be
+			// the default window framebuffer, where COLOR_ATTACHMENT0 is invalid.
 		}
 	}
 	GL4ClearBuffers(glclearflags);
@@ -2553,7 +2554,6 @@ void GL4Renderer::StartCockpitSceneFrame(int x1, int y1, int x2, int y2)
 	glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
 	const GLenum draw_buffer = GL_COLOR_ATTACHMENT0;
 	glDrawBuffers(1, &draw_buffer);
-	glReadBuffer(GL_COLOR_ATTACHMENT0);
 
 	glClearColor(0.0, 0.0, 0.0, 0.0);
 	GL4ClearBuffers(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
