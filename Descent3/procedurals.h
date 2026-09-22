@@ -16,7 +16,7 @@
 * along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#ifndef PROCEDRUALS_H
+#ifndef PROCEDURALS_H
 #define PROCEDURALS_H
 
 #include "pstypes.h"
@@ -70,12 +70,6 @@ extern ushort DefaultProcPalette[];
 // Goes through our array and clears the slots out
 void InitProcedurals();
 
-// Fades and entire texture one step closer to black
-void FadeProcTexture (int tex_handle);
-
-// Draws lightning into a bitmap
-void AddProcLightning (int x1,int y1,int x2,int y2);
-
 //link the procedural into the list for its texture
 void ProcElementLink(int index,int texnum);
 
@@ -86,8 +80,7 @@ void ProcElementUnlink(int index,int texnum);
 void ClearAllProceduralsFromTexture (int texnum);
 
 // Does a procedural for this texture
-void EvaluateProcedural (int texnum);
-void SetProceduralVisualTick(int tick);
+void EvaluateProcedural(int texnum, int visual_tick);
 
 // Returns the next free procelement
 int ProcElementAllocate ();

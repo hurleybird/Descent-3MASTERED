@@ -8,6 +8,7 @@ add_executable(renderer_scene_tests
     model_scene_tests.cpp
     light_tests.cpp
     image_tests.cpp
+    procedural_tests.cpp
     ../../renderer/SceneLighting.cpp
     ../../renderer/SceneGeometry.cpp
     ../../renderer/ScenePortals.cpp

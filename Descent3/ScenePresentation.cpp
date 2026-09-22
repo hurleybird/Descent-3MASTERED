@@ -21,6 +21,7 @@
 #include "polymodel.h"
 #include "door.h"
 #include "doorway.h"
+#include "psrand.h"
 
 bool SceneGeometryInspection() { return FindArg("-scene-inspection") != 0; }
 
@@ -91,6 +92,9 @@ void logPreparedModels(const d3scene::FrameData& data) {
         AutomatedCaptureLog("scene pose object=%u model=%u name=%s type=%u hash=%llu position=%.9g,%.9g,%.9g",
             instance.handle,instance.model->id().slot,Poly_models[instance.model->id().slot].name,instance.type,hash,
             instance.current.position.x,instance.current.position.y,instance.current.position.z);
+        if (instance.type == OBJ_PLAYER)
+            AutomatedCaptureLog("scene player direction=%.9g,%.9g,%.9g",
+                instance.current.forward.x,instance.current.forward.y,instance.current.forward.z);
     }
     for (int texture : textures) {
         // Resolve was already performed. Reading the source bitmap here must not
@@ -147,6 +151,7 @@ void resolveMaterial(d3scene::SurfaceBinding& surface, float time, bool model) {
 }
 
 d3scene::PresentationRef PrepareGamePresentation(bool advance_history) {
+    const unsigned int simulation_random = ps_rand_get_state();
     const auto source = ExtractGamePresentation(Gametime, Frametime, Game_paused, advance_history);
     auto data = source->data();
     static d3scene::PresentationRef previous_models;
@@ -184,6 +189,8 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance_history) {
     logPreparedModels(data);
     // No domain is declared complete by a diagnostic subset of its consumers.
     auto prepared = d3scene::Presentation::freeze(data);
+    if (ps_rand_get_state() != simulation_random)
+        Error("Presentation preparation consumed simulation randomness");
     if (advance_history) previous_models = prepared;
     return prepared;
 }

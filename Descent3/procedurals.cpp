@@ -30,7 +30,7 @@
 #include "mem.h"
 #include "ddio.h"
 #include "config.h"
-#include "psrand.h"
+#include "../renderer/SceneProcedural.h"
 
 #define BRIGHT_COLOR	254
 #define PROC_SIZE	128
@@ -38,14 +38,12 @@
 #define TABMASK          (TABSIZE-1)
 #define PERM(x)          perm[(x)&TABMASK]
 #define INDEX(ix,iy)  PERM((ix)+PERM((iy)))
-#define RANDNBR   ((prand())/(float) RAND_MAX)
-
-static int Procedural_visual_tick = 0;
-
-void SetProceduralVisualTick(int tick)
-{
-	Procedural_visual_tick = tick;
-}
+struct ProceduralEvaluation {
+    int tick;
+    d3scene::ProceduralRandom random;
+    ubyte* destination = nullptr;
+    ProceduralEvaluation(int image, int visual_tick) : tick(visual_tick), random(image, visual_tick) {}
+};
 #define LERP(t,x0,x1) ((x0)+(t)*((x1)-(x0)))
 #define SMOOTHSTEP(x)  ((x))
 
@@ -61,13 +59,6 @@ ushort WaterProcTableHi[NUM_WATER_SHADES][256];
 ubyte WaterProcTableLo[NUM_WATER_SHADES][256];
 char* ProcNames[] = { "None","Line Lightning","Sphere lightning","Straight","Rising Embers","Random Embers","Spinners","Roamers","Fountain","Cone","Fall Right","Fall Left","END" };
 char* WaterProcNames[] = { "None","Height blob","Sine Blob","Random Raindrops","Random Blobdrops","END" };
-static ubyte* ProcDestData;
-int pholdrand = 1;
-
-inline int prand()
-{
-	return(((pholdrand = pholdrand * 214013L + 2531011L) >> 16) & 0x7fff);
-}
 
 // Given an array of r,g,b values, generates a 16bit palette table for those colors
 void GeneratePaletteForProcedural(ubyte* r, ubyte* g, ubyte* b, ushort* pal)
@@ -91,18 +82,19 @@ void GeneratePaletteForProcedural(ubyte* r, ubyte* g, ubyte* b, ushort* pal)
 // Inits the noise table for procedurals
 void InitNoise()
 {
+	d3scene::ProceduralRandom noise(1);
 	float* table = Noise_table;
 	float z, r, theta;
 
 	for (int i = 0; i < TABSIZE; i++)
 	{
-		perm[i] = prand() % TABMASK;
-		z = 1.0f - 2.0f * RANDNBR;
+		perm[i] = noise() % TABMASK;
+		z = 1.0f - 2.0f * (noise() / 32767.0f);
 
 		/* r is radius of x,y circle */
 		r = sqrtf(1 - z * z);
 		/* theta is angle in (x,y) */
-		theta = 2.0f * 3.14f * RANDNBR;
+		theta = 2.0f * 3.14f * (noise() / 32767.0f);
 		*table++ = r * cosf(theta);
 		*table++ = r * sinf(theta);
 		*table++ = z;
@@ -295,12 +287,12 @@ int ProcElementFree(int index)
 
 #define SWAP(a,b) do { int _swap_var_=(a); (a)=(b); (b)=_swap_var_; } while (0)
 // Draws a line into the passed in bitmap
-void DrawProceduralLine(int x1, int y1, int x2, int y2, ubyte color)
+void DrawProceduralLine(ProceduralEvaluation& context, int x1, int y1, int x2, int y2, ubyte color)
 {
 	int DY, DX;
 	int i, x, y, yinc = 1, xinc = 1, error_term;
 
-	ubyte* surface_ptr = ProcDestData;
+	ubyte* surface_ptr = context.destination;
 
 	int xmask = PROC_SIZE - 1;
 	int ymask = PROC_SIZE - 1;
@@ -339,7 +331,7 @@ void DrawProceduralLine(int x1, int y1, int x2, int y2, ubyte color)
 			{
 				y += yinc;
 				y &= ymask;
-				surface_ptr = ProcDestData + (y * PROC_SIZE);
+				surface_ptr = context.destination + (y * PROC_SIZE);
 				error_term -= DX;
 			}
 		}
@@ -356,7 +348,7 @@ void DrawProceduralLine(int x1, int y1, int x2, int y2, ubyte color)
 			y += yinc;
 			y &= ymask;
 			error_term += DX;
-			surface_ptr = ProcDestData + (y * PROC_SIZE);
+			surface_ptr = context.destination + (y * PROC_SIZE);
 			if (error_term >= DY)
 			{
 				x += xinc;
@@ -368,10 +360,10 @@ void DrawProceduralLine(int x1, int y1, int x2, int y2, ubyte color)
 }
 
 // Fades an entire bitmap one step closer to black
-void FadeProcTexture(int tex_handle)
+void FadeProcTexture(ProceduralEvaluation& context, int tex_handle)
 {
 	int total = PROC_SIZE * PROC_SIZE;
-	ubyte* src_data = ProcDestData;
+	ubyte* src_data = context.destination;
 	int fadeval;
 	fadeval = 255 - GameTextures[tex_handle].procedural->heat;
 	fadeval >>= 3;
@@ -391,10 +383,10 @@ void FadeProcTexture(int tex_handle)
 }
 
 // Heats an entire bitmap 
-void HeatProcTexture(int tex_handle)
+void HeatProcTexture(ProceduralEvaluation& context, int tex_handle)
 {
 	int total = PROC_SIZE * PROC_SIZE;
-	ubyte* src_data = ProcDestData;
+	ubyte* src_data = context.destination;
 	ubyte val;
 	ubyte heat = GameTextures[tex_handle].procedural->heat;
 	val = 255 - heat;
@@ -448,7 +440,7 @@ void BlendProcTexture(int tex_handle)
 }
 
 // Draws lightning into a bitmap
-void AddProcLightning(int x1, int y1, int x2, int y2, ubyte color, static_proc_element* proc)
+void AddProcLightning(ProceduralEvaluation& context, int x1, int y1, int x2, int y2, ubyte color, static_proc_element* proc)
 {
 	float dx = x2 - x1;
 	float dy = y2 - y1;
@@ -472,11 +464,11 @@ void AddProcLightning(int x1, int y1, int x2, int y2, ubyte color, static_proc_e
 		float to_y = cur_y + (dy * 8);
 		if (i != num_segments - 1)
 		{
-			to_x += (rot_x) * ((1 + proc->speed) * (((prand() % 200) - 100.0) / 18.0));
-			to_y += (rot_y) * ((1 + proc->speed) * (((prand() % 200) - 100.0) / 18.0));
+			to_x += (rot_x) * ((1 + proc->speed) * (((context.random() % 200) - 100.0) / 18.0));
+			to_y += (rot_y) * ((1 + proc->speed) * (((context.random() % 200) - 100.0) / 18.0));
 		}
 
-		DrawProceduralLine(from_x, from_y, to_x, to_y, color);
+		DrawProceduralLine(context, from_x, from_y, to_x, to_y, color);
 
 		from_x = to_x;
 		from_y = to_y;
@@ -526,48 +518,48 @@ void ClearAllProceduralsFromTexture(int texnum)
 }
 
 // Adds one point to a bitmap
-void AddProcPoint(int x, int y, ubyte color)
+void AddProcPoint(ProceduralEvaluation& context, int x, int y, ubyte color)
 {
 	x &= (PROC_SIZE - 1);
 	y &= (PROC_SIZE - 1);
 
 	int index = y * PROC_SIZE + x;
-	ProcDestData[index] = color;
+	context.destination[index] = color;
 }
 
 // Adds one point to a bitmap
-inline void PlaceProcPoint(int x, int y, ubyte color)
+inline void PlaceProcPoint(ProceduralEvaluation& context, int x, int y, ubyte color)
 {
 	x &= (PROC_SIZE - 1);
 	y &= (PROC_SIZE - 1);
-	ProcDestData[y * PROC_SIZE + x] = color;
+	context.destination[y * PROC_SIZE + x] = color;
 }
 
 // Adds a sphere lightning bolt
-void AddProcSphereLightning(int handle, static_proc_element* proc)
+void AddProcSphereLightning(ProceduralEvaluation& context, int handle, static_proc_element* proc)
 {
 	int procnum = proc - GameTextures[handle].procedural->static_proc_elements;
 
 	if (Detail_settings.Procedurals_enabled)
 	{
-		if (proc->frequency != 0 && (Procedural_visual_tick % proc->frequency) != 0)
+		if (proc->frequency != 0 && (context.tick % proc->frequency) != 0)
 			return;
 	}
 	float norm = ((float)proc->size / 255.0);
 	int len = norm * (float)PROC_SIZE;
 	len /= 2;
-	int dir = prand() * 2;
+	int dir = context.random() * 2;
 	int dest_x = proc->x1 + (FixCos(dir) * (float)len);
 	int dest_y = proc->y1 + (FixSin(dir) * (float)len);
-	AddProcLightning(proc->x1, proc->y1, dest_x, dest_y, BRIGHT_COLOR, proc);
+	AddProcLightning(context, proc->x1, proc->y1, dest_x, dest_y, BRIGHT_COLOR, proc);
 }
 
-void AddProcRisingEmber(int handle, static_proc_element* proc)
+void AddProcRisingEmber(ProceduralEvaluation& context, int handle, static_proc_element* proc)
 {
-	if (proc->frequency == 0 || (Procedural_visual_tick % proc->frequency) == 0)
+	if (proc->frequency == 0 || (context.tick % proc->frequency) == 0)
 	{
 		// Add a new fizzle
-		int num = prand() % 7;
+		int num = context.random() % 7;
 		for (int i = 0; i < num; i++)
 		{
 			int index = ProcElementAllocate();
@@ -580,15 +572,15 @@ void AddProcRisingEmber(int handle, static_proc_element* proc)
 				DynamicProcElements[index].y1 = IntToFix((int)proc->y1);
 				DynamicProcElements[index].color = BRIGHT_COLOR;
 				DynamicProcElements[index].speed = proc->speed;
-				DynamicProcElements[index].frames_left = (prand() % 10) + 15;
+				DynamicProcElements[index].frames_left = (context.random() % 10) + 15;
 			}
 		}
 	}
 }
 
-void DoDynamicRisingEmber(int handle, dynamic_proc_element* proc)
+void DoDynamicRisingEmber(ProceduralEvaluation& context, int handle, dynamic_proc_element* proc)
 {
-	PlaceProcPoint(FixToInt(proc->x1), FixToInt(proc->y1), proc->color);
+	PlaceProcPoint(context, FixToInt(proc->x1), FixToInt(proc->y1), proc->color);
 	proc->frames_left--;
 	if (proc->frames_left < 1)
 		ProcElementUnlink(proc - DynamicProcElements, handle);
@@ -600,8 +592,8 @@ void DoDynamicRisingEmber(int handle, dynamic_proc_element* proc)
 		else
 		{
 			int speed_adjust = 1 + ((proc->speed / 255.0) * 2.0);
-			proc->dx = FloatToFix(((prand() % 3) - 1) * speed_adjust);
-			proc->dy = FloatToFix(((prand() % 3) - 2) * speed_adjust);
+			proc->dx = FloatToFix(((context.random() % 3) - 1) * speed_adjust);
+			proc->dy = FloatToFix(((context.random() % 3) - 2) * speed_adjust);
 			proc->x1 += proc->dx;
 			proc->y1 += proc->dy;
 		}
@@ -613,14 +605,14 @@ constexpr fix NarrowToFix(int value)
 	return value * 65536;
 }
 
-void AddProcSpinners(int handle, static_proc_element* proc)
+void AddProcSpinners(ProceduralEvaluation& context, int handle, static_proc_element* proc)
 {
-	if (proc->frequency == 0 || (Procedural_visual_tick % proc->frequency) == 0)
+	if (proc->frequency == 0 || (context.tick % proc->frequency) == 0)
 	{
 
 		int proc_num = (proc - GameTextures[handle].procedural->static_proc_elements) * 60;
 		int speed_adjust = 1 + ((proc->speed / 255.0) * 5.0);
-		int cur_angle = (((Procedural_visual_tick + proc_num) * speed_adjust) % 64) * 1024;
+		int cur_angle = (((context.tick + proc_num) * speed_adjust) % 64) * 1024;
 
 		int index = ProcElementAllocate();
 		if (index > -1)
@@ -634,14 +626,14 @@ void AddProcSpinners(int handle, static_proc_element* proc)
 			DynamicProcElements[index].y1 = NarrowToFix(proc->y1 + (DynamicProcElements[index].dy * NarrowToFix(proc->size)));
 			DynamicProcElements[index].color = BRIGHT_COLOR;
 			DynamicProcElements[index].speed = proc->speed;
-			DynamicProcElements[index].frames_left = (prand() % 10) + 15;
+			DynamicProcElements[index].frames_left = (context.random() % 10) + 15;
 		}
 	}
 }
 
-void DoDynamicSpinners(int handle, dynamic_proc_element* proc)
+void DoDynamicSpinners(ProceduralEvaluation& context, int handle, dynamic_proc_element* proc)
 {
-	PlaceProcPoint(FixToInt(proc->x1), FixToInt(proc->y1), proc->color);
+	PlaceProcPoint(context, FixToInt(proc->x1), FixToInt(proc->y1), proc->color);
 	proc->frames_left--;
 	if (proc->frames_left < 1)
 		ProcElementUnlink(proc - DynamicProcElements, handle);
@@ -658,12 +650,12 @@ void DoDynamicSpinners(int handle, dynamic_proc_element* proc)
 	}
 }
 
-void AddProcRandomEmber(int handle, static_proc_element* proc)
+void AddProcRandomEmber(ProceduralEvaluation& context, int handle, static_proc_element* proc)
 {
-	if (proc->frequency == 0 || (Procedural_visual_tick % proc->frequency) == 0)
+	if (proc->frequency == 0 || (context.tick % proc->frequency) == 0)
 	{
 		// Add a new fizzle
-		int num = (prand() % 4) + 1;
+		int num = (context.random() % 4) + 1;
 		for (int i = 0; i < num; i++)
 		{
 			int index = ProcElementAllocate();
@@ -676,15 +668,15 @@ void AddProcRandomEmber(int handle, static_proc_element* proc)
 				DynamicProcElements[index].y1 = IntToFix(proc->y1);
 				DynamicProcElements[index].color = BRIGHT_COLOR;
 				DynamicProcElements[index].speed = proc->speed;
-				DynamicProcElements[index].frames_left = (prand() % 10) + 15;
+				DynamicProcElements[index].frames_left = (context.random() % 10) + 15;
 			}
 		}
 	}
 }
 
-void DoDynamicRandomEmber(int handle, dynamic_proc_element* proc)
+void DoDynamicRandomEmber(ProceduralEvaluation& context, int handle, dynamic_proc_element* proc)
 {
-	PlaceProcPoint(FixToInt(proc->x1), FixToInt(proc->y1), proc->color);
+	PlaceProcPoint(context, FixToInt(proc->x1), FixToInt(proc->y1), proc->color);
 	proc->frames_left--;
 	if (proc->frames_left < 1)
 		ProcElementUnlink(proc - DynamicProcElements, handle);
@@ -696,22 +688,22 @@ void DoDynamicRandomEmber(int handle, dynamic_proc_element* proc)
 		else
 		{
 			int speed_adjust = 1 + ((proc->speed / 255.0) * 2.0);
-			proc->dx = FloatToFix(((prand() % 3) - 1) * speed_adjust);
-			proc->dy = FloatToFix(((prand() % 3) - 1) * speed_adjust);
+			proc->dx = FloatToFix(((context.random() % 3) - 1) * speed_adjust);
+			proc->dy = FloatToFix(((context.random() % 3) - 1) * speed_adjust);
 			proc->x1 += proc->dx;
 			proc->y1 += proc->dy;
 		}
 	}
 }
 
-void AddProcRoamers(int handle, static_proc_element* proc)
+void AddProcRoamers(ProceduralEvaluation& context, int handle, static_proc_element* proc)
 {
-	proc->x1 += (ps_rand() % 5) - 2;
-	proc->y1 += (ps_rand() % 5) - 2;
-	if (proc->frequency == 0 || (Procedural_visual_tick % proc->frequency) == 0)
+	proc->x1 += (context.random() % 5) - 2;
+	proc->y1 += (context.random() % 5) - 2;
+	if (proc->frequency == 0 || (context.tick % proc->frequency) == 0)
 	{
 		// Add a new fizzle
-		int num = (prand() % 4) + 1;
+		int num = (context.random() % 4) + 1;
 		for (int i = 0; i < num; i++)
 		{
 			int index = ProcElementAllocate();
@@ -724,15 +716,15 @@ void AddProcRoamers(int handle, static_proc_element* proc)
 				DynamicProcElements[index].y1 = IntToFix(proc->y1);
 				DynamicProcElements[index].color = BRIGHT_COLOR;
 				DynamicProcElements[index].speed = proc->speed;
-				DynamicProcElements[index].frames_left = (prand() % 10) + 15;
+				DynamicProcElements[index].frames_left = (context.random() % 10) + 15;
 			}
 		}
 	}
 }
 
-void DoDynamicRoamers(int handle, dynamic_proc_element* proc)
+void DoDynamicRoamers(ProceduralEvaluation& context, int handle, dynamic_proc_element* proc)
 {
-	PlaceProcPoint(FixToInt(proc->x1), FixToInt(proc->y1), proc->color);
+	PlaceProcPoint(context, FixToInt(proc->x1), FixToInt(proc->y1), proc->color);
 	proc->frames_left--;
 	if (proc->frames_left < 1)
 		ProcElementUnlink(proc - DynamicProcElements, handle);
@@ -744,20 +736,20 @@ void DoDynamicRoamers(int handle, dynamic_proc_element* proc)
 		else
 		{
 			int speed_adjust = 1 + ((proc->speed / 255.0) * 2.0);
-			proc->dx = FloatToFix(((prand() % 3) - 1) * speed_adjust);
-			proc->dy = FloatToFix(((prand() % 3) - 1) * speed_adjust);
+			proc->dx = FloatToFix(((context.random() % 3) - 1) * speed_adjust);
+			proc->dy = FloatToFix(((context.random() % 3) - 1) * speed_adjust);
 			proc->x1 += proc->dx;
 			proc->y1 += proc->dy;
 		}
 	}
 }
 
-void AddProcFountain(int handle, static_proc_element* proc)
+void AddProcFountain(ProceduralEvaluation& context, int handle, static_proc_element* proc)
 {
-	if (proc->frequency == 0 || (Procedural_visual_tick % proc->frequency) == 0)
+	if (proc->frequency == 0 || (context.tick % proc->frequency) == 0)
 	{
 		// Add a new fizzle
-		int num = (prand() % 4) + 1;
+		int num = (context.random() % 4) + 1;
 		for (int i = 0; i < num; i++)
 		{
 			int index = ProcElementAllocate();
@@ -770,25 +762,25 @@ void AddProcFountain(int handle, static_proc_element* proc)
 				DynamicProcElements[index].y1 = IntToFix(proc->y1);
 				DynamicProcElements[index].color = BRIGHT_COLOR;
 				DynamicProcElements[index].speed = proc->speed;
-				DynamicProcElements[index].dx = FloatToFix(((prand() % 100) - 50) / 200.0);
-				if ((prand() % 10) == 0)
+				DynamicProcElements[index].dx = FloatToFix(((context.random() % 100) - 50) / 200.0);
+				if ((context.random() % 10) == 0)
 				{
-					DynamicProcElements[index].dy = FloatToFix(-((prand() % 100) / 300.0));
-					DynamicProcElements[index].frames_left = (prand() % 6) + 3;
+					DynamicProcElements[index].dy = FloatToFix(-((context.random() % 100) / 300.0));
+					DynamicProcElements[index].frames_left = (context.random() % 6) + 3;
 				}
 				else
 				{
-					DynamicProcElements[index].dy = FloatToFix((prand() % 100) / 50.0);
-					DynamicProcElements[index].frames_left = (prand() % 10) + 15;
+					DynamicProcElements[index].dy = FloatToFix((context.random() % 100) / 50.0);
+					DynamicProcElements[index].frames_left = (context.random() % 10) + 15;
 				}
 			}
 		}
 	}
 }
 
-void DoDynamicFountain(int handle, dynamic_proc_element* proc)
+void DoDynamicFountain(ProceduralEvaluation& context, int handle, dynamic_proc_element* proc)
 {
-	PlaceProcPoint(FixToInt(proc->x1), FixToInt(proc->y1), proc->color);
+	PlaceProcPoint(context, FixToInt(proc->x1), FixToInt(proc->y1), proc->color);
 	proc->frames_left--;
 	if (proc->frames_left < 1)
 		ProcElementUnlink(proc - DynamicProcElements, handle);
@@ -805,12 +797,12 @@ void DoDynamicFountain(int handle, dynamic_proc_element* proc)
 	}
 }
 
-void AddProcCone(int handle, static_proc_element* proc)
+void AddProcCone(ProceduralEvaluation& context, int handle, static_proc_element* proc)
 {
-	if (proc->frequency == 0 || (Procedural_visual_tick % proc->frequency) == 0)
+	if (proc->frequency == 0 || (context.tick % proc->frequency) == 0)
 	{
 		// Add a new fizzle
-		int num = (prand() % 4) + 1;
+		int num = (context.random() % 4) + 1;
 		for (int i = 0; i < num; i++)
 		{
 			int index = ProcElementAllocate();
@@ -824,25 +816,25 @@ void AddProcCone(int handle, static_proc_element* proc)
 
 				DynamicProcElements[index].color = BRIGHT_COLOR;
 				DynamicProcElements[index].speed = proc->speed;
-				DynamicProcElements[index].dx = FloatToFix(((prand() % 100) - 50) / 80.0);
-				if ((prand() % 10) == 0)
+				DynamicProcElements[index].dx = FloatToFix(((context.random() % 100) - 50) / 80.0);
+				if ((context.random() % 10) == 0)
 				{
-					DynamicProcElements[index].dy = FloatToFix(-((prand() % 100) / 300.0));
-					DynamicProcElements[index].frames_left = (prand() % 6) + 3;
+					DynamicProcElements[index].dy = FloatToFix(-((context.random() % 100) / 300.0));
+					DynamicProcElements[index].frames_left = (context.random() % 6) + 3;
 				}
 				else
 				{
 					DynamicProcElements[index].dy = IntToFix(1);
-					DynamicProcElements[index].frames_left = (prand() % 10) + 15;
+					DynamicProcElements[index].frames_left = (context.random() % 10) + 15;
 				}
 			}
 		}
 	}
 }
 
-void DoDynamicCone(int handle, dynamic_proc_element* proc)
+void DoDynamicCone(ProceduralEvaluation& context, int handle, dynamic_proc_element* proc)
 {
-	PlaceProcPoint(FixToInt(proc->x1), FixToInt(proc->y1), proc->color);
+	PlaceProcPoint(context, FixToInt(proc->x1), FixToInt(proc->y1), proc->color);
 	proc->frames_left--;
 	if (proc->frames_left < 1)
 		ProcElementUnlink(proc - DynamicProcElements, handle);
@@ -859,12 +851,12 @@ void DoDynamicCone(int handle, dynamic_proc_element* proc)
 	}
 }
 
-void AddProcFallRight(int handle, static_proc_element* proc)
+void AddProcFallRight(ProceduralEvaluation& context, int handle, static_proc_element* proc)
 {
-	if (proc->frequency == 0 || (Procedural_visual_tick % proc->frequency) == 0)
+	if (proc->frequency == 0 || (context.tick % proc->frequency) == 0)
 	{
 		// Add a new fizzle
-		int num = (prand() % 2) + 1;
+		int num = (context.random() % 2) + 1;
 		for (int i = 0; i < num; i++)
 		{
 			int index = ProcElementAllocate();
@@ -873,20 +865,20 @@ void AddProcFallRight(int handle, static_proc_element* proc)
 				ProcElementLink(index, handle);
 				DynamicProcElements[index].type = proc->type;
 
-				DynamicProcElements[index].x1 = IntToFix(proc->x1 + ((ps_rand() % 5) - 2));
-				DynamicProcElements[index].y1 = IntToFix(proc->y1 + ((ps_rand() % 5) - 2));
+				DynamicProcElements[index].x1 = IntToFix(proc->x1 + ((context.random() % 5) - 2));
+				DynamicProcElements[index].y1 = IntToFix(proc->y1 + ((context.random() % 5) - 2));
 				DynamicProcElements[index].color = BRIGHT_COLOR;
 				DynamicProcElements[index].dx = IntToFix(1);
-				DynamicProcElements[index].dy = FloatToFix((-(prand() % 100)) / 300.0);
-				DynamicProcElements[index].frames_left = (prand() % 15) + 25;
+				DynamicProcElements[index].dy = FloatToFix((-(context.random() % 100)) / 300.0);
+				DynamicProcElements[index].frames_left = (context.random() % 15) + 25;
 			}
 		}
 	}
 }
 
-void DoDynamicFallRight(int handle, dynamic_proc_element* proc)
+void DoDynamicFallRight(ProceduralEvaluation& context, int handle, dynamic_proc_element* proc)
 {
-	PlaceProcPoint(FixToInt(proc->x1), FixToInt(proc->y1), proc->color);
+	PlaceProcPoint(context, FixToInt(proc->x1), FixToInt(proc->y1), proc->color);
 	proc->frames_left--;
 	if (proc->frames_left < 1)
 		ProcElementUnlink(proc - DynamicProcElements, handle);
@@ -898,21 +890,21 @@ void DoDynamicFallRight(int handle, dynamic_proc_element* proc)
 		else
 		{
 			if (FixToInt(proc->dx) > 0)
-				proc->dx -= FloatToFix(((ps_rand() % 100) / 2000.0));
+				proc->dx -= FloatToFix(((context.random() % 100) / 2000.0));
 			if (FixToInt(proc->dy) < 2)
-				proc->dy += FloatToFix(((ps_rand() % 100) / 1000.0));
+				proc->dy += FloatToFix(((context.random() % 100) / 1000.0));
 			proc->x1 += proc->dx;
 			proc->y1 += proc->dy;
 		}
 	}
 }
 
-void AddProcFallLeft(int handle, static_proc_element* proc)
+void AddProcFallLeft(ProceduralEvaluation& context, int handle, static_proc_element* proc)
 {
-	if (proc->frequency == 0 || (Procedural_visual_tick % proc->frequency) == 0)
+	if (proc->frequency == 0 || (context.tick % proc->frequency) == 0)
 	{
 		// Add a new fizzle
-		int num = (prand() % 2) + 1;
+		int num = (context.random() % 2) + 1;
 		for (int i = 0; i < num; i++)
 		{
 			int index = ProcElementAllocate();
@@ -921,20 +913,20 @@ void AddProcFallLeft(int handle, static_proc_element* proc)
 				ProcElementLink(index, handle);
 				DynamicProcElements[index].type = proc->type;
 
-				DynamicProcElements[index].x1 = IntToFix(proc->x1 + ((ps_rand() % 5) - 2));
-				DynamicProcElements[index].y1 = IntToFix(proc->y1 + ((ps_rand() % 5) - 2));
+				DynamicProcElements[index].x1 = IntToFix(proc->x1 + ((context.random() % 5) - 2));
+				DynamicProcElements[index].y1 = IntToFix(proc->y1 + ((context.random() % 5) - 2));
 				DynamicProcElements[index].color = BRIGHT_COLOR;
 				DynamicProcElements[index].dx = IntToFix(-1);
-				DynamicProcElements[index].dy = FloatToFix((-(prand() % 100)) / 300.0);
-				DynamicProcElements[index].frames_left = (prand() % 15) + 25;
+				DynamicProcElements[index].dy = FloatToFix((-(context.random() % 100)) / 300.0);
+				DynamicProcElements[index].frames_left = (context.random() % 15) + 25;
 			}
 		}
 	}
 }
 
-void DoDynamicFallLeft(int handle, dynamic_proc_element* proc)
+void DoDynamicFallLeft(ProceduralEvaluation& context, int handle, dynamic_proc_element* proc)
 {
-	PlaceProcPoint(FixToInt(proc->x1), FixToInt(proc->y1), proc->color);
+	PlaceProcPoint(context, FixToInt(proc->x1), FixToInt(proc->y1), proc->color);
 	proc->frames_left--;
 	if (proc->frames_left < 1)
 		ProcElementUnlink(proc - DynamicProcElements, handle);
@@ -946,9 +938,9 @@ void DoDynamicFallLeft(int handle, dynamic_proc_element* proc)
 		else
 		{
 			if (FixToInt(proc->dx) < 0)
-				proc->dx += FloatToFix(((ps_rand() % 100) / 2000.0));
+				proc->dx += FloatToFix(((context.random() % 100) / 2000.0));
 			if (FixToInt(proc->dy) < 2)
-				proc->dy += FloatToFix(((ps_rand() % 100) / 1000.0));
+				proc->dy += FloatToFix(((context.random() % 100) / 1000.0));
 			proc->x1 += proc->dx;
 			proc->y1 += proc->dy;
 		}
@@ -1195,7 +1187,7 @@ void DrawWaterWithLight(int handle, int lightval)
 	}
 }
 
-void AddProcHeightBlob(static_proc_element* proc, int handle)
+void AddProcHeightBlob(ProceduralEvaluation& context, static_proc_element* proc, int handle)
 {
 	int rquad;
 	int cx, cy, cyq;
@@ -1204,7 +1196,7 @@ void AddProcHeightBlob(static_proc_element* proc, int handle)
 	int x = proc->x1;
 	int y = proc->y1;
 	int procnum = proc - GameTextures[handle].procedural->static_proc_elements;
-	if (proc->frequency && ((Procedural_visual_tick + procnum) % proc->frequency))
+	if (proc->frequency && ((context.tick + procnum) % proc->frequency))
 		return;
 	int radius = proc->size;
 	int height = proc->speed;
@@ -1228,10 +1220,10 @@ void AddProcHeightBlob(static_proc_element* proc, int handle)
 	}
 }
 
-void AddProcRaindrops(static_proc_element* proc, int handle)
+void AddProcRaindrops(ProceduralEvaluation& context, static_proc_element* proc, int handle)
 {
 	int procnum = proc - GameTextures[handle].procedural->static_proc_elements;
-	if (proc->frequency && ((Procedural_visual_tick + procnum) % proc->frequency))
+	if (proc->frequency && ((context.tick + procnum) % proc->frequency))
 		return;
 	ubyte proc_frequency = proc->frequency;
 	ubyte proc_size = proc->size;
@@ -1239,11 +1231,11 @@ void AddProcRaindrops(static_proc_element* proc, int handle)
 	ubyte x1 = proc->x1;
 	ubyte y1 = proc->y1;
 	proc->frequency = 0;
-	proc->size = (ps_rand() % 3) + 1;
-	proc->speed = std::max(0, proc_speed + ((ps_rand() % 10) - 5));
-	proc->x1 = x1 + (ps_rand() % (proc_size * 2)) - (proc_size);
-	proc->y1 = y1 + (ps_rand() % (proc_size * 2)) - (proc_size);
-	AddProcHeightBlob(proc, handle);
+	proc->size = (context.random() % 3) + 1;
+	proc->speed = std::max(0, proc_speed + ((context.random() % 10) - 5));
+	proc->x1 = x1 + (context.random() % (proc_size * 2)) - (proc_size);
+	proc->y1 = y1 + (context.random() % (proc_size * 2)) - (proc_size);
+	AddProcHeightBlob(context, proc, handle);
 	proc->x1 = x1;
 	proc->y1 = y1;
 	proc->size = proc_size;
@@ -1251,10 +1243,10 @@ void AddProcRaindrops(static_proc_element* proc, int handle)
 	proc->frequency = proc_frequency;
 }
 
-void AddProcBlobdrops(static_proc_element* proc, int handle)
+void AddProcBlobdrops(ProceduralEvaluation& context, static_proc_element* proc, int handle)
 {
 	int procnum = proc - GameTextures[handle].procedural->static_proc_elements;
-	if (proc->frequency && ((Procedural_visual_tick + procnum) % proc->frequency))
+	if (proc->frequency && ((context.tick + procnum) % proc->frequency))
 		return;
 	ubyte proc_frequency = proc->frequency;
 	ubyte proc_size = proc->size;
@@ -1262,11 +1254,11 @@ void AddProcBlobdrops(static_proc_element* proc, int handle)
 	ubyte x1 = proc->x1;
 	ubyte y1 = proc->y1;
 	proc->frequency = 0;
-	proc->size = (ps_rand() % 6) + 4;
-	proc->speed = std::max(0, proc_speed + ((ps_rand() % 50) - 25));
-	proc->x1 = x1 + (ps_rand() % (proc_size * 2)) - (proc_size);
-	proc->y1 = y1 + (ps_rand() % (proc_size * 2)) - (proc_size);
-	AddProcHeightBlob(proc, handle);
+	proc->size = (context.random() % 6) + 4;
+	proc->speed = std::max(0, proc_speed + ((context.random() % 50) - 25));
+	proc->x1 = x1 + (context.random() % (proc_size * 2)) - (proc_size);
+	proc->y1 = y1 + (context.random() % (proc_size * 2)) - (proc_size);
+	AddProcHeightBlob(context, proc, handle);
 	proc->x1 = x1;
 	proc->y1 = y1;
 	proc->size = proc_size;
@@ -1274,10 +1266,10 @@ void AddProcBlobdrops(static_proc_element* proc, int handle)
 	proc->frequency = proc_frequency;
 }
 
-void AddProcSineBlob(static_proc_element* proc, int handle)
+void AddProcSineBlob(ProceduralEvaluation& context, static_proc_element* proc, int handle)
 {
 	int procnum = proc - GameTextures[handle].procedural->static_proc_elements;
-	if (proc->frequency && ((Procedural_visual_tick + procnum) % proc->frequency))
+	if (proc->frequency && ((context.tick + procnum) % proc->frequency))
 		return;
 	int x = proc->x1;
 	int y = proc->y1;
@@ -1333,7 +1325,7 @@ void AllocateMemoryForWaterProcedural(int handle)
 }
 
 // Does a water effect for this texture
-void EvaluateWaterProcedural(int handle)
+void EvaluateWaterProcedural(ProceduralEvaluation& context, int handle)
 {
 	proc_struct* procedural = GameTextures[handle].procedural;
 	if (procedural->memory_type != PROC_MEMORY_TYPE_WATER)
@@ -1346,16 +1338,16 @@ void EvaluateWaterProcedural(int handle)
 		switch (proc->type)
 		{
 		case PROC_WATER_HEIGHT_BLOB:
-			AddProcHeightBlob(proc, handle);
+			AddProcHeightBlob(context, proc, handle);
 			break;
 		case PROC_WATER_SINE_BLOB:
-			AddProcSineBlob(proc, handle);
+			AddProcSineBlob(context, proc, handle);
 			break;
 		case PROC_WATER_RAINDROPS:
-			AddProcRaindrops(proc, handle);
+			AddProcRaindrops(context, proc, handle);
 			break;
 		case PROC_WATER_BLOBDROPS:
-			AddProcBlobdrops(proc, handle);
+			AddProcBlobdrops(context, proc, handle);
 			break;
 		default:
 			break;
@@ -1409,7 +1401,7 @@ void EvaluateWaterProcedural(int handle)
 		int diff = end - start;
 		if (diff > 0)
 		{
-			float gametime = timer_GetTime();
+			float gametime = (context.tick / 60.0f);
 			float frametime = procedural->osc_time / (diff);
 			float cur_frametime = gametime / frametime;
 			int int_frame = cur_frametime;
@@ -1450,7 +1442,7 @@ void AllocateMemoryForFireProcedural(int handle)
 	procedural->memory_type = PROC_MEMORY_TYPE_FIRE;
 }
 
-void EvaluateFireProcedural(int handle)
+void EvaluateFireProcedural(ProceduralEvaluation& context, int handle)
 {
 	proc_struct* procedural = GameTextures[handle].procedural;
 
@@ -1458,10 +1450,10 @@ void EvaluateFireProcedural(int handle)
 	if (procedural->memory_type != PROC_MEMORY_TYPE_FIRE)
 		AllocateMemoryForFireProcedural(handle);
 	
-	ProcDestData = (ubyte*)procedural->proc1;
+	context.destination = (ubyte*)procedural->proc1;
 	// fade and the current texture
-	FadeProcTexture(handle);
-	//HeatProcTexture (handle);
+	FadeProcTexture(context, handle);
+	//HeatProcTexture(context, handle);
 	// Do the static procedurals first
 	
 	for (int i = 0; i < procedural->num_static_elements; i++)
@@ -1470,34 +1462,34 @@ void EvaluateFireProcedural(int handle)
 		switch (proc->type)
 		{
 		case PROC_LINE_LIGHTNING:
-			AddProcLightning(proc->x1, proc->y1, proc->x2, proc->y2, BRIGHT_COLOR, proc);
+			AddProcLightning(context, proc->x1, proc->y1, proc->x2, proc->y2, BRIGHT_COLOR, proc);
 			break;
 		case PROC_SPHERE_LIGHTNING:
-			AddProcSphereLightning(handle, proc);
+			AddProcSphereLightning(context, handle, proc);
 			break;
 		case PROC_RISING_EMBER:
-			AddProcRisingEmber(handle, proc);
+			AddProcRisingEmber(context, handle, proc);
 			break;
 		case PROC_RANDOM_EMBERS:
-			AddProcRandomEmber(handle, proc);
+			AddProcRandomEmber(context, handle, proc);
 			break;
 		case PROC_SPINNERS:
-			AddProcSpinners(handle, proc);
+			AddProcSpinners(context, handle, proc);
 			break;
 		case PROC_ROAMERS:
-			AddProcRoamers(handle, proc);
+			AddProcRoamers(context, handle, proc);
 			break;
 		case PROC_FOUNTAIN:
-			AddProcFountain(handle, proc);
+			AddProcFountain(context, handle, proc);
 			break;
 		case PROC_CONE:
-			AddProcCone(handle, proc);
+			AddProcCone(context, handle, proc);
 			break;
 		case PROC_FALL_RIGHT:
-			AddProcFallRight(handle, proc);
+			AddProcFallRight(context, handle, proc);
 			break;
 		case PROC_FALL_LEFT:
-			AddProcFallLeft(handle, proc);
+			AddProcFallLeft(context, handle, proc);
 			break;
 		default:
 			break;
@@ -1512,28 +1504,28 @@ void EvaluateFireProcedural(int handle)
 		switch (proc->type)
 		{
 		case PROC_RISING_EMBER:
-			DoDynamicRisingEmber(handle, proc);
+			DoDynamicRisingEmber(context, handle, proc);
 			break;
 		case PROC_RANDOM_EMBERS:
-			DoDynamicRandomEmber(handle, proc);
+			DoDynamicRandomEmber(context, handle, proc);
 			break;
 		case PROC_SPINNERS:
-			DoDynamicSpinners(handle, proc);
+			DoDynamicSpinners(context, handle, proc);
 			break;
 		case PROC_ROAMERS:
-			DoDynamicRoamers(handle, proc);
+			DoDynamicRoamers(context, handle, proc);
 			break;
 		case PROC_FOUNTAIN:
-			DoDynamicFountain(handle, proc);
+			DoDynamicFountain(context, handle, proc);
 			break;
 		case PROC_CONE:
-			DoDynamicCone(handle, proc);
+			DoDynamicCone(context, handle, proc);
 			break;
 		case PROC_FALL_RIGHT:
-			DoDynamicFallRight(handle, proc);
+			DoDynamicFallRight(context, handle, proc);
 			break;
 		case PROC_FALL_LEFT:
-			DoDynamicFallLeft(handle, proc);
+			DoDynamicFallLeft(context, handle, proc);
 			break;
 		default:
 			break;
@@ -1543,13 +1535,13 @@ void EvaluateFireProcedural(int handle)
 
 	// blend the current texture
 	BlendProcTexture(handle);
-	ProcDestData = (ubyte*)procedural->proc2;
+	context.destination = (ubyte*)procedural->proc2;
 	int total = PROC_SIZE * PROC_SIZE;
 	ushort* data = bm_data(dest_bitmap, 0);
 	ushort* pal = procedural->palette;
-	for (int i = 0; i < total; i++, data++, ProcDestData++)
+	for (int i = 0; i < total; i++, data++, context.destination++)
 	{
-		*data = pal[*ProcDestData];
+		*data = pal[*context.destination];
 	}
 
 	// Swap for next time
@@ -1559,8 +1551,9 @@ void EvaluateFireProcedural(int handle)
 }
 
 // Does a procedural for this texture
-void EvaluateProcedural(int handle)
+void EvaluateProcedural(int handle, int visual_tick)
 {
+	ProceduralEvaluation context(handle, visual_tick);
 	proc_struct* procedural = GameTextures[handle].procedural;
 
 	int dest_bitmap = procedural->procedural_bitmap;
@@ -1571,7 +1564,7 @@ void EvaluateProcedural(int handle)
 	}
 
 	if (GameTextures[handle].flags & TF_WATER_PROCEDURAL)
-		EvaluateWaterProcedural(handle);
+		EvaluateWaterProcedural(context, handle);
 	else
-		EvaluateFireProcedural(handle);
+		EvaluateFireProcedural(context, handle);
 }

@@ -1,5 +1,27 @@
 # Renderer migration checkpoint
 
+## Continuation: procedural evaluation inputs
+
+Procedural kernels now receive a local evaluation context carrying canonical
+60 Hz time, texture/tick-seeded randomness and destination storage. Removed shared
+procedural RNG/tick/destination and all gameplay RNG/wall-clock reads from those
+kernels. The existing bounded catch-up rule remains; disabled procedural detail
+uses simulation time, initializes its first image, and handles clock rewinds.
+Persistent fire/water state and the shared legacy element allocator still need
+ownership migration; this is not a claim that the entire procedural subsystem is
+independent of resource pressure or historical evaluation order.
+
+3,417 scene checks pass and the full game builds. All eight saves passed both
+`scene-procedural-clean` and `scene-procedural-rng-guard`; the latter asserts that
+the whole presentation preparation leaves gameplay RNG unchanged. Six saves are
+pixel-identical to `scene-image-byte-exact`. Saves 002/003 differ (mean RGB error
+0.333739/14.261854), and were visually inspected. Both repeat byte-for-byte in
+`scene-procedural-repeat`. The earlier player/model pose fingerprints also differ
+from the new runs, so these are not equivalent-state texture-only comparisons.
+Removing renderer consumption of game RNG intentionally changes subsequent
+simulation draws; do not claim every observed pixel change is fully diagnosed.
+No Candidate deployment, cockpit edits or shadow work.
+
 ## Scope and status
 
 The user approved renderer rearchitecture and background save-game comparisons,

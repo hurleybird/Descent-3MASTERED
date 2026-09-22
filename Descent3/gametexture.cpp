@@ -29,6 +29,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "procedurals.h"
+#include "../renderer/SceneProcedural.h"
 #include "ddio.h"
 #include "config.h"
 #include "args.h"
@@ -383,37 +384,22 @@ int GetTextureBitmap(int handle, int framenum, bool force)
 
 	if (GameTextures[handle].flags & TF_PROCEDURAL)	// Do a procedural
 	{
-		int do_eval = 1;
-
 		if (GameTextures[handle].procedural == NULL)
 			AllocateProceduralForTexture(handle);
 
-		if (GameTextures[handle].procedural->last_procedural_frame == FrameCount)
-			do_eval = 0;
 		const int visual_tick = Get60HzVisualTick();
-		if (GameTextures[handle].procedural->last_procedural_tick == visual_tick)
-			do_eval = 0;
-
-		if (!force && !Detail_settings.Procedurals_enabled)
+		const int steps = d3scene::proceduralSteps(
+			GameTextures[handle].procedural->last_procedural_tick, visual_tick,
+			force || Detail_settings.Procedurals_enabled);
+		if (steps)
 		{
-			if (timer_GetTime() < GameTextures[handle].procedural->last_evaluation_time + 10.0)
-				do_eval = 0;
-		}
-
-		if (do_eval)
-		{
-			int steps = visual_tick - GameTextures[handle].procedural->last_procedural_tick;
-			if (GameTextures[handle].procedural->last_procedural_tick < 0 ||
-				steps < 1 || steps > 8)
-				steps = 1;
 			for (int step = steps - 1; step >= 0; --step)
 			{
-				SetProceduralVisualTick(visual_tick - step);
-				EvaluateProcedural(handle);
+				EvaluateProcedural(handle, visual_tick - step);
 			}
 			GameTextures[handle].procedural->last_procedural_frame = FrameCount;
 			GameTextures[handle].procedural->last_procedural_tick = visual_tick;
-			GameTextures[handle].procedural->last_evaluation_time = timer_GetTime();
+			GameTextures[handle].procedural->last_evaluation_time = visual_tick / 60.0f;
 			src_bitmap = GameTextures[handle].procedural->procedural_bitmap;
 			GameBitmaps[src_bitmap].flags |= BF_CHANGED;
 		}
