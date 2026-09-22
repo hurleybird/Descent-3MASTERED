@@ -2,6 +2,7 @@
 #include "SceneView.h"
 #include "SceneGeometry.h"
 #include "ScenePortals.h"
+#include "SceneTerrain.h"
 #include <unordered_map>
 #include <algorithm>
 #include <cmath>
@@ -168,6 +169,40 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
                 item.part_index = static_cast<uint32_t>(part); item.polygon_index = static_cast<uint32_t>(face);
                 item.world = world;
                 consider(MeshView(geometry,object.parts[part].vertices),object.parts[part].surfaces[face],item,window);
+            }
+        }
+    }
+    if (frame.data().terrain.asset) {
+        PortalWindow exterior_window{};
+        if (!view.portal_visibility || !room_indices.count(view.room)) exterior_window = {-1,-1,1,1,true};
+        else for (size_t room = 0; room < rooms.size(); ++room) if (rooms[room].exterior && windows[room].visible) {
+            const auto& window = windows[room];
+            if (!exterior_window.visible) exterior_window = window;
+            else exterior_window = {std::min(exterior_window.left,window.left),std::min(exterior_window.bottom,window.bottom),
+                std::max(exterior_window.right,window.right),std::max(exterior_window.top,window.top),true};
+        }
+        if (exterior_window.visible) {
+            const auto& terrain = frame.data().terrain;
+            for (size_t patch_index = 0; patch_index < terrain.asset->patches().size(); ++patch_index) {
+                const auto& patch = terrain.asset->patches()[patch_index];
+                MeshGeometry hull; MeshPolygon polygon;
+                for (uint32_t corner = 0; corner < 8; ++corner) {
+                    hull.vertices.push_back({corner&1 ? patch.bounds.maximum.x : patch.bounds.minimum.x,
+                        corner&2 ? patch.bounds.maximum.y : patch.bounds.minimum.y,corner&4 ? patch.bounds.maximum.z : patch.bounds.minimum.z});
+                    polygon.corners.push_back({corner});
+                }
+                if (polygonOutside(result.camera,MeshView(hull),polygon,{},exterior_window)) continue;
+                const Vec3 center{(patch.bounds.minimum.x+patch.bounds.maximum.x)*.5f,
+                    (patch.bounds.minimum.y+patch.bounds.maximum.y)*.5f,(patch.bounds.minimum.z+patch.bounds.maximum.z)*.5f};
+                for (size_t batch = 0; batch < patch.batches.size(); ++batch) {
+                    const auto& surface = terrain.patches[patch_index][batch];
+                    if (!surface.draw_surface) continue;
+                    VisibleSurface item; item.terrain = true;
+                    item.terrain_patch = static_cast<uint32_t>(patch_index); item.terrain_batch = static_cast<uint32_t>(batch);
+                    item.blended = surface.material.blended();
+                    item.depth = static_cast<float>(dot(view.camera.forward,subtract(center,view.camera.position)));
+                    result.surfaces.push_back(item);
+                }
             }
         }
     }

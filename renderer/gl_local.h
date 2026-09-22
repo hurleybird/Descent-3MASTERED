@@ -127,6 +127,7 @@ class GL4Renderer : public IRenderer
 	};
 	std::vector<SceneMeshGpu> scene_rooms;
 	std::vector<std::vector<SceneMeshGpu>> scene_models;
+	std::vector<std::vector<SceneMeshGpu>> scene_terrain;
 	void UploadSceneMesh(SceneMeshGpu&, d3scene::AssetId, const d3scene::MeshGeometry&);
 	uint64_t scene_asset_lifetime = 0;
 	ShaderProgram scene_shader;

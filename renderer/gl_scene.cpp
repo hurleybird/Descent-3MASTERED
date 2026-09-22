@@ -4,6 +4,7 @@
 #include "SceneView.h"
 #include "SceneGeometry.h"
 #include "SceneImages.h"
+#include "SceneTerrain.h"
 #include <cstring>
 #include <cmath>
 #include <string>
@@ -115,6 +116,11 @@ void GL4Renderer::DestroySceneResources() {
         if (mesh.buffer) glDeleteBuffers(1,&mesh.buffer);
     }
     scene_models.clear();
+    for (auto& patch : scene_terrain) for (auto& mesh : patch) {
+        if (mesh.vao) glDeleteVertexArrays(1,&mesh.vao);
+        if (mesh.buffer) glDeleteBuffers(1,&mesh.buffer);
+    }
+    scene_terrain.clear();
     if (scene_light_buffer) glDeleteBuffers(1,&scene_light_buffer);
     if (scene_influence_buffer) glDeleteBuffers(1,&scene_influence_buffer);
     if (scene_light_texture) glDeleteTextures(1,&scene_light_texture);
@@ -209,6 +215,7 @@ void GL4Renderer::UploadSceneFrame(const d3scene::Presentation& frame) {
             scene_uv_ranges.emplace(&surface,ElementRange(start,static_cast<uint32_t>(uvs.size())-start));
         };
         for (const auto& room : frame.data().rooms) for (const auto& surface : room.surfaces) add(surface);
+        for (const auto& patch : frame.data().terrain.patches) for (const auto& surface : patch) add(surface);
         for (const auto& object : frame.data().objects) for (const auto& part : object.parts)
             for (const auto& surface : part.surfaces) add(surface);
         std::vector<d3scene::Vec3> positions;
@@ -322,7 +329,15 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
         const d3scene::SurfaceBinding* binding;
         SceneMeshGpu* mesh;
         ElementRange prepared_positions(0,0);
-        if (item.model) {
+        if (item.terrain) {
+            const auto& terrain = presentation.data().terrain;
+            if (scene_terrain.size() <= item.terrain_patch) scene_terrain.resize(item.terrain_patch+1);
+            auto& batches = scene_terrain[item.terrain_patch];
+            if (batches.size() <= item.terrain_batch) batches.resize(item.terrain_batch+1);
+            mesh = &batches[item.terrain_batch];
+            UploadSceneMesh(*mesh,terrain.asset->id(),terrain.asset->patches()[item.terrain_patch].batches[item.terrain_batch].geometry);
+            binding = &terrain.patches[item.terrain_patch][item.terrain_batch];
+        } else if (item.model) {
             const auto& object = presentation.data().objects[item.object_index];
             const auto id = object.model->id();
             if (scene_models.size() <= id.slot) scene_models.resize(static_cast<size_t>(id.slot)+1);
@@ -370,16 +385,18 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
         } else glDisable(GL_BLEND);
         glDepthMask(surface.material.writesSolidDepth() ? GL_TRUE : GL_FALSE);
         glBindVertexArray(gpu.vao);
-        const auto range=gpu.polygons[item.polygon_index];
+        const auto range = item.terrain ? ElementRange(0,gpu.polygons.back().offset+gpu.polygons.back().count) : gpu.polygons[item.polygon_index];
         const auto uv_range = scene_uv_ranges.at(binding);
         glUniform1i(scene_shader.FindUniform("use_instance_uvs"),uv_range.count != 0);
         glUniform1i(scene_shader.FindUniform("instance_uv_offset"),static_cast<int>(uv_range.offset)-static_cast<int>(range.offset));
         glUniform1i(scene_shader.FindUniform("use_instance_positions"),prepared_positions.count != 0);
         glUniform1i(scene_shader.FindUniform("instance_position_offset"),prepared_positions.offset);
+        if (item.terrain) { glEnable(GL_CULL_FACE); glFrontFace(GL_CCW); glCullFace(GL_BACK); }
+        else glDisable(GL_CULL_FACE);
         glDrawArrays(GL_TRIANGLES,range.offset,range.count);
         rend_RecordDrawCall(RENDERER_DRAW_CALL_3D);
     }
-    glDepthMask(GL_TRUE); glDisable(GL_BLEND);
+    glDepthMask(GL_TRUE); glDisable(GL_BLEND); glDisable(GL_CULL_FACE);
     ShaderProgram::ClearBinding();
     // The remaining canvas adapter maintains its own texture binding cache.
     // Invalidate that cache rather than lying about scene-owned GL names.

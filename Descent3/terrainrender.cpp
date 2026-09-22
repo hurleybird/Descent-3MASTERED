@@ -1194,63 +1194,7 @@ ubyte CodeTerrainPoint(g3Point* p)
 	return cc;
 }
 
-// Returns true if light can hit this segment/heighth bit
-int IsTerrainDynamicChecked(int seg, int bit)
-{
-	if (seg < 0 || seg >= (TERRAIN_WIDTH * TERRAIN_DEPTH))
-		return 1;
-	if (bit >= 8)
-		return 1;
-	ubyte val = Terrain_dynamic_table[seg] & (1 << bit);
-	if (val)
-		return 1;
-	return 0;
-}
-
-// Gets the dynamic light value for this position
-float GetTerrainDynamicScalar(vector* pos, int seg)
-{
-	float cube_values[10];
-	int y_increment = MAX_TERRAIN_HEIGHT / 8;
-	int y_int = pos->y / y_increment;
-	int x_int = pos->x / TERRAIN_SIZE;
-	int z_int = pos->z / TERRAIN_SIZE;
-
-	float x_norm = (pos->x / TERRAIN_SIZE) - x_int;
-	float z_norm = (pos->z / TERRAIN_SIZE) - z_int;
-	float y_norm = (pos->y / y_increment) - y_int;
-	if (y_norm < 0)
-	{
-		y_norm = 0;
-		y_int = 0;
-	}
-	if (y_norm > 1)
-	{
-		y_norm = 1.0;
-		y_int = 7;
-	}
-	if (x_norm < 0 || x_norm>1 || z_norm < 0 || z_norm>1)
-		return .5;
-	float left_norm, right_norm, top_norm, bottom_norm, scalar;
-
-	cube_values[0] = IsTerrainDynamicChecked(seg, y_int);
-	cube_values[1] = IsTerrainDynamicChecked(seg + TERRAIN_WIDTH, y_int);
-	cube_values[2] = IsTerrainDynamicChecked(seg + TERRAIN_WIDTH + 1, y_int);
-	cube_values[3] = IsTerrainDynamicChecked(seg + 1, y_int);
-	cube_values[4] = IsTerrainDynamicChecked(seg, y_int + 1);
-	cube_values[5] = IsTerrainDynamicChecked(seg + TERRAIN_WIDTH, y_int + 1);
-	cube_values[6] = IsTerrainDynamicChecked(seg + TERRAIN_WIDTH + 1, y_int + 1);
-	cube_values[7] = IsTerrainDynamicChecked(seg + 1, y_int + 1);
-	left_norm = ((1 - z_norm) * cube_values[0]) + (z_norm * cube_values[1]);
-	right_norm = ((1 - z_norm) * cube_values[3]) + (z_norm * cube_values[2]);
-	bottom_norm = ((1 - x_norm) * left_norm) + (x_norm * right_norm);
-	left_norm = ((1 - z_norm) * cube_values[4]) + (z_norm * cube_values[5]);
-	right_norm = ((1 - z_norm) * cube_values[7]) + (z_norm * cube_values[6]);
-	top_norm = ((1 - x_norm) * left_norm) + (x_norm * right_norm);
-	scalar = ((1 - y_norm) * bottom_norm) + (y_norm * top_norm);
-	ASSERT(scalar >= 0 && scalar <= 1);
-	return scalar;
-}
+// Outdoor exposure sampling lives in SceneTerrain; drawing never owns it.
 
 // Takes a min,max vector and makes a surrounding cube from it
 void MakePointsFromMinMax(vector* corners, vector* minp, vector* maxp);

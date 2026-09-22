@@ -7,6 +7,7 @@
 #include "marker.h"
 #include "../model/ModelPose.h"
 #include "../model/SceneModelAsset.h"
+#include "../renderer/SceneTerrain.h"
 #include "gameloop.h"
 #include "game.h"
 #include "object_lighting.h"
@@ -61,14 +62,14 @@ d3scene::Vec3 volumeColor(const RoomTable& rooms, int number, const vector& posi
     auto color = d3scene::sampleVolume(room.asset->volume(),value(position));
     return {color.x*room.light_scalar,color.y*room.light_scalar,color.z*room.light_scalar};
 }
-d3scene::Vec3 ambientColor(const object& source, const RoomTable& rooms) {
+d3scene::Vec3 ambientColor(const object& source, const RoomTable& rooms, const d3scene::TerrainState& terrain) {
     d3scene::Vec3 color{1,1,1};
     const bool outside = OBJECT_OUTSIDE(&source);
     const bool volume = source.effect_info && (source.effect_info->type_flags & EF_VOLUME_LIT);
     if (outside) {
         if (source.type == OBJ_POWERUP) return color;
-        vector position = source.pos;
-        const float scalar = GetTerrainDynamicScalar(&position,CELLNUM(source.roomnum));
+        const float scalar = d3scene::sampleTerrainExposure(terrain.asset->grid(),
+            {source.pos.x,source.pos.y,source.pos.z},CELLNUM(source.roomnum));
         color = {scalar,scalar,scalar};
     } else {
         if (source.lighting_render_type == LRT_STATIC ||
@@ -133,7 +134,7 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::FrameDat
             found = frame_assets.emplace(model_number, std::move(asset)).first;
         }
         instance.model = found->second;
-        const auto ambient = ambientColor(*source,rooms);
+        const auto ambient = ambientColor(*source,rooms,data.terrain);
         auto effect = appearance(*source);
         // Explicit inspection fixture: exercises prepared-position uploads even
         // when a saved scene has no active cloak/deformation. Never mutates game state.

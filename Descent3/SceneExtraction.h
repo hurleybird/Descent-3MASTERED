@@ -11,6 +11,7 @@ d3scene::PresentationRef ExtractGamePresentation(double time, float delta, bool 
 void ResetGamePresentationScene();
 void PrepareGameModelInstances(d3scene::FrameData&, const d3scene::FrameData* previous);
 void PrepareGameSceneLights(d3scene::FrameData&);
+void PrepareGameTerrain(d3scene::FrameData&);
 d3scene::PresentationRef PrepareGamePresentation(bool advance_history = true);
 void RenderGameSceneView(const d3scene::Presentation&, d3scene::View);
 bool SceneGeometryInspection();

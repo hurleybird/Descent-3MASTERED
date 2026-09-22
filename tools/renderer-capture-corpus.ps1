@@ -9,6 +9,7 @@ param(
     [ValidateSet('clean','effects')][string]$Profile = 'effects',
     [switch]$SceneInspection,
     [switch]$VertexLighting,
+    [switch]$TerrainProbe,
     [switch]$DeformationProbe
 )
 
@@ -16,6 +17,7 @@ param(
 # at Candidate or the normal installation: the game may write local cache files.
 $ErrorActionPreference = 'Stop'
 if ($DeformationProbe -and -not $SceneInspection) { throw 'Deformation probe requires the explicit scene inspection executor.' }
+if ($TerrainProbe -and -not $SceneInspection) { throw 'Terrain probe requires the explicit scene inspection executor.' }
 $runtimePath = (Resolve-Path -LiteralPath $Runtime).Path
 $seedPath = (Resolve-Path -LiteralPath $Seeds).Path
 $outputPath = [IO.Path]::GetFullPath($Output)
@@ -38,6 +40,7 @@ $manifest = [ordered]@{
     runtime = $runtimePath; profile = $Profile; frame = $Frame; seed = $Seed; scene_inspection = [bool]$SceneInspection
     deformation_probe = [bool]$DeformationProbe
     vertex_lighting = [bool]$VertexLighting
+    terrain_probe = [bool]$TerrainProbe
     executable = (Get-FileHash -LiteralPath $exe).Hash
     shaders = (Get-FileHash -LiteralPath (Join-Path $runtimePath 'descent3mastered.hog')).Hash
     pilot = (Get-FileHash -LiteralPath (Join-Path $seedPath 'Jeff.plt')).Hash
@@ -66,6 +69,7 @@ try {
         else { $arguments += @('-msaa','4','-ssaa','2','-ao','-bloom') }
         if ($SceneInspection) { $arguments += '-scene-inspection' }
         if ($VertexLighting) { $arguments += '-noperpixellighting' }
+        if ($TerrainProbe) { $arguments += '-scene-terrain-probe' }
         if ($DeformationProbe) { $arguments += '-scene-deformation-probe' }
         $started = Get-Date
         $process = Start-Process -FilePath $exe -ArgumentList $arguments -WorkingDirectory $runtimePath -WindowStyle Hidden -PassThru

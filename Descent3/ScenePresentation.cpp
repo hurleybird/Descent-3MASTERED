@@ -3,6 +3,7 @@
 #include "SceneMaterialBindings.h"
 #include "../renderer/SceneLighting.h"
 #include "../renderer/SceneImages.h"
+#include "../renderer/SceneTerrain.h"
 #include "descent.h"
 #include "bitmap.h"
 #include <cmath>
@@ -71,6 +72,7 @@ void prepareImages(d3scene::FrameData& data) {
     };
     for (auto& room : data.rooms) for (auto& surface : room.surfaces) prepare(surface);
     for (auto& object : data.objects) for (auto& part : object.parts) for (auto& surface : part.surfaces) prepare(surface);
+    for (auto& surface : data.terrain.materials) prepare(surface);
 }
 // Field-wise fingerprints diagnose state-vs-pixel variation; never hash padding
 // or use diagnostic hashes as asset identities.
@@ -189,11 +191,14 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance_history) {
             surface.draw_surface = surface.draw_surface && (room.portals[surface.portal].flags & PF_RENDER_FACES);
       }
     }
+    PrepareGameTerrain(data);
     PrepareGameModelInstances(data, previous_models ? &previous_models->data() : nullptr);
+    for (auto& surface : data.terrain.materials) resolveMaterial(surface,static_cast<float>(data.simulation_time),false);
     for (auto& object : data.objects) for (auto& part : object.parts) for (auto& surface : part.surfaces)
         resolveMaterial(surface,static_cast<float>(data.simulation_time),true);
-    PrepareGameSceneLights(data);
     prepareImages(data);
+    d3scene::prepareTerrainPatches(data.terrain);
+    PrepareGameSceneLights(data);
     for (auto& room : data.rooms) for (auto& portal : room.portals) {
         const auto& surface = room.surfaces[portal.polygon];
         const auto material = d3scene::compileMaterialPolicy(surface,room.asset->geometry().polygons[portal.polygon]);
@@ -214,6 +219,13 @@ void RenderGameSceneView(const d3scene::Presentation& frame, d3scene::View view)
         Error("Renderer migration is incomplete. This test build requires -scene-inspection; use the preserved Candidate for gameplay.");
     view.geometry_inspection = true;
     view.feedback = d3scene::NoFeedback;
+    if (FindArg("-scene-terrain-probe") && frame.data().terrain.asset) {
+        const auto& grid = frame.data().terrain.asset->grid();
+        const uint32_t x = grid.width/2, z = grid.depth/4;
+        view.camera.position = {x*grid.spacing,grid.heights[z*grid.width+x]+120,z*grid.spacing};
+        view.camera.right = {1,0,0}; view.camera.up = {0,.8f,.6f}; view.camera.forward = {0,-.6f,.8f};
+        view.attached_camera = false; view.room = -1;
+    }
     // Diagnostic views do not mark rooms explored or tell AI it was observed.
     // The gameplay feedback compiler barrier remains until the normal executor
     // and its visibility policy have been migrated.

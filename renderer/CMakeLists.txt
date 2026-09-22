@@ -7,6 +7,7 @@ SET (RENDERER_SOURCES
 		renderer/SceneGeometry.cpp
 		renderer/ScenePortals.cpp
 		renderer/SceneImages.cpp
+		renderer/SceneTerrain.cpp
 		renderer/gl_scene.cpp
 		renderer/HardwareInternal.h
 		renderer/RendererConfig.h

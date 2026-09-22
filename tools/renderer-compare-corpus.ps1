@@ -72,6 +72,9 @@ if ($referenceManifest.profile -ne $actualManifest.profile -or
     throw 'Capture profiles, frame, pilot or registry settings differ; comparison invalid.'
 }
 if ($referenceManifest.results.Count -ne $actualManifest.results.Count) { throw 'Corpus sizes differ.' }
+if ([bool]$referenceManifest.terrain_probe -ne [bool]$actualManifest.terrain_probe -and -not $DiagnosticComparison) {
+    throw 'Terrain fixture differs; use -DiagnosticComparison, never treat this as parity acceptance.'
+}
 if ([bool]$referenceManifest.vertex_lighting -ne [bool]$actualManifest.vertex_lighting -and -not $DiagnosticComparison) {
     throw 'Lighting quality differs; use -DiagnosticComparison, never treat this as parity acceptance.'
 }

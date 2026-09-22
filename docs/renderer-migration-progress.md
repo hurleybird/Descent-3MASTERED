@@ -1,5 +1,37 @@
 # Renderer migration checkpoint
 
+## Continuation: renderer-owned terrain grid, patches and exposure
+
+Terrain extraction publishes immutable height/material/visibility/clip-plane
+revisions, never LOD scratch or camera-selected cells. One CPU geometry kernel
+expands the authored diagonal, texture rotation/tiling and lightmap coordinates;
+16-cell patches group by material for GPU upload/draw. Existing seam planes clip
+this canonical geometry with interpolated UVs (including the original .005 plane
+tolerance), so shader-only cuts are no longer hidden from other consumers.
+The scene executor owns terrain GPU buffers and uses the shared image assets,
+material policy and emitter table. View-local patch queries respect exterior
+portal reachability; lighting uses conservative patch bounds and exterior
+eligibility, independently of camera visibility. No old terrain draw fallback.
+
+The authored eight-bit height exposure field is owned by the terrain asset. The
+same pure interpolation routine serves model ambient lighting and the simulation
+adapter used by outdoor damage. It preserves the legacy 43-unit vertical interval
+and boundary sampling; below-ground heights are now clamped rather than invoking
+a negative bit shift. The old sampling implementation was removed from drawing.
+
+4,590 CPU checks pass, including all 65,025 cells under all four rotations,
+asset lifetime/revision retention, hidden cells, clipping/UV interpolation,
+patch/portal visibility, light eligibility and 1,000 exposure interpolation cases.
+Full build passes. All eight `scene-terrain-final-clean` images are pixel-identical
+to `scene-camera-clean`. Two outdoor fixtures in `scene-terrain-probe` were
+visually inspected; both repeat identically through the clipping/exposure changes
+in `scene-terrain-clipped-probe` and `scene-terrain-final-probe`. These fixtures
+prove outdoor execution, NOT parity against a complete legacy exterior view.
+
+Still pending: sky/effects/fog, legacy quality/LOD policy, targeted entrance seam
+visuals, exterior golden captures, performance and full frame composition. Terrain
+is not marked complete. Candidate/Prev Candidate remain untouched; no shadows.
+
 ## Continuation: camera shake no longer rewrites simulation poses
 
 Removed ShakePlayer/UnshakePlayer and the player-orientation save/restore loop

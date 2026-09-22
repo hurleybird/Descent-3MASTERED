@@ -116,6 +116,9 @@ private:
     uint32_t padded_extent_ = 0;
 };
 using ImageAssetRef = std::shared_ptr<const ImageAsset>;
+struct TerrainGrid;
+class TerrainAsset;
+using TerrainAssetRef = std::shared_ptr<const TerrainAsset>;
 
 // Immutable revisions keep already-published frames alive across level unload,
 // slot reuse, and geometry changes. Reset never invalidates an existing frame.
@@ -131,6 +134,8 @@ public:
     void removeModel(uint32_t slot);
     ImageAssetRef image(uint32_t slot) const;
     ImageAssetRef publishImage(uint32_t slot,const ImageSource&);
+    TerrainAssetRef terrain() const { return terrain_; }
+    TerrainAssetRef publishTerrain(const TerrainGrid&);
     uint64_t lifetime() const { return lifetime_; }
 private:
     uint64_t lifetime_ = 0;
@@ -138,6 +143,7 @@ private:
     std::vector<RoomAssetRef> rooms_;
     std::vector<ModelAssetRef> models_;
     std::vector<ImageAssetRef> images_;
+    TerrainAssetRef terrain_;
 };
 
 enum class BlendMode : uint8_t { Solid, Alpha, Additive };
@@ -172,6 +178,11 @@ struct SurfaceBinding {
     uint8_t light_multiple = 0;
 };
 MaterialPolicy compileMaterialPolicy(const SurfaceBinding&, const MeshPolygon&);
+struct TerrainState {
+    TerrainAssetRef asset;
+    std::vector<SurfaceBinding> materials;
+    std::vector<std::vector<SurfaceBinding>> patches;
+};
 struct Portal {
     int32_t polygon = -1, destination_room = -1, destination_portal = -1;
     int32_t combine_master = -1;
@@ -252,6 +263,7 @@ struct FrameData {
     std::vector<ObjectState> objects;
     std::vector<Light> lights;
     std::vector<CameraPerturbation> camera_perturbations;
+    TerrainState terrain;
 };
 
 class Presentation final {

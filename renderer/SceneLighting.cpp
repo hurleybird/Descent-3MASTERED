@@ -1,6 +1,7 @@
 // Descent 3MASTERED - GPL-3.0-or-later
 #include "SceneLighting.h"
 #include "SceneGeometry.h"
+#include "SceneTerrain.h"
 #include <algorithm>
 #include <cmath>
 #include <unordered_map>
@@ -113,5 +114,21 @@ void prepareLightInfluences(FrameData& data) {
     for (auto& object : data.objects) if (object.model) for (size_t part = 0; part < object.parts.size(); ++part)
         assign(object.room,MeshView(object.model->geometry().parts[part].geometry,object.parts[part].vertices),compose(object.current,object.parts[part].current),
             object.parts[part].surfaces);
+    if (data.terrain.asset) for (size_t patch = 0; patch < data.terrain.patches.size(); ++patch) {
+        const auto& bounds = data.terrain.asset->patches()[patch].bounds;
+        std::vector<uint32_t> indices;
+        for (size_t light = 0; light < data.lights.size(); ++light) {
+            const auto& source = data.lights[light];
+            bool exterior = !rooms.count(source.room);
+            for (auto room : reachable[light]) exterior = exterior || rooms.at(room)->exterior;
+            if (!exterior) continue;
+            const auto axis = [](float p,float lo,float hi) { return p-std::max(lo,std::min(p,hi)); };
+            const float x = axis(source.position.x,bounds.minimum.x,bounds.maximum.x);
+            const float y = axis(source.position.y,bounds.minimum.y,bounds.maximum.y);
+            const float z = axis(source.position.z,bounds.minimum.z,bounds.maximum.z);
+            if (x*x+y*y+z*z <= source.radius*source.radius) indices.push_back(static_cast<uint32_t>(light));
+        }
+        for (auto& surface : data.terrain.patches[patch]) surface.light_indices = indices;
+    }
 }
 }

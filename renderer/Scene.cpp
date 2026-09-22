@@ -1,5 +1,6 @@
 // Descent 3MASTERED - GPL-3.0-or-later
 #include "Scene.h"
+#include "SceneTerrain.h"
 #include <atomic>
 #include <cmath>
 #include <limits>
@@ -93,6 +94,7 @@ void SceneAssets::reset() {
     rooms_.clear();
     models_.clear();
     images_.clear();
+    terrain_.reset();
     lifetime_ = lifetime;
     revision_ = 0;
 }
@@ -210,6 +212,16 @@ PresentationRef Presentation::freeze(const FrameData& data) {
         for (const auto& image : {surface.color_image,surface.baked_image})
             require(!image || image->id().lifetime == data.scene_lifetime,"Stale image asset in frame");
     };
+    if (data.terrain.asset) {
+        require(data.terrain.asset->id().lifetime == data.scene_lifetime,"Stale terrain asset");
+        require(data.terrain.materials.size() == data.terrain.asset->grid().materials.size(),"Incomplete terrain materials");
+        for (const auto& surface : data.terrain.materials) { validateSurface(surface); validateIndices(surface); }
+        require(data.terrain.patches.size() == data.terrain.asset->patches().size(),"Incomplete terrain patch bindings");
+        for (size_t patch = 0; patch < data.terrain.patches.size(); ++patch) {
+            require(data.terrain.patches[patch].size() == data.terrain.asset->patches()[patch].batches.size(),"Incomplete terrain batch bindings");
+            for (const auto& surface : data.terrain.patches[patch]) { validateSurface(surface); validateIndices(surface); }
+        }
+    } else require(data.terrain.materials.empty() && data.terrain.patches.empty(),"Terrain materials have no grid");
     std::unordered_set<int32_t> rooms;
     for (const auto& room : data.rooms) {
         require(room.number >= 0 && rooms.insert(room.number).second, "Duplicate or invalid scene room");
@@ -254,6 +266,10 @@ PresentationRef Presentation::freeze(const FrameData& data) {
         } else require(object.parts.empty(), "Model pose has no asset");
     }
     std::shared_ptr<Presentation> prepared(new Presentation(data));
+    for (auto& surface : prepared->data_.terrain.materials)
+        surface.material = compileMaterialPolicy(surface,MeshPolygon{});
+    for (auto& patch : prepared->data_.terrain.patches) for (auto& surface : patch)
+        surface.material = compileMaterialPolicy(surface,MeshPolygon{});
     for (auto& room : prepared->data_.rooms)
         for (size_t face = 0; face < room.surfaces.size(); ++face)
             room.surfaces[face].material = compileMaterialPolicy(room.surfaces[face],room.asset->geometry().polygons[face]);

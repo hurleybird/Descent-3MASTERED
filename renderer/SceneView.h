@@ -31,6 +31,8 @@ struct VisibleSurface {
     bool model = false;
     uint32_t object_index = 0, part_index = 0;
     Transform world;
+    bool terrain = false;
+    uint32_t terrain_patch = 0, terrain_batch = 0;
 };
 struct ViewQueryStats {
     uint32_t rooms_considered = 0, surfaces_considered = 0;
