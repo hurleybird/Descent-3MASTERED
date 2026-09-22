@@ -36,6 +36,8 @@
 #include "weapon.h"
 #include "stringtable.h"
 #include "SceneExtraction.h"
+#include "SceneCanvas.h"
+#include "../renderer/SceneView.h"
 #include "../model/ModelPose.h"
 #include "../renderer/SceneGeometry.h"
 #include "gameloop.h"
@@ -140,11 +142,30 @@ inline int GAUGE_INDEX(tStatMask mask);
 static constexpr float GAUGE_INVSHIPRING_DELTA = .06f;
 // No g3 projection, renderer-state capture, or shared model pose is involved.
 void PrepareGameCockpitGauges(d3scene::FrameData& frame,const ModelTransforms& transforms,
-    const d3scene::Transform& placement)
+    const d3scene::Transform& placement,bool moving)
 {
     using Quad = std::array<d3scene::Vec3,4>;
     const auto asset = d3scene::assets().publishMesh(2,d3scene::unitBillboardQuad());
     int order = 0;
+    int32_t text_order = 0;
+    d3scene::View gauge_view;
+    gauge_view.kind = d3scene::ViewKind::Preview; gauge_view.history_key = SceneCockpitGauges;
+    gauge_view.viewport = gauge_view.projection_anchor = {0,0,Game_window_w,Game_window_h};
+    gauge_view.zoom = SceneCockpitZoom;
+    const auto camera = d3scene::prepareCamera(gauge_view);
+    SceneTextStyle text_style; text_style.font = HUD_FONT; text_style.color = {0,180.f/255,0};
+    const float window_scale = float(Game_window_w)/Max_window_w;
+    // Authored HUD offsets use the 4:3 reference width, while monitor geometry
+    // uses the full cockpit viewport. Previously this survived only as stale
+    // Hud_aspect_x after RenderHUDFrame restored Game_window_w.
+    const float hud_x = float(Game_window_h*4/3)/DEFAULT_HUD_WIDTH, hud_y = float(Game_window_h)/DEFAULT_HUD_HEIGHT;
+    text_style.scale = (window_scale <= .6f ? .6f : window_scale <= .8f ? .8f : 1.f)*ConfigNormalizeHudTextScale(Hud_text_scale);
+    const auto text = [&](int x,int y,const char* value) {
+        auto style = text_style;
+        PrepareSceneText(frame,SceneCockpitText,text_order,x,y,value,style);
+        style.additive = true;
+        PrepareSceneText(frame,SceneCockpitText,text_order,x,y,value,style);
+    };
     const auto mix = [](d3scene::Vec3 a,d3scene::Vec3 b,float t) {
         return d3scene::Vec3{a.x+(b.x-a.x)*t,a.y+(b.y-a.y)*t,a.z+(b.z-a.z)*t};
     };
@@ -200,6 +221,28 @@ void PrepareGameCockpitGauges(d3scene::FrameData& frame,const ModelTransforms& t
             }
             append(points,get_weapon_hud_image(Player_num,primary ? PW_PRIMARY : PW_SECONDARY),127.f/255,false,false,0,0,1,1);
             if (Cockpit_alt_mode) frame.meshes.back().collection = SceneCockpitMonitorBacking;
+            if (!moving) {
+                const auto clip = d3scene::project(camera,points[0]);
+                if (clip.w > 0) {
+                    const int x = int((clip.x/clip.w+1)*.5*Game_window_w);
+                    int y = int((1-clip.y/clip.w)*.5*Game_window_h);
+                    const int weapon_type = primary ? PW_PRIMARY : PW_SECONDARY;
+                    const int index = Players[Player_num].weapon[weapon_type].index;
+                    text(int(x+(primary ? 30 : 5)*hud_x),int(y+10*hud_y),TXT(Static_weapon_ckpt_names[index][0]));
+                    const auto* second_line = TXT(Static_weapon_ckpt_names[index][1]);
+                    if (*second_line) {
+                        text(int(x+(primary ? 35 : 5)*hud_x),int(y+20*hud_y),second_line);
+                        y = int(y+10*hud_y);
+                    }
+                    const auto& ship = Ships[Players[Player_num].ship_index];
+                    if (!primary || ship.static_wb[index].ammo_usage) {
+                        const int ammo = Players[Player_num].weapon_ammo[index]; char amount[32];
+                        if (primary && (ship.fire_flags[index]&SFF_TENTHS)) snprintf(amount,sizeof(amount),"%d.%d",ammo/10,ammo%10);
+                        else snprintf(amount,sizeof(amount),"%d",ammo);
+                        text(int(x+(primary ? 40 : 15)*hud_x),int(y+20*hud_y),amount);
+                    }
+                }
+            }
         } else if (mask == STAT_SHIELDS) {
             const float amount = (std::min)(1.f,Objects[Players[Player_num].objnum].shields/INITIAL_SHIELDS);
             int index = static_cast<int>(std::ceil((1.f-amount-.1f)*NUM_SHIELD_GAUGE_FRAMES));
@@ -241,7 +284,7 @@ void PrepareGameCockpitGauges(d3scene::FrameData& frame,const ModelTransforms& t
       }
     }
     if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
-        AutomatedCaptureLog("scene gauge graphics prepared quads=%d text=0 backing=%d",order,Cockpit_alt_mode ? 1 : 0);
+        AutomatedCaptureLog("scene gauge graphics prepared quads=%d glyphs=%d backing=%d",order,text_order,Cockpit_alt_mode ? 1 : 0);
 }
 
 //	renders a monitor style quad 

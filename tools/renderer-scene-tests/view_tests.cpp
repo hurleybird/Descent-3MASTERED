@@ -45,6 +45,43 @@ void appendRoom(d3scene::SceneAssets& assets,d3scene::FrameData& data,d3scene::M
 
 int runSceneViewTests() {
     {
+        auto canvas = view(); canvas.kind = d3scene::ViewKind::Preview;
+        canvas.projection = d3scene::ViewProjection::Orthographic;
+        canvas.orthographic_size = {800,600}; canvas.orthographic_depth = {-2,2};
+        canvas.camera.position = {400,300,0}; canvas.camera.up = {0,-1,0};
+        const auto camera = d3scene::prepareCamera(canvas);
+        const auto first = d3scene::project(camera,{0,0,-2});
+        const auto last = d3scene::project(camera,{800,600,2});
+        check(near(first.x,-1) && near(first.y,1) && near(first.z,-1) && first.w == 1 &&
+            near(last.x,1) && near(last.y,-1) && near(last.z,1) && last.w == 1,
+            "Orthographic canvas lost corners, depth endpoints or constant W");
+        const auto near_point = d3scene::project(camera,{123,456,-1});
+        const auto far_point = d3scene::project(camera,{123,456,1});
+        check(near(near_point.x,far_point.x) && near(near_point.y,far_point.y),"Orthographic size changed with depth");
+        const auto restored = d3scene::unproject(camera,float(near_point.x),float(near_point.y),float((near_point.z+1)*.5));
+        check(std::abs(restored.x-123) < .0001 && std::abs(restored.y-456) < .0001 && near(restored.z,-1),
+            "Orthographic depth unprojection did not recover the source point");
+        check(d3scene::sphereIntersects(camera,{400,300,0},0) &&
+            !d3scene::sphereIntersects(camera,{-10,300,0},1) &&
+            !d3scene::sphereIntersects(camera,{400,610,0},1) &&
+            !d3scene::sphereIntersects(camera,{400,300,-3},.5f),"Orthographic conservative planes are not parallel");
+        const auto matrix = d3scene::viewMatrices(camera).view_projection;
+        const double point[4] = {123,456,-1,1}; double actual[4]{};
+        for (int row = 0; row < 4; ++row) for (int column = 0; column < 4; ++column)
+            actual[row] += matrix[column*4+row]*point[column];
+        check(near(actual[0],near_point.x) && near(actual[1],near_point.y) && near(actual[2],near_point.z) && actual[3] == 1,
+            "Orthographic image and raster camera projections disagree");
+        for (int invalid = 0; invalid < 3; ++invalid) {
+            auto request = canvas;
+            if (invalid == 0) request.kind = d3scene::ViewKind::Main;
+            if (invalid == 1) request.orthographic_depth = {2,2};
+            if (invalid == 2) request.orthographic_size.x = 0;
+            bool rejected = false;
+            try { d3scene::prepareCamera(request); } catch (const std::invalid_argument&) { rejected = true; }
+            check(rejected,"Invalid orthographic volume or main-world ownership was accepted");
+        }
+    }
+    {
         d3scene::SceneAssets overlay_assets;
         d3scene::FrameData overlay_data;
         overlay_data.sequence = 1; overlay_data.scene_lifetime = overlay_assets.lifetime();

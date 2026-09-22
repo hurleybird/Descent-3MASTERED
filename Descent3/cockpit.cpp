@@ -925,7 +925,7 @@ void PrepareGameCockpit(d3scene::FrameData& frame, bool advance)
     if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
         AutomatedCaptureLog("scene cockpit prepared model=%d keyframe=%.6g base=%u layered=%u late=%u gauges=0",
             Cockpit_info.model_num,keyframe,masks[0],masks[1],masks[2]);
-    PrepareGameCockpitGauges(frame,transforms,placement);
+    PrepareGameCockpitGauges(frame,transforms,placement,Cockpit_info.animating);
 }
 
 bool CockpitHasPostPostElements()

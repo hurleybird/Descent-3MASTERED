@@ -163,6 +163,13 @@ void grfont_FreeTemplate(tFontTemplate *ft);
 
 //	returns a character's width
 int grfont_GetCharWidth(int font, int ch);
+// Read-only atlas/metric lookup for immutable presentation extraction. The
+// caller copies/publishes the bitmap; execution never retains a live font id.
+struct tFontGlyph {
+    int bitmap = -1, width = 0, height = 0;
+    float u = 0, v = 0, uv_width = 0, uv_height = 0;
+};
+bool grfont_GetGlyph(int font, int ch, tFontGlyph& glyph);
 
 //	returns a font's height
 int grfont_GetHeight(int font);

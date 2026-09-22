@@ -83,6 +83,7 @@ uniform mat4 previous_view_projection;
 out vec4 current_clip, previous_clip;
 uniform vec4 projection;
 uniform float near_distance, effect_depth_offset;
+uniform float orthographic_depth_scale;
 out vec2 texcoord, lightcoord;
 out float vertex_alpha;
 out vec3 world_position;
@@ -101,9 +102,13 @@ void main() {
     float z = dot(relative,camera_forward);
     gl_Position = vec4(dot(relative,camera_right)*projection.x + z*projection.z,
                        dot(relative,camera_up)*projection.y + z*projection.w, z-2.0*near_distance,z);
+    if (orthographic_depth_scale > 0.0)
+        gl_Position = vec4(dot(relative,camera_right)*projection.x+projection.z,
+            dot(relative,camera_up)*projection.y+projection.w,(z-near_distance)*orthographic_depth_scale-1.0,1.0);
     gl_Position.xy += raster_offset*raster_pixel_scale*gl_Position.w;
     if (effect_depth_offset != 0.0)
-        gl_Position.z = (1.0-2.0*near_distance/max(near_distance,z+effect_depth_offset))*gl_Position.w;
+        gl_Position.z = orthographic_depth_scale > 0.0 ? (z+effect_depth_offset-near_distance)*orthographic_depth_scale-1.0 :
+            (1.0-2.0*near_distance/max(near_distance,z+effect_depth_offset))*gl_Position.w;
     current_clip = gl_Position;
     vec3 previous_world = previous_position+previous_right*previous_prepared.x+
         previous_up*previous_prepared.y+previous_forward*previous_prepared.z;
@@ -141,7 +146,7 @@ uniform samplerBuffer scene_fog;
 uniform int fog_volume_count, fog_enabled, fog_additive, fog_exterior;
 uniform int multiply_material;
 uniform sampler2D opaque_depth;
-uniform float soft_depth_range, near_distance;
+uniform float soft_depth_range, near_distance, orthographic_depth_scale;
 uniform ivec2 depth_snapshot_origin;
 uniform vec3 eye, camera_forward, exterior_fog_color;
 uniform vec2 exterior_fog_range;
@@ -267,7 +272,8 @@ void main() {
         ivec2 pixel = clamp(ivec2(gl_FragCoord.xy)-depth_snapshot_origin,ivec2(0),size-ivec2(1));
         float depth = texelFetch(opaque_depth,pixel,0).r;
         if (depth < 1.0) {
-            float surface_depth = near_distance/max(1.e-8,1.0-depth);
+            float surface_depth = orthographic_depth_scale > 0.0 ? near_distance+2.0*depth/orthographic_depth_scale :
+                near_distance/max(1.e-8,1.0-depth);
             float particle_depth = dot(world_position-eye,camera_forward);
             base.a *= clamp((surface_depth-particle_depth)/soft_depth_range,0.0,1.0);
         }
@@ -862,6 +868,7 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
     glUniform4f(scene_shader.FindUniform("projection"),projection.x_scale,projection.y_scale,
         projection.x_offset,projection.y_offset);
     glUniform1f(scene_shader.FindUniform("near_distance"),projection.near_distance);
+    glUniform1f(scene_shader.FindUniform("orthographic_depth_scale"),projection.orthographic_depth_scale);
     glUniform2f(scene_shader.FindUniform("raster_pixel_scale"),2.f/view.viewport.width,2.f/view.viewport.height);
     glUniformMatrix4fv(scene_shader.FindUniform("previous_view_projection"),1,GL_FALSE,history.previous.view_projection.data());
     glUniform1i(scene_shader.FindUniform("lighting_per_pixel"),presentation.data().lighting_quality == d3scene::LightingQuality::Pixel);

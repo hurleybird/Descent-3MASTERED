@@ -2874,7 +2874,7 @@ void GameDrawMainView(const d3scene::Presentation& presentation)
 }
 
 //Added by Samir
-constexpr float HUD_RENDER_ZOOM = 0.56f;
+constexpr float HUD_RENDER_ZOOM = SceneCockpitZoom;
 
 //Do Cockpit/Hud
 void GameDrawHud()

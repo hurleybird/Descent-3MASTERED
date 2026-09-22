@@ -735,6 +735,23 @@ int grfont_BltChar(int font, tCharBlt *cbi)
 
 
 //	returns a character's width
+bool grfont_GetGlyph(int font, int ch, tFontGlyph& glyph)
+{
+    glyph = {};
+    if (font < 0 || font >= MAX_FONTS || !Fonts[font].references) return false;
+    const auto& source = Fonts[font];
+    ch &= 255;
+    if (ch > source.font.max_ascii && (source.font.flags & FT_UPPERCASE)) ch = toupper(ch);
+    if (ch < source.font.min_ascii || ch > source.font.max_ascii) return false;
+    const int index = ch-source.font.min_ascii;
+    glyph.bitmap = source.bmps[source.ch_bmp[index]];
+    glyph.width = source.font.flags & FT_PROPORTIONAL ? source.font.char_widths[index] : source.font.width;
+    glyph.height = source.font.height;
+    glyph.u = source.ch_uf[index]; glyph.v = source.ch_vf[index];
+    glyph.uv_width = source.ch_wf[index]; glyph.uv_height = source.ch_hf[index];
+    return true;
+}
+
 int grfont_GetCharWidth(int font, int ch)
 {
 	ASSERT(font > -1 && font < MAX_FONTS);

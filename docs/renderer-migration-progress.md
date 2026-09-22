@@ -1,5 +1,29 @@
 # Renderer migration checkpoint
 
+## Continuation: orthographic canvas and prepared gauge text
+
+Views now explicitly select perspective or orthographic projection; CPU query,
+matrix products, GPU rasterization, soft-depth conversion and unprojection agree.
+Orthographic views cannot own main-world image products/gameplay feedback. The
+conservative query retains five planes (far rejection is left to GPU clipping).
+Font atlas/metric lookup is read-only; plain-text extraction emits owned logical
+canvas quads and publishes their images through the normal image boundary.
+Cockpit weapon labels/ammo use an orthographic compositing view, not legacy
+grtext draw calls or a fake perspective placement. Shared SceneCockpitZoom now
+names the existing .56 cockpit/HUD projection constant.
+
+Captured text exposed the legacy 4:3 HUD reference width surviving as stale
+Hud_aspect_x after full-width cockpit restoration. The producer now derives that
+authored layout explicitly. Initial text/layout captures are diagnostic; the
+final scene-canvas-reference 003 uses the corrected 4:3 offsets and was visually
+inspected. Full build and 5,301 checks pass. Of eight canvas-normal captures,
+seven are pixel-identical to output-normal; 002 is pixel-identical to the older
+depth-policy-normal 002 (the previously documented pose-dependent alternative).
+CockpitProbe revision is 4. Full HUD, other ships and dynamic gauge states remain
+unqualified. Glyph runs currently emit individual quads; shared prepared UVs
+and batching are the next upstream text-cost issue, not a completed performance
+claim. Candidate remains untouched.
+
 ## Continuation: ordered gauge graphics and monitor coverage
 
 Added explicit depth-independent compositing views and per-surface composition

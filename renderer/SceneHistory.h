@@ -23,7 +23,7 @@ inline ImageMotion prepareImageMotion(const FrameData& frame,const ViewHistorySa
     const ImageMotion& completed) {
     if (camera.sequence != frame.sequence || camera.lifetime != frame.scene_lifetime ||
         camera.view.kind != ViewKind::Main || camera.view.collection != 0 || camera.view.target != ViewTarget::Scene ||
-        camera.view.ordering != ViewOrdering::Depth)
+        camera.view.ordering != ViewOrdering::Depth || camera.view.projection != ViewProjection::Perspective)
         throw std::logic_error("Image motion requires this presentation's main camera");
     ImageMotion result;
     result.camera = camera; result.delta_time = frame.delta_time;

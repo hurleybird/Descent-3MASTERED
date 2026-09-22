@@ -10,12 +10,13 @@ namespace d3scene {
 Rect rasterViewport(Rect logical, int32_t raster_height, int32_t scale,
     int32_t offset_x = 0, int32_t offset_y = 0);
 
-// Positive eye Z, legacy depth = 1 - near/Z. This is the same homogeneous
-// projection used by both conservative visibility and the GPU. No far plane;
-// changing to reverse-Z is not part of this migration.
+// Positive eye Z. Perspective retains legacy depth = 1-near/Z and no far
+// plane; orthographic uses a finite linear depth range. The conservative query
+// and GPU share this projection. Reverse-Z is not part of this migration.
 struct Projection {
     float x_scale = 1, y_scale = 1, x_offset = 0, y_offset = 0;
     float near_distance = 1;
+    float orthographic_depth_scale = 0; // zero: perspective; otherwise 2/(far-near)
 };
 struct ClipPosition { double x, y, z, w; };
 struct Plane { Vec3 normal; float constant = 0; };

@@ -100,19 +100,33 @@ Camera prepareCamera(const View& view) {
     // Keep operation order identical to the first verified GPU projection.
     const float aspect = static_cast<float>(view.projection_anchor.width)/view.projection_anchor.height;
     const float zoom = view.zoom*.75f;
-    const float sx = (aspect <= 1 ? 1 : 1/aspect)/zoom;
-    const float sy = (aspect <= 1 ? aspect : 1)/zoom;
+    const bool orthographic = view.projection == ViewProjection::Orthographic;
+    const float sx = orthographic ? 2/view.orthographic_size.x : (aspect <= 1 ? 1 : 1/aspect)/zoom;
+    const float sy = orthographic ? 2/view.orthographic_size.y : (aspect <= 1 ? aspect : 1)/zoom;
     const float width = static_cast<float>(view.viewport.width), height = static_cast<float>(view.viewport.height);
     auto& p = camera.projection;
     p.x_scale = sx*view.projection_anchor.width/width;
     p.y_scale = sy*view.projection_anchor.height/height;
     p.x_offset = (2.f*view.projection_anchor.x+view.projection_anchor.width)/width-1;
     p.y_offset = 1-(2.f*view.projection_anchor.y+view.projection_anchor.height)/height;
+    if (orthographic) {
+        p.near_distance = view.orthographic_depth.x;
+        p.orthographic_depth_scale = 2/(view.orthographic_depth.y-view.orthographic_depth.x);
+        if (!(p.orthographic_depth_scale > 0) || !std::isfinite(p.orthographic_depth_scale))
+            throw std::invalid_argument("Invalid orthographic depth scale");
+    }
     if (!std::isfinite(p.x_scale) || !std::isfinite(p.y_scale) ||
         !std::isfinite(p.x_offset) || !std::isfinite(p.y_offset))
         throw std::invalid_argument("Non-finite camera projection");
     const auto& t = camera.transform;
-    camera.planes = {{
+    if (orthographic) camera.planes = {{
+        plane(combine(t.right,p.x_scale,{},0),t.position,1+p.x_offset),
+        plane(combine(t.right,-p.x_scale,{},0),t.position,1-p.x_offset),
+        plane(combine(t.up,p.y_scale,{},0),t.position,1+p.y_offset),
+        plane(combine(t.up,-p.y_scale,{},0),t.position,1-p.y_offset),
+        plane(t.forward,t.position,-p.near_distance)
+    }};
+    else camera.planes = {{
         plane(combine(t.right,p.x_scale,t.forward,1+p.x_offset),t.position),
         plane(combine(t.right,-p.x_scale,t.forward,1-p.x_offset),t.position),
         plane(combine(t.up,p.y_scale,t.forward,1+p.y_offset),t.position),
@@ -127,6 +141,9 @@ ViewMatrices viewMatrices(const Camera& camera) {
     const auto& t = camera.transform;
     result.projection = {{p.x_scale,0,0,0, 0,p.y_scale,0,0,
         p.x_offset,p.y_offset,1,1, 0,0,-2*p.near_distance,0}};
+    if (p.orthographic_depth_scale > 0)
+        result.projection = {{p.x_scale,0,0,0, 0,p.y_scale,0,0,
+            0,0,p.orthographic_depth_scale,0, p.x_offset,p.y_offset,-1-p.near_distance*p.orthographic_depth_scale,1}};
     result.inverse_view = {{t.right.x,t.right.y,t.right.z,0, t.up.x,t.up.y,t.up.z,0,
         t.forward.x,t.forward.y,t.forward.z,0, t.position.x,t.position.y,t.position.z,1}};
     const std::array<float,16> world_view{{t.right.x,t.up.x,t.forward.x,0,
@@ -141,8 +158,10 @@ Vec3 unproject(const Camera& camera,float x,float y,float depth) {
     if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(depth) || depth < 0 || depth >= 1)
         throw std::invalid_argument("Cannot unproject a non-finite or background depth sample");
     const auto& p = camera.projection;
-    const float z = p.near_distance/(1-depth);
-    return transformPoint(camera.transform,{z*(x-p.x_offset)/p.x_scale,z*(y-p.y_offset)/p.y_scale,z});
+    const bool orthographic = p.orthographic_depth_scale > 0;
+    const float z = orthographic ? p.near_distance+2*depth/p.orthographic_depth_scale : p.near_distance/(1-depth);
+    const float w = orthographic ? 1 : z;
+    return transformPoint(camera.transform,{w*(x-p.x_offset)/p.x_scale,w*(y-p.y_offset)/p.y_scale,z});
 }
 Transform resolveMeshTransform(const PreparedMesh& instance,const Camera& camera) {
     auto world = instance.world;
@@ -203,6 +222,9 @@ ClipPosition project(const Camera& camera, Vec3 world) {
     const auto p = subtract(world,camera.transform.position);
     const double x = dot(p,camera.transform.right), y = dot(p,camera.transform.up), z = dot(p,camera.transform.forward);
     const auto& projection = camera.projection;
+    if (projection.orthographic_depth_scale > 0)
+        return {x*projection.x_scale+projection.x_offset,y*projection.y_scale+projection.y_offset,
+            (z-projection.near_distance)*projection.orthographic_depth_scale-1,1};
     return {x*projection.x_scale+z*projection.x_offset, y*projection.y_scale+z*projection.y_offset,
         z-2*projection.near_distance,z};
 }

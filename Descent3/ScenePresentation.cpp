@@ -2,6 +2,9 @@
 #include "SceneExtraction.h"
 #include "SceneMaterialBindings.h"
 #include "SceneReflectionBake.h"
+#include "SceneCanvas.h"
+#include "../renderer/SceneGeometry.h"
+#include "grtext.h"
 #include "../renderer/SceneLighting.h"
 #include "../renderer/SceneImages.h"
 #include "../renderer/SceneTerrain.h"
@@ -12,6 +15,7 @@
 #include <cmath>
 #include <algorithm>
 #include <cstring>
+#include <stdexcept>
 #include <unordered_set>
 #include <unordered_map>
 #include "game.h"
@@ -33,6 +37,39 @@
 #include "terrain.h"
 
 bool SceneGeometryInspection() { return FindArg("-scene-inspection") != 0; }
+
+void PrepareSceneText(d3scene::FrameData& frame,uint64_t collection,int32_t& next_order,
+    int x,int y,const char* text,const SceneTextStyle& style) {
+    if (!text || style.font < 0 || !std::isfinite(style.scale) || style.scale <= 0)
+        throw std::invalid_argument("Invalid prepared text input");
+    const int origin = x, spacing = 1+grfont_GetTracking(style.font);
+    const auto quad = d3scene::assets().publishMesh(2,d3scene::unitBillboardQuad());
+    for (const auto* cursor = reinterpret_cast<const unsigned char*>(text); *cursor; ++cursor) {
+        if (*cursor == '\n') { x = origin; y += int(grfont_GetHeight(style.font)*style.scale)+1; continue; }
+        if (*cursor == ' ') { x += int(grfont_GetCharWidth(style.font,' ')*style.scale)+spacing; continue; }
+        tFontGlyph glyph;
+        const bool found = grfont_GetGlyph(style.font,*cursor,glyph);
+        if (found && glyph.width > 0 && glyph.height > 0) {
+            const int right = int(x+glyph.width*style.scale), bottom = int(y+glyph.height*style.scale);
+            if (right > x && bottom > y) {
+                d3scene::PreparedMesh mesh;
+                mesh.asset = quad; mesh.collection = collection;
+                mesh.vertices = {{float(x),float(y),.5f},{float(right),float(y),.5f},
+                    {float(right),float(bottom),.5f},{float(x),float(bottom),.5f}};
+                auto& surface = mesh.surface;
+                surface.composition_order = next_order++;
+                surface.bitmap = glyph.bitmap; surface.texture_alpha = true; surface.texture_wrap = false;
+                surface.unlit = true; surface.two_sided = true; surface.depth = d3scene::DepthMode::Disabled;
+                surface.blend = style.additive ? d3scene::BlendMode::Additive : d3scene::BlendMode::Alpha;
+                surface.alpha = style.alpha; surface.color_modulation = style.color;
+                surface.u_offset = glyph.u; surface.v_offset = glyph.v; surface.texture_scale = {glyph.uv_width,glyph.uv_height};
+                frame.meshes.push_back(std::move(mesh));
+            }
+        }
+        x += (found ? int(glyph.width*style.scale) : 1)+spacing+
+            grfont_GetKernedSpacing(style.font,*cursor,cursor[1]);
+    }
+}
 
 d3scene::OcclusionClass SceneRoomOcclusionClass(int texture, bool exterior) {
     if (exterior) return d3scene::OcclusionClass::Default;
@@ -481,7 +518,7 @@ void RenderGameSceneView(const d3scene::Presentation& frame, d3scene::View view)
 
 void RenderPreparedCockpit(const d3scene::Presentation& frame, d3scene::Rect viewport, float zoom) {
     if (!SceneGeometryInspection()) Error("Cockpit migration has not passed gameplay acceptance");
-    bool base = false, layered = false, late = false, gauges = false, monitors = false;
+    bool base = false, layered = false, late = false, gauges = false, monitors = false, text = false;
     for (const auto& instance : frame.data().model_instances) {
         base = base || instance.collection == SceneCockpitBase;
         layered = layered || instance.collection == SceneCockpitAfterGauges;
@@ -490,6 +527,7 @@ void RenderPreparedCockpit(const d3scene::Presentation& frame, d3scene::Rect vie
     for (const auto& mesh : frame.data().meshes) {
         gauges = gauges || mesh.collection == SceneCockpitGauges;
         monitors = monitors || mesh.collection == SceneCockpitMonitorBacking;
+        text = text || mesh.collection == SceneCockpitText;
     }
     if (!base && !layered && !late) Error("Cockpit fixture has no prepared cockpit model");
     d3scene::View view;
@@ -516,6 +554,16 @@ void RenderPreparedCockpit(const d3scene::Presentation& frame, d3scene::Rect vie
         d3scene::renderView(frame,view);
         view.ordering = d3scene::ViewOrdering::Depth;
     }
+    if (text) {
+        auto canvas = view;
+        canvas.collection = canvas.history_key = SceneCockpitText;
+        canvas.ordering = d3scene::ViewOrdering::Compositing;
+        canvas.projection = d3scene::ViewProjection::Orthographic;
+        canvas.orthographic_size = {float(viewport.width),float(viewport.height)};
+        canvas.camera.position = {viewport.width*.5f,viewport.height*.5f,0};
+        canvas.camera.up = {0,-1,0};
+        d3scene::renderView(frame,canvas);
+    }
     if (layered) {
         view.collection = view.history_key = SceneCockpitAfterGauges;
         d3scene::renderView(frame,view);
@@ -527,7 +575,7 @@ void RenderPreparedCockpit(const d3scene::Presentation& frame, d3scene::Rect vie
         d3scene::renderView(frame,view);
     }
     if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
-        AutomatedCaptureLog("scene cockpit composed base=%d late=%d gauges=%d text=0",base,late,gauges);
+        AutomatedCaptureLog("scene cockpit composed base=%d late=%d gauges=%d text=%d",base,late,gauges,text);
 }
 
 void RenderModuleSceneView(object* viewer, vector* eye, int room, matrix* orientation,

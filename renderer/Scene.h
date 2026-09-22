@@ -442,6 +442,7 @@ using PresentationRef = std::shared_ptr<const Presentation>;
 enum class ViewKind { Main, Auxiliary, Mirror, SaveThumbnail, Automap, Preview };
 enum class ViewTarget { Scene, Display };
 enum class ViewOrdering { Depth, Compositing };
+enum class ViewProjection { Perspective, Orthographic };
 struct Rect { int32_t x = 0, y = 0, width = 0, height = 0; };
 enum Feedback : uint8_t { NoFeedback = 0, Automap = 1, ObjectVisibility = 2, EffectEligibility = 4 };
 struct View {
@@ -450,6 +451,8 @@ struct View {
     ViewKind kind = ViewKind::Main;
     ViewTarget target = ViewTarget::Scene;
     ViewOrdering ordering = ViewOrdering::Depth;
+    ViewProjection projection = ViewProjection::Perspective;
+    Vec2 orthographic_size{1,1}, orthographic_depth{0,1};
     bool clear_depth = false; // scoped to this view's raster viewport
     uint64_t collection = 0; // selects content, independently of camera/history/target
     uint64_t history_key = 0;

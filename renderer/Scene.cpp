@@ -479,6 +479,13 @@ void Presentation::requireExecutable() const {
         throw std::logic_error("Renderer migration incomplete: presentation contains unprepared domains");
 }
 void validateView(const View& view) {
+    require(view.projection == ViewProjection::Perspective || view.projection == ViewProjection::Orthographic,"Invalid view projection");
+    require(view.projection != ViewProjection::Orthographic ||
+        (view.kind != ViewKind::Main && view.feedback == NoFeedback &&
+         std::isfinite(view.orthographic_size.x) && std::isfinite(view.orthographic_size.y) &&
+         view.orthographic_size.x > 0 && view.orthographic_size.y > 0 &&
+         std::isfinite(view.orthographic_depth.x) && std::isfinite(view.orthographic_depth.y) &&
+         view.orthographic_depth.y > view.orthographic_depth.x),"Invalid orthographic view volume or ownership");
     require(view.ordering == ViewOrdering::Depth || view.ordering == ViewOrdering::Compositing, "Invalid view ordering");
     require(view.ordering != ViewOrdering::Compositing || (view.kind != ViewKind::Main && view.feedback == NoFeedback),
         "Compositing views cannot own main-world products or gameplay feedback");
