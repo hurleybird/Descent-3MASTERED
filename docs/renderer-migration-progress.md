@@ -1,5 +1,32 @@
 # Renderer migration checkpoint
 
+## Continuation: complete world composition before overlay rendering
+
+Removed the cockpit-dependent deferred-bloom branch and its cross-layer pending
+resource state. One world path now prepares bloom, copies linear world color,
+applies motion, performs bloom/display transfer, then allows cockpit/canvas use.
+Cockpit presence no longer changes motion's color convention or completes world
+bloom. BeginCockpitFrame consumes the finished world image; EndCockpitFrame only
+resolves/blends its layer. Authored cockpit/gauge publication is still pending.
+
+Framebuffer roles exchange owned storage instead of copying pixels back after
+motion and display composition. A runtime GPU check verifies identity, extent,
+HDR radiance and independent destruction after exchange. World and cockpit use
+one tested 4->2->1 / 2->1 reduction schedule. AO no longer triggers a redundant
+display-stage depth copy; its depth consumption belongs to the scene schedule.
+
+Full build and 5,195 CPU checks pass. All eight world-composition captures finish;
+compared with the prior compositor, differences are at most one 8-bit channel
+value (additional linear intermediate rounding). Storage/shared-reduction runs
+leave seven saves exact and a localized recurring 000 pose delta. Native/no-post
+000/003 and 4x SSAA/8x MSAA 003 complete. Moving-camera 000/002 with motion enabled
+complete and report valid moving surface history; 000 was visually inspected.
+The transparent layer fixture was inspected at native, 2x and 4x: the world stays
+intact and the panel composes at the same screen location. This exercises the
+canvas compositor, not migrated cockpit geometry. Capture manifests guard
+MotionBlur and LayerProbe settings. Candidate/Previous Candidate remain untouched;
+all domain barriers are still pending.
+
 ## Continuation: explicit exterior roots and receiver-owned decals
 
 Outdoor views now declare their origin instead of falling into the unknown-room

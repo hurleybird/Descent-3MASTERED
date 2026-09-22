@@ -49,6 +49,7 @@
 #include "mono.h"
 #include "pserror.h"
 #include "SceneView.h"
+#include "SceneCompositing.h"
 #include "SceneHistory.h"
 #include "gl_shared.h"
 #include "IRenderer.h"
@@ -248,17 +249,8 @@ class GL4Renderer : public IRenderer
 	bool captured_scene_view_projection_valid = false;
 	bool captured_scene_inverse_modelview_valid = false;
 	bool frozen_static_motion_valid = false;
-	bool deferred_bloom_composite_pending = false;
-	bool deferred_bloom_apply_pending = false;
-	Framebuffer* deferred_bloom_source_framebuffer = nullptr;
-	ColorFramebuffer* deferred_bloom_framebuffer = nullptr;
-	GLuint deferred_bloom_protection_mask_texture = 0;
 	bool cockpit_scene_frame_active = false;
-	float deferred_bloom_uv_origin_x = 0.0f;
-	float deferred_bloom_uv_origin_y = 0.0f;
-	float deferred_bloom_uv_scale_x = 1.0f;
-	float deferred_bloom_uv_scale_y = 1.0f;
-	float deferred_display_gamma = 1.0f;
+	float presentation_gamma = 1.0f;
 	float current_projection[16] = {};
 	float current_view_projection[16] = {};
 	float current_inverse_view_projection[16] = {};
@@ -681,14 +673,13 @@ private:
 	void UpdateWindow();
 	void RefreshViewSize();
 	void UpdatePresentRect();
-	bool BeginPostPresentFrameInternal(bool defer_bloom_composite);
 	void StartCockpitSceneFrame(int x1, int y1, int x2, int y2);
 	bool ResolveCockpitLayerToPostComposite();
 	void ClearPostPresentAlpha();
 	void BlendPostCompositeOverPostPresent();
-	void ApplyDeferredBloom(GLuint alpha_occlusion_mask_texture);
-	void CompositeDeferredBloomOverPostPresent();
-	void GammaCorrectPostPresent();
+	void CompositeWorldDisplay(Framebuffer* world_source,ColorFramebuffer* bloom_output,
+		GLuint protection_mask,float uv_x,float uv_y,float uv_w,float uv_h,float display_gamma);
+	void GammaCorrectPostPresent(float display_gamma);
 	void CompositePendingModalUI();
 	void BindScreenshotSourceForRead(int& read_x, int& read_y);
 	int SupersamplingFactor() const;

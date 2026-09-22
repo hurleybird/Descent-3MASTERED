@@ -157,6 +157,9 @@ class Framebuffer
 	void ResolveDepth();
 public:
 	Framebuffer();
+	// Transfer complete framebuffer storage between compositor roles without
+	// copying pixels. Resolve shaders are context-owned and storage-independent.
+	void SwapStorage(Framebuffer& other);
 	void Update(int width, int height, int msaa_samples);
 	void Destroy();
 	//Mark the resolved sub framebuffer as stale. Call after writing to the MSAA

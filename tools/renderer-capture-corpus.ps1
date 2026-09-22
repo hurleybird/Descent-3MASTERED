@@ -19,6 +19,8 @@ param(
     [switch]$ModelEffectsProbe,
     [switch]$ScorchProbe,
     [switch]$ScorchViewProbe,
+    [switch]$MotionBlur,
+    [switch]$LayerProbe,
     [switch]$HistoryProbe,
     [switch]$DeformationProbe
 )
@@ -27,6 +29,7 @@ param(
 # at Candidate or the normal installation: the game may write local cache files.
 $ErrorActionPreference = 'Stop'
 if ($AtmosphereProbe) { $SatelliteProbe = $true }
+if ($LayerProbe -and -not $SceneInspection) { throw 'Layer probe requires scene inspection.' }
 if ($ScorchViewProbe) {
     if (-not $SceneInspection -or $TerrainProbe -or $SkyProbe -or $SatelliteProbe -or $HistoryProbe -or $ModelEffectsProbe) {
         throw 'Scorch view probe requires scene inspection and no other camera probe.'
@@ -76,6 +79,8 @@ $manifest = [ordered]@{
     model_effects_probe = [bool]$ModelEffectsProbe
     scorch_probe = [bool]$ScorchProbe
     scorch_view_probe = [bool]$ScorchViewProbe
+    motion_blur = [bool]$MotionBlur
+    layer_probe = [bool]$LayerProbe
     model_effects_revision = $(if ($ModelEffectsProbe) { 2 } else { 0 })
     history_probe = [bool]$HistoryProbe
     executable = (Get-FileHash -LiteralPath $exe).Hash
@@ -101,7 +106,9 @@ try {
             ('"{0}"' -f $runtimePath),'-pilot','Jeff','-loadgame',('"{0}"' -f $savePath),
             '-capture-frame',"$Frame",'-capture-dt','0.016666667','-capture-seed',"$Seed",'-capture-headlight',
             '-capture-output',('"{0}"' -f $png),'-render-resolution','1280','720',
-            '-perpixellighting','-nomotionblur')
+            '-perpixellighting')
+        if ($MotionBlur) { $arguments += '-motion-blur-new' }
+        else { $arguments += '-nomotionblur' }
         if ($Profile -ne 'effects') { $arguments += @('-noao','-nobloom') }
         else { $arguments += @('-ao','-bloom') }
         $arguments += @('-ssaa',"$sampleScale",'-msaa',"$msaaCount")
@@ -116,6 +123,7 @@ try {
         if ($ModelEffectsProbe) { $arguments += '-scene-model-effects-probe' }
         if ($ScorchProbe) { $arguments += '-capture-scorch' }
         if ($ScorchViewProbe) { $arguments += '-scene-scorch-view-probe' }
+        if ($LayerProbe) { $arguments += '-scene-layer-probe' }
         if ($DeformationProbe) { $arguments += '-scene-deformation-probe' }
         $started = Get-Date
         $process = Start-Process -FilePath $exe -ArgumentList $arguments -WorkingDirectory $runtimePath -WindowStyle Hidden -PassThru

@@ -42,6 +42,15 @@ void appendRoom(d3scene::SceneAssets& assets,d3scene::FrameData& data,d3scene::M
 }
 
 int runSceneViewTests() {
+    check(d3scene::imageReductionSteps(1).empty(),"Native resolution introduced a reduction pass");
+    const auto reduction2 = d3scene::imageReductionSteps(2), reduction4 = d3scene::imageReductionSteps(4);
+    check(reduction2.size() == 1 && reduction2[0].source_scale == 2 && reduction2[0].destination_scale == 1,
+        "Two-times layer reduction changed kernel scale");
+    check(reduction4.size() == 2 && reduction4[0].source_scale == 4 && reduction4[0].destination_scale == 2 &&
+        reduction4[1].source_scale == 2 && reduction4[1].destination_scale == 1,"Four-times layer skipped an intermediate reduction");
+    bool invalid_reduction = false;
+    try { d3scene::imageReductionSteps(3); } catch (const std::invalid_argument&) { invalid_reduction = true; }
+    check(invalid_reduction,"Unsupported reduction scale silently changed filter");
     auto v=view();
     auto camera=d3scene::prepareCamera(v);
     check(near(camera.projection.x_scale,1)&&near(camera.projection.y_scale,4.0/3),"Legacy 4:3 FOV changed");

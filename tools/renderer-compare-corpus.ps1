@@ -78,6 +78,12 @@ if ($referenceManifest.profile -ne $actualManifest.profile -or
     throw 'Capture profiles, frame, pilot or registry settings differ; comparison invalid.'
 }
 if ($referenceManifest.results.Count -ne $actualManifest.results.Count) { throw 'Corpus sizes differ.' }
+if ([bool]$referenceManifest.layer_probe -ne [bool]$actualManifest.layer_probe -and -not $DiagnosticComparison) {
+    throw 'Layer fixture differs; use DiagnosticComparison for intentional composition changes.'
+}
+if ([bool]$referenceManifest.motion_blur -ne [bool]$actualManifest.motion_blur -and -not $DiagnosticComparison) {
+    throw 'Motion blur differs; use DiagnosticComparison for intentional processing changes.'
+}
 if ([bool]$referenceManifest.scorch_probe -ne [bool]$actualManifest.scorch_probe -and -not $DiagnosticComparison) {
     throw 'Scorch fixture differs; use DiagnosticComparison for intentional fixture changes.'
 }

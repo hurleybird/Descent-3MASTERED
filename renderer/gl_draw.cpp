@@ -650,8 +650,7 @@ void GL4Renderer::ApplyPixelMotionBlur(int supersampling_factor)
 		GL_BindFramebufferTexture(object_id_texture, 4, GL_NEAREST);
 	GL_DrawFramebufferQuad(motion_blur_framebuffer.Handle(), 0, 0,
 		motion_blur_framebuffer.Width(), motion_blur_framebuffer.Height());
-	motion_blur_framebuffer.BlitToRaw(post_present_framebuffer.Handle(), 0, 0,
-		post_present_framebuffer.Width(), post_present_framebuffer.Height(), GL_NEAREST);
+	post_present_framebuffer.SwapStorage(motion_blur_framebuffer);
 }
 
 void GL4Renderer::DrawMotionVectorDebugPreview(int supersampling_factor)

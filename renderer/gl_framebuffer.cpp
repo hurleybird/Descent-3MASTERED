@@ -248,6 +248,17 @@ void ColorFramebuffer::Destroy()
 	m_internal_format = 0;
 }
 
+void Framebuffer::SwapStorage(Framebuffer& other)
+{
+	using std::swap;
+	swap(m_name,other.m_name); swap(m_subname,other.m_subname);
+	swap(m_colorname,other.m_colorname); swap(m_subcolorname,other.m_subcolorname);
+	swap(m_depthname,other.m_depthname); swap(m_subdepthname,other.m_subdepthname);
+	swap(m_width,other.m_width); swap(m_height,other.m_height);
+	swap(m_samples,other.m_samples); swap(m_requested_samples,other.m_requested_samples);
+	swap(m_subcolor_dirty,other.m_subcolor_dirty); swap(m_subdepth_dirty,other.m_subdepth_dirty);
+}
+
 Framebuffer::Framebuffer()
 {
 	m_width = m_height = 0;
@@ -1122,6 +1133,23 @@ void main() {
         Error("Signed sample-light composition failed: %g,%g,%g,%g",radiance[0],radiance[1],radiance[2],radiance[3]);
     glDeleteTextures(1,&eligible); glDeleteTextures(1,&constant_ao); composite.Destroy();
     shader.Destroy(); motion.Destroy(); target.Destroy();
+    Framebuffer storage_a,storage_b;
+    storage_a.Update(1,1,0); storage_b.Update(2,1,0);
+    const GLuint first_storage = storage_a.Handle(), second_storage = storage_b.Handle();
+    glBindFramebuffer(GL_FRAMEBUFFER,storage_a.Handle()); glDrawBuffer(GL_COLOR_ATTACHMENT0);
+    const float stored_color[4] = {2,.25f,.5f,1};
+    glClearBufferfv(GL_COLOR,0,stored_color);
+    storage_a.SwapStorage(storage_b);
+    if (storage_a.Handle() != second_storage || storage_b.Handle() != first_storage ||
+        storage_a.Width() != 2 || storage_b.Width() != 1)
+        Error("Compositor storage swap lost resource identity or dimensions");
+    storage_b.ColorTextureForRead(); glReadBuffer(GL_COLOR_ATTACHMENT0);
+    glReadPixels(0,0,1,1,GL_RGBA,GL_FLOAT,radiance);
+    if (radiance[0] != 2 || radiance[1] != .25f || radiance[2] != .5f || radiance[3] != 1)
+        Error("Compositor storage swap corrupted radiance");
+    storage_b.Destroy();
+    if (!glIsFramebuffer(storage_a.Handle())) Error("Compositor storage swap aliased ownership");
+    storage_a.Destroy();
     glBlendFuncSeparatei(0,blend_src_rgb,blend_dst_rgb,blend_src_alpha,blend_dst_alpha);
     glBlendEquationSeparatei(0,blend_rgb,blend_alpha);
     if (blend3) glEnablei(GL_BLEND,3); else glDisablei(GL_BLEND,3);
@@ -1131,6 +1159,7 @@ void main() {
     AutomatedCaptureLog("scene sample resolve verified: nearest sample=1 depth=0.2 velocity=1,11 validity=1 class=3 identity=101");
     AutomatedCaptureLog("scene radiance resolve verified: unclipped RGB=2,0.5,0.125");
     AutomatedCaptureLog("scene signed-light composition verified: per-sample radiance and alpha preserved");
+    AutomatedCaptureLog("scene compositor storage verified: identity, extent, radiance and independent destruction");
 }
 
 void PostProtectionMaskResources::Update(uint32_t new_width, uint32_t new_height, uint32_t msaa_samples)

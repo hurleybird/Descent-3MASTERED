@@ -3023,6 +3023,28 @@ void GameRenderFrame(void)
 			DrawSmallViews(*presentation);
 		}
 		rend_PerfGpuSceneMark(RENDERER_GPU_SCENE_AFTER_SMALL_VIEWS);
+		if (SceneGeometryInspection() && FindArg("-scene-layer-probe"))
+		{
+			// Exercise the canvas composition boundary without invoking any
+			// unmigrated cockpit model/gauge renderer or changing authored geometry.
+			if (!rend_BeginCockpitFrame()) Error("Layer fixture could not begin composition");
+			StartFrame(0,0,Max_window_w,Max_window_h,false);
+			rend_SetZBufferState(0); rend_SetZBufferWriteMask(0);
+			rend_SetLighting(LS_NONE); rend_SetTextureType(TT_FLAT);
+			rend_SetOverlayType(OT_NONE); rend_SetAlphaType(AT_CONSTANT);
+			rend_SetAlphaValue(128); rend_SetFlatColor(GR_RGB(0,180,220));
+			g3Point corners[4] = {}; g3Point* points[4] = {&corners[0],&corners[1],&corners[2],&corners[3]};
+			const float x[4] = {.6f,.9f,.9f,.6f}, y[4] = {.65f,.65f,.9f,.9f};
+			for (int i = 0; i < 4; ++i) {
+				corners[i].p3_sx = x[i]*Max_window_w; corners[i].p3_sy = y[i]*Max_window_h;
+				corners[i].p3_flags = PF_PROJECTED;
+			}
+			rend_DrawPolygon2D(0,points,4);
+			EndFrame(); rend_EndCockpitFrame();
+			rend_SetZBufferState(1); rend_SetZBufferWriteMask(1);
+			if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
+				AutomatedCaptureLog("scene layer fixture composed");
+		}
 
 		// Do Cockpit/Hud
 		// Cinematics own their presentation through Cinematic_RenderFrame below.

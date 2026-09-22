@@ -2040,21 +2040,11 @@ void GL4Renderer::GetVrrInfo(renderer_vrr_info* info)
 
 bool GL4Renderer::BeginPostPresentFrame()
 {
-	return BeginPostPresentFrameInternal(false);
-}
-
-bool GL4Renderer::BeginPostPresentFrameInternal(bool defer_bloom_composite)
-{
 	FlushFontBatch();
 
 	if (post_present_pending_swap)
 		return true;
 
-	deferred_bloom_composite_pending = false;
-	deferred_bloom_apply_pending = false;
-	deferred_bloom_source_framebuffer = nullptr;
-	deferred_bloom_framebuffer = nullptr;
-	deferred_bloom_protection_mask_texture = 0;
 
 #ifdef _DEBUG
 	GLenum err = glGetError();
@@ -2090,10 +2080,12 @@ bool GL4Renderer::BeginPostPresentFrameInternal(bool defer_bloom_composite)
 
 	Framebuffer* present_framebuffer = &framebuffers[framebuffer_current_draw];
 	int supersampling_factor = SupersamplingFactor();
-	float display_gamma = OpenGL_preferred_state.gamma != 0.0f ? 1.f / OpenGL_preferred_state.gamma : 1.f;
-	const bool ao_enabled = OpenGL_preferred_state.ao_enabled && framebuffer_ok;
+	const float display_gamma = OpenGL_preferred_state.gamma != 0.0f ? 1.f / OpenGL_preferred_state.gamma : 1.f;
+	presentation_gamma = display_gamma;
 	const bool bloom_enabled = OpenGL_preferred_state.bloom_enabled;
-	const bool late_post_enabled = ao_enabled || bloom_enabled;
+	// AO has consumed opaque depth in the scene schedule. Display composition
+	// only needs this depth copy for bloom; motion reads the owned opaque export.
+	const bool late_post_enabled = bloom_enabled;
 	const int framebuffer_logical_bottom_offset =
 		framebuffer_logical_height - OpenGL_state.screen_height - framebuffer_logical_offset_y;
 	const int post_visible_origin_x = framebuffer_logical_offset_x;
@@ -2114,43 +2106,22 @@ bool GL4Renderer::BeginPostPresentFrameInternal(bool defer_bloom_composite)
 		bloom_source_framebuffer.ClearAlphaToZero();
 		present_framebuffer = &bloom_source_framebuffer;
 	}
-	else if (supersampling_factor >= 4)
-	{
-		downsampleshader.Use();
-		{
-			PERF_MARKER_SCOPE("Post.PresentDownsample.4xTo2x");
-			framebuffers[framebuffer_current_draw].DownsampleTo(downscale_framebuffer.Handle(), 0, 0,
-				downscale_framebuffer.Width(), downscale_framebuffer.Height(), downsampleshader_gamma, display_gamma,
-				downsampleshader_dest_origin, downsampleshader_source_visible_origin,
-				downsampleshader_source_visible_size, post_visible_origin_x * 4,
-				post_visible_origin_y * 4, post_visible_width * 4, post_visible_height * 4);
-		}
-		GL4PerfGpuDrain("GPU.PresentDownsample.4xTo2x");
-		downsampleshader.Use();
-		{
-			PERF_MARKER_SCOPE("Post.PresentDownsample.2xTo1x");
-			downscale_framebuffer.DownsampleTo(resolved_framebuffer.Handle(), 0, 0,
-				resolved_framebuffer.Width(), resolved_framebuffer.Height(), downsampleshader_gamma, display_gamma,
-				downsampleshader_dest_origin, downsampleshader_source_visible_origin,
-				downsampleshader_source_visible_size, post_visible_origin_x * 2,
-				post_visible_origin_y * 2, post_visible_width * 2, post_visible_height * 2);
-		}
-		GL4PerfGpuDrain("GPU.PresentDownsample.2xTo1x");
-		present_framebuffer = &resolved_framebuffer;
-	}
 	else if (supersampling_factor >= 2)
 	{
-		downsampleshader.Use();
-		{
-			PERF_MARKER_SCOPE("Post.PresentDownsample.2xTo1x");
-			framebuffers[framebuffer_current_draw].DownsampleTo(resolved_framebuffer.Handle(), 0, 0,
-				resolved_framebuffer.Width(), resolved_framebuffer.Height(), downsampleshader_gamma, display_gamma,
-				downsampleshader_dest_origin, downsampleshader_source_visible_origin,
-				downsampleshader_source_visible_size, post_visible_origin_x * 2,
-				post_visible_origin_y * 2, post_visible_width * 2, post_visible_height * 2);
+		Framebuffer* source = &framebuffers[framebuffer_current_draw];
+		for (const auto step : d3scene::imageReductionSteps(supersampling_factor)) {
+			Framebuffer& destination = step.destination_scale == 1 ? resolved_framebuffer : downscale_framebuffer;
+			destination.Update(framebuffer_logical_width*step.destination_scale,framebuffer_logical_height*step.destination_scale,0);
+			downsampleshader.Use();
+			source->DownsampleTo(destination.Handle(),0,0,destination.Width(),destination.Height(),
+				downsampleshader_gamma,display_gamma,downsampleshader_dest_origin,
+				downsampleshader_source_visible_origin,downsampleshader_source_visible_size,
+				post_visible_origin_x*step.source_scale,post_visible_origin_y*step.source_scale,
+				post_visible_width*step.source_scale,post_visible_height*step.source_scale);
+			GL4PerfGpuDrain("GPU.WorldImageReduction");
+			source = &destination;
 		}
-		GL4PerfGpuDrain("GPU.PresentDownsample.2xTo1x");
-		present_framebuffer = &resolved_framebuffer;
+		present_framebuffer = source;
 	}
 	else if (late_post_enabled && framebuffers[framebuffer_current_draw].Samples() >= 2)
 	{
@@ -2201,124 +2172,35 @@ bool GL4Renderer::BeginPostPresentFrameInternal(bool defer_bloom_composite)
 		(float)OpenGL_state.screen_height / (float)present_framebuffer->Height() : 1.0f;
 	GLuint bloom_depth_texture = late_post_enabled ?
 		present_framebuffer->DepthTextureForRead() : 0;
-	ColorFramebuffer* bloom_framebuffer = nullptr;
-	if (defer_bloom_composite)
-	{
-		if (bloom_enabled && present_framebuffer->Handle() != 0)
-		{
-			// The resolved scene target remains immutable while the cockpit is
-			// rendered into its own layer. Keep that target alive by reference
-			// instead of copying its full-resolution color and depth attachments
-			// into a second framebuffer just before deferred bloom consumes it.
-			deferred_bloom_source_framebuffer = present_framebuffer;
-			deferred_bloom_apply_pending = true;
-		}
-		else
-		{
-			bloom.DestroyFramebuffers();
-		}
-		GL4PerfGpuSplitMark(GL4_GPU_SPLIT_BLOOM_AFTER_DEFERRED_SOURCE);
-	}
-	else
-	{
-		bloom_framebuffer = bloom.Apply(bloom_enabled ? present_framebuffer : nullptr,
-			OpenGL_preferred_state, OpenGL_state, display_gamma,
-			bloom_depth_texture, protection_mask_texture,
-			terrain_fog_reconstruction_enabled, terrain_fog_reconstruction_start,
-			terrain_fog_reconstruction_end);
-		GL4PerfGpuDrain("GPU.Bloom.Apply");
-	}
-	if (defer_bloom_composite)
-	{
-		deferred_bloom_composite_pending = false;
-		deferred_bloom_framebuffer = nullptr;
-		deferred_bloom_protection_mask_texture = protection_mask_texture;
-		deferred_bloom_uv_origin_x = post_uv_origin_x;
-		deferred_bloom_uv_origin_y = post_uv_origin_y;
-		deferred_bloom_uv_scale_x = post_uv_scale_x;
-		deferred_bloom_uv_scale_y = post_uv_scale_y;
-		deferred_display_gamma = display_gamma;
+	// Complete world composition before any cockpit/canvas can reuse scene
+	// storage. No pending bloom resources escape this operation.
+	ColorFramebuffer* bloom_framebuffer = bloom.Apply(bloom_enabled ? present_framebuffer : nullptr,
+		OpenGL_preferred_state, OpenGL_state, display_gamma,
+		bloom_depth_texture, protection_mask_texture,
+		terrain_fog_reconstruction_enabled, terrain_fog_reconstruction_start,
+		terrain_fog_reconstruction_end, 0,
+		post_uv_origin_x, post_uv_origin_y, post_uv_scale_x, post_uv_scale_y);
+	GL4PerfGpuDrain("GPU.Bloom.Apply");
+	GL4PerfGpuSplitMark(GL4_GPU_SPLIT_BLOOM_AFTER_DEFERRED_SOURCE);
 
-		blitshader.Use();
-		glUniform1f(blitshader_gamma, 1.0f);
-		if (blitshader_uv_origin != -1)
-			glUniform2f(blitshader_uv_origin, post_uv_origin_x, post_uv_origin_y);
-		if (blitshader_uv_scale != -1)
-			glUniform2f(blitshader_uv_scale, post_uv_scale_x, post_uv_scale_y);
-		present_framebuffer->BlitTo(post_present_framebuffer.Handle(), 0, 0,
-			post_present_framebuffer.Width(), post_present_framebuffer.Height(), false);
-		if (blitshader_uv_origin != -1)
-			glUniform2f(blitshader_uv_origin, 0.0f, 0.0f);
-		if (blitshader_uv_scale != -1)
-			glUniform2f(blitshader_uv_scale, 1.0f, 1.0f);
-		GL4PerfGpuDrain("GPU.PostPresentBlitLinear");
-		GL4PerfGpuSplitMark(GL4_GPU_SPLIT_BLOOM_AFTER_POST_PRESENT_COPY);
+	// Motion consumes linear world color on every presentation path. Display
+	// transfer and cockpit presence cannot change its input color convention.
+	blitshader.Use();
+	glUniform1f(blitshader_gamma, 1.0f);
+	if (blitshader_uv_origin != -1) glUniform2f(blitshader_uv_origin, post_uv_origin_x, post_uv_origin_y);
+	if (blitshader_uv_scale != -1) glUniform2f(blitshader_uv_scale, post_uv_scale_x, post_uv_scale_y);
+	present_framebuffer->BlitTo(post_present_framebuffer.Handle(), 0, 0,
+		post_present_framebuffer.Width(), post_present_framebuffer.Height(), false);
+	if (blitshader_uv_origin != -1) glUniform2f(blitshader_uv_origin, 0.0f, 0.0f);
+	if (blitshader_uv_scale != -1) glUniform2f(blitshader_uv_scale, 1.0f, 1.0f);
+	GL4PerfGpuDrain("GPU.PostPresentBlitLinear");
+	GL4PerfGpuSplitMark(GL4_GPU_SPLIT_BLOOM_AFTER_POST_PRESENT_COPY);
 
-		ApplyPixelMotionBlur(supersampling_factor);
-		DrawMotionVectorDebugPreview(supersampling_factor);
-		GL4PerfGpuSplitMark(GL4_GPU_SPLIT_BLOOM_AFTER_MOTION_BLUR);
-	}
-	else if (bloom_framebuffer)
-	{
-		bloom.compositeshader.Use();
-		glUniform1f(bloom.composite_gamma, display_gamma);
-		glUniform1f(bloom.composite_intensity, OpenGL_preferred_state.bloom_intensity);
-		glUniform1i(bloom.composite_use_alpha_mask, 0);
-		glUniform1i(bloom.composite_use_protection_mask, protection_mask_texture != 0 ? 1 : 0);
-		glUniform1i(bloom.composite_use_terrain_fog_protection,
-			terrain_fog_reconstruction_enabled && bloom_depth_texture != 0 &&
-			protection_mask_texture != 0 ? 1 : 0);
-		glUniform2f(bloom.composite_terrain_fog_depth_range,
-			terrain_fog_reconstruction_start, terrain_fog_reconstruction_end);
-		if (bloom.composite_uv_origin != -1)
-			glUniform2f(bloom.composite_uv_origin, post_uv_origin_x, post_uv_origin_y);
-		if (bloom.composite_uv_scale != -1)
-			glUniform2f(bloom.composite_uv_scale, post_uv_scale_x, post_uv_scale_y);
-		if (bloom.composite_scene_uv_origin != -1)
-			glUniform2f(bloom.composite_scene_uv_origin, post_uv_origin_x, post_uv_origin_y);
-		if (bloom.composite_scene_uv_scale != -1)
-			glUniform2f(bloom.composite_scene_uv_scale, post_uv_scale_x, post_uv_scale_y);
-		rend_ClearBoundTextures();
-		GL_BindFramebufferTexture(present_framebuffer->ColorTextureForRead(), 0, GL_NEAREST);
-		GL_BindFramebufferTexture(bloom_framebuffer->ColorTextureForRead(), 1, GL_LINEAR);
-		if (protection_mask_texture != 0)
-			GL_BindFramebufferTexture(protection_mask_texture, 3, GL_NEAREST);
-		if (bloom_depth_texture != 0)
-			GL_BindFramebufferTexture(bloom_depth_texture, 4, GL_NEAREST);
-		{
-			PERF_MARKER_SCOPE("Bloom.Composite");
-			GL_DrawFramebufferQuad(post_present_framebuffer.Handle(), 0, 0,
-				post_present_framebuffer.Width(), post_present_framebuffer.Height());
-		}
-		GL4PerfGpuDrain("GPU.Bloom.Composite");
-	}
-	else
-	{
-		blitshader.Use();
-		glUniform1f(blitshader_gamma, display_gamma);
-		if (blitshader_uv_origin != -1)
-			glUniform2f(blitshader_uv_origin, post_uv_origin_x, post_uv_origin_y);
-		if (blitshader_uv_scale != -1)
-			glUniform2f(blitshader_uv_scale, post_uv_scale_x, post_uv_scale_y);
-		present_framebuffer->BlitTo(post_present_framebuffer.Handle(), 0, 0,
-			post_present_framebuffer.Width(), post_present_framebuffer.Height(), false);
-		if (blitshader_uv_origin != -1)
-			glUniform2f(blitshader_uv_origin, 0.0f, 0.0f);
-		if (blitshader_uv_scale != -1)
-			glUniform2f(blitshader_uv_scale, 1.0f, 1.0f);
-		GL4PerfGpuDrain("GPU.PostPresentBlit");
-	}
-	if (!defer_bloom_composite)
-	{
-		GL4PerfGpuSplitMark(GL4_GPU_SPLIT_BLOOM_AFTER_DEFERRED_SOURCE);
-		GL4PerfGpuSplitMark(GL4_GPU_SPLIT_BLOOM_AFTER_POST_PRESENT_COPY);
-	}
-	if (!defer_bloom_composite)
-	{
-		ApplyPixelMotionBlur(supersampling_factor);
-		DrawMotionVectorDebugPreview(supersampling_factor);
-		GL4PerfGpuSplitMark(GL4_GPU_SPLIT_BLOOM_AFTER_MOTION_BLUR);
-	}
+	ApplyPixelMotionBlur(supersampling_factor);
+	GL4PerfGpuSplitMark(GL4_GPU_SPLIT_BLOOM_AFTER_MOTION_BLUR);
+	CompositeWorldDisplay(present_framebuffer,bloom_framebuffer,protection_mask_texture,
+		post_uv_origin_x,post_uv_origin_y,post_uv_scale_x,post_uv_scale_y,display_gamma);
+	DrawMotionVectorDebugPreview(supersampling_factor);
 	ShaderProgram::ClearBinding();
 
 	GL4PerfGpuSplitMark(GL4_GPU_SPLIT_AFTER_BLOOM);
@@ -2372,7 +2254,7 @@ bool GL4Renderer::IsPostPresentFramePending() const
 	return post_present_pending_swap;
 }
 
-void GL4Renderer::GammaCorrectPostPresent()
+void GL4Renderer::GammaCorrectPostPresent(float display_gamma)
 {
 	if (post_present_framebuffer.Handle() == 0)
 		return;
@@ -2382,16 +2264,15 @@ void GL4Renderer::GammaCorrectPostPresent()
 		return;
 
 	blitshader.Use();
-	glUniform1f(blitshader_gamma, deferred_display_gamma);
+	glUniform1f(blitshader_gamma, display_gamma);
 	if (blitshader_uv_origin != -1)
 		glUniform2f(blitshader_uv_origin, 0.0f, 0.0f);
 	if (blitshader_uv_scale != -1)
 		glUniform2f(blitshader_uv_scale, 1.0f, 1.0f);
 	post_present_framebuffer.BlitTo(post_composite_framebuffer.Handle(), 0, 0,
 		post_composite_framebuffer.Width(), post_composite_framebuffer.Height(), false);
-	post_composite_framebuffer.BlitToRaw(post_present_framebuffer.Handle(), 0, 0,
-		post_present_framebuffer.Width(), post_present_framebuffer.Height(), GL_NEAREST);
-	GL4PerfGpuDrain("GPU.CockpitPostGamma");
+	post_present_framebuffer.SwapStorage(post_composite_framebuffer);
+	GL4PerfGpuDrain("GPU.WorldDisplayTransfer");
 }
 
 void GL4Renderer::StartCockpitSceneFrame(int x1, int y1, int x2, int y2)
@@ -2458,41 +2339,25 @@ bool GL4Renderer::ResolveCockpitLayerToPostComposite()
 	const int visible_width = OpenGL_state.screen_width;
 	const int visible_height = OpenGL_state.screen_height;
 
-	if (supersampling_factor >= 4)
-	{
-		downscale_framebuffer.Update(framebuffer_logical_width * 2, framebuffer_logical_height * 2, 0);
-		if (downscale_framebuffer.Handle() == 0)
-			return false;
-
-		downsampleshader.Use();
-		framebuffers[framebuffer_current_draw].DownsampleTo(downscale_framebuffer.Handle(), 0, 0,
-			downscale_framebuffer.Width(), downscale_framebuffer.Height(), downsampleshader_gamma,
-			deferred_display_gamma, downsampleshader_dest_origin, downsampleshader_source_visible_origin,
-			downsampleshader_source_visible_size, visible_origin_x * 4, visible_origin_y * 4,
-			visible_width * 4, visible_height * 4);
-		GL4PerfGpuDrain("GPU.CockpitDownsample.4xTo2x");
-
-		downsampleshader.Use();
-		downscale_framebuffer.DownsampleTo(post_composite_framebuffer.Handle(), 0, 0,
-			post_composite_framebuffer.Width(), post_composite_framebuffer.Height(), downsampleshader_gamma,
-			deferred_display_gamma, downsampleshader_dest_origin, downsampleshader_source_visible_origin,
-			downsampleshader_source_visible_size, visible_origin_x * 2, visible_origin_y * 2,
-			visible_width * 2, visible_height * 2, visible_origin_x, visible_origin_y);
-		GL4PerfGpuDrain("GPU.CockpitDownsample.2xTo1x");
-	}
-	else if (supersampling_factor >= 2)
-	{
-		downsampleshader.Use();
-		framebuffers[framebuffer_current_draw].DownsampleTo(post_composite_framebuffer.Handle(), 0, 0,
-			post_composite_framebuffer.Width(), post_composite_framebuffer.Height(), downsampleshader_gamma,
-			deferred_display_gamma, downsampleshader_dest_origin, downsampleshader_source_visible_origin,
-			downsampleshader_source_visible_size, visible_origin_x * 2, visible_origin_y * 2,
-			visible_width * 2, visible_height * 2, visible_origin_x, visible_origin_y);
-		GL4PerfGpuDrain("GPU.CockpitDownsample.2xTo1x");
-	}
 	if (supersampling_factor >= 2)
 	{
-		GL4PerfGpuDrain("GPU.CockpitResolve");
+		Framebuffer* source = &framebuffers[framebuffer_current_draw];
+		for (const auto step : d3scene::imageReductionSteps(supersampling_factor)) {
+			const bool final = step.destination_scale == 1;
+			Framebuffer& destination = final ? post_composite_framebuffer : downscale_framebuffer;
+			if (!final) destination.Update(framebuffer_logical_width*step.destination_scale,
+				framebuffer_logical_height*step.destination_scale,0);
+			if (destination.Handle() == 0) return false;
+			downsampleshader.Use();
+			source->DownsampleTo(destination.Handle(),0,0,destination.Width(),destination.Height(),
+				downsampleshader_gamma,presentation_gamma,downsampleshader_dest_origin,
+				downsampleshader_source_visible_origin,downsampleshader_source_visible_size,
+				visible_origin_x*step.source_scale,visible_origin_y*step.source_scale,
+				visible_width*step.source_scale,visible_height*step.source_scale,
+				final ? visible_origin_x : 0,final ? visible_origin_y : 0);
+			GL4PerfGpuDrain("GPU.CockpitImageReduction");
+			source = &destination;
+		}
 		return true;
 	}
 
@@ -2622,99 +2487,66 @@ void GL4Renderer::BlendPostCompositeOverPostPresent()
 	RestoreLegacy();
 }
 
-void GL4Renderer::ApplyDeferredBloom(GLuint alpha_occlusion_mask_texture)
-{
-	if (!deferred_bloom_apply_pending)
-		return;
-
-	deferred_bloom_apply_pending = false;
-	deferred_bloom_composite_pending = false;
-	deferred_bloom_framebuffer = nullptr;
-
-	if (!OpenGL_preferred_state.bloom_enabled || !deferred_bloom_source_framebuffer ||
-		deferred_bloom_source_framebuffer->Handle() == 0)
-	{
-		bloom.DestroyFramebuffers();
-		return;
-	}
-
-	ColorFramebuffer* bloom_framebuffer = bloom.Apply(deferred_bloom_source_framebuffer,
-		OpenGL_preferred_state, OpenGL_state, deferred_display_gamma,
-		deferred_bloom_source_framebuffer->DepthTextureForRead(),
-		deferred_bloom_protection_mask_texture,
-		terrain_fog_reconstruction_enabled, terrain_fog_reconstruction_start,
-		terrain_fog_reconstruction_end,
-		alpha_occlusion_mask_texture,
-		deferred_bloom_uv_origin_x, deferred_bloom_uv_origin_y,
-		deferred_bloom_uv_scale_x, deferred_bloom_uv_scale_y);
-	GL4PerfGpuDrain("GPU.Bloom.ApplyDeferred");
-	deferred_bloom_framebuffer = bloom_framebuffer;
-	deferred_bloom_composite_pending = bloom_framebuffer != nullptr;
-}
-
-void GL4Renderer::CompositeDeferredBloomOverPostPresent()
+void GL4Renderer::CompositeWorldDisplay(Framebuffer* world_source,ColorFramebuffer* bloom_output,
+	GLuint protection_mask,float uv_x,float uv_y,float uv_w,float uv_h,float display_gamma)
 {
 	if (post_present_framebuffer.Handle() == 0)
 		return;
 
 	bool composited_bloom = false;
-	if (deferred_bloom_composite_pending && deferred_bloom_framebuffer &&
-		deferred_bloom_framebuffer->Handle() != 0)
+	if (bloom_output &&
+		bloom_output->Handle() != 0)
 	{
 		post_composite_framebuffer.Update(post_present_framebuffer.Width(), post_present_framebuffer.Height(), 0);
 		if (post_composite_framebuffer.Handle() != 0)
 		{
 			bloom.compositeshader.Use();
-			glUniform1f(bloom.composite_gamma, deferred_display_gamma);
+			glUniform1f(bloom.composite_gamma, display_gamma);
 			glUniform1f(bloom.composite_intensity, OpenGL_preferred_state.bloom_intensity);
 			glUniform1i(bloom.composite_use_alpha_mask, 0);
 			glUniform1i(bloom.composite_use_protection_mask,
-				deferred_bloom_protection_mask_texture != 0 ? 1 : 0);
-			GLuint deferred_bloom_depth_texture =
-				deferred_bloom_source_framebuffer ?
-				deferred_bloom_source_framebuffer->DepthTextureForRead() : 0;
+				protection_mask != 0 ? 1 : 0);
+			GLuint world_depth_texture =
+				world_source ?
+				world_source->DepthTextureForRead() : 0;
 			glUniform1i(bloom.composite_use_terrain_fog_protection,
-				terrain_fog_reconstruction_enabled && deferred_bloom_depth_texture != 0 &&
-				deferred_bloom_protection_mask_texture != 0 ? 1 : 0);
+				terrain_fog_reconstruction_enabled && world_depth_texture != 0 &&
+				protection_mask != 0 ? 1 : 0);
 			glUniform2f(bloom.composite_terrain_fog_depth_range,
 				terrain_fog_reconstruction_start, terrain_fog_reconstruction_end);
 			if (bloom.composite_uv_origin != -1)
 				glUniform2f(bloom.composite_uv_origin,
-					deferred_bloom_uv_origin_x, deferred_bloom_uv_origin_y);
+					uv_x, uv_y);
 			if (bloom.composite_uv_scale != -1)
 				glUniform2f(bloom.composite_uv_scale,
-					deferred_bloom_uv_scale_x, deferred_bloom_uv_scale_y);
+					uv_w, uv_h);
 			if (bloom.composite_scene_uv_origin != -1)
 				glUniform2f(bloom.composite_scene_uv_origin, 0.0f, 0.0f);
 			if (bloom.composite_scene_uv_scale != -1)
 				glUniform2f(bloom.composite_scene_uv_scale, 1.0f, 1.0f);
 			rend_ClearBoundTextures();
 			GL_BindFramebufferTexture(post_present_framebuffer.ColorTextureForRead(), 0, GL_NEAREST);
-			GL_BindFramebufferTexture(deferred_bloom_framebuffer->ColorTextureForRead(), 1, GL_LINEAR);
-			if (deferred_bloom_protection_mask_texture != 0)
-				GL_BindFramebufferTexture(deferred_bloom_protection_mask_texture, 3, GL_NEAREST);
-			if (deferred_bloom_depth_texture != 0)
-				GL_BindFramebufferTexture(deferred_bloom_depth_texture, 4, GL_NEAREST);
+			GL_BindFramebufferTexture(bloom_output->ColorTextureForRead(), 1, GL_LINEAR);
+			if (protection_mask != 0)
+				GL_BindFramebufferTexture(protection_mask, 3, GL_NEAREST);
+			if (world_depth_texture != 0)
+				GL_BindFramebufferTexture(world_depth_texture, 4, GL_NEAREST);
 			{
-				PERF_MARKER_SCOPE("Bloom.CompositeCockpitLayer");
+				PERF_MARKER_SCOPE("Bloom.CompositeWorldDisplay");
 				GL_DrawFramebufferQuad(post_composite_framebuffer.Handle(), 0, 0,
 					post_composite_framebuffer.Width(), post_composite_framebuffer.Height());
 			}
-			post_composite_framebuffer.BlitToRaw(post_present_framebuffer.Handle(), 0, 0,
-				post_present_framebuffer.Width(), post_present_framebuffer.Height(), GL_NEAREST);
-			GL4PerfGpuDrain("GPU.Bloom.CompositeCockpitLayer");
+			post_present_framebuffer.SwapStorage(post_composite_framebuffer);
+			GL4PerfGpuDrain("GPU.Bloom.CompositeWorldDisplay");
 			composited_bloom = true;
 		}
 	}
 
 	if (!composited_bloom)
 	{
-		GammaCorrectPostPresent();
+		GammaCorrectPostPresent(display_gamma);
 	}
 
-	deferred_bloom_composite_pending = false;
-	deferred_bloom_framebuffer = nullptr;
-	deferred_bloom_protection_mask_texture = 0;
 	ShaderProgram::ClearBinding();
 }
 
@@ -2831,10 +2663,6 @@ void GL4Renderer::EndPostPresentFrame()
 		motion_vectors_capture_locked = false;
 		post_present_pending_swap = false;
 		cockpit_scene_frame_active = false;
-		deferred_bloom_composite_pending = false;
-		deferred_bloom_apply_pending = false;
-		deferred_bloom_framebuffer = nullptr;
-		deferred_bloom_protection_mask_texture = 0;
 	}
 	if (msaa_downshift_release_frames > 0)
 	{
@@ -2874,7 +2702,7 @@ bool GL4Renderer::BeginCockpitFrame()
 	if (!framebuffer_ok)
 		return false;
 
-	if (!BeginPostPresentFrameInternal(true))
+	if (!BeginPostPresentFrame())
 		return false;
 
 	cockpit_scene_frame_active = true;
@@ -2890,9 +2718,7 @@ void GL4Renderer::EndCockpitFrame()
 	GL4PerfGpuSplitMark(GL4_GPU_SPLIT_COCKPIT_AFTER_DRAW);
 	ClearPostPresentAlpha();
 	GL4PerfGpuSplitMark(GL4_GPU_SPLIT_COCKPIT_AFTER_ALPHA_CLEAR);
-	ApplyDeferredBloom(0);
 	GL4PerfGpuSplitMark(GL4_GPU_SPLIT_COCKPIT_AFTER_BLOOM_APPLY);
-	CompositeDeferredBloomOverPostPresent();
 	GL4PerfGpuSplitMark(GL4_GPU_SPLIT_COCKPIT_AFTER_BLOOM_COMPOSITE);
 	const bool cockpit_layer_resolved = cockpit_scene_frame_active && ResolveCockpitLayerToPostComposite();
 	GL4PerfGpuSplitMark(GL4_GPU_SPLIT_COCKPIT_AFTER_RESOLVE);
@@ -3114,7 +2940,6 @@ void GL4Renderer::ExportOpaqueScene(const d3scene::Camera& camera)
 		bloom_source_framebuffer.Destroy();
 		bloom_source_resolved_framebuffer.Destroy();
 		bloom_source_downscale_framebuffer.Destroy();
-		deferred_bloom_source_framebuffer = nullptr;
 	}
 
 	if (framebuffer_ok)
@@ -4397,7 +4222,6 @@ void GL4Renderer::UpdateFramebuffer(void)
 		bloom_source_framebuffer.Destroy();
 		bloom_source_resolved_framebuffer.Destroy();
 		bloom_source_downscale_framebuffer.Destroy();
-		deferred_bloom_source_framebuffer = nullptr;
 		post_present_framebuffer.Destroy();
 		post_composite_framebuffer.Destroy();
 		motion_blur_framebuffer.Destroy();
@@ -4460,7 +4284,6 @@ void GL4Renderer::UpdateFramebuffer(void)
 
 	bloom_source_valid = false;
 	ao_scene_valid = false;
-	deferred_bloom_apply_pending = false;
 	legacy_draw_uniforms_dirty = true;
 	post_protection_mask_dirty = false;
 	post_protection_mask_cleared_this_frame = false;
@@ -4517,7 +4340,6 @@ void GL4Renderer::CloseFramebuffer(void)
 	bloom_source_framebuffer.Destroy();
 	bloom_source_resolved_framebuffer.Destroy();
 	bloom_source_downscale_framebuffer.Destroy();
-	deferred_bloom_source_framebuffer = nullptr;
 	post_present_framebuffer.Destroy();
 	post_composite_framebuffer.Destroy();
 	motion_blur_framebuffer.Destroy();
@@ -4528,7 +4350,6 @@ void GL4Renderer::CloseFramebuffer(void)
 	soft_particle_depth_source_framebuffer = 0;
 	bloom_source_valid = false;
 	ao_scene_valid = false;
-	deferred_bloom_apply_pending = false;
 	surface_records.Destroy();
 	frozen_static_motion_valid = false;
 	post_protection_mask.Destroy();
