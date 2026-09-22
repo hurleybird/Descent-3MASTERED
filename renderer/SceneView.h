@@ -5,6 +5,11 @@
 
 namespace d3scene {
 
+// Logical top-left view rectangle to bottom-left raster coordinates. Target
+// allocation owns scale/overscan; canvas state is not an input to execution.
+Rect rasterViewport(Rect logical, int32_t raster_height, int32_t scale,
+    int32_t offset_x = 0, int32_t offset_y = 0);
+
 // Positive eye Z, legacy depth = 1 - near/Z. This is the same homogeneous
 // projection used by both conservative visibility and the GPU. No far plane;
 // changing to reverse-Z is not part of this migration.

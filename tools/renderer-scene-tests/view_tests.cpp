@@ -44,6 +44,33 @@ void appendRoom(d3scene::SceneAssets& assets,d3scene::FrameData& data,d3scene::M
 }
 
 int runSceneViewTests() {
+    {
+        const auto normal = d3scene::rasterViewport({20,30,800,600},1440,2);
+        check(normal.x == 40 && normal.y == 180 && normal.width == 1600 && normal.height == 1200,
+            "Scene viewport lost supersampling or top-left conversion");
+        const auto overscan = d3scene::rasterViewport({-32,-18,1344,756},1512,2,32,18);
+        check(overscan.x == 0 && overscan.y == 0 && overscan.width == 2688 && overscan.height == 1512,
+            "Scene viewport lost allocation overscan origin");
+        const auto display = d3scene::rasterViewport({640,360,640,360},720,1);
+        check(display.x == 640 && display.y == 0 && display.width == 640 && display.height == 360,
+            "Display viewport inherited scene supersampling");
+        for (int mode = 0; mode < 3; ++mode) {
+            bool rejected = false;
+            try { d3scene::rasterViewport({0,0,mode == 2 ? INT32_MAX : 800,600},720,mode == 0 ? 0 : 2,mode == 1 ? INT32_MAX : 0); }
+            catch (const std::invalid_argument&) { rejected = true; }
+            check(rejected,"Raster viewport accepted invalid scale or overflowing coordinates");
+        }
+        auto request = view(); request.target = d3scene::ViewTarget::Display;
+        bool rejected = false;
+        try { d3scene::validateView(request); } catch (const std::invalid_argument&) { rejected = true; }
+        check(rejected,"Main world view accepted display-space output");
+        request.kind = d3scene::ViewKind::Preview;
+        d3scene::validateView(request);
+        request.feedback = d3scene::Automap;
+        rejected = false;
+        try { d3scene::validateView(request); } catch (const std::invalid_argument&) { rejected = true; }
+        check(rejected,"Display preview accepted gameplay feedback");
+    }
     check(d3scene::imageReductionSteps(1).empty(),"Native resolution introduced a reduction pass");
     const auto reduction2 = d3scene::imageReductionSteps(2), reduction4 = d3scene::imageReductionSteps(4);
     check(reduction2.size() == 1 && reduction2[0].source_scale == 2 && reduction2[0].destination_scale == 1,
@@ -623,6 +650,9 @@ int runSceneViewTests() {
         ++preview.collection;
         check(!collection_history.prepare(prior_tick,preview,d3scene::prepareCamera(preview)).previous_valid,
             "View history crossed content collections");
+        --preview.collection; preview.target = d3scene::ViewTarget::Display;
+        check(!collection_history.prepare(prior_tick,preview,d3scene::prepareCamera(preview)).previous_valid,
+            "View history crossed raster targets");
     }
     check(!histories.prepare(tick,auxiliary,d3scene::prepareCamera(auxiliary)).previous_valid,
         "Auxiliary view borrowed main-view history through a numeric key collision");

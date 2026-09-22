@@ -462,9 +462,19 @@ void RenderGameSceneView(const d3scene::Presentation& frame, d3scene::View view)
         auto preview = view;
         preview.kind = d3scene::ViewKind::Preview; preview.collection = 1;
         preview.history_key = 0x434f4c4c454354ull;
+        if (FindArg("-scene-display-view-probe")) {
+            if (!rend_BeginPostPresentFrame()) Error("Display view fixture could not complete the world");
+            preview.target = d3scene::ViewTarget::Display;
+            preview.clear_depth = true;
+            preview.viewport = {view.projection_anchor.width/2,view.projection_anchor.height/2,
+                view.projection_anchor.width/2,view.projection_anchor.height/2};
+            preview.projection_anchor = {0,0,preview.viewport.width,preview.viewport.height};
+        }
         d3scene::renderView(frame,preview);
         if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
             AutomatedCaptureLog("scene model collection fixture world=0 preview=1");
+        if (FindArg("-scene-display-view-probe") && (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0))
+            AutomatedCaptureLog("scene display view fixture target=display viewport=bottom_right");
     }
 }
 

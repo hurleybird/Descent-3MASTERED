@@ -8,8 +8,21 @@
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
+#include <limits>
 
 namespace d3scene {
+Rect rasterViewport(Rect logical, int32_t raster_height, int32_t scale, int32_t offset_x, int32_t offset_y) {
+    if (raster_height <= 0 || scale <= 0 || logical.width <= 0 || logical.height <= 0)
+        throw std::invalid_argument("Invalid raster viewport extent");
+    const auto narrow = [](int64_t value) {
+        if (value < (std::numeric_limits<int32_t>::min)() || value > (std::numeric_limits<int32_t>::max)())
+            throw std::invalid_argument("Raster viewport overflow");
+        return static_cast<int32_t>(value);
+    };
+    return {narrow((int64_t(logical.x)+offset_x)*scale),
+        narrow(int64_t(raster_height)-(int64_t(logical.y)+logical.height+offset_y)*scale),
+        narrow(int64_t(logical.width)*scale),narrow(int64_t(logical.height)*scale)};
+}
 namespace {
 double dot(Vec3 a, Vec3 b) { return double(a.x)*b.x + double(a.y)*b.y + double(a.z)*b.z; }
 Vec3 subtract(Vec3 a, Vec3 b) { return {a.x-b.x, a.y-b.y, a.z-b.z}; }

@@ -1,5 +1,25 @@
 # Renderer migration checkpoint
 
+## Continuation: view-owned raster output
+
+View requests now select scene or finished-display raster output explicitly.
+The executor computes its viewport from the request and allocation scale/origin,
+not the last canvas draw. Scoped depth clearing, sample state, depth snapshots,
+dirty tracking and output attachments follow the selected allocation. Display
+views cannot claim main-world products or gameplay feedback; target changes
+invalidate view history. Invalid composition phases and modal-canvas inheritance
+are rejected. Scene execution no longer inherits an incidental scissor enable.
+
+Full build and 5,276 CPU checks pass. Seven of eight output-normal effects saves
+are pixel-identical to depth-policy-normal. The first 002 differs only around
+the robot ([719,166,786,232], mean .0227293, maximum 152); a final-build repeat is
+pixel-identical to the old 002, so this is not a persistent output-contract
+change. Final-build 000 is also identical. The display fixture draws a separately
+owned player model into the lower-right quarter after world display processing;
+the effects image was visually inspected and is identical before/after the
+final phase/scissor safeguards. This is output-boundary evidence, not cockpit
+or gauge migration completion. Candidate remains untouched.
+
 ## Continuation: raster depth policy independent of opaque products
 
 Materials now explicitly resolve Automatic/ReadWrite/ReadOnly/Disabled depth

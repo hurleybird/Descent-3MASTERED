@@ -477,6 +477,9 @@ void Presentation::requireExecutable() const {
         throw std::logic_error("Renderer migration incomplete: presentation contains unprepared domains");
 }
 void validateView(const View& view) {
+    require(view.target == ViewTarget::Scene || view.target == ViewTarget::Display, "Invalid view target");
+    require(view.target != ViewTarget::Display || (view.kind != ViewKind::Main && view.feedback == NoFeedback),
+        "Display views cannot own main-world products or gameplay feedback");
     require(view.history_key != 0, "View has no history identity");
     require(finite(view.camera) && std::isfinite(view.zoom) && view.zoom > 0, "Invalid view camera");
     require(view.viewport.width > 0 && view.viewport.height > 0 &&

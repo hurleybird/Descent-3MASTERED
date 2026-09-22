@@ -730,6 +730,16 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
     if (!view.geometry_inspection)
         Error("Scene executor migration incomplete: only explicit geometry inspection is currently supported.");
     const auto visibility = d3scene::queryView(presentation,view);
+    const bool display_target = view.target == d3scene::ViewTarget::Display;
+    if (!framebuffer_ok || modal_ui_frame_active ||
+        (display_target && (!post_present_pending_swap || cockpit_scene_frame_active)) ||
+        (!display_target && post_present_pending_swap && !cockpit_scene_frame_active) ||
+        (view.kind == d3scene::ViewKind::Main && cockpit_scene_frame_active))
+        Error("Scene view target is unavailable in the current composition phase");
+    auto& output = display_target ? post_present_framebuffer : framebuffers[framebuffer_current_draw];
+    const auto raster = d3scene::rasterViewport(view.viewport,output.Height(),
+        display_target ? 1 : SupersamplingFactor(),display_target ? 0 : framebuffer_logical_offset_x,
+        display_target ? 0 : framebuffer_logical_offset_y);
     if (FindArg("-scene-lod-probe") && (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)) {
         std::vector<unsigned> polygons(presentation.data().model_instances.size(),0);
         for (const auto& item : visibility.surfaces) if (item.model) ++polygons[item.model_instance_index];
@@ -749,6 +759,8 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
     const auto check_scene_error = [](const char* stage) { const auto error = glGetError(); if (error != GL_NO_ERROR) Error("Scene GL error 0x%x at %s",error,stage); };
     check_scene_error("entry");
     FlushFontBatch();
+    const GLboolean inherited_scissor = glIsEnabled(GL_SCISSOR_TEST);
+    glDisable(GL_SCISSOR_TEST);
     check_scene_error("font flush");
     if (!scene_sample_resolve_verified) {
         GL_VerifySceneSampleResolve();
@@ -784,22 +796,33 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
     glDepthMask(GL_TRUE);
     glDepthFunc(GL_LEQUAL);
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-    post_protection_mask.UseSceneDrawBuffers(framebuffers[framebuffer_current_draw].Handle(),false,false);
+    if (!display_target) post_protection_mask.UseSceneDrawBuffers(output.Handle(),false,false);
     const d3scene::ViewProducts products{view.kind == d3scene::ViewKind::Main,
         view.kind == d3scene::ViewKind::Main && OpenGL_preferred_state.ao_enabled && framebuffer_ok};
     if (products.occlusion_radiance) BeginSceneRadianceProduct();
     const bool writes_motion = products.opaque_scene && SceneSurfaceTargetEnabled();
     const auto bind_outputs = [&] {
-        glBindFramebuffer(GL_DRAW_FRAMEBUFFER,framebuffers[framebuffer_current_draw].Handle());
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER,output.Handle());
         const GLenum targets[5] = {GL_COLOR_ATTACHMENT0,
             static_cast<GLenum>(writes_motion ? GL_COLOR_ATTACHMENT1 : GL_NONE),
-            static_cast<GLenum>(post_protection_mask.mask_texture ? GL_COLOR_ATTACHMENT2 : GL_NONE),
+            static_cast<GLenum>(!display_target && post_protection_mask.mask_texture ? GL_COLOR_ATTACHMENT2 : GL_NONE),
             static_cast<GLenum>(products.occlusion_radiance ? GL_COLOR_ATTACHMENT3 : GL_NONE),
             static_cast<GLenum>(writes_motion ? GL_COLOR_ATTACHMENT4 : GL_NONE)};
         glDrawBuffers(5,targets);
         glDisablei(GL_BLEND,1); glDisablei(GL_BLEND,4);
     };
     bind_outputs();
+    output.MarkAllDirty();
+    glViewport(raster.x,raster.y,raster.width,raster.height);
+    if (output.Samples() >= 2) glEnable(GL_MULTISAMPLE); else glDisable(GL_MULTISAMPLE);
+    if (view.clear_depth) {
+        GLint previous_scissor[4]; glGetIntegerv(GL_SCISSOR_BOX,previous_scissor);
+        const GLboolean scissor = glIsEnabled(GL_SCISSOR_TEST);
+        glEnable(GL_SCISSOR_TEST); glScissor(raster.x,raster.y,raster.width,raster.height);
+        const GLfloat depth = 1; glClearBufferfv(GL_DEPTH,0,&depth);
+        glScissor(previous_scissor[0],previous_scissor[1],previous_scissor[2],previous_scissor[3]);
+        if (!scissor) glDisable(GL_SCISSOR_TEST);
+    }
     if (writes_motion) {
         // This product belongs to the main scene, not StartFrame's legacy
         // canvas state. Clear background identity/velocity on every execution.
@@ -807,7 +830,7 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
         bind_outputs();
         surface_records.MarkDirty(); motion_vectors_dirty = true;
     }
-    post_protection_mask.resolve_valid = false;
+    if (!display_target) post_protection_mask.resolve_valid = false;
     if (visibility.exterior_visible && presentation.data().sky_enabled) {
         // Clear only this view's color attachment. Background geometry never
         // tests or writes world depth, including in auxiliary viewports.
@@ -974,7 +997,7 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
         if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) Error("Scene opaque-depth snapshot is incomplete");
         // All depth consumers share nearest-surface sample selection. A raw
         // MSAA depth blit can choose a different sample from motion/identity.
-        framebuffers[framebuffer_current_draw].DepthTextureForRead();
+        output.DepthTextureForRead();
         glBindFramebuffer(GL_DRAW_FRAMEBUFFER,scene_depth_framebuffer);
         const GLboolean scissor = glIsEnabled(GL_SCISSOR_TEST);
         glDisable(GL_SCISSOR_TEST);
@@ -1123,9 +1146,12 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
       }
     }
     glDepthMask(GL_TRUE); glEnable(GL_DEPTH_TEST); glDisable(GL_BLEND); glDisable(GL_CULL_FACE);
-    framebuffers[framebuffer_current_draw].MarkAllDirty();
-    post_protection_mask_dirty = true;
-    post_protection_mask.resolve_valid = false;
+    if (inherited_scissor) glEnable(GL_SCISSOR_TEST);
+    output.MarkAllDirty();
+    if (!display_target) {
+        post_protection_mask_dirty = true;
+        post_protection_mask.resolve_valid = false;
+    }
     ShaderProgram::ClearBinding();
     // The remaining canvas adapter maintains its own texture binding cache.
     // Invalidate that cache rather than lying about scene-owned GL names.

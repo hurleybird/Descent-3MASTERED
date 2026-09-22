@@ -21,6 +21,7 @@ param(
     [switch]$ModelEffectsProbe,
     [switch]$StandaloneModelProbe,
     [switch]$ModelCollectionProbe,
+    [switch]$DisplayViewProbe,
     [switch]$ScorchProbe,
     [switch]$ScorchViewProbe,
     [switch]$MotionBlur,
@@ -35,6 +36,7 @@ param(
 # at Candidate or the normal installation: the game may write local cache files.
 $ErrorActionPreference = 'Stop'
 if ($AtmosphereProbe) { $SatelliteProbe = $true }
+if ($DisplayViewProbe) { $ModelCollectionProbe = $true }
 if ($ModelCollectionProbe) { $StandaloneModelProbe = $true }
 if ($StandaloneModelProbe) {
     if (-not $SceneInspection) { throw 'Standalone model probe requires scene inspection.' }
@@ -99,6 +101,7 @@ $manifest = [ordered]@{
     model_effects_probe = [bool]$ModelEffectsProbe
     standalone_model_probe = [bool]$StandaloneModelProbe
     model_collection_probe = [bool]$ModelCollectionProbe
+    display_view_probe = [bool]$DisplayViewProbe
     scorch_probe = [bool]$ScorchProbe
     scorch_view_probe = [bool]$ScorchViewProbe
     motion_blur = [bool]$MotionBlur
@@ -148,6 +151,7 @@ try {
         if ($AxisProbe) { $arguments += '-scene-axis-probe' }
         if ($StandaloneModelProbe) { $arguments += '-scene-standalone-model-probe' }
         if ($ModelCollectionProbe) { $arguments += '-scene-model-collection-probe' }
+        if ($DisplayViewProbe) { $arguments += '-scene-display-view-probe' }
         if ($RingProbe) { $arguments += '-scene-ring-probe' }
         if ($DepthPolicyProbe) { $arguments += '-scene-depth-policy-probe' }
         if ($ModelEffectsProbe) { $arguments += '-scene-model-effects-probe' }
@@ -176,6 +180,7 @@ try {
         if ($DepthPolicyProbe) { $resourceValidated = $logText.Contains('scene depth fixture columns=write,read,disabled,read_occluded') }
         if ($StandaloneModelProbe) { $resourceValidated = $logText.Contains('scene standalone model fixture instances=1') }
         if ($ModelCollectionProbe) { $resourceValidated = $resourceValidated -and $logText.Contains('scene model collection fixture world=0 preview=1') }
+        if ($DisplayViewProbe) { $resourceValidated = $resourceValidated -and $logText.Contains('scene display view fixture target=display viewport=bottom_right') }
         if ($RingProbe) { $resourceValidated = $resourceValidated -and $logText.Contains('scene ring fixture facing=1 planar_reverse=1 object=1 gravity=1') }
         if ($LodProbeTier -ge 0) {
             $resourceValidated = $resourceValidated -and $logText.Contains("scene LOD fixture tier=$LodProbeTier ") -and $logText.Contains('scene LOD visible ')

@@ -121,6 +121,9 @@ if ([bool]$referenceManifest.model_effects_probe -ne [bool]$actualManifest.model
 if ([bool]$referenceManifest.standalone_model_probe -ne [bool]$actualManifest.standalone_model_probe -and -not $DiagnosticComparison) {
     throw 'Standalone model ownership differs; this is not a parity comparison.'
 }
+if ([bool]$referenceManifest.display_view_probe -ne [bool]$actualManifest.display_view_probe -and -not $DiagnosticComparison) {
+    throw 'Display-view fixture mismatch requires DiagnosticComparison.'
+}
 if ([bool]$referenceManifest.model_collection_probe -ne [bool]$actualManifest.model_collection_probe -and -not $DiagnosticComparison) {
     throw 'Model content collections differ; this is not a parity comparison.'
 }
