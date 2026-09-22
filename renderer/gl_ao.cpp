@@ -162,7 +162,6 @@ void AOResources::InitShaders()
 	extern const char* aoBlurFragmentSrc;
 	extern const char* aoTemporalFragmentSrc;
 	extern const char* aoSuppressionFragmentSrc;
-	extern const char* aoApplyFragmentSrc;
 
 	depth_shader.AttachSource(blitVertexSrc, aoDepthFragmentSrc);
 	depth_shader.Use();
@@ -269,17 +268,6 @@ void AOResources::InitShaders()
 	suppression_gamma = suppression_shader.FindUniform("gamma");
 	suppression_bloom_threshold = suppression_shader.FindUniform("bloom_threshold");
 
-	apply_shader.AttachSource(blitVertexSrc, aoApplyFragmentSrc);
-	apply_shader.Use();
-	GLint apply_heh = apply_shader.FindUniform("heh");
-	GLint apply_mask = apply_shader.FindUniform("suppression_mask");
-	if (apply_heh != -1) glUniform1i(apply_heh, 0);
-	if (apply_mask != -1) glUniform1i(apply_mask, 1);
-	apply_intensity = apply_shader.FindUniform("intensity");
-	apply_has_mask = apply_shader.FindUniform("has_suppression_mask");
-	apply_ao_uv_origin = apply_shader.FindUniform("ao_uv_origin");
-	apply_ao_uv_scale = apply_shader.FindUniform("ao_uv_scale");
-	apply_debug_channel = apply_shader.FindUniform("debug_channel");
 
 	ShaderProgram::ClearBinding();
 
@@ -314,7 +302,6 @@ void AOResources::DestroyShaders()
 	blur_y_shader.Destroy();
 	temporal_shader.Destroy();
 	suppression_shader.Destroy();
-	apply_shader.Destroy();
 	if (noise_texture)
 	{
 		glDeleteTextures(1, &noise_texture);
@@ -350,7 +337,7 @@ void AOResources::Destroy()
 	DestroyShaders();
 }
 
-void AOResources::Apply(Framebuffer* source, Framebuffer* target, const renderer_preferred_state& pref_state,
+AOResult AOResources::Evaluate(Framebuffer* source, const renderer_preferred_state& pref_state,
 	const rendering_state& render_state, const float* projection,
 	float nearz, float farz, GLuint suppression_mask_texture, GLuint ao_weight_texture,
 	bool ao_weight_is_direct,
@@ -361,10 +348,9 @@ void AOResources::Apply(Framebuffer* source, Framebuffer* target, const renderer
 	const float* current_projection, const float* current_inverse_modelview,
 	const float* previous_view_projection,
 	bool has_static_reconstruction, bool has_dynamic_velocity,
-	bool reset_temporal_history, bool composite_to_target, AOResult* result)
+	bool reset_temporal_history)
 {
-	if (result)
-		*result = {};
+	AOResult result{};
 	if (!source || !pref_state.ao_enabled)
 	{
 		if (HasFramebuffers())
@@ -372,18 +358,15 @@ void AOResources::Apply(Framebuffer* source, Framebuffer* target, const renderer
 			glFinish();
 			DestroyFramebuffers();
 		}
-		return;
+		return result;
 	}
 
 	PERF_MARKER_SCOPE("AO.Total");
 
-	if (!target)
-		target = source;
-
 	int source_width = (int)source->Width();
 	int source_height = (int)source->Height();
 	if (source_width <= 0 || source_height <= 0)
-		return;
+		return result;
 
 	if (source_visible_w <= 0 || source_visible_h <= 0)
 	{
@@ -434,11 +417,6 @@ void AOResources::Apply(Framebuffer* source, Framebuffer* target, const renderer
 	ao_framebuffer.Update(ao_width, ao_height, GL_RG16F, GL_RG, GL_FLOAT);
 	ao_blur_framebuffer.Update(ao_width, ao_height, GL_RG16F, GL_RG, GL_FLOAT);
 
-	int target_width = (int)target->Width();
-	int target_height = (int)target->Height();
-	if (target_width <= 0 || target_height <= 0)
-		return;
-
 	//Save GL state we are about to trample so we leave the caller in
 	//the same state we found it in (matters for follow-up draw calls).
 	GLint old_read = 0, old_draw = 0;
@@ -467,9 +445,7 @@ void AOResources::Apply(Framebuffer* source, Framebuffer* target, const renderer
 	GLuint depth_texture = msaa_source ? source->DepthTextureForRead() : source->DepthTextureRaw();
 	GLuint scene_color_texture = 0;
 	if (pref_state.bloom_enabled)
-		scene_color_texture = (source == target) ?
-			(msaa_source ? source->ColorTextureForRead() : source->ColorTextureRaw()) :
-			target->ColorTextureForRead();
+		scene_color_texture = msaa_source ? source->ColorTextureForRead() : source->ColorTextureRaw();
 	//AO reads resolved 2D inputs. Hardware resolves are much cheaper than
 	//doing source-block * sample-count loops in the AO/suppression shaders.
 	int input_samples = 0;
@@ -487,7 +463,6 @@ void AOResources::Apply(Framebuffer* source, Framebuffer* target, const renderer
 
 	float radius = ClampFloat(pref_state.ao_radius, 0.1f, 12.0f);
 	float bias = ClampFloat(pref_state.ao_bias, 0.0f, 1.0f);
-	float intensity = ClampFloat(pref_state.ao_intensity, 0.0f, 4.0f);
 
 	//Convert world-space radius to a pixel-space scale at depth==1. The shader
 	//then divides by per-pixel depth to get the on-screen step size. This is
@@ -796,70 +771,11 @@ void AOResources::Apply(Framebuffer* source, Framebuffer* target, const renderer
 	const bool debug_display_ao_only =
 		(pref_state.ao_debug_preview || pref_state.ao_temporal_debug_preview) &&
 		Game_mode != GM_NONE;
-	if (result)
-	{
-		result->ao_texture = apply_source->ColorTextureForRead();
-		result->suppression_texture = debug_display_ao_only ? 0 : final_suppression_mask;
-		result->debug_display = debug_display_ao_only;
-		result->debug_channel = pref_state.ao_temporal_debug_preview ? 2 : 0;
-	}
+	result.ao_texture = apply_source->ColorTextureForRead();
+	result.suppression_texture = debug_display_ao_only ? 0 : final_suppression_mask;
+	result.debug_display = debug_display_ao_only;
+	result.debug_channel = pref_state.ao_temporal_debug_preview ? 2 : 0;
 
-	//-------------------------------------------------------------------------
-	// Pass 6: Modulate target scene color in-place.
-	//
-	// Draw a fullscreen quad to the target framebuffer with blend mode
-	// (DST_COLOR, ZERO) so the destination is multiplied by our AO factor.
-	//-------------------------------------------------------------------------
-	if (composite_to_target)
-	{
-		PERF_MARKER_SCOPE("AO.Composite");
-		apply_shader.Use();
-		glUniform1f(apply_intensity, debug_display_ao_only ? 1.0f : intensity);
-		if (apply_has_mask != -1)
-			glUniform1i(apply_has_mask, !debug_display_ao_only && final_suppression_mask != 0 ? 1 : 0);
-		if (apply_debug_channel != -1)
-			glUniform1i(apply_debug_channel, pref_state.ao_temporal_debug_preview ? 2 : 0);
-		if (apply_ao_uv_origin != -1)
-			glUniform2f(apply_ao_uv_origin,
-				(float)source_visible_x / (float)source_width,
-				(float)source_visible_y / (float)source_height);
-		if (apply_ao_uv_scale != -1)
-			glUniform2f(apply_ao_uv_scale,
-				(float)source_visible_w / (float)source_width,
-				(float)source_visible_h / (float)source_height);
-
-		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, target->Handle());
-		GLenum draw_buffer = GL_COLOR_ATTACHMENT0;
-		glDrawBuffers(1, &draw_buffer);
-		glViewport(0, 0, target_width, target_height);
-
-		if (debug_display_ao_only)
-		{
-			glDisable(GL_BLEND);
-		}
-		else
-		{
-			glEnable(GL_BLEND);
-			glBlendFunc(GL_DST_COLOR, GL_ZERO);
-		}
-		glDisable(GL_DEPTH_TEST);
-		glDisable(GL_CULL_FACE);
-		glDepthMask(GL_FALSE);
-		glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-
-		rend_ClearBoundTextures();
-		GL_BindFramebufferTexture(apply_source->ColorTextureForRead(), 0, GL_LINEAR);
-		if (final_suppression_mask != 0)
-			GL_BindFramebufferTexture(final_suppression_mask, 1, GL_LINEAR);
-
-		AODrawFullscreen(target->Handle(), target_width, target_height);
-		GL4PerfGpuAOMark(GL4_GPU_AO_AFTER_COMPOSITE);
-	}
-
-	//Pass 5 changed the target color attachment; any cached single-sample
-	//resolve from earlier in this frame no longer matches.
-	if (composite_to_target)
-		target->MarkColorDirty();
 
 	//Restore prior GL state.
 	glBlendFuncSeparate(blend_src_rgb, blend_dst_rgb, blend_src_alpha, blend_dst_alpha);
@@ -879,4 +795,5 @@ void AOResources::Apply(Framebuffer* source, Framebuffer* target, const renderer
 
 	rend_ClearBoundTextures();
 	rend_RestoreLegacy();
+	return result;
 }

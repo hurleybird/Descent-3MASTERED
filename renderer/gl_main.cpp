@@ -2187,146 +2187,7 @@ bool GL4Renderer::BeginPostPresentFrameInternal(bool defer_bloom_composite)
 
 	GLuint protection_mask_texture = post_protection_mask_dirty ?
 		post_protection_mask.TextureForRead(framebuffers[framebuffer_current_draw].Handle()) : 0;
-	GLuint ao_suppression_mask_texture = protection_mask_texture;
-	GLuint ao_class_texture = ao_enabled ?
-		surface_records.TextureForRead(framebuffers[framebuffer_current_draw].Handle()) : 0;
-
-	GL4PerfGpuSplitMark(GL4_GPU_SPLIT_AFTER_PREP);
-
-	if (ao_enabled)
-	{
-		//The current path consumes the already-resolved scene capture directly;
-		//there are no AO-local scene copies. Anchor those zero-length stages here
-		//so the depth reduction receives its own GPU timing range.
-		GL4PerfGpuAOMark(GL4_GPU_AO_AFTER_SCENE_COLOR_COPY);
-		GL4PerfGpuAOMark(GL4_GPU_AO_AFTER_SCENE_DEPTH_COPY);
-		const float* ao_projection = captured_scene_projection_valid ?
-			captured_scene_projection : last_projection;
-		GLuint ao_weight_texture = ao_class_texture;
-		const bool ao_weight_is_direct = false;
-		const int ao_noise_origin_x = framebuffer_logical_offset_x;
-		const int ao_noise_origin_y =
-			framebuffer_logical_height - OpenGL_state.screen_height - framebuffer_logical_offset_y;
-		const int visible_origin_x = framebuffer_logical_offset_x;
-		const int visible_origin_y =
-			framebuffer_logical_height - OpenGL_state.screen_height - framebuffer_logical_offset_y;
-		const int visible_width = OpenGL_state.screen_width;
-		const int visible_height = OpenGL_state.screen_height;
-		const bool mask_overscan_for_ao =
-			visible_origin_x != 0 || visible_origin_y != 0 ||
-			visible_width != (int)present_framebuffer->Width() ||
-			visible_height != (int)present_framebuffer->Height();
-
-		const float near_denominator = -ao_projection[11]-ao_projection[10];
-		const float far_denominator = ao_projection[11]-ao_projection[10];
-		const float near_z = fabsf(near_denominator) > 1.e-6f ? fabsf(ao_projection[14]/near_denominator) : 1.f;
-		// Infinite projection has no far plane. This is the AO working range,
-		// not a fabricated finite projection used to linearize scene depth.
-		const float far_z = fabsf(far_denominator) > 1.e-6f ? fabsf(ao_projection[14]/far_denominator) : 10000.f;
-
-		bool deferred_ao = ao_scene_valid && bloom_source_valid &&
-			bloom_source_framebuffer.Handle() != 0 &&
-			bloom_source_framebuffer.Width() == present_framebuffer->Width() &&
-			bloom_source_framebuffer.Height() == present_framebuffer->Height();
-		const bool ao_temporal_wants_motion =
-			OpenGL_preferred_state.ao_temporal_blend > 0.0f ||
-			OpenGL_preferred_state.ao_temporal_debug_preview;
-		// A paused modal menu leaves the rendered scene fixed in screen space.
-		// Preserve temporal AO at those same coordinates; clearing its history
-		// here made AO snap to the zero-jitter sample pattern as F2 opened.
-		// Motion data from the last live frame is stale while paused, so exclude
-		// both dynamic and reconstructed motion rather than reprojecting it.
-		const bool ao_motion_frozen = MotionVectorsFrozen();
-		const bool ao_reset_temporal_history = scene_temporal_reset;
-		GLuint ao_velocity_texture = 0;
-		GLuint ao_object_id_texture = 0;
-		bool ao_has_dynamic_velocity = false;
-		if (ao_temporal_wants_motion && !ao_motion_frozen && SceneSurfaceTargetEnabled() &&
-			surface_records.width > 0 && surface_records.height > 0 && motion_vectors_dirty)
-		{
-			ao_velocity_texture = surface_records.TextureForRead(framebuffers[framebuffer_current_draw].Handle());
-			ao_object_id_texture = surface_records.ObjectIdTextureForRead(framebuffers[framebuffer_current_draw].Handle());
-			ao_has_dynamic_velocity = ao_velocity_texture != 0 && ao_object_id_texture != 0;
-		}
-		const bool use_frozen_static_motion = MotionVectorsFrozen() && frozen_static_motion_valid;
-		const float* ao_motion_projection = use_frozen_static_motion ? frozen_static_motion_projection :
-			(captured_scene_projection_valid ? captured_scene_projection : current_projection);
-		const float* ao_motion_inverse_modelview = use_frozen_static_motion ?
-			frozen_static_motion_inverse_modelview :
-			(captured_scene_inverse_modelview_valid ? captured_scene_inverse_modelview : current_inverse_modelview);
-		const float* ao_motion_previous_view_projection = use_frozen_static_motion ?
-			frozen_static_motion_previous_view_projection : previous_view_projection;
-		const bool ao_has_static_reconstruction = ao_temporal_wants_motion && !ao_motion_frozen &&
-			(use_frozen_static_motion || have_previous_view_projection) &&
-			(use_frozen_static_motion ||
-				(captured_scene_projection_valid && captured_scene_inverse_modelview_valid) ||
-				(have_current_projection && have_current_inverse_modelview));
-
-		if (deferred_ao)
-		{
-			AOResult ao_result;
-			ao.Apply(&bloom_source_framebuffer, nullptr, OpenGL_preferred_state,
-				OpenGL_state, ao_projection, near_z, far_z, 0,
-				ao_weight_texture, ao_weight_is_direct, 0, 0, 0, 0,
-				ao_noise_origin_x, ao_noise_origin_y,
-				ao_velocity_texture, ao_object_id_texture,
-				(int)surface_records.width, (int)surface_records.height, supersampling_factor,
-				ao_motion_projection, ao_motion_inverse_modelview,
-				ao_motion_previous_view_projection, ao_has_static_reconstruction,
-				ao_has_dynamic_velocity, ao_reset_temporal_history, false, &ao_result);
-			GL4PerfGpuDrain("GPU.AO.Apply");
-			GL4PerfGpuAOMark(GL4_GPU_AO_AFTER_COMPOSITE);
-
-			ao_composite_framebuffer.Update(present_framebuffer->Width(), present_framebuffer->Height(), 0);
-			ao_compositeshader.Use();
-			float ao_intensity = OpenGL_preferred_state.ao_intensity;
-			if (ao_intensity < 0.0f) ao_intensity = 0.0f;
-			if (ao_intensity > 4.0f) ao_intensity = 4.0f;
-			glUniform1f(ao_composite_intensity, ao_result.debug_display ? 1.0f : ao_intensity);
-			glUniform1i(ao_composite_has_suppression_mask,
-				ao_result.suppression_texture != 0 ? 1 : 0);
-			glUniform1i(ao_composite_debug_display, ao_result.debug_display ? 1 : 0);
-			glUniform1i(ao_composite_debug_channel, ao_result.debug_channel);
-			if (ao_composite_visible_origin != -1)
-				glUniform2f(ao_composite_visible_origin, (float)visible_origin_x, (float)visible_origin_y);
-			if (ao_composite_visible_size != -1)
-				glUniform2f(ao_composite_visible_size, (float)visible_width, (float)visible_height);
-			if (ao_composite_use_visible_rect != -1)
-				glUniform1i(ao_composite_use_visible_rect, mask_overscan_for_ao ? 1 : 0);
-			rend_ClearBoundTextures();
-			GL_BindFramebufferTexture(present_framebuffer->ColorTextureForRead(), 0, GL_NEAREST);
-			GL_BindFramebufferTexture(scene_ao_product.ColorTextureForRead(), 1, GL_NEAREST);
-			GL_BindFramebufferTexture(ao_result.ao_texture, 2, GL_LINEAR);
-			if (ao_result.suppression_texture != 0)
-				GL_BindFramebufferTexture(ao_result.suppression_texture, 3, GL_LINEAR);
-			{
-				PERF_MARKER_SCOPE("AO.DeferredComposite");
-				GL_DrawFramebufferQuad(ao_composite_framebuffer.Handle(), 0, 0,
-					ao_composite_framebuffer.Width(), ao_composite_framebuffer.Height());
-			}
-			GL4PerfGpuDrain("GPU.AO.DeferredComposite");
-			GL4PerfGpuAOMark(GL4_GPU_AO_AFTER_DEFERRED_COMPOSITE);
-			bloom_source_framebuffer.BlitDepthTo(ao_composite_framebuffer.Handle(), 0, 0,
-				ao_composite_framebuffer.Width(), ao_composite_framebuffer.Height());
-			GL4PerfGpuDrain("GPU.AO.CompositeDepthCopy");
-			GL4PerfGpuAOMark(GL4_GPU_AO_AFTER_COMPOSITE_DEPTH_COPY);
-			present_framebuffer = &ao_composite_framebuffer;
-		}
-		else
-		{
-			ao.Apply(present_framebuffer, present_framebuffer, OpenGL_preferred_state,
-				OpenGL_state, ao_projection, near_z, far_z, ao_suppression_mask_texture,
-				ao_weight_texture, ao_weight_is_direct, 0, 0, 0, 0,
-				ao_noise_origin_x, ao_noise_origin_y,
-				ao_velocity_texture, ao_object_id_texture,
-				(int)surface_records.width, (int)surface_records.height, supersampling_factor,
-				ao_motion_projection, ao_motion_inverse_modelview,
-				ao_motion_previous_view_projection, ao_has_static_reconstruction,
-				ao_has_dynamic_velocity, ao_reset_temporal_history);
-			GL4PerfGpuDrain("GPU.AO.Apply");
-			GL4PerfGpuAOMark(GL4_GPU_AO_AFTER_COMPOSITE);
-		}
-	}
+	// World AO is completed by the scene schedule before display resampling.
 
 	GL4PerfGpuSplitMark(GL4_GPU_SPLIT_AFTER_AO);
 
@@ -3254,7 +3115,6 @@ void GL4Renderer::ExportOpaqueScene(const d3scene::Camera& camera)
 		bloom_source_resolved_framebuffer.Destroy();
 		bloom_source_downscale_framebuffer.Destroy();
 		deferred_bloom_source_framebuffer = nullptr;
-		ao_composite_framebuffer.Destroy();
 	}
 
 	if (framebuffer_ok)
@@ -4538,7 +4398,6 @@ void GL4Renderer::UpdateFramebuffer(void)
 		bloom_source_resolved_framebuffer.Destroy();
 		bloom_source_downscale_framebuffer.Destroy();
 		deferred_bloom_source_framebuffer = nullptr;
-		ao_composite_framebuffer.Destroy();
 		post_present_framebuffer.Destroy();
 		post_composite_framebuffer.Destroy();
 		motion_blur_framebuffer.Destroy();
@@ -4659,7 +4518,6 @@ void GL4Renderer::CloseFramebuffer(void)
 	bloom_source_resolved_framebuffer.Destroy();
 	bloom_source_downscale_framebuffer.Destroy();
 	deferred_bloom_source_framebuffer = nullptr;
-	ao_composite_framebuffer.Destroy();
 	post_present_framebuffer.Destroy();
 	post_composite_framebuffer.Destroy();
 	motion_blur_framebuffer.Destroy();

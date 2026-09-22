@@ -97,7 +97,7 @@ const char* blitFragmentSrc =
 "{\n"
 "vec2 sample_uv = uv_origin + outuv * uv_scale;\n"
 "vec4 sourcecolor = texture(heh, sample_uv);\n"
-"color = vec4(pow(sourcecolor.rgb, vec3(gamma)), sourcecolor.a);\n"
+"color = vec4(pow(max(sourcecolor.rgb,vec3(0.0)), vec3(gamma)), sourcecolor.a);\n"
 "}\n"
 "";
 
@@ -657,46 +657,30 @@ const char* bloomCompositeFragmentSrc =
 "}\n"
 "";
 
-const char* aoDeferredCompositeFragmentSrc =
-"#version 450 core\n"
-"\n"
-"in vec2 outuv;\n"
-"out vec4 color;\n"
-"\n"
-"uniform sampler2D final_source;\n"
-"uniform sampler2D scene_source;\n"
-"uniform sampler2D ao_source;\n"
-"uniform sampler2D suppression_mask;\n"
-"uniform float intensity;\n"
-"uniform int has_suppression_mask;\n"
-"uniform int debug_display;\n"
-"uniform int debug_channel;\n"
-"uniform vec2 visible_origin;\n"
-"uniform vec2 visible_size;\n"
-"uniform int use_visible_rect;\n"
-"\n"
-"void main()\n"
-"{\n"
-"	vec4 final_color = texture(final_source, outuv);\n"
-"	vec3 scene_color = texture(scene_source, outuv).rgb;\n"
-"	vec4 ao_depth = texture(ao_source, outuv);\n"
-"	float ao = clamp(debug_channel == 2 ? ao_depth.z : ao_depth.x, 0.0, 1.0);\n"
-"	if (has_suppression_mask != 0)\n"
-"	{\n"
-"		float suppression = clamp(texture(suppression_mask, outuv).r, 0.0, 1.0);\n"
-"		ao = mix(ao, 1.0, suppression);\n"
-"	}\n"
-"	vec3 ao_scene_color = debug_display != 0 ? vec3(ao) : scene_color * pow(ao, intensity);\n"
-"	float scene_mask = 1.0 - clamp(final_color.a, 0.0, 1.0);\n"
-"	if (use_visible_rect != 0)\n"
-"	{\n"
-"		vec2 local = gl_FragCoord.xy - visible_origin;\n"
-"		if (local.x < 0.0 || local.y < 0.0 || local.x >= visible_size.x || local.y >= visible_size.y)\n"
-"			scene_mask = 0.0;\n"
-"	}\n"
-"\tcolor = vec4(debug_display != 0 ? mix(final_color.rgb,vec3(ao),scene_mask) : max(final_color.rgb + (ao_scene_color - scene_color) * scene_mask, vec3(0.0)), final_color.a);\n"
-"}\n"
-"";
+const char* aoDeferredCompositeFragmentSrc = R"GLSL(#version 450 core
+in vec2 outuv;
+out vec4 color;
+uniform sampler2D scene_source, ao_source, suppression_mask;
+uniform sampler2DMS scene_source_ms;
+uniform int source_samples;
+uniform float intensity;
+uniform int has_suppression_mask, debug_display, debug_channel;
+uniform vec2 visible_origin, visible_size;
+uniform int use_visible_rect;
+void main() {
+    vec2 local = gl_FragCoord.xy-visible_origin;
+    if (use_visible_rect != 0 && (any(lessThan(local,vec2(0))) || any(greaterThanEqual(local,visible_size)))) discard;
+    vec4 ao_depth = texture(ao_source,outuv);
+    float ao = clamp(debug_channel == 2 ? ao_depth.z : ao_depth.x,0.0,1.0);
+    if (has_suppression_mask != 0) ao = mix(ao,1.0,clamp(texture(suppression_mask,outuv).r,0.0,1.0));
+    ivec2 pixel = ivec2(gl_FragCoord.xy);
+    vec3 eligible = source_samples >= 2 ? texelFetch(scene_source_ms,pixel,gl_SampleID).rgb :
+        texelFetch(scene_source,pixel,0).rgb;
+    // Floating-point additive blending applies this signed light delta directly
+    // to the matching sample. Never resolve/copy the scene just to subtract it.
+    color = debug_display != 0 ? vec4(vec3(ao),1) : vec4(eligible*(pow(ao,intensity)-1.0),0);
+}
+)GLSL";
 
 const char* testVertexSrc =
 "#version 450 core\n"
@@ -1303,37 +1287,5 @@ const char* aoSuppressionFragmentSrc =
 "        suppression = max(suppression, bloom);\n"
 "    }\n"
 "    result = vec4(clamp(suppression, 0.0, 1.0), 0.0, 0.0, 1.0);\n"
-"}\n"
-"";
-
-//Apply pass: multiplies destination color by the AO factor.
-//Uses (GL_DST_COLOR, GL_ZERO) blend, so the output color is the AO multiplier.
-const char* aoApplyFragmentSrc =
-"#version 450 core\n"
-"\n"
-"in vec2 outuv;\n"
-"out vec4 result;\n"
-"\n"
-"uniform sampler2D heh;       // RG: x=AO factor 0..1, y=depth\n"
-"uniform sampler2D suppression_mask; // R8: 0=apply AO, 1=suppress AO\n"
-"uniform float intensity;     // 0..4-ish; AO raised to this power\n"
-"uniform int has_suppression_mask;\n"
-"uniform vec2 ao_uv_origin;\n"
-"uniform vec2 ao_uv_scale;\n"
-"uniform int debug_channel;\n"
-"\n"
-"void main()\n"
-"{\n"
-"    vec2 ao_uv = ao_uv_origin + outuv * ao_uv_scale;\n"
-"    vec4 ao_depth = texture(heh, ao_uv);\n"
-"    float ao = debug_channel == 2 ? ao_depth.z : ao_depth.x;\n"
-"    ao = clamp(ao, 0.0, 1.0);\n"
-"    if (has_suppression_mask != 0)\n"
-"    {\n"
-"        float suppression = clamp(texture(suppression_mask, ao_uv).r, 0.0, 1.0);\n"
-"        ao = mix(ao, 1.0, suppression);\n"
-"    }\n"
-"    ao = pow(ao, intensity);\n"
-"    result = vec4(vec3(ao), 1.0);\n"
 "}\n"
 "";

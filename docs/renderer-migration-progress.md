@@ -1,5 +1,40 @@
 # Renderer migration checkpoint
 
+## Continuation: scheduled world occlusion, before display resampling
+
+AO evaluation/composition moved out of `BeginPostPresentFrameInternal` into the
+explicit `CompositeWorldOcclusion` scene pass after world translucency and before
+SSAA reduction or canvas/cockpit work. The schedule rejects missing opaque-input
+dependencies. `AOResources::Evaluate` produces images only: the old in-place
+multiply fallback and its shader are deleted. The scene's paused state is owned
+by the presentation packet. Later overlay alpha no longer estimates AO coverage.
+
+The first implementation copied/resolved eligible radiance and scene color at
+full raster size. User questioned SSAA cost; capture-only GPU timestamps exposed
+a serious bandwidth cost at 4x SSAA. That copy implementation was replaced before
+checkpointing: the compositor detaches the existing radiance attachment, reads
+the corresponding MSAA sample, and additively blends a signed occluded-light
+delta directly into floating-point scene color. Both full-size copy textures are
+deleted. Final display conversion clamps negative roundoff before gamma.
+
+The actual compositor now has a GPU self-test with different eligible radiance
+in each sample, verifying signed subtraction and preserved alpha. 4,888 CPU
+checks and full build pass. All eight effects captures (`scene-ao-direct-corpus`)
+and both moving/deformed history fixtures pass strict GPU checks. The preceding
+world-AO clean corpus is byte-identical across all eight saves to the float-color
+checkpoint. Direct composition changes seven effects images by at most one
+channel level versus the copy implementation; 000 has a differing Buddybot pose.
+1x/no-MSAA and 4x/4-MSAA saves 001/002 also pass; relevant images inspected.
+
+Diagnostic timings are single screenshot-frame GPU timestamps, not a finished
+performance benchmark. At 2x SSAA, copies+composition measured .64/.81 ms for
+saves 001/002; at 4x, 16.18/14.99 ms. Direct composition measured .75/.83 ms at 2x
+and 3.26/4.18 ms at 4x, with no image-copy stage. AO estimation stayed 1370x771
+(overscan included), while raster sizes were 2740x1542 and 5480x3084. Estimation
+timings still increased at 4x despite unchanged dimensions, so whole-frame
+bandwidth, GPU scheduling and performance require further qualification. The
+capture harness now records/validates explicit SSAA and MSAA overrides.
+
 ## Continuation: unclipped intermediate radiance
 
 Scene, resolve, composition and bloom-pyramid color storage now uses RGBA16F;

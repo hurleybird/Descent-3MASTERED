@@ -258,7 +258,6 @@ void GL4Renderer::DestroySceneResources() {
     }
     scene_ao_radiance_texture = 0;
     scene_ao_width = scene_ao_height = scene_ao_samples = 0;
-    scene_ao_resolved.Destroy(); scene_ao_product.Destroy();
     for (auto& image : scene_images) if (image.second.texture) glDeleteTextures(1,&image.second.texture);
     scene_images.clear();
     for (auto& room : scene_rooms) {
@@ -477,31 +476,91 @@ void GL4Renderer::BeginSceneRadianceProduct() {
     glClearBufferfv(GL_COLOR,3,zero);
 }
 
-void GL4Renderer::FinishSceneRadianceProduct() {
-    GLint previous_read, previous_draw;
+void GL4Renderer::CompositeSceneRadiance(bool paused) {
+    // Capture-only timestamps separate AO estimation from SSAA-scaled image
+    // traffic. Synchronous collection is restricted to the screenshot frame.
+    const bool measure = AutomatedCapturePending();
+    GLuint timings[4] = {};
+    if (measure) { glGenQueries(4,timings); glQueryCounter(timings[0],GL_TIMESTAMP); }
+    GLint previous_read, previous_draw, viewport[4];
     glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING,&previous_read);
     glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING,&previous_draw);
+    glGetIntegerv(GL_VIEWPORT,viewport);
     const GLboolean scissor = glIsEnabled(GL_SCISSOR_TEST);
     glDisable(GL_SCISSOR_TEST);
-    scene_ao_resolved.Update(scene_ao_width,scene_ao_height,GL_RGBA16F,GL_RGBA,GL_FLOAT);
-    scene_ao_product.Update(framebuffer_logical_width,framebuffer_logical_height,GL_RGBA16F,GL_RGBA,GL_FLOAT);
-    glBindFramebuffer(GL_READ_FRAMEBUFFER,framebuffers[framebuffer_current_draw].Handle());
-    glReadBuffer(GL_COLOR_ATTACHMENT3);
-    glBindFramebuffer(GL_DRAW_FRAMEBUFFER,scene_ao_resolved.Handle());
+
+    // AO is a world-light operation. Apply it to full raster-resolution
+    // radiance before nonlinear display resampling or later canvas layers.
+    // Those layers therefore need no inferred alpha/protection correction.
+    if (!ao_scene_valid || !bloom_source_valid || !captured_scene_projection_valid ||
+        !captured_scene_inverse_modelview_valid)
+        Error("World occlusion requires the scheduled opaque scene product");
+    const auto source = framebuffers[framebuffer_current_draw].Handle();
+    const auto records = surface_records.TextureForRead(source);
+    const auto identities = surface_records.ObjectIdTextureForRead(source);
+    const auto* projection = captured_scene_projection;
+    const float near_denominator = -projection[11]-projection[10];
+    const float far_denominator = projection[11]-projection[10];
+    const float near_z = fabsf(projection[14]/near_denominator);
+    const float far_z = fabsf(far_denominator) > 1.e-6f ? fabsf(projection[14]/far_denominator) : 10000.f;
+    const bool temporal = OpenGL_preferred_state.ao_temporal_blend > 0 || OpenGL_preferred_state.ao_temporal_debug_preview;
+    const bool moving = temporal && !paused;
+    if (measure) glQueryCounter(timings[1],GL_TIMESTAMP);
+    const auto result = ao.Evaluate(&bloom_source_framebuffer,OpenGL_preferred_state,OpenGL_state,projection,near_z,far_z,
+        0,records,false,0,0,0,0,framebuffer_logical_offset_x,
+        framebuffer_logical_height-OpenGL_state.screen_height-framebuffer_logical_offset_y,
+        records,identities,surface_records.width,surface_records.height,SupersamplingFactor(),
+        projection,captured_scene_inverse_modelview,previous_view_projection,
+        moving && have_previous_view_projection,moving,scene_temporal_reset);
+    if (!result.ao_texture) Error("Scheduled world occlusion did not produce its required image");
+    if (measure) glQueryCounter(timings[2],GL_TIMESTAMP);
+    ao_compositeshader.Use();
+    glUniform1f(ao_composite_intensity,result.debug_display ? 1.f :
+        (std::max)(0.f,(std::min)(4.f,OpenGL_preferred_state.ao_intensity)));
+    glUniform1i(ao_composite_has_suppression_mask,result.suppression_texture != 0);
+    glUniform1i(ao_composite_debug_display,result.debug_display);
+    glUniform1i(ao_composite_debug_channel,result.debug_channel);
+    glUniform2f(ao_composite_visible_origin,float(viewport[0]),float(viewport[1]));
+    glUniform2f(ao_composite_visible_size,float(viewport[2]),float(viewport[3]));
+    glUniform1i(ao_composite_use_visible_rect,1);
+    glUniform1i(ao_compositeshader.FindUniform("source_samples"),scene_ao_samples);
+    rend_ClearBoundTextures();
+    const GLenum radiance_type = scene_ao_samples >= 2 ? GL_TEXTURE_2D_MULTISAMPLE : GL_TEXTURE_2D;
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER,source);
+    // Remove the sampled image from the framebuffer entirely: no read/write
+    // feedback and no radiance-copy allocation, even for single-sample scenes.
+    glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER,GL_COLOR_ATTACHMENT3,radiance_type,0,0);
+    if (scene_ao_samples >= 2) {
+        glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D_MULTISAMPLE,scene_ao_radiance_texture);
+    } else GL_BindFramebufferTexture(scene_ao_radiance_texture,1,GL_NEAREST);
+    GL_BindFramebufferTexture(result.ao_texture,2,GL_LINEAR);
+    if (result.suppression_texture) GL_BindFramebufferTexture(result.suppression_texture,3,GL_LINEAR);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER,source);
     glDrawBuffer(GL_COLOR_ATTACHMENT0);
-    glBlitFramebuffer(0,0,scene_ao_width,scene_ao_height,0,0,scene_ao_width,scene_ao_height,GL_COLOR_BUFFER_BIT,GL_NEAREST);
-    glReadBuffer(GL_COLOR_ATTACHMENT0);
-    glBindFramebuffer(GL_READ_FRAMEBUFFER,scene_ao_resolved.Handle());
-    glReadBuffer(GL_COLOR_ATTACHMENT0);
-    glBindFramebuffer(GL_DRAW_FRAMEBUFFER,scene_ao_product.Handle());
-    glDrawBuffer(GL_COLOR_ATTACHMENT0);
-    glBlitFramebuffer(0,0,scene_ao_width,scene_ao_height,0,0,framebuffer_logical_width,framebuffer_logical_height,
-        GL_COLOR_BUFFER_BIT,GL_LINEAR);
+    glViewport(0,0,scene_ao_width,scene_ao_height);
+    glDisable(GL_DEPTH_TEST); glDepthMask(GL_FALSE); glDisable(GL_CULL_FACE); glDisable(GL_SCISSOR_TEST);
+    glColorMaski(0,GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);
+    if (result.debug_display) glDisablei(GL_BLEND,0);
+    else { glEnablei(GL_BLEND,0); glBlendEquationi(0,GL_FUNC_ADD); glBlendFuncSeparatei(0,GL_ONE,GL_ONE,GL_ZERO,GL_ONE); }
+    glBindVertexArray(GL_GetFramebufferVAO());
+    glDrawArrays(GL_TRIANGLES,0,3); rend_RecordDrawCall(RENDERER_DRAW_CALL_POSTPROCESS);
+    glDisablei(GL_BLEND,0);
+    glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D_MULTISAMPLE,0);
+    if (measure) {
+        glQueryCounter(timings[3],GL_TIMESTAMP);
+        GLuint64 ticks[4] = {};
+        for (int i = 0; i < 4; ++i) glGetQueryObjectui64v(timings[i],GL_QUERY_RESULT,&ticks[i]);
+        AutomatedCaptureLog("scene AO GPU diagnostic raster=%ux%u estimate=%ux%u samples=%u resolve_ms=%.6f estimate_ms=%.6f composite_ms=%.6f",
+            scene_ao_width,scene_ao_height,ao.ao_framebuffer.Width(),ao.ao_framebuffer.Height(),scene_ao_samples,
+            double(ticks[1]-ticks[0])*1.e-6,double(ticks[2]-ticks[1])*1.e-6,double(ticks[3]-ticks[2])*1.e-6);
+        glDeleteQueries(4,timings);
+    }
+    framebuffers[framebuffer_current_draw].MarkColorDirty();
+    glViewport(viewport[0],viewport[1],viewport[2],viewport[3]);
     glBindFramebuffer(GL_READ_FRAMEBUFFER,previous_read);
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER,previous_draw);
     if (scissor) glEnable(GL_SCISSOR_TEST);
-    // World translucency is already incorporated in eligible RGB. Alpha now
-    // belongs only to later canvas/cockpit layers, avoiding double attenuation.
+    // Completed world color is now independent of later canvas/cockpit alpha.
     framebuffers[framebuffer_current_draw].ClearAlphaToZero();
     UseSceneDrawBuffers();
 }
@@ -647,8 +706,8 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
     const auto passes = d3scene::buildViewPasses(presentation,visibility,products);
     check_scene_error("pass setup");
     for (const auto& pass : passes) {
-      if (pass.kind == d3scene::ViewPassKind::ExportRadiance) {
-        FinishSceneRadianceProduct();
+      if (pass.kind == d3scene::ViewPassKind::CompositeWorldOcclusion) {
+        CompositeSceneRadiance(presentation.data().paused);
         continue;
       }
       if (pass.kind == d3scene::ViewPassKind::ExportOpaqueScene) {

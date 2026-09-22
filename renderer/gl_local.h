@@ -164,7 +164,6 @@ class GL4Renderer : public IRenderer
 	Framebuffer bloom_source_framebuffer;
 	Framebuffer bloom_source_resolved_framebuffer;
 	Framebuffer bloom_source_downscale_framebuffer;
-	Framebuffer ao_composite_framebuffer;
 	Framebuffer post_present_framebuffer;
 	Framebuffer post_composite_framebuffer;
 	Framebuffer motion_blur_framebuffer;
@@ -634,9 +633,8 @@ private:
 	// in lockstep with scene compositing instead of estimating it from color.
 	GLuint scene_ao_radiance_texture = 0;
 	uint32_t scene_ao_width = 0, scene_ao_height = 0, scene_ao_samples = 0;
-	ColorFramebuffer scene_ao_resolved, scene_ao_product;
 	void BeginSceneRadianceProduct();
-	void FinishSceneRadianceProduct();
+	void CompositeSceneRadiance(bool paused);
 	void DrawRoomFogMultiplyCorrection(GLenum primitive, GLint first, GLsizei count);
 	bool PrepareRoomFogEntryMap(const renderer_room_fog_state& state);
 

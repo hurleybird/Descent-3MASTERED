@@ -63,6 +63,12 @@ $referencePath = (Resolve-Path -LiteralPath $Reference).Path
 $actualPath = (Resolve-Path -LiteralPath $Actual).Path
 $referenceManifest = Get-Content -LiteralPath (Join-Path $referencePath 'manifest.json') -Raw | ConvertFrom-Json
 $actualManifest = Get-Content -LiteralPath (Join-Path $actualPath 'manifest.json') -Raw | ConvertFrom-Json
+$referenceScale = if ($referenceManifest.supersampling) { $referenceManifest.supersampling } elseif ($referenceManifest.profile -eq 'clean') { 1 } else { 2 }
+$actualScale = if ($actualManifest.supersampling) { $actualManifest.supersampling } elseif ($actualManifest.profile -eq 'clean') { 1 } else { 2 }
+if ($referenceScale -ne $actualScale -and -not $DiagnosticComparison) { throw 'Supersampling differs; this is not a parity comparison.' }
+$referenceMsaa = if ($null -ne $referenceManifest.msaa_samples) { $referenceManifest.msaa_samples } elseif ($referenceManifest.profile -eq 'clean') { 0 } else { 4 }
+$actualMsaa = if ($null -ne $actualManifest.msaa_samples) { $actualManifest.msaa_samples } elseif ($actualManifest.profile -eq 'clean') { 0 } else { 4 }
+if ($referenceMsaa -ne $actualMsaa -and -not $DiagnosticComparison) { throw 'MSAA differs; this is not a parity comparison.' }
 if ($referenceManifest.profile -ne $actualManifest.profile -or
     $referenceManifest.frame -ne $actualManifest.frame -or
     $referenceManifest.seed -ne $actualManifest.seed -or

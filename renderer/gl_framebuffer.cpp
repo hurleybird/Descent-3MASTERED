@@ -1024,6 +1024,12 @@ GLuint SceneSurfaceResources::ObjectIdTextureForRead(GLuint source_framebuffer)
 void GL_VerifySceneSampleResolve()
 {
     SampleResolveScope scope;
+    GLint blend_src_rgb, blend_dst_rgb, blend_src_alpha, blend_dst_alpha, blend_rgb, blend_alpha;
+    glGetIntegeri_v(GL_BLEND_SRC_RGB,0,&blend_src_rgb); glGetIntegeri_v(GL_BLEND_DST_RGB,0,&blend_dst_rgb);
+    glGetIntegeri_v(GL_BLEND_SRC_ALPHA,0,&blend_src_alpha); glGetIntegeri_v(GL_BLEND_DST_ALPHA,0,&blend_dst_alpha);
+    glGetIntegeri_v(GL_BLEND_EQUATION_RGB,0,&blend_rgb); glGetIntegeri_v(GL_BLEND_EQUATION_ALPHA,0,&blend_alpha);
+    const auto blend3 = glIsEnabledi(GL_BLEND,3);
+    GLboolean mask3[4]; glGetBooleani_v(GL_COLOR_WRITEMASK,3,mask3);
     const auto sample_shading = glIsEnabled(GL_SAMPLE_SHADING);
     const auto multisample = glIsEnabled(GL_MULTISAMPLE);
     GLfloat minimum; glGetFloatv(GL_MIN_SAMPLE_SHADING_VALUE,&minimum);
@@ -1033,7 +1039,12 @@ void GL_VerifySceneSampleResolve()
     SceneSurfaceResources motion;
     motion.Update(1,1,target.Samples());
     motion.AttachToFramebuffer(target.Handle());
-    const GLenum outputs[5] = {GL_COLOR_ATTACHMENT0,GL_COLOR_ATTACHMENT1,GL_NONE,GL_NONE,GL_COLOR_ATTACHMENT4};
+    GLuint eligible;
+    glGenTextures(1,&eligible); glBindTexture(GL_TEXTURE_2D_MULTISAMPLE,eligible);
+    glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE,target.Samples(),GL_RGBA16F,1,1,GL_TRUE);
+    glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT3,GL_TEXTURE_2D_MULTISAMPLE,eligible,0);
+    glDisablei(GL_BLEND,3); glColorMaski(3,GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);
+    const GLenum outputs[5] = {GL_COLOR_ATTACHMENT0,GL_COLOR_ATTACHMENT1,GL_NONE,GL_COLOR_ATTACHMENT3,GL_COLOR_ATTACHMENT4};
     glDrawBuffers(5,outputs);
     glViewport(0,0,1,1);
     glEnable(GL_MULTISAMPLE); glEnable(GL_SAMPLE_SHADING); glMinSampleShading(1);
@@ -1043,6 +1054,7 @@ void GL_VerifySceneSampleResolve()
     shader.AttachSource(blitVertexSrc,R"GLSL(#version 450 core
 layout(location=0) out vec4 color;
 layout(location=1) out vec4 velocity;
+layout(location=3) out vec4 eligible;
 layout(location=4) out uint identity;
 void main() {
     int sample_index = gl_SampleID;
@@ -1050,6 +1062,7 @@ void main() {
     color = vec4(2,.5,.125,1);
     velocity = vec4(sample_index,10+sample_index,sample_index == 1 ? 1 : 0,(sample_index+2)/255.0);
     identity = uint(100+sample_index);
+    eligible = vec4(sample_index+1,0,0,1);
 }
 )GLSL");
     shader.Use(); glBindVertexArray(GL_GetFramebufferVAO());
@@ -1076,11 +1089,48 @@ void main() {
     if (fabsf(resolved_depth-.2f) > .00001f || velocity[0] != 1 || velocity[1] != 11 || velocity[2] != 1 ||
         int(velocity[3]*255+.5f) != 3 || identity != 101)
         Error("Scene sample resolve mixed surfaces: depth=%g velocity=%g,%g identity=%u",resolved_depth,velocity[0],velocity[1],identity);
+    // Exercise the actual signed-light compositor, including distinct eligible
+    // values in every sample. No scene-color readback/copy feeds this draw.
+    extern const char* aoDeferredCompositeFragmentSrc;
+    ShaderProgram composite;
+    composite.AttachSource(blitVertexSrc,aoDeferredCompositeFragmentSrc);
+    composite.Use();
+    glUniform1i(composite.FindUniform("scene_source_ms"),0);
+    glUniform1i(composite.FindUniform("scene_source"),1);
+    glUniform1i(composite.FindUniform("ao_source"),2);
+    glUniform1i(composite.FindUniform("suppression_mask"),3);
+    glUniform1i(composite.FindUniform("source_samples"),target.Samples());
+    glUniform1f(composite.FindUniform("intensity"),1);
+    GLuint constant_ao;
+    glGenTextures(1,&constant_ao); glActiveTexture(GL_TEXTURE2); glBindTexture(GL_TEXTURE_2D,constant_ao);
+    const float half = .5f;
+    glTexImage2D(GL_TEXTURE_2D,0,GL_R16F,1,1,0,GL_RED,GL_FLOAT,&half);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER,target.Handle());
+    glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER,GL_COLOR_ATTACHMENT3,GL_TEXTURE_2D_MULTISAMPLE,0,0);
+    glDrawBuffer(GL_COLOR_ATTACHMENT0);
+    glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D_MULTISAMPLE,eligible);
+    glDisable(GL_DEPTH_TEST); glDepthMask(GL_FALSE);
+    glEnablei(GL_BLEND,0); glBlendEquationi(0,GL_FUNC_ADD); glBlendFuncSeparatei(0,GL_ONE,GL_ONE,GL_ZERO,GL_ONE);
+    glDrawArrays(GL_TRIANGLES,0,3);
+    glDisablei(GL_BLEND,0);
+    target.MarkColorDirty(); target.ColorTextureForRead();
+    glReadBuffer(GL_COLOR_ATTACHMENT0); glReadPixels(0,0,1,1,GL_RGBA,GL_FLOAT,radiance);
+    const float expected = 2-.25f*(target.Samples()+1);
+    if (fabsf(radiance[0]-expected) > .001f || radiance[1] != .5f || radiance[2] != .125f || radiance[3] != 1)
+        Error("Signed sample-light composition failed: %g,%g,%g,%g",radiance[0],radiance[1],radiance[2],radiance[3]);
+    glDeleteTextures(1,&eligible); glDeleteTextures(1,&constant_ao); composite.Destroy();
     shader.Destroy(); motion.Destroy(); target.Destroy();
+    glBlendFuncSeparatei(0,blend_src_rgb,blend_dst_rgb,blend_src_alpha,blend_dst_alpha);
+    glBlendEquationSeparatei(0,blend_rgb,blend_alpha);
+    if (blend3) glEnablei(GL_BLEND,3); else glDisablei(GL_BLEND,3);
+    glColorMaski(3,mask3[0],mask3[1],mask3[2],mask3[3]);
     glMinSampleShading(minimum);
     GL_SetEnabledState(GL_SAMPLE_SHADING,sample_shading); GL_SetEnabledState(GL_MULTISAMPLE,multisample);
     AutomatedCaptureLog("scene sample resolve verified: nearest sample=1 depth=0.2 velocity=1,11 validity=1 class=3 identity=101");
     AutomatedCaptureLog("scene radiance resolve verified: unclipped RGB=2,0.5,0.125");
+    AutomatedCaptureLog("scene signed-light composition verified: per-sample radiance and alpha preserved");
 }
 
 void PostProtectionMaskResources::Update(uint32_t new_width, uint32_t new_height, uint32_t msaa_samples)

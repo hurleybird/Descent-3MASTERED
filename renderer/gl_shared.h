@@ -359,8 +359,8 @@ struct AOResult
 	int debug_channel = 0;
 };
 
-//Ambient occlusion. Renders depth-driven AO, then either modulates
-//the scene color in place or exposes the visibility term for deferred composition.
+//Ambient occlusion. Produces depth-driven visibility and temporal history.
+//Scene color is modified only by the explicit world-composition pass.
 //Reconstructs view-space normals from the depth buffer (we have no normals G-buffer).
 struct AOResources
 {
@@ -385,7 +385,6 @@ struct AOResources
 	ShaderProgram blur_y_shader;
 	ShaderProgram temporal_shader;
 	ShaderProgram suppression_shader;
-	ShaderProgram apply_shader;
 
 	//Depth downsample/resolve shader uniforms.
 	GLint depth_source = -1;
@@ -465,21 +464,15 @@ struct AOResources
 	GLint suppression_bloom_threshold = -1;
 
 	//Apply (composite) shader uniforms.
-	GLint apply_intensity = -1;
-	GLint apply_has_mask = -1;
-	GLint apply_ao_uv_origin = -1;
-	GLint apply_ao_uv_scale = -1;
-	GLint apply_debug_channel = -1;
 
 	void InitShaders();
 	void DestroyShaders();
 	bool HasFramebuffers() const;
 	void DestroyFramebuffers();
 	void Destroy();
-	//Computes AO for the supplied source framebuffer (which must have valid
-	//color + depth). Modulates target->color, or source->color when target is
-	//null, by sampling pref_state and projection info.
-	void Apply(Framebuffer* source, Framebuffer* target, const renderer_preferred_state& pref_state,
+	// Produces occlusion/history products without modifying scene color.
+	// Composition belongs exclusively to the scheduled world-light pass.
+	AOResult Evaluate(Framebuffer* source, const renderer_preferred_state& pref_state,
 		const rendering_state& render_state, const float* projection,
 		float nearz, float farz, GLuint suppression_mask_texture, GLuint ao_weight_texture,
 		bool ao_weight_is_direct,
@@ -492,8 +485,7 @@ struct AOResources
 		const float* current_inverse_modelview = nullptr,
 		const float* previous_view_projection = nullptr,
 		bool has_static_reconstruction = false, bool has_dynamic_velocity = false,
-		bool reset_temporal_history = false, bool composite_to_target = true,
-		AOResult* result = nullptr);
+		bool reset_temporal_history = false);
 };
 
 inline int RendererSupersamplingFactor(const renderer_preferred_state& state)

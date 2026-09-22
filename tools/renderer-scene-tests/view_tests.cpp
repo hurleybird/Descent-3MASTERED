@@ -289,7 +289,11 @@ int runSceneViewTests() {
     check(matrices.inverse_view[0] == side.camera.right.x && matrices.inverse_view[8] == side.camera.forward.x &&
         matrices.inverse_view[12] == side.camera.position.x,"Post-consumer inverse view uses another camera");
     const auto radiance_passes = d3scene::buildViewPasses(*scheduled_frame,scheduled_visibility,{true,true});
-    check(radiance_passes.back().kind == d3scene::ViewPassKind::ExportRadiance &&
+    bool rejected_missing_depth = false;
+    try { d3scene::buildViewPasses(*scheduled_frame,scheduled_visibility,{false,true}); }
+    catch (const std::invalid_argument&) { rejected_missing_depth = true; }
+    check(rejected_missing_depth,"Occlusion pass accepted a missing opaque scene dependency");
+    check(radiance_passes.back().kind == d3scene::ViewPassKind::CompositeWorldOcclusion &&
         radiance_passes[radiance_passes.size()-2].kind == d3scene::ViewPassKind::BlendedWorld,
         "Eligible radiance was exported before translucency attenuated it");
     const d3scene::RadianceSample opaque{{.6f,.7f,.8f},{.3f,.2f,.1f}}; // the remainder is fog/emissive

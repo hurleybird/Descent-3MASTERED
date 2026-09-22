@@ -58,7 +58,7 @@ struct ViewVisibility {
     ViewQueryStats stats;
     bool exterior_visible = false;
 };
-enum class ViewPassKind { Background, OpaqueWorld, SnapshotOpaqueDepth, ExportOpaqueScene, BlendedWorld, ExportRadiance };
+enum class ViewPassKind { Background, OpaqueWorld, SnapshotOpaqueDepth, ExportOpaqueScene, BlendedWorld, CompositeWorldOcclusion };
 struct ViewProducts { bool opaque_scene = false, occlusion_radiance = false; };
 struct ViewPass {
     ViewPassKind kind;

@@ -279,6 +279,8 @@ const SurfaceBinding& visibleSurfaceBinding(const Presentation& frame,const Visi
     return data.rooms[item.room_index].surfaces[item.polygon_index];
 }
 std::vector<ViewPass> buildViewPasses(const Presentation& frame,const ViewVisibility& view,ViewProducts products) {
+    if (products.occlusion_radiance && !products.opaque_scene)
+        throw std::invalid_argument("World occlusion requires an opaque scene product");
     std::vector<ViewPass> passes;
     uint32_t index = 0;
     while (index < view.surfaces.size() && view.surfaces[index].layer == RenderLayer::Background) ++index;
@@ -292,7 +294,7 @@ std::vector<ViewPass> buildViewPasses(const Presentation& frame,const ViewVisibi
     if (depth_required) passes.push_back({ViewPassKind::SnapshotOpaqueDepth,index,index});
     if (products.opaque_scene) passes.push_back({ViewPassKind::ExportOpaqueScene,index,index});
     if (index < view.surfaces.size()) passes.push_back({ViewPassKind::BlendedWorld,index,static_cast<uint32_t>(view.surfaces.size())});
-    if (products.occlusion_radiance) passes.push_back({ViewPassKind::ExportRadiance,index,index});
+    if (products.occlusion_radiance) passes.push_back({ViewPassKind::CompositeWorldOcclusion,index,index});
     return passes;
 }
 } // namespace d3scene

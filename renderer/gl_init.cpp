@@ -859,7 +859,7 @@ int GL4Renderer::Init(oeApplication* app, renderer_preferred_state* pref_state)
 
 	ao_compositeshader.AttachSource(blitVertexSrc, aoDeferredCompositeFragmentSrc);
 	ao_compositeshader.Use();
-	ao_composite_final_source = ao_compositeshader.FindUniform("final_source");
+	ao_composite_final_source = ao_compositeshader.FindUniform("scene_source_ms");
 	ao_composite_scene_source = ao_compositeshader.FindUniform("scene_source");
 	ao_composite_ao_source = ao_compositeshader.FindUniform("ao_source");
 	ao_composite_suppression_mask = ao_compositeshader.FindUniform("suppression_mask");

@@ -7,6 +7,8 @@ param(
     [uint32]$Seed = 12345,
     [int]$TimeoutSeconds = 120,
     [ValidateSet('clean','antialias','effects')][string]$Profile = 'effects',
+    [ValidateSet(0,1,2,4)][int]$Supersampling = 0,
+    [ValidateSet(-1,0,2,4,8)][int]$MsaaSamples = -1,
     [switch]$SceneInspection,
     [switch]$VertexLighting,
     [switch]$TerrainProbe,
@@ -39,9 +41,13 @@ function Read-Settings {
     return ($values | ConvertTo-Json -Depth 8 -Compress)
 }
 $settings = Read-Settings
+$sampleScale = if ($Supersampling -gt 0) { $Supersampling } elseif ($Profile -eq 'clean') { 1 } else { 2 }
+$msaaCount = if ($MsaaSamples -ge 0) { $MsaaSamples } elseif ($Profile -eq 'clean') { 0 } else { 4 }
 $settings | Set-Content -LiteralPath (Join-Path $outputPath 'settings.json') -Encoding UTF8
 $manifest = [ordered]@{
     runtime = $runtimePath; profile = $Profile; frame = $Frame; seed = $Seed; scene_inspection = [bool]$SceneInspection
+    supersampling = $sampleScale
+    msaa_samples = $msaaCount
     deformation_probe = [bool]$DeformationProbe
     vertex_lighting = [bool]$VertexLighting
     terrain_probe = [bool]$TerrainProbe
@@ -71,9 +77,9 @@ try {
             '-capture-frame',"$Frame",'-capture-dt','0.016666667','-capture-seed',"$Seed",'-capture-headlight',
             '-capture-output',('"{0}"' -f $png),'-render-resolution','1280','720',
             '-perpixellighting','-nomotionblur')
-        if ($Profile -eq 'clean') { $arguments += @('-msaa','0','-ssaa','1','-noao','-nobloom') }
-        elseif ($Profile -eq 'antialias') { $arguments += @('-msaa','4','-ssaa','2','-noao','-nobloom') }
-        else { $arguments += @('-msaa','4','-ssaa','2','-ao','-bloom') }
+        if ($Profile -ne 'effects') { $arguments += @('-noao','-nobloom') }
+        else { $arguments += @('-ao','-bloom') }
+        $arguments += @('-ssaa',"$sampleScale",'-msaa',"$msaaCount")
         if ($SceneInspection) { $arguments += '-scene-inspection' }
         if ($HistoryProbe) { $arguments += '-scene-history-probe' }
         if ($VertexLighting) { $arguments += '-noperpixellighting' }
