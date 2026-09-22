@@ -76,12 +76,14 @@ public:
     AssetId id() const { return id_; }
     const MeshGeometry& geometry() const { return geometry_; }
     const VolumeGrid& volume() const { return volume_; }
+    const Bounds& bounds() const { return bounds_; }
 private:
     friend class SceneAssets;
     RoomAsset(AssetId id, MeshGeometry geometry, VolumeGrid volume);
     AssetId id_;
     MeshGeometry geometry_;
     VolumeGrid volume_;
+    Bounds bounds_;
 };
 using RoomAssetRef = std::shared_ptr<const RoomAsset>;
 
@@ -265,10 +267,12 @@ struct PreparedMesh {
     Transform world;
     Vec3 camera_translation; // sky follows the eye with authored half-height parallax
     float eye_distance = 0; // positive projects the world anchor onto a view-centered shell
+    Vec2 size_fade_range; // eye-depth start/end; zero disables view-local size fade
     MeshAlignment alignment = MeshAlignment::World;
     // Axis alignment preserves world.up (half the segment, toward its start)
     // and uses the length of world.right as radius. Facing is view-local.
     int32_t room = -1;
+    int32_t receiver_polygon = -1; // optional room-surface visibility dependency (decals)
     uint32_t owner = 0;
     bool has_owner = false; // same allocation-generation identity as ObjectState
 };
@@ -277,6 +281,7 @@ struct Portal {
     int32_t combine_master = -1;
     uint32_t flags = 0;
     bool traversable = true;
+    bool two_sided = false; // aperture policy, independent of surface winding
 };
 struct RoomState {
     int32_t number = -1;
@@ -418,6 +423,7 @@ struct View {
     float zoom = 1;
     bool dynamic_lighting = true;
     bool portal_visibility = true;
+    bool exterior_origin = false; // explicit exterior root, not an unknown room fallback
     uint8_t feedback = NoFeedback;
     bool camera_cut = false;
 };

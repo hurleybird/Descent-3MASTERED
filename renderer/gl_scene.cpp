@@ -716,6 +716,12 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
     if (!view.geometry_inspection)
         Error("Scene executor migration incomplete: only explicit geometry inspection is currently supported.");
     const auto visibility = d3scene::queryView(presentation,view);
+    if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0) {
+        unsigned receivers = 0;
+        for (const auto& item : visibility.surfaces)
+            if (item.mesh && presentation.data().meshes[item.mesh_index].receiver_polygon >= 0) ++receivers;
+        if (receivers) AutomatedCaptureLog("scene receiver meshes visible=%u",receivers);
+    }
     const auto check_scene_error = [](const char* stage) { const auto error = glGetError(); if (error != GL_NO_ERROR) Error("Scene GL error 0x%x at %s",error,stage); };
     check_scene_error("entry");
     FlushFontBatch();

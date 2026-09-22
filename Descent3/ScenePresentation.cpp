@@ -300,6 +300,7 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance_history) {
     PrepareGameEffects(data);
     PrepareGameModelInstances(data, previous_models ? &previous_models->data() : nullptr);
     PrepareGameObjectEffects(data);
+    PrepareGameScorches(data);
     for (auto& surface : data.terrain.materials) resolveMaterial(surface,static_cast<float>(data.simulation_time),false,true);
     for (auto& object : data.objects) for (auto& part : object.parts) for (auto& surface : part.surfaces)
         resolveMaterial(surface,static_cast<float>(data.simulation_time),true);
@@ -307,6 +308,10 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance_history) {
     d3scene::prepareTerrainPatches(data.terrain);
     PrepareGameSceneLights(data);
     for (auto& room : data.rooms) for (auto& portal : room.portals) {
+        // Exterior door apertures have authored winding conventions that are
+        // not interior-facing portal planes. Compile this once, not in queries.
+        portal.two_sided = room.exterior && portal.destination_room >= 0 &&
+            portal.destination_room < MAX_ROOMS && (Rooms[portal.destination_room].flags & RF_DOOR);
         const auto& surface = room.surfaces[portal.polygon];
         const auto material = d3scene::compileMaterialPolicy(surface,room.asset->geometry().polygons[portal.polygon]);
         portal.traversable = !(portal.flags & PF_RENDER_FACES) || material.allowsBehind() ||
@@ -343,7 +348,7 @@ void RenderGameSceneView(const d3scene::Presentation& frame, d3scene::View view)
         const uint32_t x = grid.width/2, z = grid.depth/4;
         view.camera.position = {x*grid.spacing,grid.heights[z*grid.width+x]+120,z*grid.spacing};
         view.camera.right = {1,0,0}; view.camera.up = {0,.8f,.6f}; view.camera.forward = {0,-.6f,.8f};
-        view.attached_camera = false; view.room = -1;
+        view.attached_camera = false; view.room = -1; view.exterior_origin = true;
         if (FindArg("-scene-sky-probe")) {
             view.camera.position.y += 180;
             view.camera.up = {0,.9797959f,-.2f}; view.camera.forward = {0,.2f,.9797959f};
@@ -377,6 +382,24 @@ void RenderGameSceneView(const d3scene::Presentation& frame, d3scene::View view)
             view.camera.up = {facing.uvec.x,facing.uvec.y,facing.uvec.z};
             view.camera.forward = {facing.fvec.x,facing.fvec.y,facing.fvec.z};
             view.room = object.room; view.attached_camera = false; view.exclude_object = false;
+            view.exterior_origin = object.room != -1 && ROOMNUM_OUTSIDE(object.room);
+            break;
+        }
+    }
+    if (FindArg("-scene-scorch-view-probe")) {
+        for (const auto& mesh : frame.data().meshes) if (mesh.receiver_polygon >= 0) {
+            for (const auto& room : frame.data().rooms) if (room.number == mesh.room) {
+                const auto normal = room.asset->geometry().polygons[mesh.receiver_polygon].normal;
+                vector forward{-normal.x,-normal.y,-normal.z};
+                matrix facing; vm_VectorToMatrix(&facing,&forward,nullptr,nullptr);
+                view.camera.position = {mesh.world.position.x+normal.x*12,mesh.world.position.y+normal.y*12,
+                    mesh.world.position.z+normal.z*12};
+                view.camera.right = {facing.rvec.x,facing.rvec.y,facing.rvec.z};
+                view.camera.up = {facing.uvec.x,facing.uvec.y,facing.uvec.z};
+                view.camera.forward = {facing.fvec.x,facing.fvec.y,facing.fvec.z};
+                view.room = room.number; view.exterior_origin = false; view.attached_camera = false;
+                break;
+            }
             break;
         }
     }

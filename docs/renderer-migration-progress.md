@@ -1,5 +1,37 @@
 # Renderer migration checkpoint
 
+## Continuation: explicit exterior roots and receiver-owned decals
+
+Outdoor views now declare their origin instead of falling into the unknown-room
+all-interiors reference query. Traversal seeds exterior shells and reaches indoor
+rooms through portals, respecting closed doors. Exterior door aperture sidedness
+is compiled from authoring policy. Immutable room assets cache geometric bounds;
+exterior candidate rejection handles eye-straddling boxes and pre-near apertures.
+The camera's own room remains a root regardless of shell visibility. Terrain,
+outside objects and outside meshes share one exterior aperture window. Unfiltered
+reference queries retain the complete published scene. Terrain occlusion and
+gameplay feedback policy remain unfinished; no automap/AI feedback is enabled.
+
+Scorch state now publishes receiver-bound multiplicative meshes once per frame.
+Queries require the parent surface to be visible; distance-based size fade is
+per-view and immutable. Existing depth offset and fog/multiplicative AO semantics
+use the shared material path. Tests reject missing receivers and invalid fades,
+and cover hidden receivers, independent cameras and fade endpoints.
+
+Full build and 5,191 checks pass. Eight scene-spatial-windows-effects saves are
+byte-identical to exterior-roots; exterior-bounds changes leave seven exact with
+the small recurring 002 delta. Two terrain probes complete and were inspected
+(002 final bounds, 003 spatial-window version); their bounds comparison changes
+under 0.008% of pixels. Eight scene-receiver-decals-effects saves are byte-identical
+to exterior-bounds. Targeted scorch fixtures 000/001/003 publish one decal each;
+000's tiny mark has no visible delta. The close-up scene-scorch-view-probe/003 was
+visually inspected: the dark authored mark sits on the bright receiving strip,
+with one receiver mesh confirmed visible. This is not full legacy parity.
+
+Capture harness now has ScorchProbe (existing -capture-scorch) and ScorchViewProbe
+(inspection-only receiver close-up); comparisons guard both fixture identities.
+All domain barriers remain pending. Candidate and Previous Candidate unchanged.
+
 ## Continuation: owned model roles, glows and object imagery
 
 Model preparation now resolves surface/facing/glow/hidden roles and hierarchy

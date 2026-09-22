@@ -4,6 +4,7 @@
 #include "ScenePortals.h"
 #include "SceneTerrain.h"
 #include <unordered_map>
+#include <unordered_set>
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
@@ -176,6 +177,13 @@ Transform resolveMeshTransform(const PreparedMesh& instance,const Camera& camera
     world.position.x += instance.camera_translation.x*camera.transform.position.x;
     world.position.y += instance.camera_translation.y*camera.transform.position.y;
     world.position.z += instance.camera_translation.z*camera.transform.position.z;
+    if (instance.size_fade_range.y > 0) {
+        const float depth = static_cast<float>(dot(camera.transform.forward,subtract(world.position,camera.transform.position)));
+        const float scale = std::max(0.f,std::min(1.f,(instance.size_fade_range.y-depth)/
+            (instance.size_fade_range.y-instance.size_fade_range.x)));
+        world.right = combine(world.right,scale,{},0);
+        world.up = combine(world.up,scale,{},0);
+    }
     return world;
 }
 ClipPosition project(const Camera& camera, Vec3 world) {
@@ -212,6 +220,23 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
     const auto windows = queryPortalWindows(frame,view,result.camera);
     std::unordered_map<int32_t,size_t> room_indices;
     for (size_t i = 0; i < rooms.size(); ++i) room_indices.emplace(rooms[i].number,i);
+    PortalWindow exterior_window{};
+    if (!view.portal_visibility || view.exterior_origin || !room_indices.count(view.room)) exterior_window = {-1,-1,1,1,true};
+    else for (size_t room = 0; room < rooms.size(); ++room) if (rooms[room].exterior && windows[room].visible) {
+        const auto& window = windows[room];
+        if (!exterior_window.visible) exterior_window = window;
+        else exterior_window = {std::min(exterior_window.left,window.left),std::min(exterior_window.bottom,window.bottom),
+            std::max(exterior_window.right,window.right),std::max(exterior_window.top,window.top),true};
+    }
+    result.exterior_visible = exterior_window.visible;
+    const auto spatialWindow = [&](int32_t room) {
+        const auto found = room_indices.find(room);
+        if (found != room_indices.end()) return windows[found->second];
+        // Nonnegative values identify rooms; -1 is unbound content. Other
+        // negative memberships identify exterior cells, not unbound geometry.
+        if (room < -1) return exterior_window;
+        return PortalWindow{-1,-1,1,1,true};
+    };
     auto consider = [&](MeshView geometry, const SurfaceBinding& surface, VisibleSurface item,PortalWindow window) {
         if (!surface.draw_surface || (!item.model && surface.bitmap < 0)) return;
         ++result.stats.surfaces_considered;
@@ -244,9 +269,7 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
         const auto& object = frame.data().objects[i];
         if (!object.visible) continue;
         if (view.exclude_object && object.handle == view.excluded_object) continue;
-        PortalWindow window{-1,-1,1,1,true};
-        const auto room = room_indices.find(object.room);
-        if (room != room_indices.end()) window = windows[room->second];
+        const auto window = spatialWindow(object.room);
         if (!window.visible) continue;
         if (object.model && (!object.has_render_bounds || boundsOutside(result.camera,object.render_bounds,window))) continue;
         if (object.model || sphereIntersects(result.camera,object.current.position,object.radius))
@@ -269,15 +292,6 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
         }
     }
     {
-        PortalWindow exterior_window{};
-        if (!view.portal_visibility || !room_indices.count(view.room)) exterior_window = {-1,-1,1,1,true};
-        else for (size_t room = 0; room < rooms.size(); ++room) if (rooms[room].exterior && windows[room].visible) {
-            const auto& window = windows[room];
-            if (!exterior_window.visible) exterior_window = window;
-            else exterior_window = {std::min(exterior_window.left,window.left),std::min(exterior_window.bottom,window.bottom),
-                std::max(exterior_window.right,window.right),std::max(exterior_window.top,window.top),true};
-        }
-        result.exterior_visible = exterior_window.visible;
         if (exterior_window.visible && frame.data().terrain.asset) {
             const auto& terrain = frame.data().terrain;
             for (size_t patch_index = 0; patch_index < terrain.asset->patches().size(); ++patch_index) {
@@ -298,9 +312,14 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
         }
     }
     std::unordered_map<uint32_t,const ObjectState*> owners;
+    std::unordered_set<uint64_t> visible_receivers;
+    for (const auto& surface : result.surfaces) if (!surface.model && !surface.terrain && !surface.mesh)
+        visible_receivers.insert((uint64_t(surface.room_index)<<32)|surface.polygon_index);
     for (const auto& object : frame.data().objects) owners.emplace(object.handle,&object);
     for (size_t index = 0; index < frame.data().meshes.size(); ++index) {
         const auto& instance = frame.data().meshes[index];
+        if (instance.receiver_polygon >= 0 && !visible_receivers.count(
+            (uint64_t(room_indices.at(instance.room))<<32)|uint32_t(instance.receiver_polygon))) continue;
         if (instance.has_owner && ((view.exclude_object && instance.owner == view.excluded_object) ||
             !owners.at(instance.owner)->visible)) continue;
         const auto& geometry = instance.asset->geometry();
@@ -308,9 +327,10 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
             (instance.surface.material.layer == RenderLayer::Background && !result.exterior_visible)) continue;
         VisibleSurface item; item.mesh = true; item.mesh_index = static_cast<uint32_t>(index);
         item.world = resolveMeshTransform(instance,result.camera);
+        if (instance.size_fade_range.y > 0 && dot(item.world.right,item.world.right) == 0) continue;
         PortalWindow window{-1,-1,1,1,true};
-        if (instance.surface.material.layer == RenderLayer::World && view.portal_visibility && room_indices.count(instance.room)) {
-            window = windows[room_indices.at(instance.room)];
+        if (instance.surface.material.layer == RenderLayer::World && view.portal_visibility) {
+            window = spatialWindow(instance.room);
             if (!window.visible) continue;
         }
         // Pixel-expanded markers can straddle a clip boundary while their

@@ -7,13 +7,31 @@
 #include <limits>
 namespace d3scene {
 namespace {
-PortalWindow projectedPortal(const Camera& camera,const MeshGeometry& mesh,const MeshPolygon& polygon) {
+PortalWindow projectedBounds(const Camera& camera,const Bounds& bounds) {
+    const double infinity = std::numeric_limits<double>::infinity();
+    PortalWindow result{infinity,infinity,-infinity,-infinity,true};
+    unsigned behind = 0;
+    for (unsigned i = 0; i < 8; ++i) {
+        const auto p = project(camera,{i&1 ? bounds.maximum.x : bounds.minimum.x,
+            i&2 ? bounds.maximum.y : bounds.minimum.y,i&4 ? bounds.maximum.z : bounds.minimum.z});
+        if (p.w <= 1.e-5) { ++behind; continue; }
+        const double epsilon = 2.e-6*(1+std::abs(p.x/p.w)+std::abs(p.y/p.w));
+        result.left = std::min(result.left,p.x/p.w-epsilon); result.right = std::max(result.right,p.x/p.w+epsilon);
+        result.bottom = std::min(result.bottom,p.y/p.w-epsilon); result.top = std::max(result.top,p.y/p.w+epsilon);
+    }
+    if (behind == 8) return {};
+    // A box crossing the eye plane is unbounded in projection. Never use a
+    // projected-corner shortcut to cull a large enclosing building.
+    if (behind) return {-1,-1,1,1,true};
+    return result;
+}
+PortalWindow projectedPortal(const Camera& camera,const MeshGeometry& mesh,const MeshPolygon& polygon,bool two_sided) {
     const auto first = mesh.vertices[polygon.corners[0].vertex];
     const auto eye = camera.transform.position;
     const auto n = polygon.normal;
     const double facing = double(n.x)*(eye.x-first.x)+double(n.y)*(eye.y-first.y)+double(n.z)*(eye.z-first.z);
     const double tolerance = 2.e-6*(1+std::abs(eye.x)+std::abs(eye.y)+std::abs(eye.z));
-    if (facing < -tolerance) return {};
+    if (!two_sided && facing < -tolerance) return {};
     std::vector<ClipPosition> input, clipped;
     for (const auto& corner : polygon.corners) input.push_back(project(camera,mesh.vertices[corner.vertex]));
     // Portal apertures before the geometry near plane must remain open: clipping
@@ -55,15 +73,20 @@ std::vector<PortalWindow> queryPortalWindows(const Presentation& frame,const Vie
     std::unordered_map<int32_t,size_t> indices;
     for (size_t i = 0; i < rooms.size(); ++i) indices.emplace(rooms[i].number,i);
     const auto root = indices.find(view.room);
-    if (!view.portal_visibility || root == indices.end()) {
+    if (!view.portal_visibility || (root == indices.end() && !view.exterior_origin)) {
         for (auto& window : windows) window.visible = true;
         return windows;
     }
-    std::deque<size_t> queue{root->second};
-    windows[root->second].visible = true;
-    std::vector<bool> queued(rooms.size(),false); queued[root->second] = true;
+    std::deque<size_t> queue;
+    std::vector<bool> queued(rooms.size(),false);
+    std::vector<PortalWindow> exterior_bounds(rooms.size());
+    for (size_t i = 0; i < rooms.size(); ++i) if (rooms[i].exterior)
+        exterior_bounds[i] = rooms[i].asset->geometry().vertices.empty() ? PortalWindow{-1,-1,1,1,true} :
+            projectedBounds(camera,rooms[i].asset->bounds());
     const auto widen = [&](size_t index,PortalWindow window) {
         if (!window.visible) return;
+        const bool camera_room = !view.exterior_origin && root != indices.end() && index == root->second;
+        if (rooms[index].exterior && !camera_room && !intersect(window,exterior_bounds[index]).visible) return;
         auto& target = windows[index];
         if (target.visible) {
             if (target.left <= window.left && target.right >= window.right && target.bottom <= window.bottom && target.top >= window.top) return;
@@ -73,6 +96,12 @@ std::vector<PortalWindow> queryPortalWindows(const Presentation& frame,const Vie
         target = window;
         if (!queued[index]) { queue.push_back(index); queued[index] = true; }
     };
+    if (view.exterior_origin) {
+        // Seed available exterior shells, then enter interiors only through
+        // their apertures. Terrain occlusion may refine these seeds later.
+        for (size_t i = 0; i < rooms.size(); ++i)
+            if (rooms[i].exterior) widen(i,{-1,-1,1,1,true});
+    } else widen(root->second,{-1,-1,1,1,true});
     while (!queue.empty()) {
         const size_t index = queue.front(); queue.pop_front(); queued[index] = false;
         const auto& room = rooms[index];
@@ -81,13 +110,13 @@ std::vector<PortalWindow> queryPortalWindows(const Presentation& frame,const Vie
             for (size_t other = 0; other < rooms.size(); ++other)
                 if (rooms[other].exterior) widen(other,window);
         }
-        if (room.blocks_portals && index != root->second) continue;
+        if (room.blocks_portals && (view.exterior_origin || root == indices.end() || index != root->second)) continue;
         for (const auto& portal : room.portals) {
             if (!portal.traversable) continue;
             const auto destination = indices.find(portal.destination_room);
             if (destination == indices.end()) continue;
             const auto& mesh = room.asset->geometry();
-            auto aperture = projectedPortal(camera,mesh,mesh.polygons[portal.polygon]);
+            auto aperture = projectedPortal(camera,mesh,mesh.polygons[portal.polygon],portal.two_sided);
             widen(destination->second,intersect(window,aperture));
         }
     }

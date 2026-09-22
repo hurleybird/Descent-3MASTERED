@@ -26,6 +26,10 @@
 #include "config.h"
 #include "object_external_struct.h" //for ROOMNUM_OUTSIDE macro
 #include "psrand.h"
+#include "SceneExtraction.h"
+#include "../renderer/SceneGeometry.h"
+#include "bitmap.h"
+#include "gameloop.h"
 
 
 //Structure for storing scorch marks
@@ -249,6 +253,39 @@ static float ScorchMaxVisibleDistance()
 static float ScorchFadeStartDistance()
 {
 	return Render_extended_draw_distance ? 340.0f : 170.0f;
+}
+
+// Snapshot the live ring once; render views never revisit mutable scorch state
+// or depend on a face draw calling back into the game.
+void PrepareGameScorches(d3scene::FrameData& frame)
+{
+    if (!Detail_settings.Scorches_enabled || Scorch_start < 0 || Scorch_end < 0) return;
+    const auto quad = d3scene::assets().publishMesh(2,d3scene::unitBillboardQuad());
+    const size_t start = frame.meshes.size();
+    for (int index = Scorch_start, visited = 0; visited < MAX_SCORCHES; ++visited, index = (index+1)%MAX_SCORCHES) {
+        const auto& source = Scorches[index];
+        const int room = RF_ROOM(source.roomface), face = RF_FACE(source.roomface);
+        if (room >= 0 && room < MAX_ROOMS && Rooms[room].used && face < Rooms[room].num_faces &&
+            source.handle_index < Num_scorch_textures && source.size > 0) {
+            const int bitmap = GetTextureBitmapAtTime(Scorch_texture_handles[source.handle_index],0,static_cast<float>(frame.simulation_time));
+            if (bitmap > BAD_BITMAP_HANDLE && bitmap < MAX_BITMAPS && GameBitmaps[bitmap].used) {
+                d3scene::PreparedMesh decal;
+                decal.asset = quad; decal.room = room; decal.receiver_polygon = face;
+                decal.world.position = {source.pos.x,source.pos.y,source.pos.z};
+                const float scale = source.size/(16.f*127.f);
+                decal.world.right = {source.rx*scale,source.ry*scale,source.rz*scale};
+                decal.world.up = {source.ux*scale,source.uy*scale,source.uz*scale};
+                decal.size_fade_range = {ScorchFadeStartDistance(),ScorchMaxVisibleDistance()};
+                decal.surface.bitmap = bitmap; decal.surface.unlit = true; decal.surface.two_sided = true;
+                decal.surface.texture_wrap = false; decal.surface.blend = d3scene::BlendMode::Multiply;
+                decal.surface.effect_depth_offset = -.5f;
+                frame.meshes.push_back(std::move(decal));
+            }
+        }
+        if (index == Scorch_end) break;
+    }
+    if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
+        AutomatedCaptureLog("scene scorches published=%u",static_cast<unsigned>(frame.meshes.size()-start));
 }
 
 //Draw the scorch(es) for a given face

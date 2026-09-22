@@ -187,6 +187,41 @@ int runSceneViewTests() {
     windows = d3scene::queryPortalWindows(*d3scene::Presentation::freeze(portals),portal_view,d3scene::prepareCamera(portal_view));
     check(windows[1].visible && windows[1].left < -.79 && windows[1].right > .79,"Multiple portal windows were not unioned");
     check(portal_frame->data().rooms[0].asset->geometry().vertices[0].z == 2,"Portal query changed held scene assets");
+    auto exterior_data = portals;
+    exterior_data.rooms[0].exterior = true;
+    auto exterior_view = view(); exterior_view.exterior_origin = true;
+    auto exterior_frame = d3scene::Presentation::freeze(exterior_data);
+    auto exterior_windows = d3scene::queryPortalWindows(*exterior_frame,exterior_view,d3scene::prepareCamera(exterior_view));
+    check(exterior_windows[0].visible && exterior_windows[1].visible && exterior_windows[2].visible && !exterior_windows[3].visible,
+        "Exterior origin exposed disconnected interiors");
+    exterior_data.rooms[1].blocks_portals = true;
+    exterior_windows = d3scene::queryPortalWindows(*d3scene::Presentation::freeze(exterior_data),exterior_view,d3scene::prepareCamera(exterior_view));
+    check(exterior_windows[1].visible && !exterior_windows[2].visible,"Exterior seed bypassed a closed door");
+    auto reversed_apertures = exterior_data.rooms[0].asset->geometry();
+    for (auto& face : reversed_apertures.polygons) face.normal = {0,0,1};
+    exterior_data.rooms[0].asset = assets.publishRoom(0,reversed_apertures);
+    exterior_windows = d3scene::queryPortalWindows(*d3scene::Presentation::freeze(exterior_data),exterior_view,d3scene::prepareCamera(exterior_view));
+    check(!exterior_windows[1].visible,"One-sided backfacing aperture was traversed");
+    for (auto& portal : exterior_data.rooms[0].portals) portal.two_sided = true;
+    exterior_windows = d3scene::queryPortalWindows(*d3scene::Presentation::freeze(exterior_data),exterior_view,d3scene::prepareCamera(exterior_view));
+    check(exterior_windows[1].visible && !exterior_windows[2].visible,"Two-sided door aperture lost visibility or bypassed door closure");
+    exterior_data.rooms[0].exterior = false;
+    exterior_windows = d3scene::queryPortalWindows(*d3scene::Presentation::freeze(exterior_data),exterior_view,d3scene::prepareCamera(exterior_view));
+    check(!exterior_windows[0].visible && !exterior_windows[3].visible,"No exterior shells fell back to all interiors");
+    exterior_data.rooms[3].exterior = true;
+    exterior_data.rooms[3].asset = assets.publishRoom(3,triangle(100,5));
+    exterior_windows = d3scene::queryPortalWindows(*d3scene::Presentation::freeze(exterior_data),exterior_view,d3scene::prepareCamera(exterior_view));
+    check(!exterior_windows[3].visible,"Offscreen exterior shell seeded traversal");
+    exterior_data.rooms[3].asset = assets.publishRoom(3,triangle(0,.5f));
+    exterior_windows = d3scene::queryPortalWindows(*d3scene::Presentation::freeze(exterior_data),exterior_view,d3scene::prepareCamera(exterior_view));
+    check(exterior_windows[3].visible,"Near-plane exterior shell lost aperture eligibility");
+    exterior_data.rooms[3].asset = assets.publishRoom(3,triangle(0,-5));
+    exterior_windows = d3scene::queryPortalWindows(*d3scene::Presentation::freeze(exterior_data),exterior_view,d3scene::prepareCamera(exterior_view));
+    check(!exterior_windows[3].visible,"Exterior shell behind camera seeded traversal");
+    auto enclosing = triangle(0,5); enclosing.vertices[0] = {-100,-100,-5}; enclosing.vertices[1] = {100,100,5};
+    exterior_data.rooms[3].asset = assets.publishRoom(3,enclosing);
+    exterior_windows = d3scene::queryPortalWindows(*d3scene::Presentation::freeze(exterior_data),exterior_view,d3scene::prepareCamera(exterior_view));
+    check(exterior_windows[3].visible,"Eye-straddling exterior shell was culled by projected corners");
     d3scene::FrameData shaken; shaken.sequence = 3; shaken.scene_lifetime = assets.lifetime();
     d3scene::Transform rotation; rotation.right = {0,0,-1}; rotation.forward = {1,0,0};
     shaken.camera_perturbations.push_back({42,rotation});
@@ -237,6 +272,34 @@ int runSceneViewTests() {
     bool background_leaked = false;
     for (const auto& surface : enclosed.surfaces) background_leaked |= surface.layer == d3scene::RenderLayer::Background;
     check(!background_leaked,"Background geometry leaked into enclosed room");
+    auto decals = environment;
+    decals.meshes.resize(1); decals.meshes[0].room = 0; decals.meshes[0].receiver_polygon = 0;
+    auto decal_query = d3scene::queryView(*d3scene::Presentation::freeze(decals),sky_view);
+    check(decal_query.surfaces.size() == 2,"Visible receiver lost its decal");
+    decals.rooms[0].surfaces[0].draw_surface = false;
+    check(d3scene::queryView(*d3scene::Presentation::freeze(decals),sky_view).surfaces.empty(),"Hidden receiver left a floating decal");
+    decals.meshes[0].receiver_polygon = 1;
+    bool missing_receiver = false;
+    try { d3scene::Presentation::freeze(decals); } catch (const std::invalid_argument&) { missing_receiver = true; }
+    check(missing_receiver,"Missing decal receiver was accepted");
+    decals.meshes[0].receiver_polygon = -1; decals.meshes[0].size_fade_range = {20,10};
+    bool bad_fade = false;
+    try { d3scene::Presentation::freeze(decals); } catch (const std::invalid_argument&) { bad_fade = true; }
+    check(bad_fade,"Reversed mesh size fade was accepted");
+    auto enclosed_exterior = environment;
+    enclosed_exterior.meshes[0].room = -2;
+    d3scene::ObjectState exterior_object; exterior_object.handle = 91;
+    exterior_object.room = -2; exterior_object.current.position = {0,0,3}; exterior_object.radius = 1;
+    enclosed_exterior.objects.push_back(exterior_object);
+    const auto enclosed_frame = d3scene::Presentation::freeze(enclosed_exterior);
+    const auto excluded_exterior = d3scene::queryView(*enclosed_frame,sky_view);
+    check(excluded_exterior.object_indices.empty(),"Enclosed camera admitted an exterior object");
+    bool exterior_mesh_leaked = false;
+    for (const auto& surface : excluded_exterior.surfaces) exterior_mesh_leaked |= surface.mesh;
+    check(!exterior_mesh_leaked,"Enclosed camera admitted an exterior world mesh");
+    auto reference_view = sky_view; reference_view.portal_visibility = false;
+    check(d3scene::queryView(*enclosed_frame,reference_view).object_indices.size() == 1,
+        "Spatial filtering destroyed reference query scene availability");
     colored.vertex_colors.pop_back(); bool rejected_colors = false;
     try { assets.publishMesh(1,colored); } catch (const std::invalid_argument&) { rejected_colors = true; }
     check(rejected_colors,"Incomplete authored mesh color stream was accepted");
@@ -246,6 +309,14 @@ int runSceneViewTests() {
     billboard.world.position = {10,2,3};
     billboard.world.right = {0,-2,0}; billboard.world.up = {3,0,0}; // rotated, non-square sprite
     auto side = view(); side.camera.right = {0,0,-1}; side.camera.forward = {1,0,0};
+    auto fading = billboard; fading.size_fade_range = {5,15};
+    const auto faded = d3scene::resolveMeshTransform(fading,d3scene::prepareCamera(side));
+    check(near(faded.right.y,-1) && near(faded.up.z,-1.5),"Mesh distance fade did not use view depth");
+    const auto unfaded = d3scene::resolveMeshTransform(fading,d3scene::prepareCamera(view()));
+    check(near(unfaded.right.y,-2) && near(unfaded.up.x,3),"One view's distance fade leaked into another");
+    fading.world.position.x = 20;
+    const auto vanished = d3scene::resolveMeshTransform(fading,d3scene::prepareCamera(side));
+    check(near(vanished.right.y,0) && near(vanished.up.z,0),"Mesh did not vanish at fade end");
     const auto oriented = d3scene::resolveMeshTransform(billboard,d3scene::prepareCamera(side));
     check(oriented.position.x == 10 && oriented.position.y == 2 && oriented.position.z == 3,"Billboarding moved world-space center");
     check(oriented.right.y == -2 && oriented.up.z == -3 && oriented.forward.x == 1,"Billboard lost authored spin or aspect ratio");

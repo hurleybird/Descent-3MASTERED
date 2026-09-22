@@ -111,7 +111,14 @@ bool operator==(const VolumeGrid& a,const VolumeGrid& b) {
         a.spacing == b.spacing && a.colors == b.colors;
 }
 RoomAsset::RoomAsset(AssetId id, MeshGeometry geometry, VolumeGrid volume)
-    : id_(id), geometry_(std::move(geometry)), volume_(std::move(volume)) {}
+    : id_(id), geometry_(std::move(geometry)), volume_(std::move(volume)) {
+    if (geometry_.vertices.empty()) return;
+    bounds_.minimum = bounds_.maximum = geometry_.vertices.front();
+    for (const auto p : geometry_.vertices) {
+        bounds_.minimum = {std::min(bounds_.minimum.x,p.x),std::min(bounds_.minimum.y,p.y),std::min(bounds_.minimum.z,p.z)};
+        bounds_.maximum = {std::max(bounds_.maximum.x,p.x),std::max(bounds_.maximum.y,p.y),std::max(bounds_.maximum.z,p.z)};
+    }
+}
 SceneAssets::SceneAssets() { reset(); }
 void SceneAssets::reset() {
     const uint64_t lifetime = NextLifetime.fetch_add(1);
@@ -310,6 +317,9 @@ PresentationRef Presentation::freeze(const FrameData& data) {
             "Raster markers require a background layer");
         require(finite(mesh.world) && finite(mesh.camera_translation),"Invalid generic mesh transform");
         require(std::isfinite(mesh.eye_distance) && mesh.eye_distance >= 0,"Invalid view-relative mesh distance");
+        require(std::isfinite(mesh.size_fade_range.x) && std::isfinite(mesh.size_fade_range.y) &&
+            ((mesh.size_fade_range.x == 0 && mesh.size_fade_range.y == 0) ||
+                (mesh.size_fade_range.x >= 0 && mesh.size_fade_range.y > mesh.size_fade_range.x)),"Invalid mesh size fade range");
         require(mesh.alignment == MeshAlignment::World || mesh.alignment == MeshAlignment::Camera ||
             mesh.alignment == MeshAlignment::FacingEye || mesh.alignment == MeshAlignment::CameraUpright ||
             mesh.alignment == MeshAlignment::Axis,"Invalid mesh alignment");
@@ -325,9 +335,9 @@ PresentationRef Presentation::freeze(const FrameData& data) {
             for (const auto& surface : data.terrain.patches[patch]) { validateSurface(surface); validateIndices(surface); }
         }
     } else require(data.terrain.materials.empty() && data.terrain.patches.empty(),"Terrain materials have no grid");
-    std::unordered_set<int32_t> rooms;
+    std::unordered_map<int32_t,const RoomState*> rooms;
     for (const auto& room : data.rooms) {
-        require(room.number >= 0 && rooms.insert(room.number).second, "Duplicate or invalid scene room");
+        require(room.number >= 0 && rooms.emplace(room.number,&room).second, "Duplicate or invalid scene room");
         require(room.asset && room.asset->id().lifetime == data.scene_lifetime &&
             room.asset->id().slot == static_cast<uint32_t>(room.number), "Room asset identity mismatch");
         require(room.surfaces.size() == room.asset->geometry().polygons.size(), "Incomplete room surface bindings");
@@ -347,6 +357,13 @@ PresentationRef Presentation::freeze(const FrameData& data) {
         for (const auto& portal : room.portals)
             require(portal.polygon >= 0 && static_cast<size_t>(portal.polygon) < room.surfaces.size(),
                 "Portal references missing polygon");
+    }
+    for (const auto& mesh : data.meshes) {
+        require(mesh.receiver_polygon >= -1,"Invalid mesh receiver polygon");
+        if (mesh.receiver_polygon < 0) continue;
+        const auto room = rooms.find(mesh.room);
+        require(room != rooms.end() && static_cast<size_t>(mesh.receiver_polygon) < room->second->surfaces.size() &&
+            mesh.surface.layer == RenderLayer::World,"Mesh receiver is not a world surface");
     }
     std::unordered_set<uint32_t> objects;
     for (const auto& object : data.objects) {
