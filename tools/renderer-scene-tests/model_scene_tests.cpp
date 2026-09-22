@@ -3,6 +3,7 @@
 #include "../../renderer/SceneView.h"
 #include "../../renderer/SceneGeometry.h"
 #include "../../renderer/SceneLighting.h"
+#include "../../renderer/SceneMotion.h"
 #include "../../model/SceneModelAsset.h"
 #include <limits>
 #include <cmath>
@@ -133,6 +134,36 @@ int runModelSceneTests() {
     rejects([&] { Presentation::freeze(malformed); });
     malformed = frame->data(); malformed.objects[0].parts[0].surfaces[0].alpha = std::numeric_limits<float>::quiet_NaN();
     rejects([&] { Presentation::freeze(malformed); });
+    auto motion_data = frame->data();
+    auto& moving = motion_data.objects[0];
+    moving.has_previous = true; moving.parts[0].has_previous = true;
+    moving.previous.position = {2,3,4}; moving.parts[0].previous.position = {5,6,7};
+    auto moving_frame = Presentation::freeze(motion_data);
+    VisibleSurface moving_surface; moving_surface.model = true; moving_surface.object_index = 0; moving_surface.part_index = 0;
+    const auto motion = surfaceMotion(*moving_frame,moving_surface,true);
+    check(motion.valid && motion.identity != 0 && motion.previous.position.x == 7 && motion.previous.position.z == 11,
+        "Motion did not compose previous object and hierarchical part transforms");
+    check(!surfaceMotion(*moving_frame,moving_surface,false).valid,"Model motion ignored camera-history invalidation");
+    moving.parts[0].has_previous = false;
+    check(!surfaceMotion(*Presentation::freeze(motion_data),moving_surface,true).valid,
+        "New topology/part pose reused an unrelated predecessor");
+    moving.parts[0].has_previous = true; moving.has_previous = false;
+    check(!surfaceMotion(*Presentation::freeze(motion_data),moving_surface,true).valid,
+        "A newly allocated object claimed valid model motion");
+    PreparedModelPart paired;
+    paired.previous_vertices = authored.parts[0].geometry.vertices;
+    paired.previous_vertices[0].x -= 2;
+    const auto pairs = modelPositionPairs(authored.parts[0].geometry,paired);
+    check(pairs.size() == 3 && pairs[0].current.x-pairs[0].previous.x == 2,
+        "Ending deformation discarded the previous prepared positions");
+    paired.vertices = paired.previous_vertices; paired.previous_vertices.clear();
+    const auto beginning = modelPositionPairs(authored.parts[0].geometry,paired);
+    check(beginning[0].previous.x-beginning[0].current.x == 2,"Starting deformation lost the authored predecessor");
+    const auto projected_motion = projectMotion({2,4,0,10},{1,2,0,10},true);
+    check(projected_motion.valid && std::abs(projected_motion.velocity.x-.05f) < 1.e-6f &&
+        std::abs(projected_motion.velocity.y-.1f) < 1.e-6f,"Clip displacement has wrong direction or UV units");
+    check(!projectMotion({2,4,0,10},{1,2,0,-1},true).valid,"Behind-camera geometry fabricated a temporal correspondence");
+    check(!projectMotion({2,4,0,10},{1,2,0,10},false).valid,"Missing pose history fabricated a zero-motion correspondence");
     assets.removeModel(3);
     check(!assets.model(3) && frame->data().objects[0].model == asset, "Model unload invalidated held frame");
     assets.reset();

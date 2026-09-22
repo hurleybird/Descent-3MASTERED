@@ -1,5 +1,28 @@
 # Renderer migration checkpoint
 
+## Continuation: owned model motion and explicit temporal validity
+
+Model motion now composes previous object/part transforms and paired current/
+previous prepared vertices, including deformation starting or ending. New
+objects, changed model assets, previously hidden parts and invalid camera
+history cannot claim a stationary correspondence. The scene writes velocity,
+validity and identity with opaque depth; the coherent MSAA resolve preserves
+validity. Temporal AO rejects invalid dynamic and static-camera projections.
+
+Full build and 4,884 CPU checks pass. All eight clean and effects saves complete
+in `scene-motion-record-clean` / `scene-motion-record-effects`. Seven clean
+images match the prior sample-resolve checkpoint exactly; 002 has the known
+Buddybot pose variation. Effects 001/004/005 are exact; other changes are small
+overall, with the largest expected temporal differences on moving models.
+Fogged 001/002 and deformed 000 screenshots were inspected.
+
+Inspection-only GPU readback in `scene-motion-gpu-readback` verifies actual
+model records, not just the synthetic resolver: both saves 000/002 have zero
+valid model pixels on frame 0 and the frame-30 cut, then nonzero motion and
+validity on every model pixel at frames 31/59. The rotating-camera/deformation
+fixture does not mutate simulation state. Material-class sample coherence,
+blur-specific policy and full frame composition remain pending.
+
 ## Continuation: coherent multisample surface records
 
 Scene framebuffer color/depth attachments are now texture-backed even under

@@ -6,6 +6,8 @@
 #include "SceneImages.h"
 #include "SceneTerrain.h"
 #include "SceneFog.h"
+#include "SceneMotion.h"
+#include "gameloop.h"
 #include <cstring>
 #include <cmath>
 #include <string>
@@ -54,6 +56,9 @@ uniform vec3 ambient_color, ambient_direction;
 uniform int directional_ambient;
 uniform vec3 eye, camera_right, camera_up, camera_forward;
 uniform vec3 model_position, model_right, model_up, model_forward;
+uniform vec3 previous_position, previous_right, previous_up, previous_forward;
+uniform mat4 previous_view_projection;
+out vec4 current_clip, previous_clip;
 uniform vec4 projection;
 uniform float near_distance;
 out vec2 texcoord, lightcoord;
@@ -63,7 +68,9 @@ out vec3 ambient;
 out vec3 vertex_dynamic;
 out vec3 authored_color;
 void main() {
-    vec3 prepared = use_instance_positions != 0 ? texelFetch(instance_positions,gl_VertexID+instance_position_offset).rgb : position;
+    int position_record = (gl_VertexID+instance_position_offset)*2;
+    vec3 prepared = use_instance_positions != 0 ? texelFetch(instance_positions,position_record).rgb : position;
+    vec3 previous_prepared = use_instance_positions != 0 ? texelFetch(instance_positions,position_record+1).rgb : position;
     vec3 world = model_position + model_right*prepared.x + model_up*prepared.y + model_forward*prepared.z;
     vec3 relative = world-eye;
     world_position = world;
@@ -72,6 +79,10 @@ void main() {
     float z = dot(relative,camera_forward);
     gl_Position = vec4(dot(relative,camera_right)*projection.x + z*projection.z,
                        dot(relative,camera_up)*projection.y + z*projection.w, z-2.0*near_distance,z);
+    current_clip = gl_Position;
+    vec3 previous_world = previous_position+previous_right*previous_prepared.x+
+        previous_up*previous_prepared.y+previous_forward*previous_prepared.z;
+    previous_clip = previous_view_projection*vec4(previous_world,1);
     texcoord=uv; lightcoord=light_uv; vertex_alpha=alpha;
     if (use_instance_uvs != 0) lightcoord = texelFetch(instance_uvs,gl_VertexID+instance_uv_offset).rg;
     vec3 world_normal = model_right*normal.x + model_up*normal.y + model_forward*normal.z;
@@ -85,6 +96,11 @@ uniform int use_lightmap, use_texture_alpha;
 uniform int use_texture;
 uniform int unlit;
 uniform float occlusion_class;
+uniform uint motion_identity;
+uniform int motion_valid;
+in vec4 current_clip, previous_clip;
+layout(location=1) out vec4 surface_motion; // XY displacement, Z history validity
+layout(location=4) out uint surface_identity;
 uniform samplerBuffer scene_fog;
 uniform int fog_volume_count, fog_enabled, fog_additive, fog_exterior;
 uniform int multiply_material;
@@ -216,6 +232,9 @@ void main() {
     color.rgb = applySceneFog(color.rgb,transmission);
     ao_radiance = vec4(multiply_material != 0 ? color.rgb : surface_radiance*transmission,base.a);
     post_coverage = vec4(0,1.0-transmission,0,occlusion_class/255.0);
+    bool valid = motion_valid != 0 && current_clip.w > 1.e-6 && previous_clip.w > 1.e-6;
+    surface_motion = valid ? vec4((current_clip.xy/current_clip.w-previous_clip.xy/previous_clip.w)*.5,1,0) : vec4(0);
+    surface_identity = motion_identity;
 }
 )GLSL";
 }
@@ -363,21 +382,19 @@ void GL4Renderer::UploadSceneFrame(const d3scene::Presentation& frame) {
         for (const auto& mesh : frame.data().meshes) add(mesh.surface);
         for (const auto& object : frame.data().objects) for (const auto& part : object.parts)
             for (const auto& surface : part.surfaces) add(surface);
-        std::vector<d3scene::Vec3> positions;
+        std::vector<d3scene::PositionPair> positions;
         scene_position_ranges.clear();
         for (const auto& object : frame.data().objects) for (size_t i = 0; i < object.parts.size(); ++i) {
             const auto& part = object.parts[i];
-            if (part.vertices.empty()) continue;
+            const auto pairs = d3scene::modelPositionPairs(object.model->geometry().parts[i].geometry,part);
+            if (pairs.empty()) continue;
             const uint32_t start = static_cast<uint32_t>(positions.size());
-            for (const auto& polygon : object.model->geometry().parts[i].geometry.polygons)
-                d3scene::forEachTriangleCorner(polygon.corners.size(),[&](size_t corner) {
-                    positions.push_back(part.vertices[polygon.corners[corner].vertex]);
-                });
+            positions.insert(positions.end(),pairs.begin(),pairs.end());
             scene_position_ranges.emplace(&part,ElementRange(start,static_cast<uint32_t>(positions.size())-start));
         }
-        if (positions.empty()) positions.push_back({0,0,0});
+        if (positions.empty()) positions.push_back({});
         glBindBuffer(GL_TEXTURE_BUFFER,scene_position_buffer);
-        glBufferData(GL_TEXTURE_BUFFER,positions.size()*sizeof(d3scene::Vec3),positions.data(),GL_STREAM_DRAW);
+        glBufferData(GL_TEXTURE_BUFFER,positions.size()*sizeof(d3scene::PositionPair),positions.data(),GL_STREAM_DRAW);
         if (indices.empty()) indices.push_back(0);
         if (uvs.empty()) uvs.push_back({0,0});
         glBindBuffer(GL_TEXTURE_BUFFER,scene_uv_buffer);
@@ -530,6 +547,19 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
     const d3scene::ViewProducts products{view.kind == d3scene::ViewKind::Main,
         view.kind == d3scene::ViewKind::Main && OpenGL_preferred_state.ao_enabled && framebuffer_ok};
     if (products.occlusion_radiance) BeginSceneRadianceProduct();
+    const bool writes_motion = products.opaque_scene && MotionVectorTargetEnabled() && !MotionVectorsFrozen();
+    const auto bind_outputs = [&] {
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER,framebuffers[framebuffer_current_draw].Handle());
+        const GLenum targets[5] = {GL_COLOR_ATTACHMENT0,
+            static_cast<GLenum>(writes_motion ? GL_COLOR_ATTACHMENT1 : GL_NONE),
+            static_cast<GLenum>(post_protection_mask.mask_texture ? GL_COLOR_ATTACHMENT2 : GL_NONE),
+            static_cast<GLenum>(products.occlusion_radiance ? GL_COLOR_ATTACHMENT3 : GL_NONE),
+            static_cast<GLenum>(writes_motion ? GL_COLOR_ATTACHMENT4 : GL_NONE)};
+        glDrawBuffers(5,targets);
+        glDisablei(GL_BLEND,1); glDisablei(GL_BLEND,4);
+    };
+    bind_outputs();
+    if (writes_motion) { motion_vectors.MarkDirty(); motion_vectors_dirty = true; }
     post_protection_mask.resolve_valid = false;
     if (visibility.exterior_visible && presentation.data().sky_enabled) {
         // Clear only this view's color attachment. Background geometry never
@@ -557,6 +587,7 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
     glUniform4f(scene_shader.FindUniform("projection"),projection.x_scale,projection.y_scale,
         projection.x_offset,projection.y_offset);
     glUniform1f(scene_shader.FindUniform("near_distance"),projection.near_distance);
+    glUniformMatrix4fv(scene_shader.FindUniform("previous_view_projection"),1,GL_FALSE,history.previous.view_projection.data());
     glUniform1i(scene_shader.FindUniform("lighting_per_pixel"),presentation.data().lighting_quality == d3scene::LightingQuality::Pixel);
     glUniform1i(scene_shader.FindUniform("colortexture"),0);
     glUniform1i(scene_shader.FindUniform("lightmaptexture"),1);
@@ -618,10 +649,43 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
       if (pass.kind == d3scene::ViewPassKind::ExportOpaqueScene) {
         GLint viewport[4]; glGetIntegerv(GL_VIEWPORT,viewport);
         ExportOpaqueScene(visibility.camera);
-        const GLenum targets[4] = {GL_COLOR_ATTACHMENT0,GL_NONE,
-            static_cast<GLenum>(post_protection_mask.mask_texture ? GL_COLOR_ATTACHMENT2 : GL_NONE),
-            static_cast<GLenum>(products.occlusion_radiance ? GL_COLOR_ATTACHMENT3 : GL_NONE)};
-        glDrawBuffers(4,targets);
+        // Read the actual scene outputs at a few capture boundaries, including
+        // the history fixture's cut. This never runs in interactive rendering.
+        const int capture_frame = AutomatedCaptureFrameIndex();
+        if (writes_motion &&
+            (capture_frame == 0 || capture_frame == 30 || capture_frame == 31 || capture_frame == 59)) {
+            const size_t pixels = size_t(motion_vectors.width)*motion_vectors.height;
+            std::vector<float> vectors(pixels*4);
+            std::vector<GLuint> identities(pixels);
+            const auto source = framebuffers[framebuffer_current_draw].Handle();
+            const auto velocity_texture = motion_vectors.TextureForRead(source);
+            const auto identity_texture = motion_vectors.ObjectIdTextureForRead(source);
+            GLint texture_binding; glGetIntegerv(GL_TEXTURE_BINDING_2D,&texture_binding);
+            glBindTexture(GL_TEXTURE_2D,velocity_texture);
+            glGetTexImage(GL_TEXTURE_2D,0,GL_RGBA,GL_FLOAT,vectors.data());
+            glBindTexture(GL_TEXTURE_2D,identity_texture);
+            glGetTexImage(GL_TEXTURE_2D,0,GL_RED_INTEGER,GL_UNSIGNED_INT,identities.data());
+            glBindTexture(GL_TEXTURE_2D,texture_binding);
+            size_t model_pixels = 0, valid_pixels = 0, moving_pixels = 0;
+            float maximum = 0;
+            for (size_t pixel = 0; pixel < pixels; ++pixel) if (identities[pixel]) {
+                ++model_pixels;
+                const float x = vectors[pixel*4], y = vectors[pixel*4+1], valid = vectors[pixel*4+2];
+                if (!std::isfinite(x) || !std::isfinite(y) || (valid != 0 && valid != 1))
+                    Error("Invalid scene motion record at pixel %u",static_cast<unsigned>(pixel));
+                if (valid != 0) ++valid_pixels;
+                const float magnitude = std::sqrt(x*x+y*y);
+                if (magnitude > 1.e-6f) ++moving_pixels;
+                maximum = (std::max)(maximum,magnitude);
+            }
+            if (!history.previous_valid && valid_pixels)
+                Error("Scene motion retained valid pixels across an invalid view history");
+            AutomatedCaptureLog("scene motion frame=%d camera_history=%d model_pixels=%u valid=%u moving=%u max_uv=%.9g",
+                capture_frame,history.previous_valid,static_cast<unsigned>(model_pixels),
+                static_cast<unsigned>(valid_pixels),static_cast<unsigned>(moving_pixels),maximum);
+            check_scene_error("motion record readback");
+        }
+        bind_outputs();
         glViewport(viewport[0],viewport[1],viewport[2],viewport[3]);
         // Image-space resolve owns its own bindings. Resume the scene pipeline
         // explicitly, including buffer textures used by both shader stages.
@@ -731,6 +795,11 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
         glUniform1i(scene_shader.FindUniform("fog_exterior"),exterior && exterior_fog.enabled);
         vec("model_position",item.world.position); vec("model_right",item.world.right);
         vec("model_up",item.world.up); vec("model_forward",item.world.forward);
+        const auto motion = d3scene::surfaceMotion(presentation,item,history.previous_valid);
+        vec("previous_position",motion.previous.position); vec("previous_right",motion.previous.right);
+        vec("previous_up",motion.previous.up); vec("previous_forward",motion.previous.forward);
+        glUniform1ui(scene_shader.FindUniform("motion_identity"),motion.identity);
+        glUniform1i(scene_shader.FindUniform("motion_valid"),motion.valid);
         vec("base_color",surface.base_color);
         vec("color_modulation",surface.color_modulation);
         vec("ambient_color",surface.ambient_color); vec("ambient_direction",surface.ambient_direction);
@@ -754,6 +823,9 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
         const GLboolean solid = surface.material.writesSolidDepth() ? GL_TRUE : GL_FALSE;
         glDisablei(GL_BLEND,2);
         glColorMaski(2,solid,solid,solid,solid);
+        const GLboolean motion_write = solid && writes_motion ? GL_TRUE : GL_FALSE;
+        glColorMaski(1,motion_write,motion_write,motion_write,motion_write);
+        glColorMaski(4,motion_write,motion_write,motion_write,motion_write);
         // The eligible-radiance image follows the same RGB compositing law.
         // Translucent surfaces do not have their own depth AO, so only transmit
         // the already-visible opaque radiance; additive light leaves it alone.

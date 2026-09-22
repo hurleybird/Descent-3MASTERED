@@ -265,6 +265,7 @@ struct PreparedModelPart {
     // Model-space transforms, composed once from the complete hierarchy.
     Transform current, previous;
     bool draw = true;
+    bool has_previous = false;
     std::vector<Vec3> vertices, previous_vertices; // empty means immutable authored positions
     std::vector<SurfaceBinding> surfaces;
 };

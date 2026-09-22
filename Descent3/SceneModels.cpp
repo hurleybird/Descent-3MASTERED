@@ -162,6 +162,7 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::FrameDat
             d3scene::PreparedModelPart part;
             part.current = value(transforms.submodels[i]);
             part.previous = history ? history->parts[i].current : part.current;
+            part.has_previous = history && history->parts[i].draw && instance.has_previous;
             part.vertices = d3scene::deformMesh(asset_part.geometry,effect.deformation,data.simulation_time,instance.handle,static_cast<uint32_t>(i));
             part.previous_vertices = history ? history->parts[i].vertices : part.vertices;
             // Special billboard/glow geometry needs explicit effect preparation.

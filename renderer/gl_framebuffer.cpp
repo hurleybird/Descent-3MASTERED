@@ -831,7 +831,7 @@ void MotionVectorResources::Update(uint32_t new_width, uint32_t new_height, uint
 	if (samples >= 2)
 	{
 		glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, velocity_texture);
-		glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, samples, GL_RG16F, width, height, GL_TRUE);
+		glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, samples, GL_RGBA16F, width, height, GL_TRUE);
 
 		glGenTextures(1, &object_id_texture);
 		glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, object_id_texture);
@@ -839,7 +839,7 @@ void MotionVectorResources::Update(uint32_t new_width, uint32_t new_height, uint
 
 		glGenTextures(1, &resolved_texture);
 		glBindTexture(GL_TEXTURE_2D, resolved_texture);
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RG16F, width, height, 0, GL_RG, GL_FLOAT, nullptr);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0, GL_RGBA, GL_FLOAT, nullptr);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -864,7 +864,7 @@ void MotionVectorResources::Update(uint32_t new_width, uint32_t new_height, uint
 	else
 	{
 		glBindTexture(GL_TEXTURE_2D, velocity_texture);
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RG16F, width, height, 0, GL_RG, GL_FLOAT, nullptr);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0, GL_RGBA, GL_FLOAT, nullptr);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -980,12 +980,12 @@ void MotionVectorResources::Resolve(GLuint source_framebuffer)
         const auto fragment = std::string(d3scene::SampleResolveGlsl)+R"GLSL(
 uniform sampler2DMS source_depth, source_velocity;
 uniform usampler2DMS source_identity;
-layout(location=0) out vec2 velocity;
+layout(location=0) out vec4 velocity;
 layout(location=1) out uint identity;
 void main() {
     ivec2 pixel = ivec2(gl_FragCoord.xy);
     int selected = nearestDepthSample(source_depth,pixel);
-    velocity = texelFetch(source_velocity,pixel,selected).xy;
+    velocity = texelFetch(source_velocity,pixel,selected);
     identity = texelFetch(source_identity,pixel,selected).r;
 }
 )GLSL";
@@ -1042,13 +1042,13 @@ void GL_VerifySceneSampleResolve()
     ShaderProgram shader;
     shader.AttachSource(blitVertexSrc,R"GLSL(#version 450 core
 layout(location=0) out vec4 color;
-layout(location=1) out vec2 velocity;
+layout(location=1) out vec4 velocity;
 layout(location=4) out uint identity;
 void main() {
     int sample_index = gl_SampleID;
     gl_FragDepth = sample_index == 1 || sample_index == 2 ? .2 : .8;
     color = vec4(1);
-    velocity = vec2(sample_index,10+sample_index);
+    velocity = vec4(sample_index,10+sample_index,sample_index == 1 ? 1 : 0,0);
     identity = uint(100+sample_index);
 }
 )GLSL");
@@ -1061,13 +1061,13 @@ void main() {
     motion.Resolve(target.Handle());
     glBindFramebuffer(GL_READ_FRAMEBUFFER,motion.resolve_framebuffer);
     glReadBuffer(GL_COLOR_ATTACHMENT0);
-    float velocity[2] = {};
-    glReadPixels(0,0,1,1,GL_RG,GL_FLOAT,velocity);
+    float velocity[4] = {};
+    glReadPixels(0,0,1,1,GL_RGBA,GL_FLOAT,velocity);
     glReadBuffer(GL_COLOR_ATTACHMENT1);
     GLuint identity = 0;
     glReadPixels(0,0,1,1,GL_RED_INTEGER,GL_UNSIGNED_INT,&identity);
     glReadBuffer(GL_COLOR_ATTACHMENT0);
-    if (fabsf(resolved_depth-.2f) > .00001f || velocity[0] != 1 || velocity[1] != 11 || identity != 101)
+    if (fabsf(resolved_depth-.2f) > .00001f || velocity[0] != 1 || velocity[1] != 11 || velocity[2] != 1 || identity != 101)
         Error("Scene sample resolve mixed surfaces: depth=%g velocity=%g,%g identity=%u",resolved_depth,velocity[0],velocity[1],identity);
     shader.Destroy(); motion.Destroy(); target.Destroy();
     glMinSampleShading(minimum);
