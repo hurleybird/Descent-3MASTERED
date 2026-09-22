@@ -111,6 +111,14 @@ if ([bool]$referenceManifest.sky_probe -ne [bool]$actualManifest.sky_probe -and 
 if ([bool]$referenceManifest.history_probe -ne [bool]$actualManifest.history_probe -and -not $DiagnosticComparison) {
     throw 'History-probe fixtures differ; this is not a parity comparison.'
 }
+$referenceLodTier = if ($null -eq $referenceManifest.lod_probe_tier) { -1 } else { [int]$referenceManifest.lod_probe_tier }
+$actualLodTier = if ($null -eq $actualManifest.lod_probe_tier) { -1 } else { [int]$actualManifest.lod_probe_tier }
+if ($referenceLodTier -ne $actualLodTier -and -not $DiagnosticComparison) {
+    throw 'Model LOD tiers differ; this is not a parity comparison.'
+}
+if ([int]$referenceManifest.lod_probe_revision -ne [int]$actualManifest.lod_probe_revision -and -not $DiagnosticComparison) {
+    throw 'Model LOD fixture revisions differ; this is not a parity comparison.'
+}
 if ([bool]$referenceManifest.resource_probe -ne [bool]$actualManifest.resource_probe -and -not $DiagnosticComparison) {
     throw 'Resource transition fixtures differ; this is not a parity comparison.'
 }

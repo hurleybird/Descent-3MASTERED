@@ -22,6 +22,7 @@ param(
     [switch]$MotionBlur,
     [switch]$LayerProbe,
     [switch]$ResourceProbe,
+    [ValidateSet(-1,0,1,2)][int]$LodProbeTier = -1,
     [switch]$HistoryProbe,
     [switch]$DeformationProbe
 )
@@ -32,6 +33,9 @@ $ErrorActionPreference = 'Stop'
 if ($AtmosphereProbe) { $SatelliteProbe = $true }
 if ($LayerProbe -and -not $SceneInspection) { throw 'Layer probe requires scene inspection.' }
 if ($ResourceProbe -and -not $SceneInspection) { throw 'Resource probe requires scene inspection.' }
+if ($LodProbeTier -ge 0 -and (-not $SceneInspection -or $HistoryProbe -or $ModelEffectsProbe -or $TerrainProbe -or $SkyProbe -or $SatelliteProbe -or $ScorchViewProbe)) {
+    throw 'LOD probe requires isolated scene inspection and no other camera fixture.'
+}
 if ($ScorchViewProbe) {
     if (-not $SceneInspection -or $TerrainProbe -or $SkyProbe -or $SatelliteProbe -or $HistoryProbe -or $ModelEffectsProbe) {
         throw 'Scorch view probe requires scene inspection and no other camera probe.'
@@ -84,6 +88,8 @@ $manifest = [ordered]@{
     motion_blur = [bool]$MotionBlur
     layer_probe = [bool]$LayerProbe
     resource_probe = [bool]$ResourceProbe
+    lod_probe_tier = $LodProbeTier
+    lod_probe_revision = $(if ($LodProbeTier -ge 0) { 1 } else { 0 })
     model_effects_revision = $(if ($ModelEffectsProbe) { 2 } else { 0 })
     history_probe = [bool]$HistoryProbe
     executable = (Get-FileHash -LiteralPath $exe).Hash
@@ -129,6 +135,7 @@ try {
         if ($ScorchViewProbe) { $arguments += '-scene-scorch-view-probe' }
         if ($LayerProbe) { $arguments += '-scene-layer-probe' }
         if ($ResourceProbe) { $arguments += '-scene-resource-probe' }
+        if ($LodProbeTier -ge 0) { $arguments += @('-scene-lod-probe',"$LodProbeTier") }
         if ($DeformationProbe) { $arguments += '-scene-deformation-probe' }
         $started = Get-Date
         $process = Start-Process -FilePath $exe -ArgumentList $arguments -WorkingDirectory $runtimePath -WindowStyle Hidden -PassThru
@@ -146,6 +153,9 @@ try {
         $process.WaitForExit()
         $logText = if (Test-Path -LiteralPath $log) { Get-Content -LiteralPath $log -Raw } else { '' }
         $resourceValidated = $true
+        if ($LodProbeTier -ge 0) {
+            $resourceValidated = $logText.Contains("scene LOD fixture tier=$LodProbeTier ") -and $logText.Contains('scene LOD visible ')
+        }
         if ($ResourceProbe) {
             foreach ($transition in @(10,20,30,40,50)) {
                 if ($transition -ge $Frame) { continue }

@@ -367,37 +367,45 @@ PresentationRef Presentation::freeze(const FrameData& data) {
         require(room != rooms.end() && static_cast<size_t>(mesh.receiver_polygon) < room->second->surfaces.size() &&
             mesh.surface.layer == RenderLayer::World,"Mesh receiver is not a world surface");
     }
-    std::unordered_set<uint32_t> objects;
+    std::unordered_map<uint32_t,const ObjectState*> objects;
     for (const auto& object : data.objects) {
-        require(objects.insert(object.handle).second, "Duplicate object lifetime in scene");
+        require(objects.emplace(object.handle,&object).second, "Duplicate object lifetime in scene");
         require(finite(object.current) && finite(object.previous) && std::isfinite(object.radius) && object.radius >= 0,
             "Invalid object transform or radius");
-        if (object.model) {
-            require(object.model->id().lifetime == data.scene_lifetime, "Stale model asset in frame");
-            require(object.parts.size() == object.model->geometry().parts.size(), "Incomplete object pose");
-            for (size_t i = 0; i < object.parts.size(); ++i) {
-                const auto& part = object.parts[i];
+        require(std::isfinite(object.lod_distances.x) && std::isfinite(object.lod_distances.y) &&
+            object.lod_distances.x >= 0 && object.lod_distances.y >= 0,"Invalid model LOD distances");
+        for (const auto index : object.lod_models)
+            require(object.models.empty() ? index == 0 : index < object.models.size(),"LOD references an absent model variant");
+        for (const auto& model : object.models) {
+            require(model.asset && model.asset->id().lifetime == data.scene_lifetime, "Stale model asset in frame");
+            require(model.parts.size() == model.asset->geometry().parts.size(), "Incomplete object pose");
+            for (size_t i = 0; i < model.parts.size(); ++i) {
+                const auto& part = model.parts[i];
                 require(finite(part.current) && finite(part.previous), "Invalid model instance transform");
-                const size_t vertex_count = object.model->geometry().parts[i].geometry.vertices.size();
+                const size_t vertex_count = model.asset->geometry().parts[i].geometry.vertices.size();
                 for (const auto* positions : {&part.vertices,&part.previous_vertices}) {
                     require(positions->empty() || positions->size() == vertex_count,"Incomplete prepared mesh positions");
                     for (const auto v : *positions) require(finite(v),"Non-finite prepared mesh position");
                 }
-                require(part.surfaces.size() == object.model->geometry().parts[i].geometry.polygons.size(),
+                require(part.surfaces.size() == model.asset->geometry().parts[i].geometry.polygons.size(),
                     "Incomplete model instance materials");
                 for (const auto& surface : part.surfaces) validateSurface(surface);
                 for (const auto& surface : part.surfaces) validateIndices(surface);
                 for (size_t face = 0; face < part.surfaces.size(); ++face) {
                     const auto& uv = part.surfaces[face].baked_uvs;
-                    require(uv.empty() || uv.size() == object.model->geometry().parts[i].geometry.polygons[face].corners.size(),
+                    require(uv.empty() || uv.size() == model.asset->geometry().parts[i].geometry.polygons[face].corners.size(),
                         "Incomplete instance lightmap UVs");
                     for (const auto& corner : uv) require(std::isfinite(corner.x) && std::isfinite(corner.y), "Invalid instance lightmap UVs");
                 }
             }
-        } else require(object.parts.empty(), "Model pose has no asset");
+        }
     }
-    for (const auto& mesh : data.meshes)
+    for (const auto& mesh : data.meshes) {
         require(!mesh.has_owner || objects.count(mesh.owner),"Mesh owner is not part of this presentation");
+        require(mesh.owner_model_variant >= -1 && (mesh.owner_model_variant < 0 ||
+            (mesh.has_owner && size_t(mesh.owner_model_variant) < objects.at(mesh.owner)->models.size())),
+            "Model attachment references an absent owner variant");
+    }
     std::shared_ptr<Presentation> prepared(new Presentation(data));
     for (auto& mesh : prepared->data_.meshes) {
         mesh.surface.material = compileMaterialPolicy(mesh.surface,MeshPolygon{});
@@ -421,22 +429,26 @@ PresentationRef Presentation::freeze(const FrameData& data) {
             bounds.minimum = {(std::min)(bounds.minimum.x,point.x),(std::min)(bounds.minimum.y,point.y),(std::min)(bounds.minimum.z,point.z)};
             bounds.maximum = {(std::max)(bounds.maximum.x,point.x),(std::max)(bounds.maximum.y,point.y),(std::max)(bounds.maximum.z,point.z)};
         };
-        for (size_t part = 0; part < object.parts.size(); ++part) {
-            auto& pose = object.parts[part];
-            pose.has_render_bounds = false;
-            const auto& geometry = object.model->geometry().parts[part].geometry;
-            const auto& positions = pose.vertices.empty() ? geometry.vertices : pose.vertices;
-            const auto world = compose(object.current,pose.current);
-            if (pose.draw && !geometry.polygons.empty()) {
-                for (const auto vertex : positions) include(pose.render_bounds,pose.has_render_bounds,transformPoint(world,vertex));
-                if (pose.has_render_bounds) {
-                    include(object.render_bounds,object.has_render_bounds,pose.render_bounds.minimum);
-                    include(object.render_bounds,object.has_render_bounds,pose.render_bounds.maximum);
+        for (auto& model : object.models) {
+            model.has_render_bounds = false;
+            for (size_t part = 0; part < model.parts.size(); ++part) {
+                auto& pose = model.parts[part];
+                pose.has_render_bounds = false;
+                const auto& geometry = model.asset->geometry().parts[part].geometry;
+                const auto& positions = pose.vertices.empty() ? geometry.vertices : pose.vertices;
+                const auto world = compose(object.current,pose.current);
+                if (pose.draw && !geometry.polygons.empty()) {
+                    for (const auto vertex : positions) include(pose.render_bounds,pose.has_render_bounds,transformPoint(world,vertex));
+                    if (pose.has_render_bounds) {
+                        include(model.render_bounds,model.has_render_bounds,pose.render_bounds.minimum);
+                        include(model.render_bounds,model.has_render_bounds,pose.render_bounds.maximum);
+                        include(object.render_bounds,object.has_render_bounds,pose.render_bounds.minimum);
+                        include(object.render_bounds,object.has_render_bounds,pose.render_bounds.maximum);
+                    }
                 }
+                for (size_t face = 0; face < pose.surfaces.size(); ++face)
+                    pose.surfaces[face].material = compileMaterialPolicy(pose.surfaces[face],geometry.polygons[face]);
             }
-            for (size_t face = 0; face < object.parts[part].surfaces.size(); ++face)
-                object.parts[part].surfaces[face].material = compileMaterialPolicy(object.parts[part].surfaces[face],
-                    object.model->geometry().parts[part].geometry.polygons[face]);
         }
     }
     return prepared;

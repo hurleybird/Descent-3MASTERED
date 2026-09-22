@@ -275,6 +275,7 @@ struct PreparedMesh {
     int32_t receiver_polygon = -1; // optional room-surface visibility dependency (decals)
     uint32_t owner = 0;
     bool has_owner = false; // same allocation-generation identity as ObjectState
+    int32_t owner_model_variant = -1; // optional attachment to one prepared LOD variant
 };
 struct Portal {
     int32_t polygon = -1, destination_room = -1, destination_portal = -1;
@@ -327,6 +328,12 @@ struct PreparedModelPart {
     std::vector<Vec3> vertices, previous_vertices; // empty means immutable authored positions
     std::vector<SurfaceBinding> surfaces;
 };
+struct PreparedModel {
+    ModelAssetRef asset;
+    std::vector<PreparedModelPart> parts;
+    Bounds render_bounds;
+    bool has_render_bounds = false;
+};
 // Object identity includes the game's allocation generation, not just its slot.
 // Preparation will replace source classifications with asset/pose/material
 // records. Unprepared objects MUST NOT be sent to a legacy draw fallback.
@@ -339,10 +346,13 @@ struct ObjectState {
     Transform current, previous;
     bool has_previous = false;
     float radius = 0;
-    ModelAssetRef model;
-    Bounds render_bounds; // union of drawn parts, never the simulation radius
+    // All eligible variants exist before any camera query. LOD selection is
+    // view-local; prepared attachments identify their owning variant as well.
+    std::vector<PreparedModel> models;
+    Vec2 lod_distances;
+    std::array<uint32_t,3> lod_models{{0,0,0}};
+    Bounds render_bounds; // union of every variant, never the simulation radius
     bool has_render_bounds = false;
-    std::vector<PreparedModelPart> parts;
 };
 
 enum class LightSource : uint8_t { Object, Effect };

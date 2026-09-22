@@ -19,6 +19,7 @@
 #include "room.h"
 #include "terrain.h"
 #include "player.h"
+#include "ship.h"
 #include "multi.h"
 #include "renderer.h"
 #include "../renderer/SceneLighting.h"
@@ -79,7 +80,7 @@ void prepareGlowPart(d3scene::FrameData& frame,const d3scene::ObjectState& owner
         float length = player.thrust_mag+player.afterburner_mag*3+.2f*jitter;
         if (Katmai) length *= 1.5f;
         float radius = glow->glow_size*(player.thrust_mag+player.afterburner_mag*.5f);
-        if (SceneGeometryInspection() && FindArg("-scene-model-effects-probe")) { radius = glow->glow_size; length = 1.5f; }
+        if (SceneGeometryInspection() && (FindArg("-scene-model-effects-probe") || FindArg("-scene-lod-probe"))) { radius = glow->glow_size; length = 1.5f; }
         slices = d3scene::thrusterSlices(radius,3*length);
         if ((is_multi_demo || (Game_mode & GM_MULTI)) && Num_teams > 1)
             color = ScenePlayerColor(PlayerGetTeam(source.id));
@@ -214,89 +215,126 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::FrameDat
         int model_number = source->type == OBJ_MARKER ? Marker_polynum : source->rtype.pobj_info.model_num;
         if (source->type == OBJ_BUILDING && (source->flags & OF_USE_DESTROYED_POLYMODEL) &&
             Object_info[source->id].lo_render_handle >= 0) model_number = Object_info[source->id].lo_render_handle;
-        if (model_number < 0 || model_number >= MAX_POLY_MODELS || !Poly_models[model_number].used)
-            throw std::invalid_argument("Object references missing model");
-        auto* model = GetPolymodelPointer(model_number);
-        if (!model->new_style) continue; // old-format executor remains a pending domain, never a legacy draw fallback
-        auto found = frame_assets.find(model_number);
-        if (found == frame_assets.end()) {
-            // Compare once per referenced model, not once per instance or view.
-            // The source loader has no revision counter; publication owns a copy.
-            size_t repaired = 0;
-            auto geometry = CompileSceneModelAsset(*model,&repaired);
-            if (repaired && !d3scene::assets().model(model_number))
-                AutomatedCaptureLog("scene model=%s repaired shading normals=%u",model->name,static_cast<unsigned>(repaired));
-            auto asset = d3scene::assets().publishModel(model_number, std::move(geometry));
-            found = frame_assets.emplace(model_number, std::move(asset)).first;
-        }
-        instance.model = found->second;
-        const auto ambient = ambientColor(*source,rooms,data.terrain);
-        auto effect = appearance(*source);
-        // Explicit inspection fixture: exercises prepared-position uploads even
-        // when a saved scene has no active cloak/deformation. Never mutates game state.
-        if (SceneGeometryInspection() && FindArg("-scene-deformation-probe")) effect.deformation = .2f;
-        const bool directional = source->lighting_render_type != LRT_STATIC &&
-            (source->lighting_render_type == LRT_GOURAUD || NoLightmaps);
-        // The saved per-object UV layout is not the shared model's topology.
-        // Reject mismatched layouts before indexing (including destroyed-model swaps).
-        const bool baked = !NoLightmaps && source->lm_object.used && source->lighting_render_type == LRT_LIGHTMAPS &&
-            model_number == source->rtype.pobj_info.model_num && ObjectLightmapsMatchPolymodel(source);
-        float normalized[MAX_SUBOBJECTS]{};
-        const float* input = nullptr;
-        if (source->rtype.pobj_info.anim_frame || model->frame_min != model->frame_max) {
-            if (model_number == source->rtype.pobj_info.model_num) SetNormalizedTimeObj(source, normalized);
-            else SetNormalizedTimeAnim(source->rtype.pobj_info.anim_frame, normalized, model);
-            input = normalized;
-        }
-        const auto pose = EvaluateModelPose(*model, input, static_cast<float>(data.simulation_time));
-        const auto transforms = ComposeModelPose(*model, pose);
-        const auto old = prior.find(instance.handle);
-        const d3scene::ObjectState* history = old != prior.end() && old->second->model &&
-            old->second->model->id() == instance.model->id() ? old->second : nullptr;
-        const auto roles = ResolveSceneModelRoles(instance.model->geometry(),source->rtype.pobj_info.subobj_flags,effect.custom_texture >= 0);
-        for (size_t i = 0; i < instance.model->geometry().parts.size(); ++i) {
-            const auto& asset_part = instance.model->geometry().parts[i];
-            d3scene::PreparedModelPart part;
-            part.current = value(transforms.submodels[i]);
-            part.previous = history ? history->parts[i].current : part.current;
-            part.has_previous = history && history->parts[i].draw && instance.has_previous;
-            part.vertices = d3scene::deformMesh(asset_part.geometry,effect.deformation,data.simulation_time,instance.handle,static_cast<uint32_t>(i));
-            part.previous_vertices = history ? history->parts[i].vertices : part.vertices;
-            const auto role = roles[i];
-            part.draw = role == SceneModelPartRole::Surface;
-            if (role == SceneModelPartRole::Facing)
-                prepareFacingPart(data,instance,*model,i,d3scene::compose(instance.current,part.current));
-            if (role == SceneModelPartRole::Glow)
-                prepareGlowPart(data,instance,*source,*model,i,d3scene::compose(instance.current,part.current));
-            for (size_t j = 0; j < asset_part.geometry.polygons.size(); ++j) {
-                d3scene::SurfaceBinding binding;
-                binding.occlusion_class = d3scene::OcclusionClass::Model;
-                binding.ambient_color = ambient;
-                binding.directional_ambient = directional;
-                binding.alpha = effect.alpha;
-                binding.color_modulation = effect.color;
-                const int slot = asset_part.polygon_materials[j];
-                if (slot >= 0) binding.texture = instance.model->geometry().textures[slot];
-                else binding.base_color = asset_part.polygon_colors[j];
-                if (source->rtype.pobj_info.tmap_override != -1) binding.texture = source->rtype.pobj_info.tmap_override;
-                if ((asset_part.authored_flags & SOF_CUSTOM) && effect.custom_texture >= 0 && binding.texture >= 0)
-                    binding.texture = effect.custom_texture;
-                if (effect.has_player_color && binding.texture >= 0 && binding.texture == player_color_texture) {
-                    // Authored team-color panels use flat ambient response,
-                    // not the directional shading of the surrounding hull.
-                    binding.directional_ambient = false;
-                    binding.color_modulation = {effect.color.x*effect.player_color.x,
-                        effect.color.y*effect.player_color.y,effect.color.z*effect.player_color.z};
-                }
-                if (baked && part.draw) {
-                    const auto& face = source->lm_object.lightmap_faces[i][j];
-                    binding.lightmap = face.lmi_handle;
-                    for (size_t corner = 0; corner < asset_part.geometry.polygons[j].corners.size(); ++corner)
-                        binding.baked_uvs.push_back({face.u2[corner],face.v2[corner]});
-                }
-                part.surfaces.push_back(binding);
+        std::array<int,3> requested{{model_number,model_number,model_number}};
+        const bool lod_probe = SceneGeometryInspection() && FindArg("-scene-lod-probe");
+        if ((Detail_settings.Object_complexity != OBJECT_COMPLEXITY_MAX || lod_probe) &&
+            (source->lighting_render_type == LRT_STATIC || source->lighting_render_type == LRT_GOURAUD)) {
+            int medium = -1, low = -1;
+            if (source->type == OBJ_POWERUP || source->type == OBJ_ROBOT || source->type == OBJ_CLUTTER) {
+                const auto& definition = Object_info[source->id];
+                medium = definition.med_render_handle; low = definition.lo_render_handle;
+                instance.lod_distances = {definition.med_lod_distance,definition.lo_lod_distance};
+            } else if (source->type == OBJ_PLAYER && !(Players[source->id].flags & (PLAYER_FLAGS_DYING | PLAYER_FLAGS_DEAD))) {
+                const auto& definition = Ships[Players[source->id].ship_index];
+                medium = definition.med_render_handle; low = definition.lo_render_handle;
+                instance.lod_distances = {definition.med_lod_distance,definition.lo_lod_distance};
             }
-            instance.parts.push_back(std::move(part));
+            const float scale = lod_probe ? 1.f : Detail_settings.Object_complexity == OBJECT_COMPLEXITY_LOW ? .6f :
+                Detail_settings.Object_complexity == OBJECT_COMPLEXITY_HIGH ? 1.2f : 1.f;
+            instance.lod_distances.x *= scale; instance.lod_distances.y *= scale;
+            requested[1] = medium >= 0 ? medium : model_number;
+            requested[2] = low >= 0 ? low : requested[1];
+        }
+        for (size_t tier = 0; tier < requested.size(); ++tier) {
+            model_number = requested[tier];
+            const auto existing = std::find_if(instance.models.begin(),instance.models.end(),
+                [&](const d3scene::PreparedModel& model) { return model.asset->id().slot == uint32_t(model_number); });
+            if (existing != instance.models.end()) {
+                instance.lod_models[tier] = uint32_t(existing-instance.models.begin());
+                continue;
+            }
+            const uint32_t variant_index = uint32_t(instance.models.size());
+            instance.lod_models[tier] = variant_index;
+            if (model_number < 0 || model_number >= MAX_POLY_MODELS || !Poly_models[model_number].used)
+                throw std::invalid_argument("Object references missing model");
+            auto* model = GetPolymodelPointer(model_number);
+            if (!model->new_style) throw std::logic_error("Unprepared legacy model format in scene variant");
+            auto found = frame_assets.find(model_number);
+            if (found == frame_assets.end()) {
+                // Compare once per referenced model, not once per instance or view.
+                // The source loader has no revision counter; publication owns a copy.
+                size_t repaired = 0;
+                auto geometry = CompileSceneModelAsset(*model,&repaired);
+                if (repaired && !d3scene::assets().model(model_number))
+                    AutomatedCaptureLog("scene model=%s repaired shading normals=%u",model->name,static_cast<unsigned>(repaired));
+                auto asset = d3scene::assets().publishModel(model_number, std::move(geometry));
+                found = frame_assets.emplace(model_number, std::move(asset)).first;
+            }
+            d3scene::PreparedModel variant;
+            variant.asset = found->second;
+            const auto ambient = ambientColor(*source,rooms,data.terrain);
+            auto effect = appearance(*source);
+            // Explicit inspection fixture: exercises prepared-position uploads even
+            // when a saved scene has no active cloak/deformation. Never mutates game state.
+            if (SceneGeometryInspection() && FindArg("-scene-deformation-probe")) effect.deformation = .2f;
+            const bool directional = source->lighting_render_type != LRT_STATIC &&
+                (source->lighting_render_type == LRT_GOURAUD || NoLightmaps);
+            // The saved per-object UV layout is not the shared model's topology.
+            // Reject mismatched layouts before indexing (including destroyed-model swaps).
+            const bool baked = !NoLightmaps && source->lm_object.used && source->lighting_render_type == LRT_LIGHTMAPS &&
+                model_number == source->rtype.pobj_info.model_num && ObjectLightmapsMatchPolymodel(source);
+            float normalized[MAX_SUBOBJECTS]{};
+            const float* input = nullptr;
+            if (source->rtype.pobj_info.anim_frame || model->frame_min != model->frame_max) {
+                if (model_number == source->rtype.pobj_info.model_num) SetNormalizedTimeObj(source, normalized);
+                else SetNormalizedTimeAnim(source->rtype.pobj_info.anim_frame, normalized, model);
+                input = normalized;
+            }
+            const auto pose = EvaluateModelPose(*model, input, static_cast<float>(data.simulation_time));
+            const auto transforms = ComposeModelPose(*model, pose);
+            const auto old = prior.find(instance.handle);
+            const d3scene::PreparedModel* history = nullptr;
+            if (old != prior.end()) for (const auto& previous_variant : old->second->models)
+                if (previous_variant.asset->id() == variant.asset->id()) { history = &previous_variant; break; }
+            const auto roles = ResolveSceneModelRoles(variant.asset->geometry(),source->rtype.pobj_info.subobj_flags,effect.custom_texture >= 0);
+            for (size_t i = 0; i < variant.asset->geometry().parts.size(); ++i) {
+                const auto& asset_part = variant.asset->geometry().parts[i];
+                d3scene::PreparedModelPart part;
+                part.current = value(transforms.submodels[i]);
+                part.previous = history ? history->parts[i].current : part.current;
+                part.has_previous = history && history->parts[i].draw && instance.has_previous;
+                part.vertices = d3scene::deformMesh(asset_part.geometry,effect.deformation,data.simulation_time,instance.handle,static_cast<uint32_t>(i));
+                part.previous_vertices = history ? history->parts[i].vertices : part.vertices;
+                const auto role = roles[i];
+                part.draw = role == SceneModelPartRole::Surface;
+                const auto attachment_begin = data.meshes.size();
+                if (role == SceneModelPartRole::Facing)
+                    prepareFacingPart(data,instance,*model,i,d3scene::compose(instance.current,part.current));
+                if (role == SceneModelPartRole::Glow)
+                    prepareGlowPart(data,instance,*source,*model,i,d3scene::compose(instance.current,part.current));
+                for (size_t attachment = attachment_begin; attachment < data.meshes.size(); ++attachment)
+                    data.meshes[attachment].owner_model_variant = static_cast<int32_t>(variant_index);
+                for (size_t j = 0; j < asset_part.geometry.polygons.size(); ++j) {
+                    d3scene::SurfaceBinding binding;
+                    binding.occlusion_class = d3scene::OcclusionClass::Model;
+                    binding.ambient_color = ambient;
+                    binding.directional_ambient = directional;
+                    binding.alpha = effect.alpha;
+                    binding.color_modulation = effect.color;
+                    const int slot = asset_part.polygon_materials[j];
+                    if (slot >= 0) binding.texture = variant.asset->geometry().textures[slot];
+                    else binding.base_color = asset_part.polygon_colors[j];
+                    if (source->rtype.pobj_info.tmap_override != -1) binding.texture = source->rtype.pobj_info.tmap_override;
+                    if ((asset_part.authored_flags & SOF_CUSTOM) && effect.custom_texture >= 0 && binding.texture >= 0)
+                        binding.texture = effect.custom_texture;
+                    if (effect.has_player_color && binding.texture >= 0 && binding.texture == player_color_texture) {
+                        // Authored team-color panels use flat ambient response,
+                        // not the directional shading of the surrounding hull.
+                        binding.directional_ambient = false;
+                        binding.color_modulation = {effect.color.x*effect.player_color.x,
+                            effect.color.y*effect.player_color.y,effect.color.z*effect.player_color.z};
+                    }
+                    if (baked && part.draw) {
+                        const auto& face = source->lm_object.lightmap_faces[i][j];
+                        binding.lightmap = face.lmi_handle;
+                        for (size_t corner = 0; corner < asset_part.geometry.polygons[j].corners.size(); ++corner)
+                            binding.baked_uvs.push_back({face.u2[corner],face.v2[corner]});
+                    }
+                    part.surfaces.push_back(binding);
+                }
+                variant.parts.push_back(std::move(part));
+            }
+            instance.models.push_back(std::move(variant));
         }
     }
 }

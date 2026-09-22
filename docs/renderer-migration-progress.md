@@ -1,5 +1,22 @@
 # Renderer migration checkpoint
 
+## Continuation: presentation-owned model variants
+
+Objects now publish all eligible authored LOD variants, with independent poses,
+materials, bounds and prior-pose matching by asset identity. Camera queries select
+the variant; attached glow/thruster geometry follows that selection. Lighting,
+image publication, motion and GPU geometry consume the selected variant instead
+of assuming a single object model. Normal startup forces maximum object detail;
+that policy is preserved, not silently changed to claim a speedup.
+
+Full build and 5,235 CPU checks pass. All eight normal effects captures are
+pixel-identical to opaque-contract-effects. The isolated LOD fixture exercises
+near/middle/far assets (829/831/832, 150/104/58 visible polygons) without changing
+simulation objects. All three final detail captures were visually inspected;
+thrusters remain attached to the selected geometry. Harness comparisons guard
+the fixture tier and revision. This does not cover every ship/robot variant or
+complete the model domain. Candidate and Previous Candidate remain untouched.
+
 ## Continuation: coherent image-resource history invalidation
 
 Deleted the resize-time velocity preservation path (RG16F snapshot, resampling

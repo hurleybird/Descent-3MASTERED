@@ -23,7 +23,7 @@ inline SurfaceMotion surfaceMotion(const Presentation& frame,const VisibleSurfac
     SurfaceMotion result; result.previous = item.world;
     if (!item.model) return result; // static world uses camera reconstruction
     const auto& object = frame.data().objects[item.object_index];
-    const auto& part = object.parts[item.part_index];
+    const auto& part = object.models[item.model_variant].parts[item.part_index];
     result.previous = compose(object.previous,part.previous);
     // Preserve the canvas adapter's zero/static and high-bit blur-policy ABI.
     result.identity = (object.handle+1u)&0x7fffffffu;
