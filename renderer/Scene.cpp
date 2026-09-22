@@ -21,11 +21,15 @@ void require(bool condition, const char* message) {
     if (!condition) throw std::invalid_argument(message);
 }
 void validateSurface(const SurfaceBinding& surface) {
-    require(finite(surface.base_color) && std::isfinite(surface.alpha) && surface.alpha >= 0 && surface.alpha <= 1 &&
+    require(finite(surface.base_color) && finite(surface.ambient_color) && finite(surface.ambient_direction) &&
+        std::isfinite(surface.alpha) && surface.alpha >= 0 && surface.alpha <= 1 &&
         std::isfinite(surface.u_offset) && std::isfinite(surface.v_offset) &&
+        std::isfinite(surface.lighting_modulation) && surface.lighting_modulation >= 0 &&
         std::isfinite(surface.lightmap_u_scale) && std::isfinite(surface.lightmap_v_scale), "Invalid scene material values");
 }
 void validateGeometry(const MeshGeometry& geometry) {
+    require(geometry.vertex_normals.empty() || geometry.vertex_normals.size() == geometry.vertices.size(), "Incomplete mesh normals");
+    for (const auto& normal : geometry.vertex_normals) require(finite(normal), "Non-finite mesh normal");
     for (const auto& vertex : geometry.vertices)
         require(finite(vertex), "Non-finite scene vertex");
     for (const auto& polygon : geometry.polygons) {
@@ -57,6 +61,9 @@ Transform compose(const Transform& parent, const Transform& local) {
 }
 bool operator!=(AssetId a, AssetId b) { return !(a == b); }
 bool operator==(const MeshGeometry& a, const MeshGeometry& b) {
+    if (a.vertex_normals.size() != b.vertex_normals.size()) return false;
+    for (size_t i = 0; i < a.vertex_normals.size(); ++i)
+        if (!equal(a.vertex_normals[i],b.vertex_normals[i])) return false;
     if (a.vertices.size() != b.vertices.size() || a.polygons.size() != b.polygons.size()) return false;
     for (size_t i = 0; i < a.vertices.size(); ++i)
         if (!equal(a.vertices[i], b.vertices[i])) return false;
@@ -72,7 +79,12 @@ bool operator==(const MeshGeometry& a, const MeshGeometry& b) {
     return true;
 }
 
-RoomAsset::RoomAsset(AssetId id, MeshGeometry geometry) : id_(id), geometry_(std::move(geometry)) {}
+bool operator==(const VolumeGrid& a,const VolumeGrid& b) {
+    return equal(a.origin,b.origin) && a.width == b.width && a.height == b.height && a.depth == b.depth &&
+        a.spacing == b.spacing && a.colors == b.colors;
+}
+RoomAsset::RoomAsset(AssetId id, MeshGeometry geometry, VolumeGrid volume)
+    : id_(id), geometry_(std::move(geometry)), volume_(std::move(volume)) {}
 SceneAssets::SceneAssets() { reset(); }
 void SceneAssets::reset() {
     const uint64_t lifetime = NextLifetime.fetch_add(1);
@@ -86,13 +98,18 @@ void SceneAssets::reset() {
 RoomAssetRef SceneAssets::room(uint32_t slot) const {
     return slot < rooms_.size() ? rooms_[slot] : nullptr;
 }
-RoomAssetRef SceneAssets::publishRoom(uint32_t slot, MeshGeometry geometry) {
+RoomAssetRef SceneAssets::publishRoom(uint32_t slot, MeshGeometry geometry, VolumeGrid volume) {
     validateGeometry(geometry);
+    require(finite(volume.origin) && std::isfinite(volume.spacing) && volume.spacing > 0, "Invalid volume grid placement");
+    if (!volume.colors.empty())
+        require(volume.width && volume.height && volume.depth &&
+            uint64_t(volume.width)*volume.height <= volume.colors.size() &&
+            uint64_t(volume.width)*volume.height*volume.depth == volume.colors.size(), "Invalid volume grid dimensions");
     const auto previous = room(slot);
-    if (previous && previous->geometry() == geometry) return previous;
+    if (previous && previous->geometry() == geometry && previous->volume() == volume) return previous;
     if (revision_ == std::numeric_limits<uint64_t>::max())
         throw std::overflow_error("Scene revision exhausted");
-    RoomAssetRef replacement(new RoomAsset({lifetime_, revision_ + 1, slot}, std::move(geometry)));
+    RoomAssetRef replacement(new RoomAsset({lifetime_, revision_ + 1, slot}, std::move(geometry),std::move(volume)));
     if (slot >= rooms_.size()) rooms_.resize(static_cast<size_t>(slot) + 1);
     rooms_[slot] = replacement;
     ++revision_;
@@ -108,9 +125,7 @@ bool operator==(const ModelGeometry& a, const ModelGeometry& b) {
         const auto& x = a.parts[i]; const auto& y = b.parts[i];
         if (!(x.geometry == y.geometry) || x.parent != y.parent || !equal(x.offset, y.offset) ||
             x.authored_flags != y.authored_flags || x.polygon_materials != y.polygon_materials ||
-            x.vertex_normals.size() != y.vertex_normals.size() || x.polygon_colors.size() != y.polygon_colors.size()) return false;
-        for (size_t j = 0; j < x.vertex_normals.size(); ++j)
-            if (!equal(x.vertex_normals[j], y.vertex_normals[j])) return false;
+            x.polygon_colors.size() != y.polygon_colors.size()) return false;
         for (size_t j = 0; j < x.polygon_colors.size(); ++j)
             if (!equal(x.polygon_colors[j], y.polygon_colors[j])) return false;
     }
@@ -125,8 +140,7 @@ ModelAssetRef SceneAssets::publishModel(uint32_t slot, ModelGeometry geometry) {
         const auto& part = geometry.parts[i];
         validateGeometry(part.geometry);
         require(finite(part.offset), "Invalid model offset");
-        require(part.vertex_normals.size() == part.geometry.vertices.size(), "Incomplete model vertex normals");
-        for (const auto& normal : part.vertex_normals) require(finite(normal), "Invalid model normal");
+        require(part.geometry.vertex_normals.size() == part.geometry.vertices.size(), "Incomplete model vertex normals");
         require(part.polygon_materials.size() == part.geometry.polygons.size() &&
             part.polygon_colors.size() == part.geometry.polygons.size(), "Incomplete model materials");
         for (size_t j = 0; j < part.polygon_materials.size(); ++j) {
@@ -182,6 +196,7 @@ PresentationRef Presentation::freeze(const FrameData& data) {
         for (const auto& surface : room.surfaces) validateSurface(surface);
         for (const auto& surface : room.surfaces) validateIndices(surface);
         require(finite(room.fog_color) && std::isfinite(room.fog_depth), "Invalid room fog");
+        require(std::isfinite(room.light_scalar) && room.light_scalar >= 0, "Invalid room illumination");
         for (const auto& portal : room.portals)
             require(portal.polygon >= 0 && static_cast<size_t>(portal.polygon) < room.surfaces.size(),
                 "Portal references missing polygon");
@@ -201,6 +216,12 @@ PresentationRef Presentation::freeze(const FrameData& data) {
                     "Incomplete model instance materials");
                 for (const auto& surface : part.surfaces) validateSurface(surface);
                 for (const auto& surface : part.surfaces) validateIndices(surface);
+                for (size_t face = 0; face < part.surfaces.size(); ++face) {
+                    const auto& uv = part.surfaces[face].baked_uvs;
+                    require(uv.empty() || uv.size() == object.model->geometry().parts[i].geometry.polygons[face].corners.size(),
+                        "Incomplete instance lightmap UVs");
+                    for (const auto& corner : uv) require(std::isfinite(corner.x) && std::isfinite(corner.y), "Invalid instance lightmap UVs");
+                }
             }
         } else require(object.parts.empty(), "Model pose has no asset");
     }

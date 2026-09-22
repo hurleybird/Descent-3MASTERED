@@ -2,6 +2,7 @@
 #include "SceneExtraction.h"
 #include "object.h"
 #include "room.h"
+#include <algorithm>
 #include <limits>
 #include <stdexcept>
 #include <unordered_map>
@@ -14,6 +15,23 @@ d3scene::Transform transform(const vector& p, const matrix& m) {
     return {value(p), value(m.rvec), value(m.uvec), value(m.fvec)};
 }
 bool same(d3scene::Vec3 a, const vector& b) { return a.x == b.x && a.y == b.y && a.z == b.z; }
+bool matchesVolume(const d3scene::VolumeGrid& grid, const room& source) {
+    if (!source.volume_lights) return grid.colors.empty();
+    if (!same(grid.origin,source.min_xyz) || grid.width != source.volume_width || grid.height != source.volume_height ||
+        grid.depth != source.volume_depth) return false;
+    const size_t count = size_t(grid.width)*grid.height*grid.depth;
+    return count == grid.colors.size() && std::equal(grid.colors.begin(),grid.colors.end(),source.volume_lights);
+}
+d3scene::VolumeGrid extractVolume(const room& source) {
+    d3scene::VolumeGrid grid;
+    if (!source.volume_lights) return grid;
+    if (source.volume_width <= 0 || source.volume_height <= 0 || source.volume_depth <= 0)
+        throw std::invalid_argument("Invalid source room light volume dimensions");
+    grid.origin = value(source.min_xyz);
+    grid.width = source.volume_width; grid.height = source.volume_height; grid.depth = source.volume_depth;
+    grid.colors.assign(source.volume_lights,source.volume_lights+size_t(grid.width)*grid.height*grid.depth);
+    return grid;
+}
 
 // The legacy simulation has no geometry revision counter. Compare owned source
 // fields (never addresses, padding, transient face marks, or hashes) at extraction
@@ -77,8 +95,8 @@ d3scene::PresentationRef ExtractGamePresentation(double time, float delta, bool 
         if (!Rooms[i].used) { assets.removeRoom(i); continue; }
         const room& source = Rooms[i];
         auto asset = assets.room(i);
-        if (!asset || !matches(asset->geometry(), source))
-            asset = assets.publishRoom(i, extractGeometry(source));
+        if (!asset || !matches(asset->geometry(), source) || !matchesVolume(asset->volume(),source))
+            asset = assets.publishRoom(i, extractGeometry(source),extractVolume(source));
         d3scene::RoomState state;
         state.number = i;
         state.asset = std::move(asset);

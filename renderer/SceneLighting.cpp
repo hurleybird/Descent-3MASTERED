@@ -6,6 +6,41 @@
 #include <unordered_set>
 
 namespace d3scene {
+float roomLightScalar(float time, uint8_t pulse, uint8_t offset, uint32_t room, bool strobe, bool flicker, bool editor) {
+    if (editor) return 1;
+    float scalar = 1;
+    if (pulse) {
+        const float half_period = std::max(pulse*.01f,.04f);
+        const float clock = time+offset*.01f;
+        const float phase = (clock-static_cast<int>(clock/(half_period*2))*(half_period*2))/half_period;
+        scalar = phase > 1 ? 2-phase : phase;
+    }
+    if (strobe && ((static_cast<int>(time*10)+room)%2)) scalar = 0;
+    if (flicker && (visualNoise(time,room,3)&1u)) scalar = 0;
+    return scalar;
+}
+Vec3 sampleVolume(const VolumeGrid& grid,Vec3 position) {
+    if (grid.colors.empty()) return {1,1,1};
+    return sampleVolume(VolumeGridView{grid.origin,grid.width,grid.height,grid.depth,grid.spacing,grid.colors.data()},position);
+}
+Vec3 sampleVolume(VolumeGridView grid,Vec3 position) {
+    if (!grid.colors || !grid.width || !grid.height || !grid.depth || grid.spacing <= 0) return {1,1,1};
+    const auto coordinate = [&](float p,float origin,uint32_t size) {
+        return std::max(0.f,std::min((p-origin)/grid.spacing,static_cast<float>(size-1)));
+    };
+    const float x = coordinate(position.x,grid.origin.x,grid.width);
+    const float y = coordinate(position.y,grid.origin.y,grid.height);
+    const float z = coordinate(position.z,grid.origin.z,grid.depth);
+    const uint32_t ix = static_cast<uint32_t>(x), iy = static_cast<uint32_t>(y), iz = static_cast<uint32_t>(z);
+    const auto sample = [&](uint32_t dx,uint32_t dy,uint32_t dz) {
+        const auto color = grid.colors[(std::min(iz+dz,grid.depth-1)*grid.height+std::min(iy+dy,grid.height-1))*grid.width+
+            std::min(ix+dx,grid.width-1)];
+        return Vec3{(color>>5)/7.f,((color>>2)&7)/7.f,(color&3)/3.f};
+    };
+    const auto mix = [](Vec3 a,Vec3 b,float t) { return Vec3{a.x*(1-t)+b.x*t,a.y*(1-t)+b.y*t,a.z*(1-t)+b.z*t}; };
+    return mix(mix(mix(sample(0,0,0),sample(0,1,0),y-iy),mix(sample(1,0,0),sample(1,1,0),y-iy),x-ix),
+        mix(mix(sample(0,0,1),sample(0,1,1),y-iy),mix(sample(1,0,1),sample(1,1,1),y-iy),x-ix),z-iz);
+}
 uint32_t visualNoise(double time, uint32_t key, uint32_t salt) {
     const double wrapped = std::fmod(std::floor(time*60.0),4294967296.0);
     uint32_t value = static_cast<uint32_t>(wrapped < 0 ? wrapped+4294967296.0 : wrapped) * 0x9e3779b9u;

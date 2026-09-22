@@ -31,6 +31,7 @@ public static class RendererImageComparison {
                 var rowB = new byte[left.Width * 4];
                 long sum = 0, different = 0, aboveTwo = 0;
                 int maximum = 0;
+                int minX = left.Width, minY = left.Height, maxX = -1, maxY = -1;
                 for (int y = 0; y < left.Height; ++y) {
                     Marshal.Copy(IntPtr.Add(a.Scan0, y*a.Stride), rowA, 0, rowA.Length);
                     Marshal.Copy(IntPtr.Add(b.Scan0, y*b.Stride), rowB, 0, rowB.Length);
@@ -41,13 +42,18 @@ public static class RendererImageComparison {
                             sum += delta; peak = Math.Max(peak, delta);
                         }
                         if (peak != 0) ++different;
-                        if (peak > 2) ++aboveTwo;
+                        if (peak > 2) {
+                            ++aboveTwo;
+                            minX = Math.Min(minX,x/4); maxX = Math.Max(maxX,x/4);
+                            minY = Math.Min(minY,y); maxY = Math.Max(maxY,y);
+                        }
                         maximum = Math.Max(maximum, peak);
                     }
                 }
                 double pixels = (double)left.Width * left.Height;
                 return new double[] {left.Width, left.Height, sum/(pixels*3),
-                    different/pixels*100, aboveTwo/pixels*100, maximum};
+                    different/pixels*100, aboveTwo/pixels*100, maximum,
+                    maxX < 0 ? -1 : minX,maxX < 0 ? -1 : minY,maxX,maxY};
             } finally { left.UnlockBits(a); right.UnlockBits(b); }
         }
     }
@@ -77,7 +83,8 @@ $results = foreach ($entry in $referenceManifest.results) {
     $metrics = [RendererImageComparison]::Measure((Join-Path $referencePath "$($entry.save).png"),
         (Join-Path $actualPath "$($entry.save).png"))
     [pscustomobject]@{save=$entry.save; diagnostic_comparison=[bool]$DiagnosticComparison; width=$metrics[0]; height=$metrics[1]; mean_rgb_error=$metrics[2];
-        changed_percent=$metrics[3]; above_two_percent=$metrics[4]; max_channel_error=$metrics[5]}
+        changed_percent=$metrics[3]; above_two_percent=$metrics[4]; max_channel_error=$metrics[5];
+        above_two_bounds=@($metrics[6],$metrics[7],$metrics[8],$metrics[9])}
 }
 if (Test-Path -LiteralPath $Report) { throw 'Report already exists.' }
 $results | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $Report -Encoding UTF8

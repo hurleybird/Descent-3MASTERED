@@ -22,7 +22,7 @@ d3scene::ModelGeometry modelGeometry() {
     d3scene::ModelPart part;
     part.geometry.vertices = {{-1,-1,0},{0,1,0},{1,-1,0}};
     part.geometry.polygons.push_back({{0,0,-1},{{0,0,0},{1,0,1},{2,1,0}}});
-    part.vertex_normals = {{0,0,-1},{0,0,-1},{0,0,-1}};
+    part.geometry.vertex_normals = {{0,0,-1},{0,0,-1},{0,0,-1}};
     part.polygon_materials = {-1}; part.polygon_colors = {{1,0,0}};
     geometry.parts.push_back(part);
     return geometry;
@@ -43,7 +43,7 @@ int runModelSceneTests() {
     poly_model source_model{}; source_model.n_models = 1; source_model.submodel = &source_part;
     size_t repaired = 0;
     const auto compiled = CompileSceneModelAsset(source_model,&repaired);
-    check(repaired == 2 && compiled.parts[0].vertex_normals[1].z == -1, "Invalid authored normals not repaired at asset boundary");
+    check(repaired == 2 && compiled.parts[0].geometry.vertex_normals[1].z == -1, "Invalid authored normals not repaired at asset boundary");
     check(std::isnan(normals[1].y), "Asset compiler rewrote source shading data");
     vertices[0].x = 99;
     check(compiled.parts[0].geometry.vertices[0].x == -1, "Compiled geometry retained source pointers");
@@ -65,12 +65,15 @@ int runModelSceneTests() {
     PreparedModelPart part;
     part.current.position.z = -2;
     part.surfaces.resize(1); // intentionally flat-color, no bitmap
+    part.surfaces[0].baked_uvs = {{0,0},{.5f,1},{1,0}};
     object.parts.push_back(part);
     data.objects.push_back(object);
     data.objects.push_back(object); data.objects[1].handle = 43;
     data.objects[1].current.position.z = 20;
     data.objects[1].parts[0].surfaces[0].alpha = 0.5f;
     auto frame = Presentation::freeze(data);
+    data.objects[0].parts[0].surfaces[0].baked_uvs[0].x = 99;
+    check(frame->data().objects[0].parts[0].surfaces[0].baked_uvs[0].x == 0,"Instance baked UVs not owned by frame");
     data.objects[0].parts[0].current.position.z = 55;
     check(frame->data().objects[0].parts[0].current.position.z == -2, "Held frame pose changed");
     View view;
@@ -97,9 +100,11 @@ int runModelSceneTests() {
     rejects([&] { assets.publishModel(4,invalid); });
     invalid = modelGeometry(); invalid.parts[0].polygon_materials[0] = 0;
     rejects([&] { assets.publishModel(4,invalid); });
-    invalid = modelGeometry(); invalid.parts[0].vertex_normals.clear();
+    invalid = modelGeometry(); invalid.parts[0].geometry.vertex_normals.clear();
     rejects([&] { assets.publishModel(4,invalid); });
     auto malformed = frame->data(); malformed.objects[0].parts.clear();
+    rejects([&] { Presentation::freeze(malformed); });
+    malformed = frame->data(); malformed.objects[0].parts[0].surfaces[0].baked_uvs.pop_back();
     rejects([&] { Presentation::freeze(malformed); });
     malformed = frame->data(); malformed.objects[0].parts[0].surfaces[0].alpha = std::numeric_limits<float>::quiet_NaN();
     rejects([&] { Presentation::freeze(malformed); });

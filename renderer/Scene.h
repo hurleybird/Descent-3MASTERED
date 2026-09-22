@@ -9,6 +9,7 @@
 
 namespace d3scene {
 
+struct Vec2 { float x = 0, y = 0; };
 struct Vec3 { float x = 0, y = 0, z = 0; };
 struct Transform {
     Vec3 position;
@@ -40,25 +41,35 @@ struct MeshPolygon {
 };
 struct MeshGeometry {
     std::vector<Vec3> vertices;
+    std::vector<Vec3> vertex_normals; // empty means authored flat polygon normals
     std::vector<MeshPolygon> polygons;
 };
 bool operator==(const MeshGeometry& a, const MeshGeometry& b);
+
+struct VolumeGrid {
+    Vec3 origin;
+    uint32_t width = 0, height = 0, depth = 0;
+    float spacing = 10;
+    std::vector<uint8_t> colors;
+};
+bool operator==(const VolumeGrid&,const VolumeGrid&);
 
 class RoomAsset final {
 public:
     AssetId id() const { return id_; }
     const MeshGeometry& geometry() const { return geometry_; }
+    const VolumeGrid& volume() const { return volume_; }
 private:
     friend class SceneAssets;
-    RoomAsset(AssetId id, MeshGeometry geometry);
+    RoomAsset(AssetId id, MeshGeometry geometry, VolumeGrid volume);
     AssetId id_;
     MeshGeometry geometry_;
+    VolumeGrid volume_;
 };
 using RoomAssetRef = std::shared_ptr<const RoomAsset>;
 
 struct ModelPart {
     MeshGeometry geometry;
-    std::vector<Vec3> vertex_normals;
     std::vector<int32_t> polygon_materials;
     std::vector<Vec3> polygon_colors;
     int32_t parent = -1;
@@ -89,7 +100,7 @@ public:
     SceneAssets();
     void reset();
     RoomAssetRef room(uint32_t slot) const;
-    RoomAssetRef publishRoom(uint32_t slot, MeshGeometry geometry);
+    RoomAssetRef publishRoom(uint32_t slot, MeshGeometry geometry, VolumeGrid volume = {});
     void removeRoom(uint32_t slot);
     ModelAssetRef model(uint32_t slot) const;
     ModelAssetRef publishModel(uint32_t slot, ModelGeometry geometry);
@@ -106,6 +117,10 @@ private:
 // material compiler must resolve them before execution is enabled.
 struct SurfaceBinding {
     std::vector<uint32_t> light_indices;
+    std::vector<Vec2> baked_uvs; // optional per-instance corner UVs, never shared model scratch
+    Vec3 ambient_color{1,1,1}, ambient_direction{0,-1,0};
+    bool directional_ambient = false;
+    float lighting_modulation = 1;
     Vec3 base_color{1, 1, 1};
     int32_t bitmap = -1, lightmap_bitmap = -1;
     float lightmap_u_scale = 1, lightmap_v_scale = 1;
@@ -131,6 +146,7 @@ struct RoomState {
     Vec3 fog_color;
     uint8_t pulse_time = 0, pulse_offset = 0;
     int32_t mirror_polygon = -1;
+    float light_scalar = 1;
 };
 
 struct PreparedModelPart {

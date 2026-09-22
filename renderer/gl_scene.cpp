@@ -6,12 +6,17 @@
 extern int Last_texel_unit_set;
 
 namespace {
-struct SceneVertex { d3scene::Vec3 position; float u, v, lu, lv, alpha; };
+struct SceneVertex { d3scene::Vec3 position; float u, v, lu, lv, alpha; d3scene::Vec3 normal; };
 const char* SceneVertexShader = R"GLSL(#version 330 core
 layout(location=0) in vec3 position;
 layout(location=1) in vec2 uv;
 layout(location=2) in vec2 light_uv;
 layout(location=3) in float alpha;
+layout(location=4) in vec3 normal;
+uniform samplerBuffer instance_uvs;
+uniform int use_instance_uvs, instance_uv_offset;
+uniform vec3 ambient_color, ambient_direction;
+uniform int directional_ambient;
 uniform vec3 eye, camera_right, camera_up, camera_forward;
 uniform vec3 model_position, model_right, model_up, model_forward;
 uniform vec4 projection;
@@ -19,6 +24,7 @@ uniform float near_distance;
 out vec2 texcoord, lightcoord;
 out float vertex_alpha;
 out vec3 world_position;
+out vec3 ambient;
 void main() {
     vec3 world = model_position + model_right*position.x + model_up*position.y + model_forward*position.z;
     vec3 relative = world-eye;
@@ -27,6 +33,10 @@ void main() {
     gl_Position = vec4(dot(relative,camera_right)*projection.x + z*projection.z,
                        dot(relative,camera_up)*projection.y + z*projection.w, z-2.0*near_distance,z);
     texcoord=uv; lightcoord=light_uv; vertex_alpha=alpha;
+    if (use_instance_uvs != 0) lightcoord = texelFetch(instance_uvs,gl_VertexID+instance_uv_offset).rg;
+    vec3 world_normal = model_right*normal.x + model_up*normal.y + model_forward*normal.z;
+    float shade = directional_ambient != 0 ? clamp((1.0-dot(world_normal,ambient_direction))*0.5,0.0,1.0) : 1.0;
+    ambient = ambient_color*shade;
 }
 )GLSL";
 const char* SceneFragmentShader = R"GLSL(#version 330 core
@@ -36,10 +46,12 @@ uniform int use_texture;
 uniform vec3 base_color;
 uniform vec2 light_scale, texture_offset;
 uniform float material_alpha;
+uniform float lighting_modulation;
 uniform samplerBuffer scene_lights;
 uniform isamplerBuffer scene_influences;
 uniform int influence_offset, influence_count;
 in vec3 world_position;
+in vec3 ambient;
 in vec2 texcoord, lightcoord;
 in float vertex_alpha;
 layout(location=0) out vec4 color;
@@ -47,7 +59,7 @@ void main() {
     vec4 base=use_texture != 0 ? texture(colortexture,texcoord+texture_offset) : vec4(base_color,1);
     base.a=(use_texture_alpha != 0 ? base.a : 1.0)*vertex_alpha*material_alpha;
     if(base.a < 0.01) discard;
-    vec3 illumination = use_lightmap != 0 ? texture(lightmaptexture,lightcoord*light_scale).rgb : vec3(1);
+    vec3 illumination = use_lightmap != 0 ? texture(lightmaptexture,lightcoord*light_scale).rgb : ambient;
     vec3 dynamic_color = vec3(0);
     for (int index = 0; index < influence_count; ++index) {
         int light = texelFetch(scene_influences,influence_offset+index).r*4;
@@ -66,7 +78,7 @@ void main() {
         dynamic_color += color_falloff.rgb*attenuation;
     }
     illumination = clamp(illumination+dynamic_color,vec3(0),vec3(1));
-    color=vec4(base.rgb*illumination,base.a);
+    color=vec4(base.rgb*illumination*lighting_modulation,base.a);
 }
 )GLSL";
 }
@@ -86,6 +98,10 @@ void GL4Renderer::DestroySceneResources() {
     if (scene_influence_buffer) glDeleteBuffers(1,&scene_influence_buffer);
     if (scene_light_texture) glDeleteTextures(1,&scene_light_texture);
     if (scene_influence_texture) glDeleteTextures(1,&scene_influence_texture);
+    if (scene_uv_buffer) glDeleteBuffers(1,&scene_uv_buffer);
+    if (scene_uv_texture) glDeleteTextures(1,&scene_uv_texture);
+    scene_uv_buffer = scene_uv_texture = 0;
+    scene_uv_ranges.clear();
     scene_light_buffer = scene_influence_buffer = scene_light_texture = scene_influence_texture = 0;
     scene_light_sequence = 0;
     scene_light_ranges.clear();
@@ -97,6 +113,7 @@ void GL4Renderer::UploadSceneLighting(const d3scene::Presentation& frame) {
     if (!scene_light_buffer) {
         glGenBuffers(1,&scene_light_buffer); glGenTextures(1,&scene_light_texture);
         glGenBuffers(1,&scene_influence_buffer); glGenTextures(1,&scene_influence_texture);
+        glGenBuffers(1,&scene_uv_buffer); glGenTextures(1,&scene_uv_texture);
     }
     if (scene_light_sequence != frame.data().sequence) {
         std::vector<float> lights;
@@ -109,15 +126,27 @@ void GL4Renderer::UploadSceneLighting(const d3scene::Presentation& frame) {
         }
         if (lights.empty()) lights.resize(16,0);
         std::vector<int32_t> indices;
+        std::vector<d3scene::Vec2> uvs;
         scene_light_ranges.clear();
+        scene_uv_ranges.clear();
         const auto add = [&](const d3scene::SurfaceBinding& surface) {
             scene_light_ranges.emplace(&surface,ElementRange(static_cast<uint32_t>(indices.size()),static_cast<uint32_t>(surface.light_indices.size())));
             for (uint32_t index : surface.light_indices) indices.push_back(static_cast<int32_t>(index));
+            const uint32_t start = static_cast<uint32_t>(uvs.size());
+            for (size_t triangle = 1; triangle+1 < surface.baked_uvs.size(); ++triangle) {
+                uvs.push_back(surface.baked_uvs[0]);
+                uvs.push_back(surface.baked_uvs[triangle]);
+                uvs.push_back(surface.baked_uvs[triangle+1]);
+            }
+            scene_uv_ranges.emplace(&surface,ElementRange(start,static_cast<uint32_t>(uvs.size())-start));
         };
         for (const auto& room : frame.data().rooms) for (const auto& surface : room.surfaces) add(surface);
         for (const auto& object : frame.data().objects) for (const auto& part : object.parts)
             for (const auto& surface : part.surfaces) add(surface);
         if (indices.empty()) indices.push_back(0);
+        if (uvs.empty()) uvs.push_back({0,0});
+        glBindBuffer(GL_TEXTURE_BUFFER,scene_uv_buffer);
+        glBufferData(GL_TEXTURE_BUFFER,uvs.size()*sizeof(d3scene::Vec2),uvs.data(),GL_STREAM_DRAW);
         glBindBuffer(GL_TEXTURE_BUFFER,scene_light_buffer);
         glBufferData(GL_TEXTURE_BUFFER,lights.size()*sizeof(float),lights.data(),GL_STREAM_DRAW);
         glBindBuffer(GL_TEXTURE_BUFFER,scene_influence_buffer);
@@ -128,6 +157,8 @@ void GL4Renderer::UploadSceneLighting(const d3scene::Presentation& frame) {
     glTexBuffer(GL_TEXTURE_BUFFER,GL_RGBA32F,scene_light_buffer);
     glActiveTexture(GL_TEXTURE3); glBindTexture(GL_TEXTURE_BUFFER,scene_influence_texture);
     glTexBuffer(GL_TEXTURE_BUFFER,GL_R32I,scene_influence_buffer);
+    glActiveTexture(GL_TEXTURE4); glBindTexture(GL_TEXTURE_BUFFER,scene_uv_texture);
+    glTexBuffer(GL_TEXTURE_BUFFER,GL_RG32F,scene_uv_buffer);
     glActiveTexture(GL_TEXTURE0); Last_texel_unit_set = 0;
 }
 
@@ -144,7 +175,8 @@ void GL4Renderer::UploadSceneMesh(SceneMeshGpu& gpu, d3scene::AssetId id, const 
             const size_t corners[3] = {0,triangle,triangle+1};
             for (size_t corner : corners) {
                 const auto& c = polygon.corners[corner];
-                vertices.push_back({geometry.vertices[c.vertex],c.u,c.v,c.light_u,c.light_v,c.alpha/255.f});
+                vertices.push_back({geometry.vertices[c.vertex],c.u,c.v,c.light_u,c.light_v,c.alpha/255.f,
+                    geometry.vertex_normals.empty() ? polygon.normal : geometry.vertex_normals[c.vertex]});
             }
         }
         gpu.polygons.emplace_back(first,static_cast<uint32_t>(vertices.size())-first);
@@ -152,9 +184,9 @@ void GL4Renderer::UploadSceneMesh(SceneMeshGpu& gpu, d3scene::AssetId id, const 
     glGenVertexArrays(1,&gpu.vao); glGenBuffers(1,&gpu.buffer);
     glBindVertexArray(gpu.vao); glBindBuffer(GL_ARRAY_BUFFER,gpu.buffer);
     glBufferData(GL_ARRAY_BUFFER,vertices.size()*sizeof(SceneVertex),vertices.data(),GL_STATIC_DRAW);
-    const int counts[4] = {3,2,2,1};
-    const size_t offsets[4] = {offsetof(SceneVertex,position),offsetof(SceneVertex,u),offsetof(SceneVertex,lu),offsetof(SceneVertex,alpha)};
-    for (GLuint attribute = 0; attribute < 4; ++attribute) {
+    const int counts[5] = {3,2,2,1,3};
+    const size_t offsets[5] = {offsetof(SceneVertex,position),offsetof(SceneVertex,u),offsetof(SceneVertex,lu),offsetof(SceneVertex,alpha),offsetof(SceneVertex,normal)};
+    for (GLuint attribute = 0; attribute < 5; ++attribute) {
         glEnableVertexAttribArray(attribute);
         glVertexAttribPointer(attribute,counts[attribute],GL_FLOAT,GL_FALSE,sizeof(SceneVertex),reinterpret_cast<void*>(offsets[attribute]));
     }
@@ -199,6 +231,7 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
     glUniform1i(scene_shader.FindUniform("lightmaptexture"),1);
     glUniform1i(scene_shader.FindUniform("scene_lights"),2);
     glUniform1i(scene_shader.FindUniform("scene_influences"),3);
+    glUniform1i(scene_shader.FindUniform("instance_uvs"),4);
 
     for (const auto& item : visibility.surfaces) {
         const d3scene::SurfaceBinding* binding;
@@ -230,6 +263,9 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
         vec("model_position",item.world.position); vec("model_right",item.world.right);
         vec("model_up",item.world.up); vec("model_forward",item.world.forward);
         vec("base_color",surface.base_color);
+        vec("ambient_color",surface.ambient_color); vec("ambient_direction",surface.ambient_direction);
+        glUniform1i(scene_shader.FindUniform("directional_ambient"),surface.directional_ambient);
+        glUniform1f(scene_shader.FindUniform("lighting_modulation"),surface.lighting_modulation);
         glUniform1i(scene_shader.FindUniform("use_texture"),surface.bitmap>=0);
         glUniform1i(scene_shader.FindUniform("use_lightmap"),surface.lightmap_bitmap>=0);
         glUniform1i(scene_shader.FindUniform("use_texture_alpha"),surface.texture_alpha);
@@ -242,6 +278,9 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
         } else { glDisable(GL_BLEND); glDepthMask(GL_TRUE); }
         glBindVertexArray(gpu.vao);
         const auto range=gpu.polygons[item.polygon_index];
+        const auto uv_range = scene_uv_ranges.at(binding);
+        glUniform1i(scene_shader.FindUniform("use_instance_uvs"),uv_range.count != 0);
+        glUniform1i(scene_shader.FindUniform("instance_uv_offset"),static_cast<int>(uv_range.offset)-static_cast<int>(range.offset));
         glDrawArrays(GL_TRIANGLES,range.offset,range.count);
         rend_RecordDrawCall(RENDERER_DRAW_CALL_3D);
     }

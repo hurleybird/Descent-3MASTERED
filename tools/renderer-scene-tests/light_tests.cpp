@@ -14,6 +14,25 @@ template<class F> void rejects(F fn) {
 int runLightTests() {
     using namespace d3scene;
     checks = 0;
+    VolumeGrid grid; grid.width = grid.height = grid.depth = 2;
+    grid.origin = {10,20,30}; grid.colors = {0,224,28,252,3,227,31,255};
+    auto center = sampleVolume(grid,{15,25,35});
+    check(center.x == .5f && center.y == .5f && center.z == .5f,"RGB332 trilinear volume sample changed");
+    auto edge = sampleVolume(grid,{999,999,-999});
+    check(edge.x == 1 && edge.y == 1 && edge.z == 0,"Volume coordinates did not clamp to grid");
+    grid.width = grid.height = grid.depth = 1; grid.colors = {255};
+    check(sampleVolume(grid,{-999,999,42}).z == 1,"Singleton volume grid failed");
+    check(sampleVolume(VolumeGrid{},{}).x == 1,"Missing authored volume must be white");
+    check(roomLightScalar(.02f,1,0,0,false,false,false) == .5f,"Minimum pulse half period changed");
+    check(roomLightScalar(0,0,0,1,true,false,false) == 0,"Room strobe phase lost identity");
+    check(roomLightScalar(0,1,0,1,true,true,true) == 1,"Editor light policy ignored");
+    for (int tick = 0; tick < 100; ++tick) {
+        const float time = tick*.031f;
+        const float half = .73f, clock = time+.17f;
+        const float phase = (clock-static_cast<int>(clock/(half*2))*half*2)/half;
+        const float expected = phase > 1 ? 1-(phase-1) : phase;
+        check(std::fabs(roomLightScalar(time,73,17,0,false,false,false)-expected)<.00001f,"Room pulse differs from source rule");
+    }
     Light point;
     point.id.owner = 123; point.radius = 20; point.position = {0,0,0}; point.color = {1,0,-0.5f}; point.room = 0;
     check(lightAttenuation(point,{0,0,0}) == 1,"Point light origin attenuation changed");
@@ -36,6 +55,13 @@ int runLightTests() {
     MeshGeometry mesh;
     mesh.vertices = {{-1,-1,5},{0,1,5},{1,-1,5}};
     mesh.polygons.push_back({{0,0,-1},{{0},{1},{2}}});
+    auto volume_asset = assets.publishRoom(8,mesh,grid);
+    check(assets.publishRoom(8,mesh,grid) == volume_asset,"Unchanged light volume lost revision");
+    grid.colors[0] = 0;
+    check(assets.publishRoom(8,mesh,grid)->id() != volume_asset->id() && volume_asset->volume().colors[0] == 255,
+        "Light volume revisions are not immutable");
+    grid.width = 2;
+    rejects([&] { assets.publishRoom(8,mesh,grid); });
     FrameData data; data.sequence = 1; data.scene_lifetime = assets.lifetime(); data.lights = {point};
     for (int i = 0; i < 3; ++i) {
         RoomState room; room.number = i; room.asset = assets.publishRoom(i,mesh); room.surfaces.resize(1);

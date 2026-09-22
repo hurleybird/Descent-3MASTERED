@@ -17,6 +17,7 @@
 */
 
 #include "render.h"
+#include "../renderer/SceneLighting.h"
 #include <stdlib.h>
 #include <string.h>
 #include <algorithm>
@@ -135,8 +136,6 @@ bool RenderLastMainViewSawTerrain()
 }
 int Global_buffer_index;
 int No_render_windows_hack = -1;
-constexpr float WALL_PULSE_INCREMENT = .01f;
-constexpr float WALL_PULSE_MIN_HALF_PERIOD = .04f;
 
 //Variables for various debugging features
 #ifndef _DEBUG
@@ -6417,36 +6416,8 @@ void RenderRoomUnsorted(room* rp)
 // Figures out a scalar value to apply to all vertices in the room
 void ComputeRoomPulseLight(room* rp)
 {
-	if (rp->pulse_time == 0 || In_editor_mode)
-		Room_light_val = 1.0;
-	else
-	{
-		float ptime = (std::max)(rp->pulse_time * WALL_PULSE_INCREMENT,
-			WALL_PULSE_MIN_HALF_PERIOD);
-		float add_time = rp->pulse_offset * WALL_PULSE_INCREMENT;
-
-		int int_time = (int)((Gametime + add_time) / (ptime * 2));
-		float left_time = (Gametime + add_time) - (int_time * ptime * 2);
-		float norm_time = left_time / (ptime);
-		if (norm_time > 1)
-			Room_light_val = 1 - (norm_time - 1.0);
-		else
-			Room_light_val = norm_time;
-	}
-	if (!In_editor_mode)
-	{
-		if (rp->flags & RF_STROBE)
-		{
-			int val = (Gametime * 10) + (rp - Rooms);
-			if (val % 2)
-				Room_light_val = 0;
-		}
-		if (rp->flags & RF_FLICKER)
-		{
-			if (Get60HzVisualNoise((uint32_t)(rp - Rooms), 3) & 1u)
-				Room_light_val = 0;
-		}
-	}
+    Room_light_val = d3scene::roomLightScalar(Gametime,rp->pulse_time,rp->pulse_offset,
+        static_cast<uint32_t>(rp-Rooms),(rp->flags & RF_STROBE) != 0,(rp->flags & RF_FLICKER) != 0,In_editor_mode != 0);
 }
 
 #define CORONA_DIST_CUTOFF	5.0f
@@ -7098,110 +7069,17 @@ static int obj_sort_func(const obj_sort_item* a, const obj_sort_item* b)
 		return 0;
 }
 
-inline void IsRoomDynamicValid(room* rp, int x, int y, int z, float* r, float* g, float* b)
-{
-	int w = rp->volume_width;
-	int h = rp->volume_height;
-	int d = rp->volume_depth;
-
-	ubyte color = rp->volume_lights[(z * w * h) + (y * w) + x];
-
-	*r = (float)((color >> 5) / 7.0);
-	*g = (float)((color >> 2) & 0x07) / 7.0;
-	*b = (float)((float)(color & 0x03) / 3.0);
-}
-
-// Gets the dynamic light value for this position
+// Simulation/retired-renderer adapter to the canonical immutable-volume sampler.
+// No draw state is changed by an ambient query.
 void GetRoomDynamicScalar(vector* pos, room* rp, float* r, float* g, float* b)
 {
-	float front_values_r[10];
-	float back_values_r[10];
-	float front_values_g[10];
-	float back_values_g[10];
-	float front_values_b[10];
-	float back_values_b[10];
-	if (!rp->volume_lights)
-	{
-		*r = 1;
-		*g = 1;
-		*b = 1;
-		return;
-	}
-	float fl_x = (pos->x - rp->min_xyz.x) / VOLUME_SPACING;
-	float fl_y = (pos->y - rp->min_xyz.y) / VOLUME_SPACING;
-	float fl_z = (pos->z - rp->min_xyz.z) / VOLUME_SPACING;
-	fl_x = std::max(fl_x, 0.f);
-	fl_y = std::max(fl_y, 0.f);
-	fl_z = std::max(fl_z, 0.f);
-	fl_x = std::min(fl_x, (float)(rp->volume_width - 1));
-	fl_y = std::min(fl_y, (float)(rp->volume_height - 1));
-	fl_z = std::min(fl_z, (float)(rp->volume_depth - 1));
-	int int_x = fl_x;
-	int int_y = fl_y;
-	int int_z = fl_z;
-	fl_x -= int_x;
-	fl_y -= int_y;
-	fl_z -= int_z;
-	int next_x = int_x + 1;
-	int next_y = int_y + 1;
-	int next_z = int_z + 1;
-	next_x = std::min(rp->volume_width - 1, next_x);
-	next_y = std::min(rp->volume_height - 1, next_y);
-	next_z = std::min(rp->volume_depth - 1, next_z);
-
-	float left_norm_r, left_norm_g, left_norm_b;
-	float right_norm_r, right_norm_g, right_norm_b;
-	float front_norm_r, front_norm_g, front_norm_b;
-	float back_norm_r, back_norm_g, back_norm_b;
-
-	IsRoomDynamicValid(rp, int_x, int_y, int_z, &front_values_r[0], &front_values_g[0], &front_values_b[0]);
-	IsRoomDynamicValid(rp, int_x, next_y, int_z, &front_values_r[1], &front_values_g[1], &front_values_b[1]);
-	IsRoomDynamicValid(rp, next_x, next_y, int_z, &front_values_r[2], &front_values_g[2], &front_values_b[2]);
-	IsRoomDynamicValid(rp, next_x, int_y, int_z, &front_values_r[3], &front_values_g[3], &front_values_b[3]);
-	IsRoomDynamicValid(rp, int_x, int_y, next_z, &back_values_r[0], &back_values_g[0], &back_values_b[0]);
-	IsRoomDynamicValid(rp, int_x, next_y, next_z, &back_values_r[1], &back_values_g[1], &back_values_b[1]);
-	IsRoomDynamicValid(rp, next_x, next_y, next_z, &back_values_r[2], &back_values_g[2], &back_values_b[2]);
-	IsRoomDynamicValid(rp, next_x, int_y, next_z, &back_values_r[3], &back_values_g[3], &back_values_b[3]);
-
-	// Do front edge
-	int left_out = 0;
-	int right_out = 0;
-
-	// Left edge
-	left_norm_r = ((1 - fl_y) * front_values_r[0]) + (fl_y * front_values_r[1]);
-	left_norm_g = ((1 - fl_y) * front_values_g[0]) + (fl_y * front_values_g[1]);
-	left_norm_b = ((1 - fl_y) * front_values_b[0]) + (fl_y * front_values_b[1]);
-
-	// Right edge
-	right_norm_r = ((1 - fl_y) * front_values_r[3]) + (fl_y * front_values_r[2]);
-	right_norm_g = ((1 - fl_y) * front_values_g[3]) + (fl_y * front_values_g[2]);
-	right_norm_b = ((1 - fl_y) * front_values_b[3]) + (fl_y * front_values_b[2]);
-
-	// Figure out front edge
-	front_norm_r = ((1 - fl_x) * left_norm_r) + (fl_x * right_norm_r);
-	front_norm_g = ((1 - fl_x) * left_norm_g) + (fl_x * right_norm_g);
-	front_norm_b = ((1 - fl_x) * left_norm_b) + (fl_x * right_norm_b);
-
-	// Do back edge
-	left_norm_r = ((1 - fl_y) * back_values_r[0]) + (fl_y * back_values_r[1]);
-	left_norm_g = ((1 - fl_y) * back_values_g[0]) + (fl_y * back_values_g[1]);
-	left_norm_b = ((1 - fl_y) * back_values_b[0]) + (fl_y * back_values_b[1]);
-
-	right_norm_r = ((1 - fl_y) * back_values_r[3]) + (fl_y * back_values_r[2]);
-	right_norm_g = ((1 - fl_y) * back_values_g[3]) + (fl_y * back_values_g[2]);
-	right_norm_b = ((1 - fl_y) * back_values_b[3]) + (fl_y * back_values_b[2]);
-	back_norm_r = ((1 - fl_x) * left_norm_r) + (fl_x * right_norm_r);
-	back_norm_g = ((1 - fl_x) * left_norm_g) + (fl_x * right_norm_g);
-	back_norm_b = ((1 - fl_x) * left_norm_b) + (fl_x * right_norm_b);
-	*r = ((1 - fl_z) * front_norm_r) + (fl_z * back_norm_r);
-	*g = ((1 - fl_z) * front_norm_g) + (fl_z * back_norm_g);
-	*b = ((1 - fl_z) * front_norm_b) + (fl_z * back_norm_b);
-
-	// Factor in flickering
-	ComputeRoomPulseLight(rp);
-	(*r) *= Room_light_val;
-	(*g) *= Room_light_val;
-	(*b) *= Room_light_val;
+    const d3scene::VolumeGridView grid{{rp->min_xyz.x,rp->min_xyz.y,rp->min_xyz.z},
+        static_cast<uint32_t>(rp->volume_width),static_cast<uint32_t>(rp->volume_height),
+        static_cast<uint32_t>(rp->volume_depth),static_cast<float>(VOLUME_SPACING),rp->volume_lights};
+    auto color = d3scene::sampleVolume(grid,{pos->x,pos->y,pos->z});
+    const float scalar = rp->volume_lights ? d3scene::roomLightScalar(Gametime,rp->pulse_time,rp->pulse_offset,
+        static_cast<uint32_t>(rp-Rooms),(rp->flags & RF_STROBE) != 0,(rp->flags & RF_FLICKER) != 0,In_editor_mode != 0) : 1;
+    *r = color.x*scalar; *g = color.y*scalar; *b = color.z*scalar;
 }
 
 ubyte Trick_type = 0;

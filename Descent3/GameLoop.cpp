@@ -687,6 +687,9 @@ static void BeginAutomatedCaptureFrame()
 		Frametime = Automated_capture.fixed_delta;
 }
 
+bool AutomatedCapturePending() { return Automated_capture.capture_pending; }
+int AutomatedCaptureFrameIndex() { return Automated_capture.gameplay_frame_active ? Automated_capture.gameplay_frame : -1; }
+
 static void CaptureAutomatedFrameIfRequested()
 {
 	if (!Automated_capture.capture_pending)

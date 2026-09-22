@@ -132,8 +132,10 @@ class GL4Renderer : public IRenderer
 	ShaderProgram scene_shader;
 	GLuint scene_light_buffer = 0, scene_light_texture = 0;
 	GLuint scene_influence_buffer = 0, scene_influence_texture = 0;
+	GLuint scene_uv_buffer = 0, scene_uv_texture = 0;
 	uint64_t scene_light_sequence = 0;
 	std::unordered_map<const d3scene::SurfaceBinding*, ElementRange> scene_light_ranges;
+	std::unordered_map<const d3scene::SurfaceBinding*, ElementRange> scene_uv_ranges;
 	void UploadSceneLighting(const d3scene::Presentation&);
 	void DestroySceneResources();
 	//MAIN

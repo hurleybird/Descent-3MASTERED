@@ -177,6 +177,35 @@ This repeats across the same binary and must be diagnosed before acceptance;
 do not dismiss it under the earlier room-only noise bound. Both images were viewed.
 The model checkpoint executable/HOG is preserved in `checkpoints/scene-model-e2bbf7e`.
 
+## Continuation: prepared surface lighting
+
+Room assets now own authored RGB332 volume grids with immutable revisions.
+One pure sampler and explicit-time pulse/strobe/flicker kernel serve scene
+preparation and remaining simulation/retired-renderer adapters. The former
+GetRoomDynamicScalar implementation was removed; ambient queries no longer
+rewrite global Room_light_val. Room pulse modulation is prepared per surface.
+
+Model instances now own ambient colors, directional-ambient policy and baked
+corner UVs. Saved lightmap layouts are checked before indexing, including model
+swaps, preserving the Level 2 layout safety fix. UVs stay per instance; normals
+belong to shared mesh geometry. The renderer uploads one instance-UV stream per
+presentation, reusing immutable geometry and the same scene shader for rooms and
+models. Baked/ambient and emitter terms remain separate until evaluation.
+
+2,371 CPU checks pass, and all eight `scene-surface-corpus-clean` captures pass.
+All eight views were visually inspected (002/005 first in `scene-surface-first`).
+Full parity is not claimed: per-pixel quality policy, specular and the previously
+listed pending domains still need migration. Candidate/Prev Candidate unchanged.
+
+Repeatability investigation: image comparison now reports changed-region bounds.
+The earlier save000 difference is confined to x=556..646, y=376..464, around the
+blue object. New capture-only field-wise pose and texture fingerprints distinguish
+simulation variation from renderer/material variation. `scene-state-repeat-a/b`
+have identical model texture fingerprints but different prepared pose/position
+for object 6978, model 186 (position differs by about 0.0004 world units).
+This is evidence of differing inputs, not proof that every earlier pixel delta
+has that cause. First/target-frame probes are being used to trace the origin.
+
 ## Preserved room-inspection test build
 
 - Runtime: `C:/tmp/D3RendererVerification/scene-test` (separate 2 GB copy).

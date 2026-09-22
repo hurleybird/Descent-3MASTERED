@@ -21,7 +21,7 @@ d3scene::ModelGeometry CompileSceneModelAsset(const poly_model& model, size_t* r
         part.parent = source.parent; part.offset = value(source.offset); part.authored_flags = source.flags;
         for (int j = 0; j < source.nverts; ++j) {
             part.geometry.vertices.push_back(value(source.verts[j]));
-            part.vertex_normals.push_back(source.vertnorms ? value(source.vertnorms[j]) : d3scene::Vec3{});
+            part.geometry.vertex_normals.push_back(source.vertnorms ? value(source.vertnorms[j]) : d3scene::Vec3{});
         }
         for (int j = 0; j < source.num_faces; ++j) {
             const auto& face = source.faces[j];
@@ -45,8 +45,8 @@ d3scene::ModelGeometry CompileSceneModelAsset(const poly_model& model, size_t* r
         // Some shipped assets contain non-finite vertex normals. Repair only
         // invalid/missing shading data from incident polygon normals; unused
         // vertices have a defined zero normal. Never send NaNs into lighting.
-        for (size_t vertex = 0; vertex < part.vertex_normals.size(); ++vertex) {
-            auto& normal = part.vertex_normals[vertex];
+        for (size_t vertex = 0; vertex < part.geometry.vertex_normals.size(); ++vertex) {
+            auto& normal = part.geometry.vertex_normals[vertex];
             const float length2 = normal.x*normal.x + normal.y*normal.y + normal.z*normal.z;
             if (std::isfinite(length2) && length2 > 1.e-12f) continue;
             normal = {};
