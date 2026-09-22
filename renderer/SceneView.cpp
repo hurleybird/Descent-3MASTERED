@@ -1,5 +1,6 @@
 // Descent 3MASTERED - GPL-3.0-or-later
 #include "SceneView.h"
+#include "SceneGeometry.h"
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
@@ -25,14 +26,14 @@ double tolerance(const Plane& plane, Vec3 point) {
     return 2e-6*(1+std::abs(double(plane.normal.x)*point.x)+
         std::abs(double(plane.normal.y)*point.y)+std::abs(double(plane.normal.z)*point.z)+std::abs(plane.constant));
 }
-bool polygonOutside(const Camera& camera, const MeshGeometry& geometry, const MeshPolygon& polygon, const Transform& world) {
+bool polygonOutside(const Camera& camera, MeshView geometry, const MeshPolygon& polygon, const Transform& world) {
     // A separating frustum plane proves rejection. Not finding one deliberately
     // keeps possible corner false positives: never reject a large polygon just
     // because all of its vertices lie outside different planes.
     for (const auto& plane : camera.planes) {
         bool all_outside = true;
         for (const auto& corner : polygon.corners) {
-            const auto point = transformPoint(world,geometry.vertices[corner.vertex]);
+            const auto point = transformPoint(world,geometry.positions[corner.vertex]);
             if (distance(plane,point) >= -tolerance(plane,point)) { all_outside = false; break; }
         }
         if (all_outside) return true;
@@ -89,11 +90,11 @@ ViewVisibility queryView(const Presentation& frame, const View& view) {
     result.scene_lifetime = frame.data().scene_lifetime;
     result.history_key = view.history_key;
     const auto& rooms = frame.data().rooms;
-    auto consider = [&](const MeshGeometry& geometry, const SurfaceBinding& surface, VisibleSurface item) {
+    auto consider = [&](MeshView geometry, const SurfaceBinding& surface, VisibleSurface item) {
         if (!surface.draw_surface || (!item.model && surface.bitmap < 0)) return;
         ++result.stats.surfaces_considered;
-        const auto& polygon = geometry.polygons[item.polygon_index];
-        const auto point = transformPoint(item.world,geometry.vertices[polygon.corners[0].vertex]);
+        const auto& polygon = geometry.topology.polygons[item.polygon_index];
+        const auto point = transformPoint(item.world,geometry.positions[polygon.corners[0].vertex]);
         const auto normal = transformDirection(item.world,polygon.normal);
         if (dot(normal,subtract(view.camera.position,point)) < 0) {
             ++result.stats.surfaces_backfacing;
@@ -113,7 +114,7 @@ ViewVisibility queryView(const Presentation& frame, const View& view) {
         const auto& room = rooms[r];
         const auto& geometry = room.asset->geometry();
         for (size_t f = 0; f < geometry.polygons.size(); ++f) {
-            consider(geometry,room.surfaces[f],{static_cast<uint32_t>(r),static_cast<uint32_t>(f)});
+            consider(MeshView(geometry),room.surfaces[f],{static_cast<uint32_t>(r),static_cast<uint32_t>(f)});
         }
     }
     for (size_t i = 0; i < frame.data().objects.size(); ++i) {
@@ -133,7 +134,7 @@ ViewVisibility queryView(const Presentation& frame, const View& view) {
                 item.model = true; item.object_index = static_cast<uint32_t>(i);
                 item.part_index = static_cast<uint32_t>(part); item.polygon_index = static_cast<uint32_t>(face);
                 item.world = world;
-                consider(geometry,object.parts[part].surfaces[face],item);
+                consider(MeshView(geometry,object.parts[part].vertices),object.parts[part].surfaces[face],item);
             }
         }
     }

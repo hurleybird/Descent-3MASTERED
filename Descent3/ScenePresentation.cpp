@@ -80,7 +80,7 @@ void resolveMaterial(d3scene::SurfaceBinding& surface, float time, bool model) {
     surface.bitmap = GetTextureBitmap(base_texture, 0);
     surface.u_offset = authored.slide_u ? std::fmod(time / authored.slide_u, 1.f) : 0;
     surface.v_offset = authored.slide_v ? std::fmod(time / authored.slide_v, 1.f) : 0;
-    surface.alpha = texture.alpha;
+    surface.alpha *= texture.alpha;
     surface.additive = (texture.flags & TF_SATURATE) != 0;
     // Room 4444 textures historically carry specular masks, while model alpha
     // can be authored in that format. Keep the distinction at compilation.

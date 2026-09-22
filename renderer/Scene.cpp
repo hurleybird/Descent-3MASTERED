@@ -21,7 +21,7 @@ void require(bool condition, const char* message) {
     if (!condition) throw std::invalid_argument(message);
 }
 void validateSurface(const SurfaceBinding& surface) {
-    require(finite(surface.base_color) && finite(surface.ambient_color) && finite(surface.ambient_direction) &&
+    require(finite(surface.base_color) && finite(surface.color_modulation) && finite(surface.ambient_color) && finite(surface.ambient_direction) &&
         std::isfinite(surface.alpha) && surface.alpha >= 0 && surface.alpha <= 1 &&
         std::isfinite(surface.u_offset) && std::isfinite(surface.v_offset) &&
         std::isfinite(surface.lighting_modulation) && surface.lighting_modulation >= 0 &&
@@ -212,6 +212,11 @@ PresentationRef Presentation::freeze(const FrameData& data) {
             for (size_t i = 0; i < object.parts.size(); ++i) {
                 const auto& part = object.parts[i];
                 require(finite(part.current) && finite(part.previous), "Invalid model instance transform");
+                const size_t vertex_count = object.model->geometry().parts[i].geometry.vertices.size();
+                for (const auto* positions : {&part.vertices,&part.previous_vertices}) {
+                    require(positions->empty() || positions->size() == vertex_count,"Incomplete prepared mesh positions");
+                    for (const auto v : *positions) require(finite(v),"Non-finite prepared mesh position");
+                }
                 require(part.surfaces.size() == object.model->geometry().parts[i].geometry.polygons.size(),
                     "Incomplete model instance materials");
                 for (const auto& surface : part.surfaces) validateSurface(surface);

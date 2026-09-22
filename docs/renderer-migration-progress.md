@@ -206,6 +206,26 @@ for object 6978, model 186 (position differs by about 0.0004 world units).
 This is evidence of differing inputs, not proof that every earlier pixel delta
 has that cause. First/target-frame probes are being used to trace the origin.
 
+## Continuation: shared prepared geometry
+
+`SceneGeometry` supplies one mesh-position view and triangle-corner expansion
+for visibility, light influence, immutable uploads and per-frame position/UV
+streams. Model instances own current/previous deformed positions; rigid instances
+reuse authored positions. Cloak, fade, timed powerup deformation and object damage
+color/shape are prepared before view execution. Radial jitter preserves its D3
+shape rule, but uses explicit time/object/part noise instead of advancing gameplay
+RNG in a draw. Viewer-dependent distortion, special models and effects remain
+pending; this does not silently claim that entire domain is complete.
+
+2,380 CPU checks pass, including an instance displaced beyond its authored mesh:
+both visibility and light selection must use the prepared positions. Full build
+and all eight `scene-deformation-corpus-clean` captures pass. Six are exact against
+the preceding surface-lighting corpus; 000/002 retain their measured variations.
+The explicit `-scene-deformation-probe` fixture modifies presentation only and is
+restricted to inspection. Its save000 Guide-Bot and door geometry visibly deform
+in `scene-deformation-bot-probe`, verifying the GPU stream. The initial save001
+probe/control happened to show no difference and is not evidence of that path.
+
 ## Preserved room-inspection test build
 
 - Runtime: `C:/tmp/D3RendererVerification/scene-test` (separate 2 GB copy).

@@ -1,5 +1,6 @@
 // Descent 3MASTERED - GPL-3.0-or-later
 #include "SceneLighting.h"
+#include "SceneGeometry.h"
 #include <algorithm>
 #include <cmath>
 #include <unordered_map>
@@ -61,14 +62,14 @@ float lightAttenuation(const Light& light, Vec3 world) {
     return attenuation;
 }
 namespace {
-bool touches(const Light& light, const MeshGeometry& mesh, const MeshPolygon& polygon, const Transform& transform) {
-    Vec3 low = transformPoint(transform,mesh.vertices[polygon.corners[0].vertex]), high = low;
+bool touches(const Light& light, MeshView mesh, const MeshPolygon& polygon, const Transform& transform) {
+    Vec3 low = transformPoint(transform,mesh.positions[polygon.corners[0].vertex]), high = low;
     if (light.directional) {
         const auto normal = transformDirection(transform,polygon.normal);
         if (normal.x*(light.position.x-low.x)+normal.y*(light.position.y-low.y)+normal.z*(light.position.z-low.z) < 0) return false;
     }
     for (const auto& corner : polygon.corners) {
-        const auto p = transformPoint(transform,mesh.vertices[corner.vertex]);
+        const auto p = transformPoint(transform,mesh.positions[corner.vertex]);
         low.x = std::min(low.x,p.x); low.y = std::min(low.y,p.y); low.z = std::min(low.z,p.z);
         high.x = std::max(high.x,p.x); high.y = std::max(high.y,p.y); high.z = std::max(high.z,p.z);
     }
@@ -93,24 +94,24 @@ void prepareLightInfluences(FrameData& data) {
             const auto& room = *rooms.at(queue[next]);
             for (const auto& portal : room.portals) {
                 if (!rooms.count(portal.destination_room) || reachable[i].count(portal.destination_room)) continue;
-                if (!touches(light,room.asset->geometry(),room.asset->geometry().polygons[portal.polygon],{})) continue;
+                if (!touches(light,MeshView(room.asset->geometry()),room.asset->geometry().polygons[portal.polygon],{})) continue;
                 reachable[i].insert(portal.destination_room); queue.push_back(portal.destination_room);
             }
         }
     }
-    auto assign = [&](int32_t room, const MeshGeometry& geometry, const Transform& transform, std::vector<SurfaceBinding>& surfaces) {
+    auto assign = [&](int32_t room, MeshView geometry, const Transform& transform, std::vector<SurfaceBinding>& surfaces) {
         for (size_t face = 0; face < surfaces.size(); ++face) {
             auto& indices = surfaces[face].light_indices;
             indices.clear();
             for (size_t i = 0; i < data.lights.size(); ++i) {
                 if (room >= 0 && !reachable[i].count(room)) continue;
-                if (touches(data.lights[i],geometry,geometry.polygons[face],transform)) indices.push_back(static_cast<uint32_t>(i));
+                if (touches(data.lights[i],geometry,geometry.topology.polygons[face],transform)) indices.push_back(static_cast<uint32_t>(i));
             }
         }
     };
-    for (auto& room : data.rooms) assign(room.number,room.asset->geometry(),{},room.surfaces);
+    for (auto& room : data.rooms) assign(room.number,MeshView(room.asset->geometry()),{},room.surfaces);
     for (auto& object : data.objects) if (object.model) for (size_t part = 0; part < object.parts.size(); ++part)
-        assign(object.room,object.model->geometry().parts[part].geometry,compose(object.current,object.parts[part].current),
+        assign(object.room,MeshView(object.model->geometry().parts[part].geometry,object.parts[part].vertices),compose(object.current,object.parts[part].current),
             object.parts[part].surfaces);
 }
 }

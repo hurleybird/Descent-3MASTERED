@@ -1,0 +1,22 @@
+// Descent 3MASTERED - GPL-3.0-or-later
+#pragma once
+#include "Scene.h"
+namespace d3scene {
+// A view into one published frame, never into simulation scratch. All geometry
+// consumers use these positions, including conservative visibility and lighting.
+struct MeshView {
+    const MeshGeometry& topology;
+    const std::vector<Vec3>& positions;
+    explicit MeshView(const MeshGeometry& mesh) : topology(mesh), positions(mesh.vertices) {}
+    MeshView(const MeshGeometry& mesh,const std::vector<Vec3>& prepared)
+        : topology(mesh), positions(prepared.empty() ? mesh.vertices : prepared) {}
+};
+template<class Consumer> void forEachTriangleCorner(size_t corners, Consumer consume) {
+    for (size_t triangle = 1; triangle+1 < corners; ++triangle) {
+        consume(0); consume(triangle); consume(triangle+1);
+    }
+}
+// Preserves D3's radial jitter shape, but replaces draw-order RNG consumption
+// with explicit time/instance/part inputs. No view can advance another's shape.
+std::vector<Vec3> deformMesh(const MeshGeometry&,float range,double time,uint32_t owner,uint32_t part);
+}

@@ -16,6 +16,8 @@
 #include "multi.h"
 #include "renderer.h"
 #include "../renderer/SceneLighting.h"
+#include "../renderer/SceneGeometry.h"
+#include "args.h"
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
@@ -27,6 +29,31 @@ d3scene::Transform value(const ModelSubmodelTransform& t) {
     return {value(t.translation), value(t.orientation.rvec), value(t.orientation.uvec), value(t.orientation.fvec)};
 }
 using RoomTable = std::unordered_map<int,const d3scene::RoomState*>;
+struct ModelAppearance {
+    float alpha = 1, deformation = 0;
+    d3scene::Vec3 color{1,1,1};
+};
+ModelAppearance appearance(const object& source) {
+    ModelAppearance result;
+    if (source.effect_info) {
+        const auto& effect = *source.effect_info;
+        const float fade = effect.fade_max_time > 0 ? effect.fade_time/effect.fade_max_time : 0;
+        if (effect.type_flags & EF_FADING_OUT) result.alpha = .08f+.92f*fade;
+        if (effect.type_flags & EF_FADING_IN) result.alpha = .08f+.92f*(1-fade);
+        if (effect.type_flags & EF_CLOAKED) { result.alpha = .13f; result.deformation = .1f; }
+        if (effect.type_flags & EF_DEFORM) {
+            result.deformation = effect.deform_range*effect.deform_time;
+            const float amount = std::max(0.f,std::min(1.f,effect.deform_time));
+            result.color = {1,1-amount*.5f,1-amount*.5f};
+        }
+    }
+    if (source.type == OBJ_POWERUP && (source.flags & OF_USES_LIFELEFT) && source.lifeleft < 5) {
+        result.alpha = source.lifeleft/5;
+        result.deformation = .2f*(1-result.alpha);
+    }
+    result.alpha = std::max(0.f,std::min(1.f,result.alpha));
+    return result;
+}
 d3scene::Vec3 volumeColor(const RoomTable& rooms, int number, const vector& position) {
     const auto found = rooms.find(number);
     if (found == rooms.end() || found->second->asset->volume().colors.empty()) return {1,1,1};
@@ -107,6 +134,10 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::FrameDat
         }
         instance.model = found->second;
         const auto ambient = ambientColor(*source,rooms);
+        auto effect = appearance(*source);
+        // Explicit inspection fixture: exercises prepared-position uploads even
+        // when a saved scene has no active cloak/deformation. Never mutates game state.
+        if (SceneGeometryInspection() && FindArg("-scene-deformation-probe")) effect.deformation = .2f;
         const bool directional = source->lighting_render_type != LRT_STATIC &&
             (source->lighting_render_type == LRT_GOURAUD || NoLightmaps);
         // The saved per-object UV layout is not the shared model's topology.
@@ -130,6 +161,8 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::FrameDat
             d3scene::PreparedModelPart part;
             part.current = value(transforms.submodels[i]);
             part.previous = history ? history->parts[i].current : part.current;
+            part.vertices = d3scene::deformMesh(asset_part.geometry,effect.deformation,data.simulation_time,instance.handle,static_cast<uint32_t>(i));
+            part.previous_vertices = history ? history->parts[i].vertices : part.vertices;
             // Special billboard/glow geometry needs explicit effect preparation.
             part.draw = !(asset_part.authored_flags & (SOF_SHELL | SOF_FRONTFACE | SOF_FACING | SOF_GLOW | SOF_THRUSTER));
             part.draw = part.draw && (source->rtype.pobj_info.subobj_flags & (1u << i));
@@ -137,6 +170,8 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::FrameDat
                 d3scene::SurfaceBinding binding;
                 binding.ambient_color = ambient;
                 binding.directional_ambient = directional;
+                binding.alpha = effect.alpha;
+                binding.color_modulation = effect.color;
                 const int slot = asset_part.polygon_materials[j];
                 if (slot >= 0) binding.texture = instance.model->geometry().textures[slot];
                 else binding.base_color = asset_part.polygon_colors[j];

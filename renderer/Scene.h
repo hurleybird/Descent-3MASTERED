@@ -122,6 +122,7 @@ struct SurfaceBinding {
     bool directional_ambient = false;
     float lighting_modulation = 1;
     Vec3 base_color{1, 1, 1};
+    Vec3 color_modulation{1,1,1};
     int32_t bitmap = -1, lightmap_bitmap = -1;
     float lightmap_u_scale = 1, lightmap_v_scale = 1;
     float u_offset = 0, v_offset = 0, alpha = 1;
@@ -153,6 +154,7 @@ struct PreparedModelPart {
     // Model-space transforms, composed once from the complete hierarchy.
     Transform current, previous;
     bool draw = true;
+    std::vector<Vec3> vertices, previous_vertices; // empty means immutable authored positions
     std::vector<SurfaceBinding> surfaces;
 };
 // Object identity includes the game's allocation generation, not just its slot.
