@@ -135,6 +135,7 @@ struct Portal {
     int32_t polygon = -1, destination_room = -1, destination_portal = -1;
     int32_t combine_master = -1;
     uint32_t flags = 0;
+    bool traversable = true;
 };
 struct RoomState {
     int32_t number = -1;
@@ -148,6 +149,7 @@ struct RoomState {
     uint8_t pulse_time = 0, pulse_offset = 0;
     int32_t mirror_polygon = -1;
     float light_scalar = 1;
+    bool blocks_portals = false, exterior = false;
 };
 
 struct PreparedModelPart {
@@ -232,6 +234,7 @@ struct View {
     Rect viewport, projection_anchor;
     float zoom = 1;
     bool dynamic_lighting = true;
+    bool portal_visibility = true;
     uint8_t feedback = NoFeedback;
     bool camera_cut = false;
 };

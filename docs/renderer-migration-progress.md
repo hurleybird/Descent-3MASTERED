@@ -226,6 +226,25 @@ restricted to inspection. Its save000 Guide-Bot and door geometry visibly deform
 in `scene-deformation-bot-probe`, verifying the GPU stream. The initial save001
 probe/control happened to show no difference and is not evidence of that path.
 
+## Continuation: view-local portal apertures
+
+`ScenePortals` replaces room/face visitation marks with owned per-view NDC windows.
+It unions multiple openings, converges through cycles without a recursion-depth
+cutoff, clips apertures at the eye rather than the geometry near plane, and consumes
+prepared transparency and closed-door traversal policy. Both room and model
+polygons use those windows. The complete scene remains available to light queries;
+portal visibility never removes source geometry from the published frame.
+Exterior connectivity remains conservative pending terrain migration. The
+frustum-only reference is still available as a pure query for qualification.
+
+2,391 CPU checks pass, including cycles, opaque/closed portals, the viewer inside
+a closed doorway, pre-near apertures, offscreen/backfacing openings and multiple
+windows into one destination. All eight `scene-portal-corpus-clean` captures pass
+and were visually inspected. Six match the preceding corpus exactly. 000/002
+differ; capture probes also show differing Guide-Bot pose inputs, so those deltas
+are not an isolated visibility-parity measurement. Gameplay feedback remains a
+compiler barrier; no AI/automap/effect timing is silently changed by this query.
+
 ## Preserved room-inspection test build
 
 - Runtime: `C:/tmp/D3RendererVerification/scene-test` (separate 2 GB copy).

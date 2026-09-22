@@ -40,6 +40,7 @@ struct ViewVisibility {
     Camera camera;
     std::vector<VisibleSurface> surfaces;
     std::vector<uint32_t> object_indices;
+    std::vector<uint32_t> room_indices;
     ViewQueryStats stats;
 };
 

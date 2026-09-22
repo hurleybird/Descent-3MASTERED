@@ -1,5 +1,6 @@
 // Descent 3MASTERED - GPL-3.0-or-later
 #include "../../renderer/SceneView.h"
+#include "../../renderer/ScenePortals.h"
 #include <cmath>
 #include <stdexcept>
 
@@ -143,5 +144,44 @@ int runSceneViewTests() {
         identical=a.surfaces[i].room_index==repeated.surfaces[i].room_index && a.surfaces[i].depth==repeated.surfaces[i].depth;
     check(identical,"Auxiliary view mutated main visibility");
     check(frame->data().rooms.size()==10&&frame->data().objects.size()==3,"Visibility discarded off-camera scene content");
+    d3scene::FrameData portals; portals.sequence = 2; portals.scene_lifetime = assets.lifetime();
+    for (int i = 0; i < 4; ++i) appendRoom(assets,portals,triangle(0,2.f+i*2));
+    portals.rooms[0].portals.push_back({0,1});
+    portals.rooms[1].portals.push_back({0,2});
+    portals.rooms[2].portals.push_back({0,1}); // cycle must converge without a depth cutoff
+    auto portal_view = view(); portal_view.room = 0;
+    auto portal_frame = d3scene::Presentation::freeze(portals);
+    auto windows = d3scene::queryPortalWindows(*portal_frame,portal_view,d3scene::prepareCamera(portal_view));
+    check(windows[0].visible && windows[1].visible && windows[2].visible && !windows[3].visible,"Portal reachability or cycle handling failed");
+    check(d3scene::queryView(*portal_frame,portal_view).room_indices.size() == 3,"View query ignored portal traversal");
+    portals.rooms[1].blocks_portals = true;
+    auto door_frame = d3scene::Presentation::freeze(portals);
+    check(d3scene::queryView(*door_frame,portal_view).room_indices.size() == 2,"Closed opaque door did not terminate traversal");
+    portal_view.room = 1;
+    check(d3scene::queryView(*door_frame,portal_view).room_indices.size() == 2,"Viewer inside closed door could not look out");
+    portal_view.room = 0; portals.rooms[0].portals[0].traversable = false;
+    check(d3scene::queryView(*d3scene::Presentation::freeze(portals),portal_view).room_indices.size() == 1,"Opaque portal was traversed");
+    portals.rooms[0].portals[0].traversable = true; portals.rooms[1].blocks_portals = false;
+    portals.rooms[0].asset = assets.publishRoom(0,triangle(0,.5f));
+    check(d3scene::queryView(*d3scene::Presentation::freeze(portals),portal_view).room_indices.size() == 3,"Aperture before near plane hid destination rooms");
+    portals.rooms[0].asset = assets.publishRoom(0,triangle(0,-2));
+    check(d3scene::queryView(*d3scene::Presentation::freeze(portals),portal_view).room_indices.size() == 1,"Portal behind the camera was traversed");
+    portals.rooms[0].asset = assets.publishRoom(0,triangle(100,2));
+    check(d3scene::queryView(*d3scene::Presentation::freeze(portals),portal_view).room_indices.size() == 1,"Offscreen aperture was traversed");
+    portal_view.portal_visibility = false;
+    check(d3scene::queryView(*d3scene::Presentation::freeze(portals),portal_view).room_indices.size() == 4,"Conservative reference query lost off-camera scene availability");
+    // Two openings into the same destination must widen its window, independent
+    // of traversal order; a first-visited mark would incorrectly lose one.
+    auto openings = triangle(-3,5);
+    auto right_opening = triangle(3,5);
+    openings.vertices.insert(openings.vertices.end(),right_opening.vertices.begin(),right_opening.vertices.end());
+    auto polygon = right_opening.polygons[0]; for (auto& corner : polygon.corners) corner.vertex += 3;
+    openings.polygons.push_back(polygon);
+    portals.rooms[0].asset = assets.publishRoom(0,openings); portals.rooms[0].surfaces.resize(2);
+    portals.rooms[0].portals = {{0,1},{1,1}};
+    portal_view.portal_visibility = true;
+    windows = d3scene::queryPortalWindows(*d3scene::Presentation::freeze(portals),portal_view,d3scene::prepareCamera(portal_view));
+    check(windows[1].visible && windows[1].left < -.79 && windows[1].right > .79,"Multiple portal windows were not unioned");
+    check(portal_frame->data().rooms[0].asset->geometry().vertices[0].z == 2,"Portal query changed held scene assets");
     return Checks;
 }

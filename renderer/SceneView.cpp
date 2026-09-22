@@ -1,6 +1,8 @@
 // Descent 3MASTERED - GPL-3.0-or-later
 #include "SceneView.h"
 #include "SceneGeometry.h"
+#include "ScenePortals.h"
+#include <unordered_map>
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
@@ -26,7 +28,7 @@ double tolerance(const Plane& plane, Vec3 point) {
     return 2e-6*(1+std::abs(double(plane.normal.x)*point.x)+
         std::abs(double(plane.normal.y)*point.y)+std::abs(double(plane.normal.z)*point.z)+std::abs(plane.constant));
 }
-bool polygonOutside(const Camera& camera, MeshView geometry, const MeshPolygon& polygon, const Transform& world) {
+bool polygonOutside(const Camera& camera, MeshView geometry, const MeshPolygon& polygon, const Transform& world,PortalWindow window) {
     // A separating frustum plane proves rejection. Not finding one deliberately
     // keeps possible corner false positives: never reject a large polygon just
     // because all of its vertices lie outside different planes.
@@ -38,6 +40,18 @@ bool polygonOutside(const Camera& camera, MeshView geometry, const MeshPolygon& 
         }
         if (all_outside) return true;
     }
+    // Homogeneous aperture tests share the exact projection used by execution.
+    // A union window can admit extra geometry, but cannot omit either opening.
+    bool left = true, right = true, bottom = true, top = true;
+    for (const auto& corner : polygon.corners) {
+        const auto p = project(camera,transformPoint(world,geometry.positions[corner.vertex]));
+        const double epsilon = 2.e-6*(1+std::abs(p.x)+std::abs(p.y)+std::abs(p.w));
+        left = left && p.x < window.left*p.w-epsilon;
+        right = right && p.x > window.right*p.w+epsilon;
+        bottom = bottom && p.y < window.bottom*p.w-epsilon;
+        top = top && p.y > window.top*p.w+epsilon;
+    }
+    if (left || right || bottom || top) return true;
     return false;
 }
 }
@@ -90,7 +104,10 @@ ViewVisibility queryView(const Presentation& frame, const View& view) {
     result.scene_lifetime = frame.data().scene_lifetime;
     result.history_key = view.history_key;
     const auto& rooms = frame.data().rooms;
-    auto consider = [&](MeshView geometry, const SurfaceBinding& surface, VisibleSurface item) {
+    const auto windows = queryPortalWindows(frame,view,result.camera);
+    std::unordered_map<int32_t,size_t> room_indices;
+    for (size_t i = 0; i < rooms.size(); ++i) room_indices.emplace(rooms[i].number,i);
+    auto consider = [&](MeshView geometry, const SurfaceBinding& surface, VisibleSurface item,PortalWindow window) {
         if (!surface.draw_surface || (!item.model && surface.bitmap < 0)) return;
         ++result.stats.surfaces_considered;
         const auto& polygon = geometry.topology.polygons[item.polygon_index];
@@ -100,7 +117,7 @@ ViewVisibility queryView(const Presentation& frame, const View& view) {
             ++result.stats.surfaces_backfacing;
             return;
         }
-        if (polygonOutside(result.camera,geometry,polygon,item.world)) {
+        if (polygonOutside(result.camera,geometry,polygon,item.world,window)) {
             ++result.stats.surfaces_outside;
             return;
         }
@@ -111,15 +128,21 @@ ViewVisibility queryView(const Presentation& frame, const View& view) {
     };
     for (size_t r = 0; r < rooms.size(); ++r) {
         ++result.stats.rooms_considered;
+        if (!windows[r].visible) continue;
+        result.room_indices.push_back(static_cast<uint32_t>(r));
         const auto& room = rooms[r];
         const auto& geometry = room.asset->geometry();
         for (size_t f = 0; f < geometry.polygons.size(); ++f) {
-            consider(MeshView(geometry),room.surfaces[f],{static_cast<uint32_t>(r),static_cast<uint32_t>(f)});
+            consider(MeshView(geometry),room.surfaces[f],{static_cast<uint32_t>(r),static_cast<uint32_t>(f)},windows[r]);
         }
     }
     for (size_t i = 0; i < frame.data().objects.size(); ++i) {
         const auto& object = frame.data().objects[i];
         if (view.exclude_object && object.handle == view.excluded_object) continue;
+        PortalWindow window{-1,-1,1,1,true};
+        const auto room = room_indices.find(object.room);
+        if (room != room_indices.end()) window = windows[room->second];
+        if (!window.visible) continue;
         if (sphereIntersects(result.camera,object.current.position,object.radius))
             result.object_indices.push_back(static_cast<uint32_t>(i));
         if (!object.model) continue;
@@ -134,7 +157,7 @@ ViewVisibility queryView(const Presentation& frame, const View& view) {
                 item.model = true; item.object_index = static_cast<uint32_t>(i);
                 item.part_index = static_cast<uint32_t>(part); item.polygon_index = static_cast<uint32_t>(face);
                 item.world = world;
-                consider(MeshView(geometry,object.parts[part].vertices),object.parts[part].surfaces[face],item);
+                consider(MeshView(geometry,object.parts[part].vertices),object.parts[part].surfaces[face],item,window);
             }
         }
     }

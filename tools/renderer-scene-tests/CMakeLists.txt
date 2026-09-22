@@ -9,6 +9,7 @@ add_executable(renderer_scene_tests
     light_tests.cpp
     ../../renderer/SceneLighting.cpp
     ../../renderer/SceneGeometry.cpp
+    ../../renderer/ScenePortals.cpp
     ../../model/ModelPose.cpp
     ../../model/SceneModelAsset.cpp
     ../../vecmat/vector.cpp

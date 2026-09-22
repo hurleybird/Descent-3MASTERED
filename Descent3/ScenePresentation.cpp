@@ -17,6 +17,8 @@
 #include "renderer.h"
 #include "pserror.h"
 #include "polymodel.h"
+#include "door.h"
+#include "doorway.h"
 
 bool SceneGeometryInspection() { return FindArg("-scene-inspection") != 0; }
 
@@ -108,6 +110,10 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance_history) {
         material_lifetime = data.scene_lifetime;
     }
     for (auto& room : data.rooms) {
+      room.exterior = (room.authored_flags & RF_EXTERNAL) != 0;
+      const auto& source = Rooms[room.number];
+      room.blocks_portals = (source.flags & RF_DOOR) && source.doorway_data &&
+          DoorwayGetPosition(&Rooms[room.number]) == 0 && !(Doors[source.doorway_data->doornum].flags & DF_SEETHROUGH);
       room.light_scalar = d3scene::roomLightScalar(static_cast<float>(data.simulation_time),room.pulse_time,
           room.pulse_offset,room.number,(room.authored_flags & RF_STROBE) != 0,
           (room.authored_flags & RF_FLICKER) != 0,GetFunctionMode() == EDITOR_MODE);
@@ -117,6 +123,11 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance_history) {
         surface.draw_surface = !(surface.authored_flags & FF_FLOATING_TRIG);
         if (surface.portal >= 0 && surface.portal < static_cast<int>(room.portals.size()))
             surface.draw_surface = surface.draw_surface && (room.portals[surface.portal].flags & PF_RENDER_FACES);
+      }
+      for (auto& portal : room.portals) {
+          const auto& surface = room.surfaces[portal.polygon];
+          portal.traversable = !(portal.flags & PF_RENDER_FACES) || surface.alpha < 1 || surface.additive ||
+              surface.texture_alpha || (GameTextures[surface.texture].flags & TF_PROCEDURAL);
       }
     }
     PrepareGameModelInstances(data, previous_models ? &previous_models->data() : nullptr);
