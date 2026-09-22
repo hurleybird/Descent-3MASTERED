@@ -85,6 +85,8 @@ int runModelSceneTests() {
     data.objects[1].current.position.z = 20;
     data.objects[1].parts[0].surfaces[0].alpha = 0.5f;
     auto frame = Presentation::freeze(data);
+    check(frame->data().objects[0].has_render_bounds && frame->data().objects[0].render_bounds.minimum.z == 10 &&
+        frame->data().objects[0].render_bounds.maximum.x == 1,"Publication did not compile world-space posed bounds");
     data.objects[0].parts[0].surfaces[0].baked_uvs[0].x = 99;
     check(frame->data().objects[0].parts[0].surfaces[0].baked_uvs[0].x == 0,"Instance baked UVs not owned by frame");
     data.objects[0].parts[0].current.position.z = 55;
@@ -101,20 +103,57 @@ int runModelSceneTests() {
     check(result.surfaces.size() == 2, "Auxiliary query changed prior surface list");
     view.exclude_object = false; view.camera.position.x = 100;
     check(queryView(*frame,view).surfaces.empty(), "Offscreen posed geometry not rejected");
-    // A pose can extend outside an obsolete source sphere: don't reject it on
-    // that sphere until animated bounds have been compiled authoritatively.
+    // A pose can extend outside an obsolete source sphere. Both geometry and
+    // the candidate object list must use the published rendering bounds.
     auto displaced = frame->data();
     displaced.objects.resize(1); displaced.objects[0].current.position.x = 100;
     displaced.objects[0].parts[0].current.position.x = -100;
     view.camera.position.x = 0;
     auto candidates = queryView(*Presentation::freeze(displaced),view);
-    check(candidates.object_indices.empty() && candidates.surfaces.size() == 1, "Source sphere incorrectly culled posed mesh");
+    check(candidates.object_indices.size() == 1 && candidates.surfaces.size() == 1, "Source sphere incorrectly culled posed mesh");
     displaced.objects[0].parts[0].current.position.x = 0;
     displaced.objects[0].parts[0].vertices = {{-101,-1,0},{-100,1,0},{-99,-1,0}};
     auto frozen_shape = Presentation::freeze(displaced);
+    check(frozen_shape->data().objects[0].render_bounds.minimum.x == -1 &&
+        frozen_shape->data().objects[0].render_bounds.maximum.x == 1,"Deformation bounds used authored positions");
     check(queryView(*frozen_shape,view).surfaces.size() == 1,"Visibility did not consume prepared positions");
     displaced.objects[0].parts[0].vertices[0].x = 400;
     check(frozen_shape->data().objects[0].parts[0].vertices[0].x == -101,"Published deformation retained mutable input");
+    auto hidden = frozen_shape->data(); hidden.objects[0].parts[0].draw = false;
+    const auto hidden_frame = Presentation::freeze(hidden);
+    check(!hidden_frame->data().objects[0].has_render_bounds && queryView(*hidden_frame,view).object_indices.empty(),
+        "Hidden part retained stale rendering bounds");
+    auto rotated = frozen_shape->data();
+    rotated.objects[0].current = {};
+    auto& rotated_part = rotated.objects[0].parts[0];
+    rotated_part.vertices = {{-1,-1,0},{0,1,0},{1,-1,0}};
+    rotated_part.current.position = {0,0,10};
+    rotated_part.current.right = {0,2,0}; rotated_part.current.up = {-3,0,0};
+    const auto rotated_frame = Presentation::freeze(rotated);
+    const auto bounds = rotated_frame->data().objects[0].render_bounds;
+    check(bounds.minimum.x == -3 && bounds.maximum.x == 3 && bounds.minimum.y == -2 && bounds.maximum.y == 2,
+        "Rotated/scaled part bounds were not transformed");
+    check(queryView(*rotated_frame,view).surfaces.size() == 1,"Valid transformed bounds hid visible geometry");
+    // Reference the same posed triangle as baked room geometry, which has no
+    // model broad phase. Include near-plane crossings, offscreen placement and
+    // deformed vertices outside the simulation sphere.
+    for (int sample = 0; sample < 160; ++sample) {
+        auto posed = rotated;
+        auto& instance = posed.objects[0];
+        instance.current.position = {float(sample%13-6)*4,float(sample%7-3)*3,float(sample%19)-9};
+        instance.parts[0].vertices[1].x += float(sample%5)*2;
+        const auto transform = compose(instance.current,instance.parts[0].current);
+        auto geometry = modelGeometry().parts[0].geometry;
+        for (size_t vertex = 0; vertex < geometry.vertices.size(); ++vertex)
+            geometry.vertices[vertex] = transformPoint(transform,instance.parts[0].vertices[vertex]);
+        geometry.polygons[0].normal = transformDirection(transform,geometry.polygons[0].normal);
+        FrameData reference; reference.sequence = 1; reference.scene_lifetime = assets.lifetime();
+        RoomState room; room.number = 0; room.asset = assets.publishRoom(0,geometry);
+        room.surfaces.resize(1); room.surfaces[0].bitmap = 1; reference.rooms.push_back(room);
+        const auto expected = queryView(*Presentation::freeze(reference),view);
+        const auto actual = queryView(*Presentation::freeze(posed),view);
+        check(actual.surfaces.size() == expected.surfaces.size(),"Posed bounds disagreed with unbounded triangle query");
+    }
     auto lit_shape = frozen_shape->data();
     Light light; light.id.owner = 1; light.radius = 15; light.position = {0,0,10}; light.color = {1,1,1};
     lit_shape.lights.push_back(light); lit_shape.objects[0].room = -1;

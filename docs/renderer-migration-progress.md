@@ -1,5 +1,18 @@
 # Renderer migration checkpoint
 
+## Continuation: frozen posed bounds
+
+Publication compiles world-space bounds from each drawn part's actual current
+pose/deformation, then unions them per object. View queries no longer use the
+simulation sphere to determine model candidates, and reject offscreen parts
+before polygon traversal. Terrain uses the same allocation-free bounds test.
+160 transformed/deformed/near-plane fixtures match a reference query over the
+same triangles with no model bounds test. 5,064 checks and full build pass.
+All eight `scene-posed-bounds-effects` screenshots are byte-identical to
+`scene-material-response-effects`; moving/deformed history fixtures 000/002
+also complete. Bounds affect view-local candidates only; gameplay feedback
+remains uncommitted until its policy is explicitly migrated.
+
 ## Continuation: owned reflection inputs and shared material response
 
 Authored reflection positions/colors and optional corner normals now publish as

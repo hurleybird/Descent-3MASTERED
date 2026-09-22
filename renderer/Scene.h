@@ -296,6 +296,8 @@ struct PreparedModelPart {
     Transform current, previous;
     bool draw = true;
     bool has_previous = false;
+    Bounds render_bounds; // world-space, compiled from this pose during freeze
+    bool has_render_bounds = false;
     std::vector<Vec3> vertices, previous_vertices; // empty means immutable authored positions
     std::vector<SurfaceBinding> surfaces;
 };
@@ -311,6 +313,8 @@ struct ObjectState {
     bool has_previous = false;
     float radius = 0;
     ModelAssetRef model;
+    Bounds render_bounds; // union of drawn parts, never the simulation radius
+    bool has_render_bounds = false;
     std::vector<PreparedModelPart> parts;
 };
 

@@ -29,6 +29,28 @@ double tolerance(const Plane& plane, Vec3 point) {
     return 2e-6*(1+std::abs(double(plane.normal.x)*point.x)+
         std::abs(double(plane.normal.y)*point.y)+std::abs(double(plane.normal.z)*point.z)+std::abs(plane.constant));
 }
+bool boundsOutside(const Camera& camera,const Bounds& bounds,PortalWindow window) {
+    std::array<Vec3,8> corners;
+    for (unsigned i = 0; i < corners.size(); ++i)
+        corners[i] = {i&1 ? bounds.maximum.x : bounds.minimum.x,
+            i&2 ? bounds.maximum.y : bounds.minimum.y,i&4 ? bounds.maximum.z : bounds.minimum.z};
+    for (const auto& plane : camera.planes) {
+        bool outside = true;
+        for (const auto point : corners)
+            if (distance(plane,point) >= -tolerance(plane,point)) { outside = false; break; }
+        if (outside) return true;
+    }
+    bool left = true, right = true, bottom = true, top = true;
+    for (const auto point : corners) {
+        const auto p = project(camera,point);
+        const double epsilon = 2.e-6*(1+std::abs(p.x)+std::abs(p.y)+std::abs(p.w));
+        left = left && p.x < window.left*p.w-epsilon;
+        right = right && p.x > window.right*p.w+epsilon;
+        bottom = bottom && p.y < window.bottom*p.w-epsilon;
+        top = top && p.y > window.top*p.w+epsilon;
+    }
+    return left || right || bottom || top;
+}
 bool polygonOutside(const Camera& camera, MeshView geometry, const MeshPolygon& polygon, const Transform& world,PortalWindow window) {
     // A separating frustum plane proves rejection. Not finding one deliberately
     // keeps possible corner false positives: never reject a large polygon just
@@ -189,13 +211,15 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
         const auto room = room_indices.find(object.room);
         if (room != room_indices.end()) window = windows[room->second];
         if (!window.visible) continue;
-        if (sphereIntersects(result.camera,object.current.position,object.radius))
+        if (object.model && (!object.has_render_bounds || boundsOutside(result.camera,object.render_bounds,window))) continue;
+        if (object.model || sphereIntersects(result.camera,object.current.position,object.radius))
             result.object_indices.push_back(static_cast<uint32_t>(i));
         if (!object.model) continue;
-        // Until deformed/animated bounds are compiled, a source object sphere
-        // is not proof that its posed mesh is offscreen. Test authored polygons.
+        // Publication compiled these bounds from the same pose/deformation as
+        // execution. The simulation radius is not a rendering visibility bound.
         for (size_t part = 0; part < object.parts.size(); ++part) {
             if (!object.parts[part].draw) continue;
+            if (!object.parts[part].has_render_bounds || boundsOutside(result.camera,object.parts[part].render_bounds,window)) continue;
             const auto world = compose(object.current,object.parts[part].current);
             const auto& geometry = object.model->geometry().parts[part].geometry;
             for (size_t face = 0; face < geometry.polygons.size(); ++face) {
@@ -221,13 +245,7 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
             const auto& terrain = frame.data().terrain;
             for (size_t patch_index = 0; patch_index < terrain.asset->patches().size(); ++patch_index) {
                 const auto& patch = terrain.asset->patches()[patch_index];
-                MeshGeometry hull; MeshPolygon polygon;
-                for (uint32_t corner = 0; corner < 8; ++corner) {
-                    hull.vertices.push_back({corner&1 ? patch.bounds.maximum.x : patch.bounds.minimum.x,
-                        corner&2 ? patch.bounds.maximum.y : patch.bounds.minimum.y,corner&4 ? patch.bounds.maximum.z : patch.bounds.minimum.z});
-                    polygon.corners.push_back({corner});
-                }
-                if (polygonOutside(result.camera,MeshView(hull),polygon,{},exterior_window)) continue;
+                if (boundsOutside(result.camera,patch.bounds,exterior_window)) continue;
                 const Vec3 center{(patch.bounds.minimum.x+patch.bounds.maximum.x)*.5f,
                     (patch.bounds.minimum.y+patch.bounds.maximum.y)*.5f,(patch.bounds.minimum.z+patch.bounds.maximum.z)*.5f};
                 for (size_t batch = 0; batch < patch.batches.size(); ++batch) {

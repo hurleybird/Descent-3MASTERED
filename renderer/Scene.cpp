@@ -10,6 +10,7 @@
 #include <utility>
 #include <set>
 #include <tuple>
+#include <algorithm>
 
 namespace d3scene {
 namespace {
@@ -360,11 +361,32 @@ PresentationRef Presentation::freeze(const FrameData& data) {
     for (auto& room : prepared->data_.rooms)
         for (size_t face = 0; face < room.surfaces.size(); ++face)
             room.surfaces[face].material = compileMaterialPolicy(room.surfaces[face],room.asset->geometry().polygons[face]);
-    for (auto& object : prepared->data_.objects)
-        for (size_t part = 0; part < object.parts.size(); ++part)
+    for (auto& object : prepared->data_.objects) {
+        object.has_render_bounds = false;
+        const auto include = [](Bounds& bounds,bool& valid,Vec3 point) {
+            require(finite(point),"Non-finite posed model position");
+            if (!valid) { bounds = {point,point}; valid = true; return; }
+            bounds.minimum = {(std::min)(bounds.minimum.x,point.x),(std::min)(bounds.minimum.y,point.y),(std::min)(bounds.minimum.z,point.z)};
+            bounds.maximum = {(std::max)(bounds.maximum.x,point.x),(std::max)(bounds.maximum.y,point.y),(std::max)(bounds.maximum.z,point.z)};
+        };
+        for (size_t part = 0; part < object.parts.size(); ++part) {
+            auto& pose = object.parts[part];
+            pose.has_render_bounds = false;
+            const auto& geometry = object.model->geometry().parts[part].geometry;
+            const auto& positions = pose.vertices.empty() ? geometry.vertices : pose.vertices;
+            const auto world = compose(object.current,pose.current);
+            if (pose.draw && !geometry.polygons.empty()) {
+                for (const auto vertex : positions) include(pose.render_bounds,pose.has_render_bounds,transformPoint(world,vertex));
+                if (pose.has_render_bounds) {
+                    include(object.render_bounds,object.has_render_bounds,pose.render_bounds.minimum);
+                    include(object.render_bounds,object.has_render_bounds,pose.render_bounds.maximum);
+                }
+            }
             for (size_t face = 0; face < object.parts[part].surfaces.size(); ++face)
                 object.parts[part].surfaces[face].material = compileMaterialPolicy(object.parts[part].surfaces[face],
                     object.model->geometry().parts[part].geometry.polygons[face]);
+        }
+    }
     return prepared;
 }
 void Presentation::requireExecutable() const {
