@@ -28,6 +28,9 @@ struct ModelTransforms {
     std::array<ModelSubmodelTransform, MAX_SUBOBJECTS> submodels{};
 };
 ModelTransforms ComposeModelPose(const poly_model& model, const ModelPose& pose);
+// Per-instance offsets expressed in model-root axes, independent of each
+// parent's animation. Does not touch the shared asset's scratch transforms.
+ModelPose OffsetModelPose(const poly_model&, const ModelPose&, const vector* root_offsets, int count);
 vector TransformModelPoint(const ModelSubmodelTransform& transform, const vector& point);
 vector TransformModelDirection(const ModelSubmodelTransform& transform, const vector& direction);
 

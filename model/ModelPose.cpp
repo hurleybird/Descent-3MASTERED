@@ -108,6 +108,20 @@ ModelPose EvaluateModelPose(const poly_model& model, const float* normalized_tim
     return pose;
 }
 
+ModelPose OffsetModelPose(const poly_model& model, const ModelPose& pose, const vector* offsets, int count) {
+    require(count >= 0 && count <= pose.count && (!count || offsets), "Invalid model pose offsets");
+    const auto transforms = ComposeModelPose(model,pose);
+    auto result = pose;
+    for (int i = 0; i < count; ++i) {
+        auto offset = offsets[i];
+        require(std::isfinite(offset.x) && std::isfinite(offset.y) && std::isfinite(offset.z), "Invalid model root offset");
+        const int parent = model.submodel[i].parent;
+        if (parent >= 0) offset = offset * transforms.submodels[parent].orientation;
+        result.submodels[i].translation += offset;
+    }
+    return result;
+}
+
 vector TransformModelDirection(const ModelSubmodelTransform& transform, const vector& direction) {
     return transform.orientation.rvec * direction.x + transform.orientation.uvec * direction.y +
         transform.orientation.fvec * direction.z;

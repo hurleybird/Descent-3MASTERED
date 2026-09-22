@@ -131,6 +131,20 @@ int runModelPoseTests() {
         check(vm_VectorDistance(&actual, &expected_point) < 1.e-4f, "Hierarchy composition changed attachment position");
         check(vm_VectorDistance(&actual_direction, &expected_direction) < 1.e-5f, "Hierarchy composition changed direction");
     }
+    const vector offsets[3] = {{2,-3,4},{-1,2,5},{4,1,-2}};
+    const auto adjusted = OffsetModelPose(model,retained,offsets,3);
+    const auto adjusted_transforms = ComposeModelPose(model,adjusted);
+    for (int leaf = 0; leaf < 3; ++leaf) {
+        vector expected = transforms.submodels[leaf].translation;
+        for (int node = leaf; node != -1; node = source[node].parent) expected += offsets[node];
+        const auto actual = adjusted_transforms.submodels[leaf].translation;
+        check(vm_VectorDistance(&expected,&actual) < 1.e-4f,"Root-space instance offset rotated with its parent");
+        check(retained.submodels[leaf].translation.x != adjusted.submodels[leaf].translation.x ||
+            retained.submodels[leaf].translation.y != adjusted.submodels[leaf].translation.y,
+            "Instance offset did not modify the copied pose");
+    }
+    rejects([&] { OffsetModelPose(model,retained,nullptr,3); });
+    rejects([&] { OffsetModelPose(model,retained,offsets,4); });
     source[1].parent = 0;
     rejects([&] { ComposeModelPose(model, retained); });
     source[1].parent = 3;

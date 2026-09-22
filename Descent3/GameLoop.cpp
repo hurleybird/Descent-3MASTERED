@@ -3061,6 +3061,9 @@ void GameRenderFrame(void)
 				AutomatedCaptureLog("scene layer fixture composed");
 		}
 
+		if (SceneGeometryInspection() && FindArg("-scene-cockpit-probe"))
+			RenderPreparedCockpit(*presentation,{Game_window_x,Game_window_y,Game_window_w,Game_window_h},HUD_RENDER_ZOOM);
+
 		// Do Cockpit/Hud
 		// Cinematics own their presentation through Cinematic_RenderFrame below.
 		// Do not run either the primary or auxiliary gameplay HUD while one is active.

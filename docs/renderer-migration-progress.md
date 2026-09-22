@@ -1,5 +1,28 @@
 # Renderer migration checkpoint
 
+## Continuation: cockpit model publication and layered execution
+
+The opt-in CockpitProbe publishes the existing cockpit as independently owned,
+camera-local model instances. Authored base, after-gauge and late-canopy masks
+remain separate. Pose hierarchy/display-spread offsets use copied instance poses,
+not shared polymodel scratch. Visual animation/buffet advance during preparation
+at most once per game frame; replay/read-only preparation reuses the exposure.
+The executor receives no cockpit game globals. Base/layered geometry uses the
+supersampled cockpit layer, late pieces the explicit display target. Gauges/HUD
+are still absent and the normal gameplay/inspection gate is unchanged.
+
+Full build and 5,284 CPU checks pass, including root-space offsets through a
+non-topologically-sorted animated hierarchy. Initial visual inspection caught
+world zoom being passed instead of HUD_RENDER_ZOOM; corrected, and effects
+captures 000/002/003 now visually align with the preserved cockpit framing.
+The final 003 is pixel-identical to the previous corrected-pose build. Normal
+003 is unchanged. Normal 000 has mean .0168041/max48 error around the robot;
+its logged Buddybot pose hash and position differ before rasterization (old
+x602.805054, new x602.804565), while surrounding logged static models match.
+Do not label that run pixel-identical or treat build success as full cockpit
+acceptance. Other ships, moving cockpit, gauges, HUD and broader qualification
+remain open. No cockpit artwork was redesigned and Candidate is untouched.
+
 ## Continuation: view-owned raster output
 
 View requests now select scene or finished-display raster output explicitly.

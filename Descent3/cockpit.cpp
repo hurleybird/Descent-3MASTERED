@@ -37,6 +37,10 @@
 #include "config.h"
 #include "gametexture.h"
 #include "renderer.h"
+#include "SceneExtraction.h"
+#include "../model/SceneModelAsset.h"
+#include "gameloop.h"
+#include <stdexcept>
 #include <string.h>
 #include <math.h>
 #include <algorithm>
@@ -53,6 +57,7 @@
 #define COCKPIT_DISPLAY_CENTER_THRESHOLD 0.25f
 #define COCKPIT_DISPLAY_WIDTH_THRESHOLD 0.20f
 constexpr int COCKPIT_MOTION_OBJECT_HANDLE = 0x20000000;
+static uint64_t Cockpit_presentation_epoch = 0;
 static constexpr bool COCKPIT_PIXEL_MOTION_ENABLED = false;
 struct tCockpitCfgInfo
 {
@@ -106,7 +111,7 @@ struct tCockpitPostPostSnapshot
 	float display_spread;
 };
 static tCockpitPostPostSnapshot Cockpit_post_post_snapshot = {};
-float KeyframeAnimateCockpit();
+float KeyframeAnimateCockpit(float delta);
 //	loads cockpit. model_name = NULL, then will not load in model name.
 void LoadCockpitInfo(const char* ckt_file, tCockpitCfgInfo* info);
 static void BuildCockpitDisplayAdjustments();
@@ -386,6 +391,7 @@ void CockpitSetRefinementEnabled(bool enabled)
 
 void InitCockpit(int ship_index)
 {
+    ++Cockpit_presentation_epoch;
 	static bool checked_refinement_argument = false;
 	if (!checked_refinement_argument)
 	{
@@ -654,6 +660,25 @@ void StartCockpitShake(float mag, vector* vec)
 //	renders the cockpit.
 extern float GetTerrainDynamicScalar(vector* pos, int seg);
 extern void GetRoomDynamicScalar(vector* pos, room* rp, float* r, float* g, float* b);
+static void AdvanceCockpitBuffet(float delta)
+{
+    if (Cockpit_info.buffet_amp > .04f) {
+        Cockpit_info.buffet_time += delta;
+        if (Cockpit_info.buffet_time > BUFFET_PERIOD) {
+            Cockpit_info.buffet_time = 0;
+            Cockpit_info.buffet_amp *= .5f;
+        }
+        const angle phase = (angle)(65536.0*Cockpit_info.buffet_time/
+            (BUFFET_PERIOD-((BUFFET_PERIOD-Cockpit_info.buffet_time)*.5f)));
+        const float wave = FixSin(phase);
+        Cockpit_info.buffet_wave = wave > .5f ? 1.f : wave < -.5f ? -1.f : 0.f;
+        Cockpit_info.animating = true;
+    } else if (Cockpit_info.buffet_amp > 0) {
+        Cockpit_info.animating = true;
+        Cockpit_info.buffet_amp = 0;
+    }
+}
+
 void RenderCockpit()
 {
 	object* player_obj = &Objects[Players[Player_num].objnum];
@@ -725,7 +750,7 @@ void RenderCockpit()
 	}
 
 	// animate and draw
-	keyframe = KeyframeAnimateCockpit();
+	keyframe = KeyframeAnimateCockpit(Frametime);
 	SetNormalizedTimeAnim(keyframe, normalized_time, Cockpit_info.model);
 
 	bool display_adjust_active = false;
@@ -738,30 +763,7 @@ void RenderCockpit()
 	}
 
 	//	must put after animation.
-	if (Cockpit_info.buffet_amp > 0.04f) 
-	{
-		angle buffet_angle;
-		Cockpit_info.buffet_time += Frametime;
-		if (Cockpit_info.buffet_time > BUFFET_PERIOD) 
-		{
-			Cockpit_info.buffet_time = 0.0f;
-			Cockpit_info.buffet_amp *= 0.5f;
-		}
-		buffet_angle = (angle)(65536.0 * Cockpit_info.buffet_time / (BUFFET_PERIOD - ((BUFFET_PERIOD - Cockpit_info.buffet_time) * 0.5f)));
-		Cockpit_info.buffet_wave = FixSin(buffet_angle);
-		if (Cockpit_info.buffet_wave > 0.5f)
-			Cockpit_info.buffet_wave = 1.0f;
-		else if (Cockpit_info.buffet_wave < -0.5f)
-			Cockpit_info.buffet_wave = -1.0f;
-		else
-			Cockpit_info.buffet_wave = 0.0f;
-		Cockpit_info.animating = true;
-	}
-	else if (Cockpit_info.buffet_amp > 0.0f) 
-	{
-		Cockpit_info.animating = true;
-		Cockpit_info.buffet_amp = 0.0f;
-	}
+	AdvanceCockpitBuffet(Frametime);
 
 	Cockpit_post_post_snapshot.valid = true;
 	Cockpit_post_post_snapshot.frame_count = FrameCount;
@@ -816,6 +818,114 @@ void RenderCockpit()
 	Cockpit_info.resized = false;
 }
 
+// Publish the authored cockpit through the same model/pose contract as world
+// models. It has no fake gameplay owner and uses camera-local coordinates.
+// Geometry inspection deliberately does not claim gauge or HUD completion.
+void PrepareGameCockpit(d3scene::FrameData& frame, bool advance)
+{
+    if (Cockpit_info.model_num < 0 || !Cockpit_info.model || !Player_object) return;
+    auto* viewer = CockpitGetMonitorSubmodel(SOF_VIEWER);
+    if (!viewer) throw std::logic_error("Cockpit presentation has no authored viewer");
+    const auto value = [](const vector& v) { return d3scene::Vec3{v.x,v.y,v.z}; };
+    const auto& model = *Cockpit_info.model;
+    const auto asset = d3scene::assets().publishModel(Cockpit_info.model_num,CompileSceneModelAsset(model));
+    // Capture before advancing: the old cockpit used the current buffet sample
+    // for this exposure and advanced it for the following exposure.
+    const float buffet = Cockpit_info.buffet_amp*Cockpit_info.buffet_wave;
+    d3scene::Transform placement;
+    placement.position = {viewer->offset.x+Cockpit_info.buffet_vec.x*buffet,
+        viewer->offset.y+Cockpit_info.buffet_vec.y*buffet,
+        viewer->offset.z-Cockpit_info.buffet_vec.z*buffet*1.1f};
+    placement.right = {-1,0,0}; placement.forward = {0,0,-1};
+    float keyframe = Cockpit_info.this_keyframe+(Cockpit_info.next_keyframe-Cockpit_info.this_keyframe)*
+        (Cockpit_info.frame_time/COCKPIT_ANIM_TIME);
+    struct Sample {
+        uint64_t lifetime = 0, epoch = 0;
+        int game_frame = -1;
+        d3scene::Transform placement;
+        float keyframe = 0;
+    };
+    static Sample completed;
+    if (completed.lifetime == frame.scene_lifetime && completed.epoch == Cockpit_presentation_epoch &&
+        completed.game_frame == FrameCount) {
+        placement = completed.placement; keyframe = completed.keyframe;
+    } else if (advance) {
+        if (!frame.paused) {
+            keyframe = KeyframeAnimateCockpit(frame.delta_time);
+            AdvanceCockpitBuffet(frame.delta_time);
+        }
+        completed = {frame.scene_lifetime,Cockpit_presentation_epoch,FrameCount,placement,keyframe};
+    }
+    keyframe = (std::max)(float(model.frame_min),(std::min)(float(model.frame_max),keyframe));
+    float normalized[MAX_SUBOBJECTS]{};
+    SetNormalizedTimeAnim(keyframe,normalized,Cockpit_info.model);
+    auto pose = EvaluateModelPose(model,normalized,static_cast<float>(frame.simulation_time));
+    const float spread = Cockpit_alt_mode ? GetCockpitDisplaySpread() : 0.f;
+    if (spread > .0001f && Cockpit_info.display_adjust_available) {
+        vector offsets[MAX_SUBOBJECTS]{};
+        for (int i = 0; i < Cockpit_info.display_adjust_count; ++i)
+            offsets[i] = Cockpit_info.display_adjust_unit[i]*spread;
+        pose = OffsetModelPose(model,pose,offsets,Cockpit_info.display_adjust_count);
+    }
+    const auto transforms = ComposeModelPose(model,pose);
+    float r,g,b;
+    if (OBJECT_OUTSIDE(Player_object)) r = g = b = GetTerrainDynamicScalar(&Player_object->pos,CELLNUM(Player_object->roomnum));
+    else GetRoomDynamicScalar(&Player_object->pos,&Rooms[Player_object->roomnum],&r,&g,&b);
+    d3scene::Vec3 ambient{(std::max)(.1f,r)*.8f,(std::max)(.1f,g)*.8f,(std::max)(.1f,b)*.8f};
+    if (Player_object->effect_info) {
+        ambient.x = (std::min)(1.f,ambient.x+Player_object->effect_info->dynamic_red);
+        ambient.y = (std::min)(1.f,ambient.y+Player_object->effect_info->dynamic_green);
+        ambient.z = (std::min)(1.f,ambient.z+Player_object->effect_info->dynamic_blue);
+    }
+    if (Players[Player_object->id].flags & PLAYER_FLAGS_HEADLIGHT) ambient = {1,1,1};
+    const uint32_t masks[3] = {Cockpit_info.nonlayered_mask,Cockpit_info.layered_mask,Cockpit_info.post_post_mask};
+    const uint64_t collections[3] = {SceneCockpitBase,SceneCockpitAfterGauges,SceneCockpitLate};
+    for (int layer = 0; layer < 3; ++layer) {
+        if (!masks[layer]) continue;
+        d3scene::ModelInstance instance;
+        instance.identity = instance.collection = collections[layer];
+        instance.current = instance.previous = placement;
+        d3scene::PreparedModel prepared; prepared.asset = asset;
+        const auto roles = ResolveSceneModelRoles(asset->geometry(),masks[layer],false);
+        for (size_t i = 0; i < asset->geometry().parts.size(); ++i) {
+            const auto& geometry = asset->geometry().parts[i];
+            d3scene::PreparedModelPart part;
+            const auto& transform = transforms.submodels[i];
+            part.current = {value(transform.translation),value(transform.orientation.rvec),
+                value(transform.orientation.uvec),value(transform.orientation.fvec)};
+            part.previous = part.current;
+            part.draw = roles[i] == SceneModelPartRole::Surface;
+            for (size_t face = 0; face < geometry.geometry.polygons.size(); ++face) {
+                d3scene::SurfaceBinding surface;
+                surface.depth = layer < 2 ? d3scene::DepthMode::ReadWrite : d3scene::DepthMode::Disabled;
+                surface.directional_ambient = true; surface.ambient_color = ambient;
+                const int slot = geometry.polygon_materials[face];
+                if (slot >= 0) surface.texture = asset->geometry().textures[slot];
+                else surface.base_color = geometry.polygon_colors[face];
+                // Preserve the existing alternate-cockpit material filter; no
+                // new geometry or styling is introduced by this extraction.
+                if (Cockpit_alt_mode && (Cockpit_info.transparent_arm_mask & (uint32_t(1)<<i))) {
+                    bool transparent = false;
+                    if (surface.texture >= 0) {
+                        const auto& material = GameTextures[surface.texture];
+                        transparent = (material.flags&(TF_ALPHA|TF_SATURATE|TF_BREAKABLE)) || material.alpha < .99f;
+                    }
+                    for (const auto& corner : geometry.geometry.polygons[face].corners)
+                        transparent = transparent || corner.alpha < 253;
+                    surface.draw_surface = !transparent;
+                }
+                part.surfaces.push_back(surface);
+            }
+            prepared.parts.push_back(std::move(part));
+        }
+        instance.models.push_back(std::move(prepared));
+        frame.model_instances.push_back(std::move(instance));
+    }
+    if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
+        AutomatedCaptureLog("scene cockpit prepared model=%d keyframe=%.6g base=%u layered=%u late=%u gauges=0",
+            Cockpit_info.model_num,keyframe,masks[0],masks[1],masks[2]);
+}
+
 bool CockpitHasPostPostElements()
 {
 	return Cockpit_info.model_num > -1 && Cockpit_info.post_post_mask != 0;
@@ -858,7 +968,7 @@ void RenderCockpitPostPost()
 //////////////////////////////////////////////////////////////////////////////
 //	
 //	adjusts current keyframe and dormancy
-float KeyframeAnimateCockpit()
+float KeyframeAnimateCockpit(float delta)
 {
 	float newkeyframe;
 
@@ -892,7 +1002,7 @@ float KeyframeAnimateCockpit()
 	Cockpit_info.animating = true;
 	if (Cockpit_info.this_keyframe != Cockpit_info.next_keyframe) 
 	{
-		Cockpit_info.frame_time += Frametime;
+		Cockpit_info.frame_time += delta;
 	}
 	if (Cockpit_info.this_keyframe == COCKPIT_COMPLETE_FRAME && Cockpit_info.next_keyframe == Cockpit_info.this_keyframe) 
 	{
