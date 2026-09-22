@@ -1,5 +1,36 @@
 # Renderer migration checkpoint
 
+## Continuation: scene image products and surface-radiance AO
+
+Removed the game-facing `CaptureBloomSource` API and late game-loop capture. The
+view schedule now exports opaque color/depth before blended effects, and exports
+AO-eligible radiance after those effects. Post consumers receive matrices from
+the exact resolved scene camera rather than the last legacy draw callback.
+Shared perspective unprojection replaces three negative-eye-Z/unit-near-plane
+assumptions; AO depth linearization and off-axis reconstruction derive directly
+from projection coefficients. CPU tests exercise translated/rotated/off-axis
+cameras, a non-unit near plane, background rejection and product ordering.
+
+The scene emits an independent half-float eligible-radiance image. Fog/emissive
+radiance is excluded at its source; alpha layers attenuate the underlying image,
+additive layers preserve it, and multiplicative layers multiply it. Deferred AO
+subtracts only the occluded portion of that image. The previous fog-suppression
+estimate and min-of-two-coverage rule were removed from this compositor. Material
+class metadata remains owned by the solid depth sample, not particles. Legacy
+bloom protection still needs its own upstream migration; this is not a claim of
+complete frame-composition replacement. Overbright/clamped color precision,
+4x supersampling reduction and temporal-history lifecycle need qualification.
+
+Full build and 4,855 CPU checks pass. All eight `scene-radiance-final-clean`
+images exactly match `scene-output-clean`; all eight combined AO/bloom + 4x MSAA
+/ 2x SSAA captures in `scene-radiance-final-effects` complete with strict GL error
+checking. Saves 000/001/002/003/007 were visually inspected across the radiance
+runs, including fog, smoke and ordinary room/model views. Earlier
+`scene-output-clean` differed from the effects checkpoint only in the known
+Buddybot pose variation in save 000. This remains inspection-only, not gameplay
+or full performance acceptance. Candidate/Previous Candidate remain untouched.
+No shadows.
+
 ## Continuation: owned billboards, material blending and pass dependencies
 
 Visual-effect extraction now publishes immutable sprite instances, explicit

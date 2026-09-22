@@ -2862,10 +2862,6 @@ void GameDrawMainView(const d3scene::Presentation& presentation)
 	rend_PerfGpuSceneMark(RENDERER_GPU_SCENE_AFTER_RENDER_EVENTS);
 	VisEffectEndCloseScreenCollection();
 
-	{
-		PERF_MARKER_SCOPE("CaptureBloomSource.MainView");
-		rend_CaptureBloomSource();
-	}
 	rend_PerfGpuSceneMark(RENDERER_GPU_SCENE_AFTER_CAPTURE_BLOOM);
 
 	//We're done with this window

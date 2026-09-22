@@ -16,6 +16,17 @@
 * along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+// Shared perspective unprojection for all image-space motion consumers. Depth
+// and eye-Z sign are derived from the supplied projection, never assumed to be
+// a legacy negative-Z camera with a hard-coded unit near plane.
+#define SCENE_UNPROJECT_GLSL \
+"vec3 SceneUnproject(mat4 p, vec2 uv, float depth) {\n" \
+"    float z = p[3][2] / ((depth * 2.0 - 1.0) * p[2][3] - p[2][2]);\n" \
+"    vec2 ndc = uv * 2.0 - vec2(1.0);\n" \
+"    return vec3(z * (ndc.x * p[2][3] - p[2][0]) / p[0][0],\n" \
+"                z * (ndc.y * p[2][3] - p[2][1]) / p[1][1], z);\n" \
+"}\n"
+
 const char* blitVertexSrc =
 "#version 450 core\n"
 "\n"
@@ -92,6 +103,7 @@ const char* blitFragmentSrc =
 
 const char* motionVectorDebugFragmentSrc =
 "#version 450 core\n"
+SCENE_UNPROJECT_GLSL
 "\n"
 "in vec2 outuv;\n"
 "out vec4 color;\n"
@@ -116,10 +128,7 @@ const char* motionVectorDebugFragmentSrc =
 "	if (depth >= 0.999999)\n"
 "		return vec2(0.0);\n"
 "	vec2 current_ndc = scene_uv * 2.0 - vec2(1.0);\n"
-"	float view_z = -1.0 / max(1.0 - depth, 0.00001);\n"
-"	float view_x = -view_z * (current_ndc.x + current_projection[2][0]) / current_projection[0][0];\n"
-"	float view_y = -view_z * (current_ndc.y + current_projection[2][1]) / current_projection[1][1];\n"
-"	vec4 world = current_inverse_modelview * vec4(view_x, view_y, view_z, 1.0);\n"
+"\tvec4 world = current_inverse_modelview * vec4(SceneUnproject(current_projection, (current_ndc + vec2(1.0)) * 0.5, depth), 1.0);\n"
 "	vec4 previous_clip = previous_view_projection * world;\n"
 "	// A point newly exposed by reverse camera motion can have been behind the\n"
 "	// previous eye plane. Its exact old screen position is undefined, but zero\n"
@@ -169,6 +178,7 @@ const char* motionVectorCopyFragmentSrc =
 
 const char* pixelMotionBlurFragmentSrc =
 "#version 450 core\n"
+SCENE_UNPROJECT_GLSL
 "\n"
 "in vec2 outuv;\n"
 "out vec4 color;\n"
@@ -201,10 +211,7 @@ const char* pixelMotionBlurFragmentSrc =
 "	if (depth >= 0.999999)\n"
 "		return vec2(0.0);\n"
 "	vec2 current_ndc = scene_uv * 2.0 - vec2(1.0);\n"
-"	float view_z = -1.0 / max(1.0 - depth, 0.00001);\n"
-"	float view_x = -view_z * (current_ndc.x + current_projection[2][0]) / current_projection[0][0];\n"
-"	float view_y = -view_z * (current_ndc.y + current_projection[2][1]) / current_projection[1][1];\n"
-"	vec4 world = current_inverse_modelview * vec4(view_x, view_y, view_z, 1.0);\n"
+"\tvec4 world = current_inverse_modelview * vec4(SceneUnproject(current_projection, (current_ndc + vec2(1.0)) * 0.5, depth), 1.0);\n"
 "	vec4 previous_clip = previous_view_projection * world;\n"
 "	// Preserve a bounded blur for geometry newly exposed across the previous\n"
 "	// eye plane instead of stamping a polygon-shaped zero-velocity region.\n"
@@ -660,10 +667,8 @@ const char* aoDeferredCompositeFragmentSrc =
 "uniform sampler2D scene_source;\n"
 "uniform sampler2D ao_source;\n"
 "uniform sampler2D suppression_mask;\n"
-"uniform sampler2D protection_mask;\n"
 "uniform float intensity;\n"
 "uniform int has_suppression_mask;\n"
-"uniform int use_protection_mask;\n"
 "uniform int debug_display;\n"
 "uniform int debug_channel;\n"
 "uniform vec2 visible_origin;\n"
@@ -689,17 +694,7 @@ const char* aoDeferredCompositeFragmentSrc =
 "		if (local.x < 0.0 || local.y < 0.0 || local.x >= visible_size.x || local.y >= visible_size.y)\n"
 "			scene_mask = 0.0;\n"
 "	}\n"
-"	if (use_protection_mask != 0)\n"
-"	{\n"
-"		ivec2 mask_size = textureSize(protection_mask, 0);\n"
-"		ivec2 mask_px = ivec2(clamp(outuv, vec2(0.0), vec2(0.999999)) * vec2(mask_size));\n"
-"		float ao_protection = texelFetch(protection_mask, mask_px, 0).r;\n"
-"		// Framebuffer alpha and the explicit mask usually describe the same\n"
-"		// translucent coverage.  Keep the stronger protection instead of\n"
-"		// counting that coverage twice.\n"
-"		scene_mask = min(scene_mask, 1.0 - clamp(ao_protection, 0.0, 1.0));\n"
-"	}\n"
-"	color = vec4(max(final_color.rgb + (ao_scene_color - scene_color) * scene_mask, vec3(0.0)), final_color.a);\n"
+"\tcolor = vec4(debug_display != 0 ? mix(final_color.rgb,vec3(ao),scene_mask) : max(final_color.rgb + (ao_scene_color - scene_color) * scene_mask, vec3(0.0)), final_color.a);\n"
 "}\n"
 "";
 
@@ -777,7 +772,7 @@ const char* aoDepthFragmentSrc =
 "uniform int ao_weight_is_direct;\n"
 "uniform vec2 input_screen_size;\n"
 "uniform vec2 ao_screen_size;\n"
-"uniform vec2 near_far;\n"
+"uniform vec4 depth_projection; // numerator, Z coefficient, W coefficient, working range\n"
 "uniform float terrain_ao_occlusion;\n"
 "uniform float polyobject_ao_occlusion;\n"
 "uniform float mine_rock_ao_occlusion;\n"
@@ -804,10 +799,9 @@ const char* aoDepthFragmentSrc =
 "\n"
 "float LinearizeDepth(float d)\n"
 "{\n"
-"    float z_n = 2.0 * d - 1.0;\n"
-"    float n = near_far.x;\n"
-"    float f = near_far.y;\n"
-"    return (2.0 * n * f) / (f + n - z_n * (f - n));\n"
+"    float denominator = (2.0 * d - 1.0) * depth_projection.z - depth_projection.y;\n"
+"    if (abs(denominator) < 1.e-8) return depth_projection.w;\n"
+"    return min(abs(depth_projection.x / denominator), depth_projection.w);\n"
 "}\n"
 "\n"
 "float AOClassWeight(float encoded_class)\n"
@@ -1062,6 +1056,7 @@ const char* aoBlurFragmentSrc =
 
 const char* aoTemporalFragmentSrc =
 "#version 450 core\n"
+SCENE_UNPROJECT_GLSL
 "\n"
 "in vec2 outuv;\n"
 "layout(location = 0) out vec4 result;\n"
@@ -1091,10 +1086,7 @@ const char* aoTemporalFragmentSrc =
 "	if (depth >= 0.999999)\n"
 "		return vec2(0.0);\n"
 "	vec2 current_ndc = source_uv * 2.0 - vec2(1.0);\n"
-"	float view_z = -1.0 / max(1.0 - depth, 0.00001);\n"
-"	float view_x = -view_z * (current_ndc.x + current_projection[2][0]) / current_projection[0][0];\n"
-"	float view_y = -view_z * (current_ndc.y + current_projection[2][1]) / current_projection[1][1];\n"
-"	vec4 world = current_inverse_modelview * vec4(view_x, view_y, view_z, 1.0);\n"
+"\tvec4 world = current_inverse_modelview * vec4(SceneUnproject(current_projection, (current_ndc + vec2(1.0)) * 0.5, depth), 1.0);\n"
 "	vec4 previous_clip = previous_view_projection * world;\n"
 "	if (previous_clip.w <= 0.00001)\n"
 "		return vec2(0.0);\n"

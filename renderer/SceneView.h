@@ -20,9 +20,16 @@ struct Camera {
     std::array<Plane, 5> planes; // left, right, bottom, top, near; world space
 };
 Camera prepareCamera(const View& view);
+// Column-major matrices for downstream image-space consumers. They describe
+// the resolved camera, not mutable legacy draw state.
+struct ViewMatrices {
+    std::array<float,16> projection{}, inverse_view{}, view_projection{};
+};
+ViewMatrices viewMatrices(const Camera&);
 View resolveView(const Presentation&, View);
 Transform resolveMeshTransform(const PreparedMesh&,const Camera&);
 ClipPosition project(const Camera& camera, Vec3 world);
+Vec3 unproject(const Camera& camera, float ndc_x, float ndc_y, float depth);
 bool sphereIntersects(const Camera& camera, Vec3 center, float radius);
 
 struct VisibleSurface {
@@ -51,13 +58,14 @@ struct ViewVisibility {
     ViewQueryStats stats;
     bool exterior_visible = false;
 };
-enum class ViewPassKind { Background, OpaqueWorld, SnapshotOpaqueDepth, BlendedWorld };
+enum class ViewPassKind { Background, OpaqueWorld, SnapshotOpaqueDepth, ExportOpaqueScene, BlendedWorld, ExportRadiance };
+struct ViewProducts { bool opaque_scene = false, occlusion_radiance = false; };
 struct ViewPass {
     ViewPassKind kind;
     uint32_t begin = 0, end = 0; // half-open range in this view's visible surfaces
 };
 const SurfaceBinding& visibleSurfaceBinding(const Presentation&,const VisibleSurface&);
-std::vector<ViewPass> buildViewPasses(const Presentation&,const ViewVisibility&);
+std::vector<ViewPass> buildViewPasses(const Presentation&,const ViewVisibility&,ViewProducts products = {});
 
 // Pure conservative frustum query over the complete published scene. Results
 // are view-local indices, never marks written into shared faces/objects.

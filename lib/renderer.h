@@ -672,9 +672,6 @@ void rend_StartFrame(int x1,int y1,int x2,int y2,int clear_flags=RF_CLEAR_ZBUFFE
 // Tells the renderer the frame is over
 void rend_EndFrame();
 
-// Captures the current scene buffer as the source for frame-level bloom.
-void rend_CaptureBloomSource();
-
 void rend_PerfGpuSceneMark(renderer_gpu_scene_mark mark);
 
 bool rend_BeginPostPresentFrame();

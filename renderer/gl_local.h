@@ -48,6 +48,7 @@
 #include "mem.h"
 #include "mono.h"
 #include "pserror.h"
+#include "SceneView.h"
 #include "gl_shared.h"
 #include "IRenderer.h"
 #include <unordered_map>
@@ -310,12 +311,10 @@ class GL4Renderer : public IRenderer
 	GLint ao_composite_scene_source = -1;
 	GLint ao_composite_ao_source = -1;
 	GLint ao_composite_suppression_mask = -1;
-	GLint ao_composite_protection_mask = -1;
 	GLint ao_composite_intensity = -1;
 	GLint ao_composite_has_suppression_mask = -1;
 	GLint ao_composite_debug_display = -1;
 	GLint ao_composite_debug_channel = -1;
-	GLint ao_composite_use_protection_mask = -1;
 	GLint ao_composite_visible_origin = -1;
 	GLint ao_composite_visible_size = -1;
 	GLint ao_composite_use_visible_rect = -1;
@@ -626,6 +625,14 @@ private:
 	void ApplyPixelMotionBlur(int supersampling_factor);
 	void DrawMotionVectorDebugPreview(int supersampling_factor);
 	void UseSceneDrawBuffers();
+	void ExportOpaqueScene(const d3scene::Camera&);
+	// AO changes surface radiance, never fog/emissive radiance. This image stays
+	// in lockstep with scene compositing instead of estimating it from color.
+	GLuint scene_ao_radiance_texture = 0;
+	uint32_t scene_ao_width = 0, scene_ao_height = 0, scene_ao_samples = 0;
+	ColorFramebuffer scene_ao_resolved, scene_ao_product;
+	void BeginSceneRadianceProduct();
+	void FinishSceneRadianceProduct();
 	void DrawRoomFogMultiplyCorrection(GLenum primitive, GLint first, GLsizei count);
 	bool PrepareRoomFogEntryMap(const renderer_room_fog_state& state);
 
@@ -831,7 +838,6 @@ public:
 	// Tells the renderer the frame is over
 	void EndFrame() override;
 
-	void CaptureBloomSource() override;
 	void PerfGpuSceneMark(renderer_gpu_scene_mark mark) override;
 
 	// Clears the display to a specified color

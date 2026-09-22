@@ -2,6 +2,7 @@
 #include "../../renderer/SceneView.h"
 #include "../../renderer/ScenePortals.h"
 #include "../../renderer/SceneGeometry.h"
+#include "../../renderer/SceneCompositing.h"
 #include <cmath>
 #include <stdexcept>
 
@@ -265,5 +266,56 @@ int runSceneViewTests() {
     const auto no_depth_frame = d3scene::Presentation::freeze(scheduled);
     check(d3scene::buildViewPasses(*no_depth_frame,d3scene::queryView(*no_depth_frame,view())).size() == 3,
         "Unconsumed opaque depth was copied");
+    const auto exported = d3scene::buildViewPasses(*scheduled_frame,scheduled_visibility,{true});
+    check(exported.size() == 5 && exported[3].kind == d3scene::ViewPassKind::ExportOpaqueScene &&
+        exported[4].kind == d3scene::ViewPassKind::BlendedWorld,"Opaque image product includes translucent consumers");
+    const auto empty_frame = d3scene::Presentation::freeze(shaken);
+    const auto empty_passes = d3scene::buildViewPasses(*empty_frame,d3scene::queryView(*empty_frame,view()),{true});
+    check(empty_passes.size() == 1 && empty_passes[0].kind == d3scene::ViewPassKind::ExportOpaqueScene,
+        "An empty view reused a previous view's opaque image product");
+    const auto matrix_camera = d3scene::prepareCamera(side);
+    const auto matrices = d3scene::viewMatrices(matrix_camera);
+    const d3scene::Vec3 point{12,3,-2};
+    const auto clip = d3scene::project(matrix_camera,point);
+    const std::array<float,4> input{{point.x,point.y,point.z,1}};
+    const double expected[4] = {clip.x,clip.y,clip.z,clip.w};
+    for (int row = 0; row < 4; ++row) {
+        float actual = 0;
+        for (int column = 0; column < 4; ++column) actual += matrices.view_projection[column*4+row]*input[column];
+        check(std::abs(actual-expected[row]) < .0001,"Post-consumer projection differs from scene visibility/depth");
+    }
+    check(matrices.inverse_view[0] == side.camera.right.x && matrices.inverse_view[8] == side.camera.forward.x &&
+        matrices.inverse_view[12] == side.camera.position.x,"Post-consumer inverse view uses another camera");
+    const auto radiance_passes = d3scene::buildViewPasses(*scheduled_frame,scheduled_visibility,{true,true});
+    check(radiance_passes.back().kind == d3scene::ViewPassKind::ExportRadiance &&
+        radiance_passes[radiance_passes.size()-2].kind == d3scene::ViewPassKind::BlendedWorld,
+        "Eligible radiance was exported before translucency attenuated it");
+    const d3scene::RadianceSample opaque{{.6f,.7f,.8f},{.3f,.2f,.1f}}; // the remainder is fog/emissive
+    for (const auto blend : {d3scene::BlendMode::Alpha,d3scene::BlendMode::Additive,d3scene::BlendMode::Multiply}) {
+        const d3scene::RadianceSample source{{.2f,.5f,.9f},{}};
+        const auto composited = d3scene::composeRadiance(opaque,source,blend,.6f);
+        const auto late = d3scene::applyOcclusion(composited,.35f);
+        const d3scene::RadianceSample early_ao{d3scene::applyOcclusion(opaque,.35f),{}};
+        const auto early = d3scene::composeRadiance(early_ao,source,blend,.6f);
+        check(near(late.x,early.color.x) && near(late.y,early.color.y) && near(late.z,early.color.z),
+            "Deferred AO changed fog/particle radiance or violated a material blending law");
+    }
+    const d3scene::RadianceSample fog_only{{.2f,.7f,.3f},{}};
+    check(near(d3scene::applyOcclusion(fog_only,0).y,.7f),"AO darkened pure fog radiance");
+    auto asymmetric = matrix_camera;
+    asymmetric.transform.position = {2,3,4};
+    asymmetric.projection.x_offset = .13f; asymmetric.projection.y_offset = -.27f;
+    asymmetric.projection.near_distance = 3.5f;
+    for (const float depth : {3.5f,10.f,100.f,1000.f}) {
+        const auto world = d3scene::transformPoint(asymmetric.transform,{2,-1,depth});
+        const auto projected = d3scene::project(asymmetric,world);
+        const float sample = float((projected.z/projected.w+1)*.5);
+        const auto reconstructed = d3scene::unproject(asymmetric,float(projected.x/projected.w),float(projected.y/projected.w),sample);
+        check(std::abs(reconstructed.x-world.x) < .02f && std::abs(reconstructed.y-world.y) < .02f &&
+            std::abs(reconstructed.z-world.z) < .02f,"Depth reconstruction lost near plane, asymmetric projection or resolved camera");
+    }
+    bool rejected_background = false;
+    try { d3scene::unproject(asymmetric,0,0,1); } catch (const std::invalid_argument&) { rejected_background = true; }
+    check(rejected_background,"Infinite background depth became a fabricated world position");
     return Checks;
 }

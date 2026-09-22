@@ -177,7 +177,7 @@ void AOResources::InitShaders()
 	depth_samples = depth_shader.FindUniform("depth_samples");
 	depth_input_screen_size = depth_shader.FindUniform("input_screen_size");
 	depth_ao_screen_size = depth_shader.FindUniform("ao_screen_size");
-	depth_near_far = depth_shader.FindUniform("near_far");
+	depth_projection = depth_shader.FindUniform("depth_projection");
 	depth_terrain_occlusion = depth_shader.FindUniform("terrain_ao_occlusion");
 	depth_polyobject_occlusion = depth_shader.FindUniform("polyobject_ao_occlusion");
 	depth_mine_rock_occlusion = depth_shader.FindUniform("mine_rock_ao_occlusion");
@@ -526,8 +526,8 @@ void AOResources::Apply(Framebuffer* source, Framebuffer* target, const renderer
 			glUniform2f(depth_input_screen_size, (float)source_width, (float)source_height);
 		if (depth_ao_screen_size != -1)
 			glUniform2f(depth_ao_screen_size, (float)ao_width, (float)ao_height);
-		if (depth_near_far != -1)
-			glUniform2f(depth_near_far, nearz, farz);
+		if (depth_projection != -1)
+			glUniform4f(depth_projection, projection[14], projection[10], projection[11], farz);
 		if (depth_terrain_occlusion != -1)
 			glUniform1f(depth_terrain_occlusion, Clamp01(pref_state.ao_terrain_occlusion));
 		if (depth_polyobject_occlusion != -1)
@@ -554,8 +554,8 @@ void AOResources::Apply(Framebuffer* source, Framebuffer* target, const renderer
 		glUniform4f(ao_proj_info,
 			2.0f / m00,
 			2.0f / m11,
-			(projection[8] - 1.0f) / m00,
-			(projection[9] - 1.0f) / m11);
+			(-projection[8] / projection[11] - 1.0f) / m00,
+			(-projection[9] / projection[11] - 1.0f) / m11);
 		glUniform2f(ao_near_far, nearz, farz);
 		glUniform1f(ao_radius, radius);
 		glUniform1f(ao_radius_pixels, radius_pixels);

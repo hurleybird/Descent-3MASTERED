@@ -2108,7 +2108,7 @@ bool GL4Renderer::BeginPostPresentFrameInternal(bool defer_bloom_composite)
 		bloom_source_framebuffer.Height() == (uint32_t)framebuffer_logical_height;
 	if (captured_scene_unchanged)
 	{
-		// CaptureBloomSource already produced this exact display-resolution
+		// The scene schedule already produced this exact display-resolution
 		// color/depth pair. Reusing it avoids resolving and downsampling the
 		// unchanged MSAA/SSAA scene a second time.
 		bloom_source_framebuffer.ClearAlphaToZero();
@@ -2270,7 +2270,7 @@ bool GL4Renderer::BeginPostPresentFrameInternal(bool defer_bloom_composite)
 		{
 			AOResult ao_result;
 			ao.Apply(&bloom_source_framebuffer, nullptr, OpenGL_preferred_state,
-				OpenGL_state, ao_projection, near_z, far_z, ao_suppression_mask_texture,
+				OpenGL_state, ao_projection, near_z, far_z, 0,
 				ao_weight_texture, ao_weight_is_direct, 0, 0, 0, 0,
 				ao_noise_origin_x, ao_noise_origin_y,
 				ao_velocity_texture, ao_object_id_texture,
@@ -2289,7 +2289,6 @@ bool GL4Renderer::BeginPostPresentFrameInternal(bool defer_bloom_composite)
 			glUniform1f(ao_composite_intensity, ao_result.debug_display ? 1.0f : ao_intensity);
 			glUniform1i(ao_composite_has_suppression_mask,
 				ao_result.suppression_texture != 0 ? 1 : 0);
-			glUniform1i(ao_composite_use_protection_mask, ao_suppression_mask_texture != 0 ? 1 : 0);
 			glUniform1i(ao_composite_debug_display, ao_result.debug_display ? 1 : 0);
 			glUniform1i(ao_composite_debug_channel, ao_result.debug_channel);
 			if (ao_composite_visible_origin != -1)
@@ -2300,12 +2299,10 @@ bool GL4Renderer::BeginPostPresentFrameInternal(bool defer_bloom_composite)
 				glUniform1i(ao_composite_use_visible_rect, mask_overscan_for_ao ? 1 : 0);
 			rend_ClearBoundTextures();
 			GL_BindFramebufferTexture(present_framebuffer->ColorTextureForRead(), 0, GL_NEAREST);
-			GL_BindFramebufferTexture(bloom_source_framebuffer.ColorTextureForRead(), 1, GL_NEAREST);
+			GL_BindFramebufferTexture(scene_ao_product.ColorTextureForRead(), 1, GL_NEAREST);
 			GL_BindFramebufferTexture(ao_result.ao_texture, 2, GL_LINEAR);
 			if (ao_result.suppression_texture != 0)
 				GL_BindFramebufferTexture(ao_result.suppression_texture, 3, GL_LINEAR);
-			if (ao_suppression_mask_texture != 0)
-				GL_BindFramebufferTexture(ao_suppression_mask_texture, 4, GL_NEAREST);
 			{
 				PERF_MARKER_SCOPE("AO.DeferredComposite");
 				GL_DrawFramebufferQuad(ao_composite_framebuffer.Handle(), 0, 0,
@@ -3239,7 +3236,7 @@ void GL4Renderer::EndFrame(void)
 {
 }
 
-void GL4Renderer::CaptureBloomSource()
+void GL4Renderer::ExportOpaqueScene(const d3scene::Camera& camera)
 {
 	FlushFontBatch();
 
@@ -3269,22 +3266,11 @@ void GL4Renderer::CaptureBloomSource()
 
 	if (framebuffer_ok)
 	{
-		if (have_current_view_projection)
-		{
-			memcpy(captured_scene_view_projection, current_view_projection, sizeof(captured_scene_view_projection));
-			captured_scene_view_projection_valid = true;
-		}
-		if (have_current_projection)
-		{
-			memcpy(captured_scene_projection, current_projection, sizeof(captured_scene_projection));
-			captured_scene_projection_valid = true;
-		}
-		if (have_current_inverse_modelview)
-		{
-			memcpy(captured_scene_inverse_modelview, current_inverse_modelview,
-				sizeof(captured_scene_inverse_modelview));
-			captured_scene_inverse_modelview_valid = true;
-		}
+		const auto matrices = d3scene::viewMatrices(camera);
+		memcpy(captured_scene_view_projection, matrices.view_projection.data(), sizeof(captured_scene_view_projection));
+		memcpy(captured_scene_projection, matrices.projection.data(), sizeof(captured_scene_projection));
+		memcpy(captured_scene_inverse_modelview, matrices.inverse_view.data(), sizeof(captured_scene_inverse_modelview));
+		captured_scene_view_projection_valid = captured_scene_projection_valid = captured_scene_inverse_modelview_valid = true;
 
 		if (late_post_enabled && OpenGL_state.screen_width > 0 && OpenGL_state.screen_height > 0)
 		{
@@ -3366,7 +3352,6 @@ void GL4Renderer::CaptureBloomSource()
 		}
 	}
 
-	rend_RestoreLegacy();
 }
 
 void GL4Renderer::PerfGpuSceneMark(renderer_gpu_scene_mark mark)

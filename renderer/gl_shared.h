@@ -389,7 +389,7 @@ struct AOResources
 	GLint depth_samples = -1;
 	GLint depth_input_screen_size = -1;
 	GLint depth_ao_screen_size = -1;
-	GLint depth_near_far = -1;
+	GLint depth_projection = -1;
 	GLint depth_terrain_occlusion = -1;
 	GLint depth_polyobject_occlusion = -1;
 	GLint depth_mine_rock_occlusion = -1;

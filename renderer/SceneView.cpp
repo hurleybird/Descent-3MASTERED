@@ -85,6 +85,29 @@ Camera prepareCamera(const View& view) {
     }};
     return camera;
 }
+ViewMatrices viewMatrices(const Camera& camera) {
+    ViewMatrices result;
+    const auto& p = camera.projection;
+    const auto& t = camera.transform;
+    result.projection = {{p.x_scale,0,0,0, 0,p.y_scale,0,0,
+        p.x_offset,p.y_offset,1,1, 0,0,-2*p.near_distance,0}};
+    result.inverse_view = {{t.right.x,t.right.y,t.right.z,0, t.up.x,t.up.y,t.up.z,0,
+        t.forward.x,t.forward.y,t.forward.z,0, t.position.x,t.position.y,t.position.z,1}};
+    const std::array<float,16> world_view{{t.right.x,t.up.x,t.forward.x,0,
+        t.right.y,t.up.y,t.forward.y,0, t.right.z,t.up.z,t.forward.z,0,
+        float(-dot(t.right,t.position)),float(-dot(t.up,t.position)),float(-dot(t.forward,t.position)),1}};
+    for (int column = 0; column < 4; ++column) for (int row = 0; row < 4; ++row)
+        for (int inner = 0; inner < 4; ++inner)
+            result.view_projection[column*4+row] += result.projection[inner*4+row]*world_view[column*4+inner];
+    return result;
+}
+Vec3 unproject(const Camera& camera,float x,float y,float depth) {
+    if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(depth) || depth < 0 || depth >= 1)
+        throw std::invalid_argument("Cannot unproject a non-finite or background depth sample");
+    const auto& p = camera.projection;
+    const float z = p.near_distance/(1-depth);
+    return transformPoint(camera.transform,{z*(x-p.x_offset)/p.x_scale,z*(y-p.y_offset)/p.y_scale,z});
+}
 Transform resolveMeshTransform(const PreparedMesh& instance,const Camera& camera) {
     auto world = instance.world;
     if (instance.alignment == MeshAlignment::Camera) {
@@ -255,7 +278,7 @@ const SurfaceBinding& visibleSurfaceBinding(const Presentation& frame,const Visi
     if (item.model) return data.objects[item.object_index].parts[item.part_index].surfaces[item.polygon_index];
     return data.rooms[item.room_index].surfaces[item.polygon_index];
 }
-std::vector<ViewPass> buildViewPasses(const Presentation& frame,const ViewVisibility& view) {
+std::vector<ViewPass> buildViewPasses(const Presentation& frame,const ViewVisibility& view,ViewProducts products) {
     std::vector<ViewPass> passes;
     uint32_t index = 0;
     while (index < view.surfaces.size() && view.surfaces[index].layer == RenderLayer::Background) ++index;
@@ -267,7 +290,9 @@ std::vector<ViewPass> buildViewPasses(const Presentation& frame,const ViewVisibi
     for (size_t i = index; i < view.surfaces.size(); ++i)
         depth_required = depth_required || visibleSurfaceBinding(frame,view.surfaces[i]).soft_depth_range > 0;
     if (depth_required) passes.push_back({ViewPassKind::SnapshotOpaqueDepth,index,index});
+    if (products.opaque_scene) passes.push_back({ViewPassKind::ExportOpaqueScene,index,index});
     if (index < view.surfaces.size()) passes.push_back({ViewPassKind::BlendedWorld,index,static_cast<uint32_t>(view.surfaces.size())});
+    if (products.occlusion_radiance) passes.push_back({ViewPassKind::ExportRadiance,index,index});
     return passes;
 }
 } // namespace d3scene

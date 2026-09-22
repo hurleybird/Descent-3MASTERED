@@ -538,14 +538,6 @@ void rend_EndFrame()
 	renderer_inst->EndFrame();
 }
 
-void rend_CaptureBloomSource()
-{
-	if (!Renderer_initted)
-		return;
-
-	renderer_inst->CaptureBloomSource();
-}
-
 void rend_PerfGpuSceneMark(renderer_gpu_scene_mark mark)
 {
 	if (!Renderer_initted)
