@@ -33,6 +33,9 @@ struct VisibleSurface {
     Transform world;
     bool terrain = false;
     uint32_t terrain_patch = 0, terrain_batch = 0;
+    bool mesh = false;
+    uint32_t mesh_index = 0;
+    RenderLayer layer = RenderLayer::World;
 };
 struct ViewQueryStats {
     uint32_t rooms_considered = 0, surfaces_considered = 0;
@@ -45,6 +48,7 @@ struct ViewVisibility {
     std::vector<uint32_t> object_indices;
     std::vector<uint32_t> room_indices;
     ViewQueryStats stats;
+    bool exterior_visible = false;
 };
 
 // Pure conservative frustum query over the complete published scene. Results

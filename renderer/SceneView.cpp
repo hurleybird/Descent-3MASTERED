@@ -172,7 +172,7 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
             }
         }
     }
-    if (frame.data().terrain.asset) {
+    {
         PortalWindow exterior_window{};
         if (!view.portal_visibility || !room_indices.count(view.room)) exterior_window = {-1,-1,1,1,true};
         else for (size_t room = 0; room < rooms.size(); ++room) if (rooms[room].exterior && windows[room].visible) {
@@ -181,7 +181,8 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
             else exterior_window = {std::min(exterior_window.left,window.left),std::min(exterior_window.bottom,window.bottom),
                 std::max(exterior_window.right,window.right),std::max(exterior_window.top,window.top),true};
         }
-        if (exterior_window.visible) {
+        result.exterior_visible = exterior_window.visible;
+        if (exterior_window.visible && frame.data().terrain.asset) {
             const auto& terrain = frame.data().terrain;
             for (size_t patch_index = 0; patch_index < terrain.asset->patches().size(); ++patch_index) {
                 const auto& patch = terrain.asset->patches()[patch_index];
@@ -206,7 +207,28 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
             }
         }
     }
+    for (size_t index = 0; index < frame.data().meshes.size(); ++index) {
+        const auto& instance = frame.data().meshes[index];
+        const auto& geometry = instance.asset->geometry();
+        if (!instance.surface.draw_surface || geometry.polygons.empty() ||
+            (instance.surface.material.layer == RenderLayer::Background && !result.exterior_visible)) continue;
+        VisibleSurface item; item.mesh = true; item.mesh_index = static_cast<uint32_t>(index);
+        item.world = instance.world;
+        item.world.position.x += instance.camera_translation.x*view.camera.position.x;
+        item.world.position.y += instance.camera_translation.y*view.camera.position.y;
+        item.world.position.z += instance.camera_translation.z*view.camera.position.z;
+        bool visible = false;
+        for (const auto& polygon : geometry.polygons)
+            if (!polygonOutside(result.camera,MeshView(geometry),polygon,item.world,{-1,-1,1,1,true})) { visible = true; break; }
+        if (!visible) continue;
+        item.layer = instance.surface.material.layer;
+        item.blended = instance.surface.material.blended();
+        item.depth = static_cast<float>(dot(view.camera.forward,subtract(item.world.position,view.camera.position)));
+        result.surfaces.push_back(item);
+    }
     std::stable_sort(result.surfaces.begin(),result.surfaces.end(),[](const VisibleSurface& a,const VisibleSurface& b) {
+        if (a.layer != b.layer) return a.layer == RenderLayer::Background;
+        if (a.layer == RenderLayer::Background) return false; // retain authored compositing order
         if (a.blended != b.blended) return !a.blended;
         return a.blended ? a.depth > b.depth : a.depth < b.depth;
     });

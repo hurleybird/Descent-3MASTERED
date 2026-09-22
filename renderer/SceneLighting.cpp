@@ -81,6 +81,13 @@ bool touches(const Light& light, MeshView mesh, const MeshPolygon& polygon, cons
 }
 }
 void prepareLightInfluences(FrameData& data) {
+    // Camera-anchored meshes cannot be spatially culled during view-independent
+    // preparation. Keep the canonical light table; the shader evaluates range.
+    for (auto& mesh : data.meshes) {
+        mesh.surface.light_indices.clear();
+        if (!mesh.surface.unlit) for (size_t i = 0; i < data.lights.size(); ++i)
+            mesh.surface.light_indices.push_back(static_cast<uint32_t>(i));
+    }
     std::unordered_map<int32_t,const RoomState*> rooms;
     for (const auto& room : data.rooms) rooms.emplace(room.number,&room);
     std::vector<std::unordered_set<int32_t>> reachable(data.lights.size());

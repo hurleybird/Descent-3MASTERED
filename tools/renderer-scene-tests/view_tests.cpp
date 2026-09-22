@@ -198,5 +198,43 @@ int runSceneViewTests() {
     check(d3scene::resolveView(*shake_frame,attached).camera.forward.z == 1,"Shake leaked into another object's camera");
     attached.camera_owner = 42; attached.attached_camera = false;
     check(d3scene::resolveView(*shake_frame,attached).camera.forward.z == 1,"Detached preview inherited player shake");
+    d3scene::FrameData environment; environment.sequence = 4; environment.scene_lifetime = assets.lifetime();
+    auto colored = triangle(0,10); colored.vertex_colors = {{1,0,0},{0,1,0},{0,0,1}};
+    const auto original_mesh = assets.publishMesh(0,colored);
+    check(assets.publishMesh(0,colored) == original_mesh,"Unchanged generic mesh was republished");
+    colored.vertex_colors[0].x = .5f;
+    const auto changed_mesh = assets.publishMesh(0,colored);
+    check(changed_mesh->id() != original_mesh->id() && original_mesh->geometry().vertex_colors[0].x == 1,
+        "Mesh color revision mutated a held asset");
+    d3scene::PreparedMesh background; background.asset = changed_mesh;
+    background.surface.layer = d3scene::RenderLayer::Background;
+    background.surface.unlit = true; background.surface.two_sided = true;
+    background.camera_translation = {1,.5f,1};
+    environment.meshes.push_back(background);
+    auto foreground = background; foreground.surface.layer = d3scene::RenderLayer::World;
+    foreground.camera_translation = {}; environment.meshes.insert(environment.meshes.begin(),foreground);
+    const auto environment_frame = d3scene::Presentation::freeze(environment);
+    const auto& background_policy = environment_frame->data().meshes[1].surface.material;
+    check(!background_policy.testsDepth() && !background_policy.writesSolidDepth(),"Background contaminated world depth policy");
+    check(environment_frame->data().meshes[0].surface.material.writesSolidDepth(),"World mesh lost solid depth policy");
+    auto sky_view = view();
+    auto sky_result = d3scene::queryView(*environment_frame,sky_view);
+    check(sky_result.exterior_visible && sky_result.surfaces.size() == 2 && sky_result.surfaces[0].mesh_index == 1,
+        "Background did not precede world geometry");
+    sky_view.camera.position = {100,2,50};
+    sky_result = d3scene::queryView(*environment_frame,sky_view);
+    check(sky_result.surfaces.size() == 1 && sky_result.surfaces[0].world.position.x == 100 &&
+        sky_result.surfaces[0].world.position.y == 1 && sky_result.surfaces[0].world.position.z == 50,
+        "View-relative mesh anchor did not preserve authored parallax");
+    check(environment_frame->data().meshes[1].world.position.x == 0,"Auxiliary camera mutated prepared mesh transform");
+    appendRoom(assets,environment,triangle(0,3)); sky_view = view(); sky_view.room = 0;
+    const auto enclosed = d3scene::queryView(*d3scene::Presentation::freeze(environment),sky_view);
+    check(!enclosed.exterior_visible,"Enclosed room requested sky clear");
+    bool background_leaked = false;
+    for (const auto& surface : enclosed.surfaces) background_leaked |= surface.layer == d3scene::RenderLayer::Background;
+    check(!background_leaked,"Background geometry leaked into enclosed room");
+    colored.vertex_colors.pop_back(); bool rejected_colors = false;
+    try { assets.publishMesh(1,colored); } catch (const std::invalid_argument&) { rejected_colors = true; }
+    check(rejected_colors,"Incomplete authored mesh color stream was accepted");
     return Checks;
 }

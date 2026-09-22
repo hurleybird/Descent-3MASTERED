@@ -1,11 +1,14 @@
 // Descent 3MASTERED - GPL-3.0-or-later
 #include "SceneExtraction.h"
+#include "SceneMaterialBindings.h"
+#include "gametexture.h"
 #include "../renderer/SceneTerrain.h"
 #include "terrain.h"
 #include "lightmap.h"
 #include "pserror.h"
 #include <algorithm>
 #include <map>
+#include <cmath>
 namespace {
 float height(int index) { return (std::max)(0.f,(std::min)(Terrain_seg[index].y,MAX_TERRAIN_HEIGHT)); }
 const terrain_tex_segment& terrainTexture(const terrain_segment& cell) {
@@ -84,6 +87,67 @@ void PrepareGameTerrain(d3scene::FrameData& frame) {
         }
         frame.terrain.materials.push_back(binding);
     }
+}
+void PrepareGameSky(d3scene::FrameData& frame) {
+    const auto color = [](ddgr_color c) -> d3scene::Vec3 {
+        return {GR_COLOR_RED(c)/255.f,GR_COLOR_GREEN(c)/255.f,GR_COLOR_BLUE(c)/255.f};
+    };
+    frame.sky_enabled = true;
+    frame.sky_color = color(Terrain_sky.sky_color);
+    d3scene::Transform rotation;
+    if ((Terrain_sky.flags & TF_ROTATE_SKY) && Terrain_sky.rotate_rate > 0) {
+        // A view never advances the sky. All views evaluate the same simulation
+        // phase, without progressively rotating the level's authored vectors.
+        const double phase = std::fmod(frame.simulation_time*Terrain_sky.rotate_rate*(65536.0/360.0),65536.0);
+        matrix m;
+        vm_AnglesToMatrix(&m,0,static_cast<angle>(phase),0);
+        vm_TransposeMatrix(&m);
+        rotation.right = {m.rvec.x,m.rvec.y,m.rvec.z};
+        rotation.up = {m.uvec.x,m.uvec.y,m.uvec.z};
+        rotation.forward = {m.fvec.x,m.fvec.y,m.fvec.z};
+    }
+    const auto publish = [&](uint32_t slot,d3scene::MeshGeometry geometry,int bitmap) {
+        d3scene::PreparedMesh mesh;
+        mesh.asset = d3scene::assets().publishMesh(slot,std::move(geometry));
+        mesh.world = rotation;
+        mesh.camera_translation = {1,.5f,1};
+        mesh.surface.layer = d3scene::RenderLayer::Background;
+        mesh.surface.unlit = true;
+        mesh.surface.two_sided = true;
+        mesh.surface.bitmap = bitmap;
+        mesh.surface.texture_alpha = bitmap >= 0;
+        frame.meshes.push_back(std::move(mesh));
+    };
+    const auto polygon = [&](d3scene::MeshGeometry& geometry,std::initializer_list<std::pair<int,int>> corners,bool gradient) {
+        d3scene::MeshPolygon face;
+        face.normal = {0,1,0};
+        for (const auto& corner : corners) {
+            const int t = corner.first, ring = corner.second;
+            const auto& position = Terrain_sky.horizon_vectors[t][ring];
+            d3scene::MeshCorner vertex;
+            vertex.vertex = static_cast<uint32_t>(geometry.vertices.size());
+            if (!gradient) { vertex.u = Terrain_sky.horizon_u[t][ring]; vertex.v = Terrain_sky.horizon_v[t][ring]; }
+            geometry.vertices.push_back({position.x,position.y,position.z});
+            if (gradient) geometry.vertex_colors.push_back(color(ring == 4 ? Terrain_sky.sky_color : Terrain_sky.horizon_color));
+            face.corners.push_back(vertex);
+        }
+        geometry.polygons.push_back(std::move(face));
+    };
+    if (Terrain_sky.textured) {
+        d3scene::MeshGeometry dome;
+        for (int t = 0; t < MAX_HORIZON_PIECES; ++t) {
+            const int next = (t+1)%MAX_HORIZON_PIECES;
+            polygon(dome,{{t,0},{next,1},{t,1}},false);
+            for (int ring = 1; ring < 4; ++ring)
+                polygon(dome,{{t,ring},{next,ring},{next,ring+1},{t,ring+1}},false);
+        }
+        const int bitmap = GetTextureBitmapAtTime(Terrain_sky.dome_texture,0,static_cast<float>(frame.simulation_time),false);
+        publish(0,std::move(dome),GetHighResolutionSkyBitmap(Terrain_sky.dome_texture,bitmap));
+    }
+    d3scene::MeshGeometry horizon;
+    for (int t = 0; t < MAX_HORIZON_PIECES; ++t)
+        polygon(horizon,{{t,4},{(t+1)%MAX_HORIZON_PIECES,4},{(t+1)%MAX_HORIZON_PIECES,5},{t,5}},true);
+    publish(1,std::move(horizon),-1);
 }
 // Simulation (including outdoor damage) and presentation share one authored
 // exposure sampler. The adapter borrows data only for this call.

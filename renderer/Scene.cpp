@@ -22,6 +22,7 @@ void require(bool condition, const char* message) {
     if (!condition) throw std::invalid_argument(message);
 }
 void validateSurface(const SurfaceBinding& surface) {
+    require(surface.layer == RenderLayer::World || surface.layer == RenderLayer::Background,"Invalid material layer");
     require(finite(surface.base_color) && finite(surface.color_modulation) && finite(surface.ambient_color) && finite(surface.ambient_direction) &&
         std::isfinite(surface.alpha) && surface.alpha >= 0 && surface.alpha <= 1 &&
         std::isfinite(surface.u_offset) && std::isfinite(surface.v_offset) &&
@@ -29,6 +30,8 @@ void validateSurface(const SurfaceBinding& surface) {
         std::isfinite(surface.lightmap_u_scale) && std::isfinite(surface.lightmap_v_scale), "Invalid scene material values");
 }
 void validateGeometry(const MeshGeometry& geometry) {
+    require(geometry.vertex_colors.empty() || geometry.vertex_colors.size() == geometry.vertices.size(),"Incomplete mesh colors");
+    for (const auto& color : geometry.vertex_colors) require(finite(color),"Invalid mesh color");
     require(geometry.vertex_normals.empty() || geometry.vertex_normals.size() == geometry.vertices.size(), "Incomplete mesh normals");
     for (const auto& normal : geometry.vertex_normals) require(finite(normal), "Non-finite mesh normal");
     for (const auto& vertex : geometry.vertices)
@@ -62,6 +65,8 @@ Transform compose(const Transform& parent, const Transform& local) {
 }
 bool operator!=(AssetId a, AssetId b) { return !(a == b); }
 bool operator==(const MeshGeometry& a, const MeshGeometry& b) {
+    if (a.vertex_colors.size() != b.vertex_colors.size()) return false;
+    for (size_t i = 0; i < a.vertex_colors.size(); ++i) if (!equal(a.vertex_colors[i],b.vertex_colors[i])) return false;
     if (a.vertex_normals.size() != b.vertex_normals.size()) return false;
     for (size_t i = 0; i < a.vertex_normals.size(); ++i)
         if (!equal(a.vertex_normals[i],b.vertex_normals[i])) return false;
@@ -95,6 +100,7 @@ void SceneAssets::reset() {
     models_.clear();
     images_.clear();
     terrain_.reset();
+    meshes_.clear();
     lifetime_ = lifetime;
     revision_ = 0;
 }
@@ -173,8 +179,18 @@ void SceneAssets::removeModel(uint32_t slot) {
     if (slot < models_.size()) models_[slot].reset();
 }
 
+MeshAssetRef SceneAssets::publishMesh(uint32_t slot,MeshGeometry geometry) {
+    validateGeometry(geometry);
+    if (slot < meshes_.size() && meshes_[slot] && meshes_[slot]->geometry() == geometry) return meshes_[slot];
+    if (revision_ == std::numeric_limits<uint64_t>::max()) throw std::overflow_error("Scene revision exhausted");
+    MeshAssetRef replacement(new MeshAsset({lifetime_,revision_+1,slot},std::move(geometry)));
+    if (meshes_.size() <= slot) meshes_.resize(size_t(slot)+1);
+    meshes_[slot] = replacement; ++revision_;
+    return replacement;
+}
 MaterialPolicy compileMaterialPolicy(const SurfaceBinding& surface, const MeshPolygon& polygon) {
     MaterialPolicy result;
+    result.layer = surface.layer;
     if (surface.texture_alpha || surface.additive) {
         result.texture_alpha = surface.color_image && surface.color_image->format() != ImageFormat::ARGB1555 ?
             TextureAlpha::Continuous : TextureAlpha::Cutout;
@@ -212,6 +228,12 @@ PresentationRef Presentation::freeze(const FrameData& data) {
         for (const auto& image : {surface.color_image,surface.baked_image})
             require(!image || image->id().lifetime == data.scene_lifetime,"Stale image asset in frame");
     };
+    require(finite(data.sky_color),"Invalid sky color");
+    for (const auto& mesh : data.meshes) {
+        require(mesh.asset && mesh.asset->id().lifetime == data.scene_lifetime,"Stale generic mesh");
+        require(finite(mesh.world) && finite(mesh.camera_translation),"Invalid generic mesh transform");
+        validateSurface(mesh.surface); validateIndices(mesh.surface);
+    }
     if (data.terrain.asset) {
         require(data.terrain.asset->id().lifetime == data.scene_lifetime,"Stale terrain asset");
         require(data.terrain.materials.size() == data.terrain.asset->grid().materials.size(),"Incomplete terrain materials");
@@ -266,6 +288,13 @@ PresentationRef Presentation::freeze(const FrameData& data) {
         } else require(object.parts.empty(), "Model pose has no asset");
     }
     std::shared_ptr<Presentation> prepared(new Presentation(data));
+    for (auto& mesh : prepared->data_.meshes) {
+        mesh.surface.material = compileMaterialPolicy(mesh.surface,MeshPolygon{});
+        for (const auto& polygon : mesh.asset->geometry().polygons) {
+            const auto policy = compileMaterialPolicy(mesh.surface,polygon);
+            if (policy.blended()) mesh.surface.material = policy;
+        }
+    }
     for (auto& surface : prepared->data_.terrain.materials)
         surface.material = compileMaterialPolicy(surface,MeshPolygon{});
     for (auto& patch : prepared->data_.terrain.patches) for (auto& surface : patch)

@@ -1,5 +1,6 @@
 // Descent 3MASTERED - GPL-3.0-or-later
 #pragma once
+int GetHighResolutionSkyBitmap(short texture_handle, int fallback_bitmap);
 struct SplitSpecularTexturePair
 {
 	int base_tmap;

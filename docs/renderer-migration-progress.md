@@ -1,5 +1,28 @@
 # Renderer migration checkpoint
 
+## Continuation: owned environment meshes and background depth policy
+
+Generic immutable mesh assets now carry optional authored vertex colors and
+prepared transforms/materials. A shared material layer explicitly distinguishes
+background from world geometry: background draws first, never tests/writes world
+depth, and retains authored compositing order. View-local camera anchoring keeps
+the sky's half-height parallax without modifying prepared assets. The executor
+owns viewport-scoped background color clearing and mesh GPU lifetime.
+
+Sky dome and horizon extraction consumes authored geometry/UVs/colors and the
+existing high-resolution image catalog (moved out of terrain drawing). Rotation
+evaluates simulation time instead of repeatedly mutating horizon vectors during
+main-view drawing. This deliberately replaces visibility-dependent accumulated
+rotation, so phase is not claimed identical to the old implementation.
+
+Full build and 4,600 CPU checks pass. All eight `scene-environment-clean` images
+are pixel-identical to `scene-terrain-final-clean`. Both downward outdoor probes
+and both new horizon-facing `scene-sky-probe` images were visually inspected;
+the latter exercise the textured domes and terrain/building depth separation.
+Probe manifests distinguish the camera fixture; these are NOT legacy exterior
+goldens. Stars, satellites, weather, fog and temporal sky streaks remain pending.
+No domain is marked complete, Candidate remains untouched, and no shadows added.
+
 ## Continuation: renderer-owned terrain grid, patches and exposure
 
 Terrain extraction publishes immutable height/material/visibility/clip-plane

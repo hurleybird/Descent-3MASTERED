@@ -73,6 +73,7 @@ void prepareImages(d3scene::FrameData& data) {
     for (auto& room : data.rooms) for (auto& surface : room.surfaces) prepare(surface);
     for (auto& object : data.objects) for (auto& part : object.parts) for (auto& surface : part.surfaces) prepare(surface);
     for (auto& surface : data.terrain.materials) prepare(surface);
+    for (auto& mesh : data.meshes) prepare(mesh.surface);
 }
 // Field-wise fingerprints diagnose state-vs-pixel variation; never hash padding
 // or use diagnostic hashes as asset identities.
@@ -192,6 +193,7 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance_history) {
       }
     }
     PrepareGameTerrain(data);
+    PrepareGameSky(data);
     PrepareGameModelInstances(data, previous_models ? &previous_models->data() : nullptr);
     for (auto& surface : data.terrain.materials) resolveMaterial(surface,static_cast<float>(data.simulation_time),false);
     for (auto& object : data.objects) for (auto& part : object.parts) for (auto& surface : part.surfaces)
@@ -219,12 +221,16 @@ void RenderGameSceneView(const d3scene::Presentation& frame, d3scene::View view)
         Error("Renderer migration is incomplete. This test build requires -scene-inspection; use the preserved Candidate for gameplay.");
     view.geometry_inspection = true;
     view.feedback = d3scene::NoFeedback;
-    if (FindArg("-scene-terrain-probe") && frame.data().terrain.asset) {
+    if ((FindArg("-scene-terrain-probe") || FindArg("-scene-sky-probe")) && frame.data().terrain.asset) {
         const auto& grid = frame.data().terrain.asset->grid();
         const uint32_t x = grid.width/2, z = grid.depth/4;
         view.camera.position = {x*grid.spacing,grid.heights[z*grid.width+x]+120,z*grid.spacing};
         view.camera.right = {1,0,0}; view.camera.up = {0,.8f,.6f}; view.camera.forward = {0,-.6f,.8f};
         view.attached_camera = false; view.room = -1;
+        if (FindArg("-scene-sky-probe")) {
+            view.camera.position.y += 180;
+            view.camera.up = {0,.9797959f,-.2f}; view.camera.forward = {0,.2f,.9797959f};
+        }
     }
     // Diagnostic views do not mark rooms explored or tell AI it was observed.
     // The gameplay feedback compiler barrier remains until the normal executor

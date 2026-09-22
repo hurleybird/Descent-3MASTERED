@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <memory>
 #include <vector>
+#include <utility>
 
 namespace d3scene {
 
@@ -42,9 +43,21 @@ struct MeshPolygon {
 struct MeshGeometry {
     std::vector<Vec3> vertices;
     std::vector<Vec3> vertex_normals; // empty means authored flat polygon normals
+    std::vector<Vec3> vertex_colors; // empty means white; explicit authored Gouraud color
     std::vector<MeshPolygon> polygons;
 };
 bool operator==(const MeshGeometry& a, const MeshGeometry& b);
+class MeshAsset final {
+public:
+    AssetId id() const { return id_; }
+    const MeshGeometry& geometry() const { return geometry_; }
+private:
+    friend class SceneAssets;
+    MeshAsset(AssetId id,MeshGeometry geometry) : id_(id), geometry_(std::move(geometry)) {}
+    AssetId id_;
+    MeshGeometry geometry_;
+};
+using MeshAssetRef = std::shared_ptr<const MeshAsset>;
 
 struct VolumeGrid {
     Vec3 origin;
@@ -136,6 +149,7 @@ public:
     ImageAssetRef publishImage(uint32_t slot,const ImageSource&);
     TerrainAssetRef terrain() const { return terrain_; }
     TerrainAssetRef publishTerrain(const TerrainGrid&);
+    MeshAssetRef publishMesh(uint32_t,MeshGeometry);
     uint64_t lifetime() const { return lifetime_; }
 private:
     uint64_t lifetime_ = 0;
@@ -144,22 +158,28 @@ private:
     std::vector<ModelAssetRef> models_;
     std::vector<ImageAssetRef> images_;
     TerrainAssetRef terrain_;
+    std::vector<MeshAssetRef> meshes_;
 };
 
+enum class RenderLayer : uint8_t { Background, World };
 enum class BlendMode : uint8_t { Solid, Alpha, Additive };
 enum class TextureAlpha : uint8_t { Ignore, Cutout, Continuous };
 struct MaterialPolicy {
+    RenderLayer layer = RenderLayer::World;
     BlendMode blend = BlendMode::Solid;
     TextureAlpha texture_alpha = TextureAlpha::Ignore;
     float alpha_cutoff = .01f;
     bool blended() const { return blend != BlendMode::Solid; }
-    bool writesSolidDepth() const { return !blended(); }
+    bool testsDepth() const { return layer == RenderLayer::World; }
+    bool writesSolidDepth() const { return testsDepth() && !blended(); }
     bool allowsBehind() const { return blended() || texture_alpha != TextureAlpha::Ignore; }
 };
 // These are authoring bindings, not alternate material implementations. The
 // material compiler must resolve them before execution is enabled.
 struct SurfaceBinding {
     MaterialPolicy material; // compiled by publication, shared by all consumers
+    RenderLayer layer = RenderLayer::World;
+    bool unlit = false, two_sided = false;
     std::vector<uint32_t> light_indices;
     std::vector<Vec2> baked_uvs; // optional per-instance corner UVs, never shared model scratch
     Vec3 ambient_color{1,1,1}, ambient_direction{0,-1,0};
@@ -182,6 +202,12 @@ struct TerrainState {
     TerrainAssetRef asset;
     std::vector<SurfaceBinding> materials;
     std::vector<std::vector<SurfaceBinding>> patches;
+};
+struct PreparedMesh {
+    MeshAssetRef asset;
+    SurfaceBinding surface;
+    Transform world;
+    Vec3 camera_translation; // sky follows the eye with authored half-height parallax
 };
 struct Portal {
     int32_t polygon = -1, destination_room = -1, destination_portal = -1;
@@ -264,6 +290,9 @@ struct FrameData {
     std::vector<Light> lights;
     std::vector<CameraPerturbation> camera_perturbations;
     TerrainState terrain;
+    std::vector<PreparedMesh> meshes;
+    bool sky_enabled = false;
+    Vec3 sky_color;
 };
 
 class Presentation final {

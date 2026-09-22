@@ -72,6 +72,9 @@ if ($referenceManifest.profile -ne $actualManifest.profile -or
     throw 'Capture profiles, frame, pilot or registry settings differ; comparison invalid.'
 }
 if ($referenceManifest.results.Count -ne $actualManifest.results.Count) { throw 'Corpus sizes differ.' }
+if ([bool]$referenceManifest.sky_probe -ne [bool]$actualManifest.sky_probe -and -not $DiagnosticComparison) {
+    throw 'Sky probe differs; use -DiagnosticComparison only for intentional cross-fixture comparisons.'
+}
 if ([bool]$referenceManifest.terrain_probe -ne [bool]$actualManifest.terrain_probe -and -not $DiagnosticComparison) {
     throw 'Terrain fixture differs; use -DiagnosticComparison, never treat this as parity acceptance.'
 }

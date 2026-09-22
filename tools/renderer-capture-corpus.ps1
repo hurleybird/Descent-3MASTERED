@@ -10,6 +10,7 @@ param(
     [switch]$SceneInspection,
     [switch]$VertexLighting,
     [switch]$TerrainProbe,
+    [switch]$SkyProbe,
     [switch]$DeformationProbe
 )
 
@@ -18,6 +19,7 @@ param(
 $ErrorActionPreference = 'Stop'
 if ($DeformationProbe -and -not $SceneInspection) { throw 'Deformation probe requires the explicit scene inspection executor.' }
 if ($TerrainProbe -and -not $SceneInspection) { throw 'Terrain probe requires the explicit scene inspection executor.' }
+if ($SkyProbe -and -not $SceneInspection) { throw 'Sky probe requires the explicit scene inspection executor.' }
 $runtimePath = (Resolve-Path -LiteralPath $Runtime).Path
 $seedPath = (Resolve-Path -LiteralPath $Seeds).Path
 $outputPath = [IO.Path]::GetFullPath($Output)
@@ -41,6 +43,7 @@ $manifest = [ordered]@{
     deformation_probe = [bool]$DeformationProbe
     vertex_lighting = [bool]$VertexLighting
     terrain_probe = [bool]$TerrainProbe
+    sky_probe = [bool]$SkyProbe
     executable = (Get-FileHash -LiteralPath $exe).Hash
     shaders = (Get-FileHash -LiteralPath (Join-Path $runtimePath 'descent3mastered.hog')).Hash
     pilot = (Get-FileHash -LiteralPath (Join-Path $seedPath 'Jeff.plt')).Hash
@@ -70,6 +73,7 @@ try {
         if ($SceneInspection) { $arguments += '-scene-inspection' }
         if ($VertexLighting) { $arguments += '-noperpixellighting' }
         if ($TerrainProbe) { $arguments += '-scene-terrain-probe' }
+        if ($SkyProbe) { $arguments += '-scene-sky-probe' }
         if ($DeformationProbe) { $arguments += '-scene-deformation-probe' }
         $started = Get-Date
         $process = Start-Process -FilePath $exe -ArgumentList $arguments -WorkingDirectory $runtimePath -WindowStyle Hidden -PassThru
