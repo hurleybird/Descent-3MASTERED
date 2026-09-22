@@ -25,22 +25,29 @@ uniform samplerBuffer scene_lights;
 uniform isamplerBuffer scene_influences;
 uniform int influence_offset, influence_count;
 uniform int lighting_per_pixel;
+float sceneEmitterAttenuation(int light,vec3 world_position,out vec3 incident) {
+    vec4 position_radius = texelFetch(scene_lights,light);
+    vec4 color_falloff = texelFetch(scene_lights,light+1);
+    vec4 direction_cone = texelFetch(scene_lights,light+2);
+    vec4 flags = texelFetch(scene_lights,light+3);
+    vec3 delta = world_position-position_radius.xyz;
+    float distance = length(delta);
+    incident = distance > .000001 ? delta/distance : vec3(0);
+    if (distance >= position_radius.w) return 0;
+    float attenuation = pow(1.0-distance/position_radius.w,color_falloff.w);
+    if (flags.x != 0) {
+        float cone = distance > .000001 ? dot(incident,direction_cone.xyz) : 1.0;
+        attenuation *= max(0.0,(cone-direction_cone.w)/max(.000001,1.0-direction_cone.w));
+    }
+    return attenuation;
+}
 vec3 sceneDynamicLighting(vec3 world_position) {
     vec3 dynamic_color = vec3(0);
     for (int index = 0; index < influence_count; ++index) {
         int light = texelFetch(scene_influences,influence_offset+index).r*4;
-        vec4 position_radius = texelFetch(scene_lights,light);
         vec4 color_falloff = texelFetch(scene_lights,light+1);
-        vec4 direction_cone = texelFetch(scene_lights,light+2);
-        vec4 flags = texelFetch(scene_lights,light+3);
-        vec3 delta = world_position-position_radius.xyz;
-        float distance = length(delta);
-        if (distance >= position_radius.w) continue;
-        float attenuation = pow(1.0-distance/position_radius.w,color_falloff.w);
-        if (flags.x != 0) {
-            float cone = distance > 0.000001 ? dot(delta/distance,direction_cone.xyz) : 1.0;
-            attenuation *= max(0.0,(cone-direction_cone.w)/max(0.000001,1.0-direction_cone.w));
-        }
+        vec3 incident;
+        float attenuation = sceneEmitterAttenuation(light,world_position,incident);
         dynamic_color += color_falloff.rgb*attenuation;
     }
     return dynamic_color;
@@ -57,6 +64,9 @@ uniform samplerBuffer instance_uvs;
 uniform int use_instance_uvs, instance_uv_offset;
 uniform samplerBuffer instance_positions;
 uniform int use_instance_positions, instance_position_offset;
+uniform samplerBuffer scene_reflections;
+uniform int reflection_normal_offset, use_reflection_normals;
+out vec3 reflection_normal;
 uniform vec3 ambient_color, ambient_direction;
 uniform int directional_ambient;
 uniform vec3 eye, camera_right, camera_up, camera_forward;
@@ -91,7 +101,8 @@ void main() {
     texcoord=uv; lightcoord=light_uv; vertex_alpha=alpha;
     if (use_instance_uvs != 0) lightcoord = texelFetch(instance_uvs,gl_VertexID+instance_uv_offset).rg;
     vec3 world_normal = model_right*normal.x + model_up*normal.y + model_forward*normal.z;
-    float shade = directional_ambient != 0 ? clamp((1.0-dot(world_normal,ambient_direction))*0.5,0.0,1.0) : 1.0;
+    reflection_normal = use_reflection_normals != 0 ? texelFetch(scene_reflections,gl_VertexID+reflection_normal_offset).rgb : world_normal;
+    float shade = directional_ambient != 0 && lighting_per_pixel == 0 ? clamp((1.0-dot(world_normal,ambient_direction))*0.5,0.0,1.0) : 1.0;
     ambient = ambient_color*shade;
 }
 )GLSL";
@@ -120,6 +131,14 @@ uniform vec2 light_scale, texture_offset;
 uniform float material_alpha;
 uniform float alpha_cutoff;
 uniform float lighting_modulation;
+uniform samplerBuffer scene_reflections;
+uniform sampler2D specular_texture;
+uniform int reflection_offset, reflection_count;
+uniform vec4 specular_response; // strength, exponent, lightmap mix, mask strength
+uniform float static_specular_strength;
+uniform vec3 ambient_direction;
+uniform int directional_ambient;
+in vec3 reflection_normal;
 in vec3 world_position;
 in vec3 ambient;
 in vec3 vertex_dynamic;
@@ -225,11 +244,45 @@ void main() {
         }
     }
     if(base.a < alpha_cutoff) discard;
-    vec3 illumination = use_lightmap != 0 ? texture(lightmaptexture,lightcoord*light_scale).rgb : ambient;
+    vec3 baked = use_lightmap != 0 ? texture(lightmaptexture,lightcoord*light_scale).rgb : vec3(1);
+    vec3 illumination = use_lightmap != 0 ? baked : ambient;
+    if (use_lightmap == 0 && directional_ambient != 0 && lighting_per_pixel != 0) {
+        vec3 n = reflection_normal/max(length(reflection_normal),1.e-8);
+        vec3 direction = ambient_direction/max(length(ambient_direction),1.e-8);
+        illumination *= clamp((1.0-dot(n,direction))*.5,0.0,1.0);
+    }
     vec3 dynamic_color = lighting_per_pixel != 0 ? sceneDynamicLighting(world_position) : vertex_dynamic;
     illumination = clamp(illumination+dynamic_color,vec3(0),vec3(1));
     if (unlit != 0) illumination = vec3(1);
     color=vec4(base.rgb*color_modulation*authored_color*illumination*lighting_modulation,base.a);
+    if (specular_response.x > 0 && unlit == 0 && dot(reflection_normal,reflection_normal) > 1.e-6) {
+        vec3 n = reflection_normal/max(length(reflection_normal),1.e-8);
+        vec3 view_delta = eye-world_position;
+        vec3 v = view_delta/max(length(view_delta),1.e-8);
+        vec3 reflected = vec3(0);
+        const float weights[4] = float[4](1.0,.66,.33,.25);
+        // Four ranked authored lobes are a content convention, not a limit on
+        // the shared dynamic emitter list.
+        for (int i = 0; i < min(reflection_count,4); ++i) {
+            vec3 incident = world_position-texelFetch(scene_reflections,reflection_offset+i*2).rgb;
+            float distance = length(incident);
+            if (distance <= 1.e-8) continue;
+            float response = pow(max(0.0,dot(v,reflect(incident/distance,n))),specular_response.y);
+            reflected += texelFetch(scene_reflections,reflection_offset+i*2+1).rgb*response*weights[i];
+        }
+        reflected *= static_specular_strength;
+        for (int index = 0; index < influence_count; ++index) {
+            int light = texelFetch(scene_influences,influence_offset+index).r*4;
+            vec3 incident;
+            float attenuation = sceneEmitterAttenuation(light,world_position,incident);
+            float response = pow(max(0.0,dot(v,reflect(incident,n))),specular_response.y);
+            reflected += texelFetch(scene_lights,light+1).rgb*attenuation*response*texelFetch(scene_lights,light+3).z;
+        }
+        reflected *= mix(vec3(1),baked,specular_response.z);
+        float mask = texture(specular_texture,texcoord+texture_offset).a;
+        color.rgb += clamp(reflected*specular_response.x,vec3(0),vec3(1))*
+            clamp(mask*specular_response.w*vertex_alpha,0.0,1.0);
+    }
     if (multiply_material != 0) color.rgb = mix(vec3(1),color.rgb,color.a);
     vec3 surface_radiance = unlit != 0 ? vec3(0) : color.rgb;
     float transmission;
@@ -300,6 +353,10 @@ void GL4Renderer::DestroySceneResources() {
     if (scene_position_texture) glDeleteTextures(1,&scene_position_texture);
     scene_position_buffer = scene_position_texture = 0;
     scene_position_ranges.clear();
+    if (scene_reflection_buffer) glDeleteBuffers(1,&scene_reflection_buffer);
+    if (scene_reflection_texture) glDeleteTextures(1,&scene_reflection_texture);
+    scene_reflection_buffer = scene_reflection_texture = 0;
+    scene_reflection_ranges.clear(); scene_normal_ranges.clear();
     scene_light_buffer = scene_influence_buffer = scene_light_texture = scene_influence_texture = 0;
     scene_frame_sequence = 0;
     scene_light_ranges.clear();
@@ -359,6 +416,7 @@ void GL4Renderer::UploadSceneFrame(const d3scene::Presentation& frame) {
         glGenBuffers(1,&scene_influence_buffer); glGenTextures(1,&scene_influence_texture);
         glGenBuffers(1,&scene_uv_buffer); glGenTextures(1,&scene_uv_texture);
         glGenBuffers(1,&scene_position_buffer); glGenTextures(1,&scene_position_texture);
+        glGenBuffers(1,&scene_reflection_buffer); glGenTextures(1,&scene_reflection_texture);
     }
     if (scene_frame_sequence != frame.data().sequence) {
         std::vector<float> lights;
@@ -366,15 +424,29 @@ void GL4Renderer::UploadSceneFrame(const d3scene::Presentation& frame) {
             const float record[16] = {light.position.x,light.position.y,light.position.z,light.radius,
                 light.color.x,light.color.y,light.color.z,light.falloff,
                 light.direction.x,light.direction.y,light.direction.z,light.cone,
-                light.directional ? 1.f : 0.f,light.headlight ? 1.f : 0.f,0,0};
+                light.directional ? 1.f : 0.f,light.headlight ? 1.f : 0.f,light.specular_strength,0};
             lights.insert(lights.end(),record,record+16);
         }
         if (lights.empty()) lights.resize(16,0);
         std::vector<int32_t> indices;
         std::vector<d3scene::Vec2> uvs;
+        std::vector<d3scene::Vec3> reflections;
+        scene_reflection_ranges.clear(); scene_normal_ranges.clear();
         scene_light_ranges.clear();
         scene_uv_ranges.clear();
         const auto add = [&](const d3scene::SurfaceBinding& surface) {
+            const uint32_t reflection_start = static_cast<uint32_t>(reflections.size());
+            if (surface.reflection) for (const auto& source : surface.reflection->data().sources) {
+                if (source.color.x == 0 && source.color.y == 0 && source.color.z == 0) continue;
+                reflections.push_back(source.position); reflections.push_back(source.color);
+            }
+            scene_reflection_ranges.emplace(&surface,ElementRange(reflection_start,static_cast<uint32_t>(reflections.size()-reflection_start)/2));
+            const uint32_t normal_start = static_cast<uint32_t>(reflections.size());
+            if (surface.reflection) {
+                const auto& normals = surface.reflection->data().corner_normals;
+                d3scene::forEachTriangleCorner(normals.size(),[&](size_t corner) { reflections.push_back(normals[corner]); });
+            }
+            scene_normal_ranges.emplace(&surface,ElementRange(normal_start,static_cast<uint32_t>(reflections.size())-normal_start));
             scene_light_ranges.emplace(&surface,ElementRange(static_cast<uint32_t>(indices.size()),static_cast<uint32_t>(surface.light_indices.size())));
             for (uint32_t index : surface.light_indices) indices.push_back(static_cast<int32_t>(index));
             const uint32_t start = static_cast<uint32_t>(uvs.size());
@@ -397,6 +469,9 @@ void GL4Renderer::UploadSceneFrame(const d3scene::Presentation& frame) {
             scene_position_ranges.emplace(&part,ElementRange(start,static_cast<uint32_t>(positions.size())-start));
         }
         if (positions.empty()) positions.push_back({});
+        if (reflections.empty()) reflections.push_back({});
+        glBindBuffer(GL_TEXTURE_BUFFER,scene_reflection_buffer);
+        glBufferData(GL_TEXTURE_BUFFER,reflections.size()*sizeof(d3scene::Vec3),reflections.data(),GL_STREAM_DRAW);
         glBindBuffer(GL_TEXTURE_BUFFER,scene_position_buffer);
         glBufferData(GL_TEXTURE_BUFFER,positions.size()*sizeof(d3scene::PositionPair),positions.data(),GL_STREAM_DRAW);
         if (indices.empty()) indices.push_back(0);
@@ -417,6 +492,8 @@ void GL4Renderer::UploadSceneFrame(const d3scene::Presentation& frame) {
     glTexBuffer(GL_TEXTURE_BUFFER,GL_RG32F,scene_uv_buffer);
     glActiveTexture(GL_TEXTURE5); glBindTexture(GL_TEXTURE_BUFFER,scene_position_texture);
     glTexBuffer(GL_TEXTURE_BUFFER,GL_RGB32F,scene_position_buffer);
+    glActiveTexture(GL_TEXTURE9); glBindTexture(GL_TEXTURE_BUFFER,scene_reflection_texture);
+    glTexBuffer(GL_TEXTURE_BUFFER,GL_RGB32F,scene_reflection_buffer);
     glActiveTexture(GL_TEXTURE0); Last_texel_unit_set = 0;
 }
 
@@ -659,6 +736,8 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
     glUniform1i(scene_shader.FindUniform("scene_influences"),3);
     glUniform1i(scene_shader.FindUniform("instance_uvs"),4);
     glUniform1i(scene_shader.FindUniform("instance_positions"),5);
+    glUniform1i(scene_shader.FindUniform("scene_reflections"),9);
+    glUniform1i(scene_shader.FindUniform("specular_texture"),8);
     glUniform1i(scene_shader.FindUniform("scene_fog"),6);
     const auto& fog_volumes = d3scene::fogVolumes(presentation.data());
     const auto fog_id = presentation.data().fog ? presentation.data().fog->id() : d3scene::AssetId{};
@@ -838,12 +917,20 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
             binding = &room.surfaces[item.polygon_index];
         }
         const auto& surface = *binding;
-        if ((surface.bitmap >= 0 && !surface.color_image) || (surface.lightmap_bitmap >= 0 && !surface.baked_image))
+        if ((surface.bitmap >= 0 && !surface.color_image) || (surface.lightmap_bitmap >= 0 && !surface.baked_image) ||
+            (surface.specular_bitmap >= 0 && !surface.specular_image))
             Error("Scene surface reached execution without prepared image assets");
         const auto& gpu = *mesh;
         if (surface.color_image) BindSceneImage(*surface.color_image,0,surface.texture_wrap,false);
         if (surface.baked_image) BindSceneImage(*surface.baked_image,1,surface.lightmap_wrap,true);
+        if (surface.specular_image) BindSceneImage(*surface.specular_image,8,surface.texture_wrap,false);
         scene_shader.Use();
+        const auto reflections = scene_reflection_ranges.at(binding);
+        glUniform1i(scene_shader.FindUniform("reflection_offset"),reflections.offset);
+        glUniform1i(scene_shader.FindUniform("reflection_count"),surface.specular_image ? reflections.count : 0);
+        glUniform4f(scene_shader.FindUniform("specular_response"),surface.specular_image ? surface.specular_strength : 0,surface.specular_exponent,
+            surface.specular_lightmap_mix,surface.specular_alpha_strength);
+        glUniform1f(scene_shader.FindUniform("static_specular_strength"),surface.static_specular_strength);
         const auto influences = scene_light_ranges.at(binding);
         glUniform1i(scene_shader.FindUniform("influence_offset"),influences.offset);
         glUniform1i(scene_shader.FindUniform("influence_count"),view.dynamic_lighting && !surface.unlit ? influences.count : 0);
@@ -905,6 +992,9 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
         glBindVertexArray(gpu.vao);
         const auto range = item.terrain || item.mesh ? ElementRange(0,gpu.polygons.back().offset+gpu.polygons.back().count) : gpu.polygons[item.polygon_index];
         const auto uv_range = scene_uv_ranges.at(binding);
+        const auto normals = scene_normal_ranges.at(binding);
+        glUniform1i(scene_shader.FindUniform("use_reflection_normals"),normals.count != 0);
+        glUniform1i(scene_shader.FindUniform("reflection_normal_offset"),static_cast<int>(normals.offset)-static_cast<int>(range.offset));
         glUniform1i(scene_shader.FindUniform("use_instance_uvs"),uv_range.count != 0);
         glUniform1i(scene_shader.FindUniform("instance_uv_offset"),static_cast<int>(uv_range.offset)-static_cast<int>(range.offset));
         glUniform1i(scene_shader.FindUniform("use_instance_positions"),prepared_positions.count != 0);

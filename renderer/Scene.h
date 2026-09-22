@@ -130,6 +130,24 @@ private:
     uint32_t padded_extent_ = 0;
 };
 using ImageAssetRef = std::shared_ptr<const ImageAsset>;
+// Authored reflection anchors are baked appearance data, not dynamic emitters.
+// Positions and optional corner normals are world-space for room surfaces.
+struct ReflectionSource { Vec3 position, color; };
+struct ReflectionData {
+    std::vector<ReflectionSource> sources;
+    std::vector<Vec3> corner_normals;
+};
+class ReflectionAsset final {
+public:
+    AssetId id() const { return id_; }
+    const ReflectionData& data() const { return data_; }
+private:
+    friend class SceneAssets;
+    ReflectionAsset(AssetId id,ReflectionData data) : id_(id),data_(std::move(data)) {}
+    AssetId id_;
+    ReflectionData data_;
+};
+using ReflectionAssetRef = std::shared_ptr<const ReflectionAsset>;
 struct TerrainGrid;
 class TerrainAsset;
 using TerrainAssetRef = std::shared_ptr<const TerrainAsset>;
@@ -151,6 +169,7 @@ public:
     void removeModel(uint32_t slot);
     ImageAssetRef image(uint32_t slot) const;
     ImageAssetRef publishImage(uint32_t slot,const ImageSource&);
+    ReflectionAssetRef publishReflection(uint32_t slot,ReflectionData);
     TerrainAssetRef terrain() const { return terrain_; }
     TerrainAssetRef publishTerrain(const TerrainGrid&);
     MeshAssetRef publishMesh(uint32_t,MeshGeometry);
@@ -162,6 +181,7 @@ private:
     std::vector<RoomAssetRef> rooms_;
     std::vector<ModelAssetRef> models_;
     std::vector<ImageAssetRef> images_;
+    std::vector<ReflectionAssetRef> reflections_;
     TerrainAssetRef terrain_;
     std::vector<MeshAssetRef> meshes_;
     FogAssetRef fog_;
@@ -186,6 +206,14 @@ struct MaterialPolicy {
 struct SurfaceBinding {
     MaterialPolicy material; // compiled by publication, shared by all consumers
     OcclusionClass occlusion_class = OcclusionClass::Default;
+    ReflectionAssetRef reflection;
+    // Authored specular response, independent of draw ordering and mutable
+    // game texture tables. Zero strength disables this lobe.
+    float specular_strength = 0, specular_exponent = 6;
+    float specular_lightmap_mix = 0, specular_alpha_strength = 1;
+    float static_specular_strength = 1;
+    int specular_bitmap = -1;
+    ImageAssetRef specular_image;
     RenderLayer layer = RenderLayer::World;
     bool unlit = false, two_sided = false;
     BlendMode blend = BlendMode::Solid; // non-solid modes explicitly request compositing
@@ -297,6 +325,7 @@ struct Light {
     int32_t room = -1;
     Vec3 position, color, direction{0,0,1};
     float radius = 0, falloff = 1, cone = 0;
+    float specular_strength = 1;
     bool directional = false, headlight = false;
 };
 

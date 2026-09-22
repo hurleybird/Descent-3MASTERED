@@ -23,6 +23,11 @@ void require(bool condition, const char* message) {
     if (!condition) throw std::invalid_argument(message);
 }
 void validateSurface(const SurfaceBinding& surface) {
+    require(std::isfinite(surface.specular_strength) && surface.specular_strength >= 0 &&
+        std::isfinite(surface.static_specular_strength) && surface.static_specular_strength >= 0 &&
+        std::isfinite(surface.specular_exponent) && surface.specular_exponent >= 1 && surface.specular_exponent <= 128 &&
+        std::isfinite(surface.specular_lightmap_mix) && surface.specular_lightmap_mix >= 0 && surface.specular_lightmap_mix <= 1 &&
+        std::isfinite(surface.specular_alpha_strength) && surface.specular_alpha_strength >= 0,"Invalid specular material response");
     require(static_cast<unsigned>(surface.occlusion_class) <= static_cast<unsigned>(OcclusionClass::Mine),
         "Unknown surface occlusion class");
     require(std::isfinite(surface.soft_depth_range) && surface.soft_depth_range >= 0,"Invalid soft intersection range");
@@ -105,6 +110,7 @@ void SceneAssets::reset() {
     rooms_.clear();
     models_.clear();
     images_.clear();
+    reflections_.clear();
     terrain_.reset();
     meshes_.clear();
     fog_.reset();
@@ -113,6 +119,27 @@ void SceneAssets::reset() {
 }
 RoomAssetRef SceneAssets::room(uint32_t slot) const {
     return slot < rooms_.size() ? rooms_[slot] : nullptr;
+}
+ReflectionAssetRef SceneAssets::publishReflection(uint32_t slot,ReflectionData data) {
+    for (const auto& source : data.sources)
+        require(finite(source.position) && finite(source.color) && source.color.x >= 0 && source.color.y >= 0 && source.color.z >= 0,
+            "Invalid authored reflection source");
+    for (const auto& normal : data.corner_normals) require(finite(normal),"Invalid reflection normal");
+    const auto previous = slot < reflections_.size() ? reflections_[slot] : nullptr;
+    if (previous) {
+        const auto& old = previous->data();
+        bool same = old.sources.size() == data.sources.size() && old.corner_normals.size() == data.corner_normals.size();
+        for (size_t i = 0; same && i < old.sources.size(); ++i)
+            same = equal(old.sources[i].position,data.sources[i].position) && equal(old.sources[i].color,data.sources[i].color);
+        for (size_t i = 0; same && i < old.corner_normals.size(); ++i) same = equal(old.corner_normals[i],data.corner_normals[i]);
+        if (same) return previous;
+    }
+    if (revision_ == std::numeric_limits<uint64_t>::max()) throw std::overflow_error("Scene revision exhausted");
+    ReflectionAssetRef replacement(new ReflectionAsset({lifetime_,revision_+1,slot},std::move(data)));
+    if (reflections_.size() <= slot) reflections_.resize(size_t(slot)+1);
+    reflections_[slot] = replacement;
+    ++revision_;
+    return replacement;
 }
 RoomAssetRef SceneAssets::publishRoom(uint32_t slot, MeshGeometry geometry, VolumeGrid volume) {
     validateGeometry(geometry);
@@ -225,14 +252,16 @@ PresentationRef Presentation::freeze(const FrameData& data) {
     for (const auto& light : data.lights) {
         require(emitters.emplace(light.id.source,light.id.owner,light.id.channel).second, "Duplicate scene emitter identity");
         require(finite(light.position) && finite(light.color) && finite(light.direction) &&
+            std::isfinite(light.specular_strength) && light.specular_strength >= 0 &&
             std::isfinite(light.radius) && light.radius > 0 && std::isfinite(light.falloff) && light.falloff > 0 &&
             std::isfinite(light.cone) && light.cone >= -1 && light.cone < 1, "Invalid scene light");
         const auto& n = light.direction;
         require(!light.directional || std::abs(n.x*n.x+n.y*n.y+n.z*n.z-1) < .001f, "Scene light direction is not normalized");
     }
     const auto validateIndices = [&](const SurfaceBinding& surface) {
+        require(!surface.reflection || surface.reflection->id().lifetime == data.scene_lifetime,"Stale reflection asset in frame");
         for (auto index : surface.light_indices) require(index < data.lights.size(), "Surface references missing emitter");
-        for (const auto& image : {surface.color_image,surface.baked_image})
+        for (const auto& image : {surface.color_image,surface.baked_image,surface.specular_image})
             require(!image || image->id().lifetime == data.scene_lifetime,"Stale image asset in frame");
     };
     require(finite(data.sky_color),"Invalid sky color");
@@ -275,6 +304,12 @@ PresentationRef Presentation::freeze(const FrameData& data) {
         require(room.surfaces.size() == room.asset->geometry().polygons.size(), "Incomplete room surface bindings");
         for (const auto& surface : room.surfaces) validateSurface(surface);
         for (const auto& surface : room.surfaces) validateIndices(surface);
+        for (size_t face = 0; face < room.surfaces.size(); ++face) {
+            const auto& reflection = room.surfaces[face].reflection;
+            require(!reflection || reflection->data().corner_normals.empty() ||
+                reflection->data().corner_normals.size() == room.asset->geometry().polygons[face].corners.size(),
+                "Incomplete room reflection normals");
+        }
         require(finite(room.fog_color) && std::isfinite(room.fog_depth), "Invalid room fog");
         require(std::isfinite(room.light_scalar) && room.light_scalar >= 0, "Invalid room illumination");
         for (const auto& portal : room.portals)

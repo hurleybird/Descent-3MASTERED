@@ -9,6 +9,7 @@
 #include "descent.h"
 #include "bitmap.h"
 #include <cmath>
+#include <algorithm>
 #include <cstring>
 #include <unordered_set>
 #include <unordered_map>
@@ -27,6 +28,7 @@
 #include "psrand.h"
 #include "damage.h"
 #include "player.h"
+#include "special_face.h"
 
 bool SceneGeometryInspection() { return FindArg("-scene-inspection") != 0; }
 
@@ -81,6 +83,7 @@ void prepareImages(d3scene::FrameData& data) {
     };
     const auto prepare = [&](d3scene::SurfaceBinding& surface) {
         if (surface.bitmap >= 0) surface.color_image = image(surface.bitmap,false);
+        if (surface.specular_bitmap >= 0) surface.specular_image = image(surface.specular_bitmap,false);
         if (surface.lightmap_bitmap >= 0) {
             surface.baked_image = image(surface.lightmap_bitmap,true);
             surface.lightmap_wrap = (GameLightmaps[surface.lightmap_bitmap].flags & LF_WRAP) != 0;
@@ -96,6 +99,13 @@ void prepareImages(d3scene::FrameData& data) {
 void logPreparedModels(const d3scene::FrameData& data) {
     if (!AutomatedCapturePending() && AutomatedCaptureFrameIndex() != 0) return;
     AutomatedCaptureLog("scene probe frame=%d time=%.9g",AutomatedCaptureFrameIndex(),data.simulation_time);
+    unsigned reflection_surfaces = 0, reflection_sources = 0, smooth_reflections = 0;
+    for (const auto& room : data.rooms) for (const auto& surface : room.surfaces) if (surface.specular_strength > 0 && surface.reflection) {
+        ++reflection_surfaces;
+        reflection_sources += static_cast<unsigned>(surface.reflection->data().sources.size());
+        smooth_reflections += !surface.reflection->data().corner_normals.empty();
+    }
+    AutomatedCaptureLog("scene authored reflections surfaces=%u sources=%u smooth=%u",reflection_surfaces,reflection_sources,smooth_reflections);
     size_t fog_triangles = 0;
     for (const auto& volume : d3scene::fogVolumes(data)) fog_triangles += volume.boundary.size();
     AutomatedCaptureLog("scene fog volumes=%u triangles=%u exterior=%d",static_cast<unsigned>(d3scene::fogVolumes(data).size()),
@@ -166,6 +176,30 @@ void resolveMaterial(d3scene::SurfaceBinding& surface, float time, bool model) {
     // can be authored in that format. Keep the distinction at compilation.
     surface.texture_alpha = (texture.flags & TF_TMAP2) != 0 &&
         (model || bm_format(surface.bitmap) != BITMAP_FORMAT_4444);
+    const bool opaque_mask = bm_format(surface.bitmap) == BITMAP_FORMAT_4444 && !surface.texture_alpha &&
+        surface.blend == d3scene::BlendMode::Solid && surface.lightmap >= 0;
+    const bool split_specular = SplitSpecularTexturePathEnabled() && FindSplitSpecularTexturePair(surface.texture).valid;
+    if (!model && Detail_settings.Specular_lighting && ((authored.flags & TF_SPECULAR) ||
+        (opaque_mask && (split_specular || Render_per_pixel_field_static_specular)))) {
+        int specular_texture = surface.texture;
+        int specular_bitmap = -1;
+        if ((surface.authored_flags & FF_DESTROYED) && (authored.flags & TF_DESTROYABLE))
+            specular_texture = authored.destroy_handle;
+        else if (SplitSpecularTexturePathEnabled()) {
+            const auto pair = FindSplitSpecularTexturePair(surface.texture);
+            if (pair.valid) { specular_texture = pair.spec_tmap; specular_bitmap = pair.spec_bm; }
+        }
+        if (specular_texture >= 0 && specular_texture < MAX_TEXTURES && GameTextures[specular_texture].used) {
+            const auto& specular = GameTextures[specular_texture];
+            surface.specular_bitmap = specular_bitmap >= 0 ? specular_bitmap : GetTextureBitmapAtTime(specular_texture,0,time);
+            const float exponent = (specular.flags & TF_PLASTIC) ? 14.f : ((specular.flags & TF_MARBLE) ? 4.f : 6.f);
+            surface.specular_exponent = (std::max)(1.f,(std::min)(128.f,std::floor(exponent*Render_per_pixel_specular_sharpness+.5f)));
+            surface.specular_strength = Render_per_pixel_specular_strength*specular.reflectivity*1.5f;
+            surface.static_specular_strength = Render_per_pixel_static_specular_strength;
+            surface.specular_lightmap_mix = Render_per_pixel_specular_lightmap_mix;
+            surface.specular_alpha_strength = Render_per_pixel_specular_alpha_strength;
+        }
+    }
     }
     if (surface.lightmap >= 0) {
         const int handle = LightmapInfo[surface.lightmap].lm_handle;
@@ -196,6 +230,9 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance_history) {
         ResetSplitSpecularTexturePairCache();
         material_lifetime = data.scene_lifetime;
     }
+    // Capture mutable authoring tables at the game/renderer boundary. Retained
+    // presentations keep their own revision even if a face is edited or freed.
+    std::unordered_map<int,d3scene::ReflectionAssetRef> reflections;
     for (auto& room : data.rooms) {
       room.exterior = (room.authored_flags & RF_EXTERNAL) != 0;
       room.fog_enabled = Detail_settings.Fog_enabled && (room.authored_flags & RF_FOG) && GetFunctionMode() != EDITOR_MODE;
@@ -206,6 +243,33 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance_history) {
           room.pulse_offset,room.number,(room.authored_flags & RF_STROBE) != 0,
           (room.authored_flags & RF_FLICKER) != 0,GetFunctionMode() == EDITOR_MODE);
       for (auto& surface : room.surfaces) {
+        if (surface.special >= 0 && surface.special < MAX_SPECIAL_FACES) {
+            const auto& authored = SpecialFaces[surface.special];
+            if (authored.used && authored.type == SFT_SPECULAR) {
+                auto found = reflections.find(surface.special);
+                if (found == reflections.end()) {
+                    d3scene::ReflectionData reflection;
+                    if (authored.num && !authored.spec_instance)
+                        Error("Scene reflection %d has no sources",surface.special);
+                    for (unsigned i = 0; i < authored.num; ++i) {
+                        const auto& source = authored.spec_instance[i];
+                        const auto color = source.bright_color;
+                        reflection.sources.push_back({{source.bright_center.x,source.bright_center.y,source.bright_center.z},
+                            {float((color >> 10)&31)/31.f,float((color >> 5)&31)/31.f,float(color&31)/31.f}});
+                    }
+                    if ((authored.flags & SFF_SPEC_SMOOTH) && authored.vertnorms) {
+                        const size_t face = &surface-room.surfaces.data();
+                        const size_t count = room.asset->geometry().polygons[face].corners.size();
+                        for (size_t i = 0; i < count; ++i) {
+                            const auto& n = authored.vertnorms[i];
+                            reflection.corner_normals.push_back({n.x,n.y,n.z});
+                        }
+                    }
+                    found = reflections.emplace(surface.special,d3scene::assets().publishReflection(surface.special,std::move(reflection))).first;
+                }
+                surface.reflection = found->second;
+            }
+        }
         surface.occlusion_class = SceneRoomOcclusionClass(surface.texture,room.exterior);
         resolveMaterial(surface,static_cast<float>(data.simulation_time),false);
         surface.lighting_modulation = room.light_scalar;

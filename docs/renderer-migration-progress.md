@@ -1,5 +1,35 @@
 # Renderer migration checkpoint
 
+## Continuation: owned reflection inputs and shared material response
+
+Authored reflection positions/colors and optional corner normals now publish as
+immutable, revisioned assets. Game preparation resolves mask images and response
+parameters; execution does not read SpecialFaces or GameTextures. Publication
+rejects stale assets, malformed normal counts and invalid material values.
+The shared surface shader evaluates authored specular before fog/composition,
+without a separate additive geometry replay. Dynamic specular uses the existing
+canonical emitter table and surface influence indices; diffuse and specular
+share the attenuation/cone evaluator. Model directional ambient now evaluates
+normalized interpolated normals at pixel quality, retaining vertex evaluation
+at lower quality.
+
+This is NOT complete specular parity: generated static reflection fields,
+split-texture donor reconstruction, exterior satellite sources and the exact
+legacy vertex-specular appearance remain pending. The four ranked authored
+lobes are a content convention, not a cap on dynamic emitter selection. The
+historical transcript confirms that the accepted reflection-family field was
+a deliberate visual choice; do not declare direct authored sources an adequate
+replacement for it merely because they compile or look plausible.
+
+Full build and 4,899 CPU checks pass. Data-only reflection publication was
+byte-identical across all eight saves (`scene-reflection-assets`). Authored-only
+captures (`scene-authored-specular-clean`) and shared dynamic/specular effects
+captures (`scene-shared-specular-effects`) complete with strict GPU checks.
+Final Phong/material captures (`scene-material-response-effects`) complete for
+all eight saves; five are byte-identical to shared-specular, remaining changes
+are localized model lighting/pose. Inspected 001/003 highlights and final 002.
+Reports live under C:/tmp/D3RendererVerification. Candidate is unchanged.
+
 ## Continuation: scheduled world occlusion, before display resampling
 
 AO evaluation/composition moved out of `BeginPostPresentFrameInternal` into the

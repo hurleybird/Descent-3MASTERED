@@ -29,6 +29,7 @@ void emit(d3scene::FrameData& frame, d3scene::LightId id, int room, const vector
     light.id = id; light.room = room; light.position = value(position);
     light.radius = radius; light.color = {r,g,b};
     light.headlight = headlight; light.directional = direction != nullptr;
+    light.specular_strength = headlight ? Render_per_pixel_headlight_specular_strength : Render_per_pixel_dynamic_specular_strength;
     if (direction) {
         const float length = std::sqrt(direction->x*direction->x+direction->y*direction->y+direction->z*direction->z);
         if (!(length > 0)) return;
