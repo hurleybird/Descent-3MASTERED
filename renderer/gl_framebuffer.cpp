@@ -364,13 +364,13 @@ bool Framebuffer::Allocate(int width, int height, int msaa_samples)
 		glGenFramebuffers(1, &m_subname);
 
 		glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, m_colorname);
-		glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, msaa_samples, GL_RGBA8, width, height, GL_TRUE);
+		glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, msaa_samples, GL_RGBA16F, width, height, GL_TRUE);
 
 		glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, m_depthname);
 		glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, msaa_samples, GL_DEPTH_COMPONENT32F, width, height, GL_TRUE);
 
 		glBindTexture(GL_TEXTURE_2D, m_subcolorname);
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0, GL_RGBA, GL_FLOAT, nullptr);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -401,7 +401,7 @@ bool Framebuffer::Allocate(int width, int height, int msaa_samples)
 		glGenTextures(1, &m_depthname);
 
 		glBindTexture(GL_TEXTURE_2D, m_colorname);
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0, GL_RGBA, GL_FLOAT, nullptr);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -1047,7 +1047,7 @@ layout(location=4) out uint identity;
 void main() {
     int sample_index = gl_SampleID;
     gl_FragDepth = sample_index == 1 || sample_index == 2 ? .2 : .8;
-    color = vec4(1);
+    color = vec4(2,.5,.125,1);
     velocity = vec4(sample_index,10+sample_index,sample_index == 1 ? 1 : 0,(sample_index+2)/255.0);
     identity = uint(100+sample_index);
 }
@@ -1058,6 +1058,12 @@ void main() {
     target.DepthTextureForRead();
     float resolved_depth = 0;
     glReadPixels(0,0,1,1,GL_DEPTH_COMPONENT,GL_FLOAT,&resolved_depth);
+    target.ColorTextureForRead();
+    glReadBuffer(GL_COLOR_ATTACHMENT0);
+    float radiance[4] = {};
+    glReadPixels(0,0,1,1,GL_RGBA,GL_FLOAT,radiance);
+    if (radiance[0] != 2 || radiance[1] != .5f || radiance[2] != .125f)
+        Error("Scene radiance was clipped or corrupted by MSAA resolve: %g,%g,%g",radiance[0],radiance[1],radiance[2]);
     motion.Resolve(target.Handle());
     glBindFramebuffer(GL_READ_FRAMEBUFFER,motion.resolve_framebuffer);
     glReadBuffer(GL_COLOR_ATTACHMENT0);
@@ -1074,6 +1080,7 @@ void main() {
     glMinSampleShading(minimum);
     GL_SetEnabledState(GL_SAMPLE_SHADING,sample_shading); GL_SetEnabledState(GL_MULTISAMPLE,multisample);
     AutomatedCaptureLog("scene sample resolve verified: nearest sample=1 depth=0.2 velocity=1,11 validity=1 class=3 identity=101");
+    AutomatedCaptureLog("scene radiance resolve verified: unclipped RGB=2,0.5,0.125");
 }
 
 void PostProtectionMaskResources::Update(uint32_t new_width, uint32_t new_height, uint32_t msaa_samples)
@@ -1478,14 +1485,14 @@ ColorFramebuffer* BloomResources::Apply(Framebuffer* source, const renderer_pref
 	}
 
 	for (int i = 0; i < downsample_count; i++)
-		framebuffers[i].Update(widths[i], heights[i], GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
+		framebuffers[i].Update(widths[i], heights[i], GL_RGBA16F, GL_RGBA, GL_FLOAT);
 
 	int merge_count = downsample_count - 1;
 	for (int i = 0; i < merge_count; i++)
 	{
 		int level = downsample_count - 2 - i;
 		framebuffers[downsample_count + i].Update(widths[level], heights[level],
-			GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
+			GL_RGBA16F, GL_RGBA, GL_FLOAT);
 	}
 
 	for (int i = downsample_count + merge_count; i < NUM_BLOOM_FBOS; i++)

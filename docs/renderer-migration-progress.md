@@ -1,5 +1,22 @@
 # Renderer migration checkpoint
 
+## Continuation: unclipped intermediate radiance
+
+Scene, resolve, composition and bloom-pyramid color storage now uses RGBA16F;
+coverage masks remain normalized RGBA8. No new tone curve, texture color-space
+conversion or lighting response was introduced. Intermediate clipping cannot
+discard bright additive radiance before eligible-light subtraction. The GPU
+self-test confirms RGB (2, .5, .125) survives the actual MSAA color resolve;
+the reference algebra also tests overbright additive composition and AO.
+
+Full build and 4,887 CPU checks pass. Both eight-save corpora complete in
+`scene-float-radiance-clean` / `scene-float-radiance-effects`; 001/002 effects
+images were inspected. Clean-image mean errors are .0014-.3911 (largest on
+layered smoke); effects mean errors .2626-.6602 with larger local highlight/
+edge differences. These are precision/clipping changes, not byte parity.
+Memory/performance and the ordering of AO versus nonlinear SSAA filtering still
+need qualification; storage precision alone does not settle that ordering.
+
 ## Continuation: depth-owned material classification
 
 The former motion resource is now a scene surface-record resource: RG velocity,

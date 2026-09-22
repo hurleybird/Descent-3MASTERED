@@ -135,6 +135,8 @@ public:
 
 class Framebuffer
 {
+	// Scene/compositing radiance stays floating point until display output.
+	// Clamping here would invalidate deferred subtraction of eligible light.
 	GLuint		m_name, m_subname;
 	GLuint		m_colorname, m_subcolorname, m_depthname, m_subdepthname;
 	uint32_t	m_width, m_height;

@@ -303,6 +303,11 @@ int runSceneViewTests() {
             "Deferred AO changed fog/particle radiance or violated a material blending law");
     }
     const d3scene::RadianceSample fog_only{{.2f,.7f,.3f},{}};
+    const d3scene::RadianceSample bright{{2,3,4},{1,2,3}};
+    const auto bright_overlay = d3scene::composeRadiance(bright,{{.5f,.5f,.5f},{}},d3scene::BlendMode::Additive,1);
+    const auto bright_occluded = d3scene::applyOcclusion(bright_overlay,.5f);
+    check(near(bright_occluded.x,2) && near(bright_occluded.y,2.5f) && near(bright_occluded.z,3),
+        "Overbright compositing clipped radiance before eligible-light subtraction");
     check(near(d3scene::applyOcclusion(fog_only,0).y,.7f),"AO darkened pure fog radiance");
     auto asymmetric = matrix_camera;
     asymmetric.transform.position = {2,3,4};
