@@ -3,6 +3,7 @@
 #include "gl_mesh.h"
 #include "SceneView.h"
 #include <cmath>
+extern int Last_texel_unit_set;
 
 namespace {
 struct SceneVertex { d3scene::Vec3 position; float u, v, lu, lv, alpha; };
@@ -17,9 +18,11 @@ uniform vec4 projection;
 uniform float near_distance;
 out vec2 texcoord, lightcoord;
 out float vertex_alpha;
+out vec3 world_position;
 void main() {
     vec3 world = model_position + model_right*position.x + model_up*position.y + model_forward*position.z;
     vec3 relative = world-eye;
+    world_position = world;
     float z = dot(relative,camera_forward);
     gl_Position = vec4(dot(relative,camera_right)*projection.x + z*projection.z,
                        dot(relative,camera_up)*projection.y + z*projection.w, z-2.0*near_distance,z);
@@ -33,6 +36,10 @@ uniform int use_texture;
 uniform vec3 base_color;
 uniform vec2 light_scale, texture_offset;
 uniform float material_alpha;
+uniform samplerBuffer scene_lights;
+uniform isamplerBuffer scene_influences;
+uniform int influence_offset, influence_count;
+in vec3 world_position;
 in vec2 texcoord, lightcoord;
 in float vertex_alpha;
 layout(location=0) out vec4 color;
@@ -41,6 +48,24 @@ void main() {
     base.a=(use_texture_alpha != 0 ? base.a : 1.0)*vertex_alpha*material_alpha;
     if(base.a < 0.01) discard;
     vec3 illumination = use_lightmap != 0 ? texture(lightmaptexture,lightcoord*light_scale).rgb : vec3(1);
+    vec3 dynamic_color = vec3(0);
+    for (int index = 0; index < influence_count; ++index) {
+        int light = texelFetch(scene_influences,influence_offset+index).r*4;
+        vec4 position_radius = texelFetch(scene_lights,light);
+        vec4 color_falloff = texelFetch(scene_lights,light+1);
+        vec4 direction_cone = texelFetch(scene_lights,light+2);
+        vec4 flags = texelFetch(scene_lights,light+3);
+        vec3 delta = world_position-position_radius.xyz;
+        float distance = length(delta);
+        if (distance >= position_radius.w) continue;
+        float attenuation = pow(1.0-distance/position_radius.w,color_falloff.w);
+        if (flags.x != 0) {
+            float cone = distance > 0.000001 ? dot(delta/distance,direction_cone.xyz) : 1.0;
+            attenuation *= max(0.0,(cone-direction_cone.w)/max(0.000001,1.0-direction_cone.w));
+        }
+        dynamic_color += color_falloff.rgb*attenuation;
+    }
+    illumination = clamp(illumination+dynamic_color,vec3(0),vec3(1));
     color=vec4(base.rgb*illumination,base.a);
 }
 )GLSL";
@@ -57,8 +82,53 @@ void GL4Renderer::DestroySceneResources() {
         if (mesh.buffer) glDeleteBuffers(1,&mesh.buffer);
     }
     scene_models.clear();
+    if (scene_light_buffer) glDeleteBuffers(1,&scene_light_buffer);
+    if (scene_influence_buffer) glDeleteBuffers(1,&scene_influence_buffer);
+    if (scene_light_texture) glDeleteTextures(1,&scene_light_texture);
+    if (scene_influence_texture) glDeleteTextures(1,&scene_influence_texture);
+    scene_light_buffer = scene_influence_buffer = scene_light_texture = scene_influence_texture = 0;
+    scene_light_sequence = 0;
+    scene_light_ranges.clear();
     scene_asset_lifetime = 0;
     scene_shader.Destroy();
+}
+
+void GL4Renderer::UploadSceneLighting(const d3scene::Presentation& frame) {
+    if (!scene_light_buffer) {
+        glGenBuffers(1,&scene_light_buffer); glGenTextures(1,&scene_light_texture);
+        glGenBuffers(1,&scene_influence_buffer); glGenTextures(1,&scene_influence_texture);
+    }
+    if (scene_light_sequence != frame.data().sequence) {
+        std::vector<float> lights;
+        for (const auto& light : frame.data().lights) {
+            const float record[16] = {light.position.x,light.position.y,light.position.z,light.radius,
+                light.color.x,light.color.y,light.color.z,light.falloff,
+                light.direction.x,light.direction.y,light.direction.z,light.cone,
+                light.directional ? 1.f : 0.f,light.headlight ? 1.f : 0.f,0,0};
+            lights.insert(lights.end(),record,record+16);
+        }
+        if (lights.empty()) lights.resize(16,0);
+        std::vector<int32_t> indices;
+        scene_light_ranges.clear();
+        const auto add = [&](const d3scene::SurfaceBinding& surface) {
+            scene_light_ranges.emplace(&surface,ElementRange(static_cast<uint32_t>(indices.size()),static_cast<uint32_t>(surface.light_indices.size())));
+            for (uint32_t index : surface.light_indices) indices.push_back(static_cast<int32_t>(index));
+        };
+        for (const auto& room : frame.data().rooms) for (const auto& surface : room.surfaces) add(surface);
+        for (const auto& object : frame.data().objects) for (const auto& part : object.parts)
+            for (const auto& surface : part.surfaces) add(surface);
+        if (indices.empty()) indices.push_back(0);
+        glBindBuffer(GL_TEXTURE_BUFFER,scene_light_buffer);
+        glBufferData(GL_TEXTURE_BUFFER,lights.size()*sizeof(float),lights.data(),GL_STREAM_DRAW);
+        glBindBuffer(GL_TEXTURE_BUFFER,scene_influence_buffer);
+        glBufferData(GL_TEXTURE_BUFFER,indices.size()*sizeof(int32_t),indices.data(),GL_STREAM_DRAW);
+        scene_light_sequence = frame.data().sequence;
+    }
+    glActiveTexture(GL_TEXTURE2); glBindTexture(GL_TEXTURE_BUFFER,scene_light_texture);
+    glTexBuffer(GL_TEXTURE_BUFFER,GL_RGBA32F,scene_light_buffer);
+    glActiveTexture(GL_TEXTURE3); glBindTexture(GL_TEXTURE_BUFFER,scene_influence_texture);
+    glTexBuffer(GL_TEXTURE_BUFFER,GL_R32I,scene_influence_buffer);
+    glActiveTexture(GL_TEXTURE0); Last_texel_unit_set = 0;
 }
 
 void GL4Renderer::UploadSceneMesh(SceneMeshGpu& gpu, d3scene::AssetId id, const d3scene::MeshGeometry& geometry) {
@@ -101,6 +171,7 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
         scene_asset_lifetime = presentation.data().scene_lifetime;
     }
     if (!scene_shader.Handle()) scene_shader.AttachSource(SceneVertexShader, SceneFragmentShader);
+    UploadSceneLighting(presentation);
 
     // The pass owns depth/blend/culling policy. No game draw-state capture and
     // no invocation of RenderMine/RenderTerrain/RenderObject occurs here.
@@ -126,6 +197,8 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
     glUniform1f(scene_shader.FindUniform("near_distance"),projection.near_distance);
     glUniform1i(scene_shader.FindUniform("colortexture"),0);
     glUniform1i(scene_shader.FindUniform("lightmaptexture"),1);
+    glUniform1i(scene_shader.FindUniform("scene_lights"),2);
+    glUniform1i(scene_shader.FindUniform("scene_influences"),3);
 
     for (const auto& item : visibility.surfaces) {
         const d3scene::SurfaceBinding* binding;
@@ -151,6 +224,9 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
         if (surface.bitmap >= 0) BindBitmap(surface.bitmap);
         if(surface.lightmap_bitmap>=0) BindLightmap(surface.lightmap_bitmap);
         scene_shader.Use();
+        const auto influences = scene_light_ranges.at(binding);
+        glUniform1i(scene_shader.FindUniform("influence_offset"),influences.offset);
+        glUniform1i(scene_shader.FindUniform("influence_count"),view.dynamic_lighting ? influences.count : 0);
         vec("model_position",item.world.position); vec("model_right",item.world.right);
         vec("model_up",item.world.up); vec("model_forward",item.world.forward);
         vec("base_color",surface.base_color);

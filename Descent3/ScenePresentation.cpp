@@ -71,6 +71,7 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance_history) {
     }
     for (auto& object : data.objects) for (auto& part : object.parts) for (auto& surface : part.surfaces)
         resolveMaterial(surface,static_cast<float>(data.simulation_time),true);
+    PrepareGameSceneLights(data);
     // No domain is declared complete by a diagnostic subset of its consumers.
     auto prepared = d3scene::Presentation::freeze(data);
     if (advance_history) previous_models = prepared;

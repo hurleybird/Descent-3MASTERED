@@ -2074,7 +2074,8 @@ void ObjDoFrame(object* obj)
 	do
 	{
 		RTP_STARTINCTIME(obj_objlight_time);
-		DoObjectLight(obj);
+		// Visual emitters are prepared once with the presentation, not applied
+		// to mutable world lightmaps from simulation updates.
 		RTP_ENDINCTIME(obj_objlight_time);
 	} while (0);	//this do{}while(0) is here because the RTP_STARTINCTIME/RTP_ENDINCTIME must be in the same scope
 	//and not share scope with another RTP_STARTINCTIME
@@ -2110,7 +2111,6 @@ void ObjDoLightingFrameAll()
 		object* objp = &Objects[i];
 		if ((objp->type != OBJ_NONE) && !(objp->flags & OF_DEAD))
 		{
-			DoObjectLight(objp);
 			objp->flags &= ~OF_RENDERED;
 		}
 	}

@@ -6,6 +6,8 @@
 #include <stdexcept>
 #include <unordered_set>
 #include <utility>
+#include <set>
+#include <tuple>
 
 namespace d3scene {
 namespace {
@@ -159,6 +161,18 @@ PresentationRef Presentation::freeze(const FrameData& data) {
     require(std::isfinite(data.simulation_time) && std::isfinite(data.delta_time) && data.delta_time >= 0,
         "Invalid presentation clock");
     require((data.pending_domains & ~AllPendingDomains) == 0, "Unknown pending scene domain");
+    std::set<std::tuple<LightSource,uint64_t,uint32_t>> emitters;
+    for (const auto& light : data.lights) {
+        require(emitters.emplace(light.id.source,light.id.owner,light.id.channel).second, "Duplicate scene emitter identity");
+        require(finite(light.position) && finite(light.color) && finite(light.direction) &&
+            std::isfinite(light.radius) && light.radius > 0 && std::isfinite(light.falloff) && light.falloff > 0 &&
+            std::isfinite(light.cone) && light.cone >= -1 && light.cone < 1, "Invalid scene light");
+        const auto& n = light.direction;
+        require(!light.directional || std::abs(n.x*n.x+n.y*n.y+n.z*n.z-1) < .001f, "Scene light direction is not normalized");
+    }
+    const auto validateIndices = [&](const SurfaceBinding& surface) {
+        for (auto index : surface.light_indices) require(index < data.lights.size(), "Surface references missing emitter");
+    };
     std::unordered_set<int32_t> rooms;
     for (const auto& room : data.rooms) {
         require(room.number >= 0 && rooms.insert(room.number).second, "Duplicate or invalid scene room");
@@ -166,6 +180,7 @@ PresentationRef Presentation::freeze(const FrameData& data) {
             room.asset->id().slot == static_cast<uint32_t>(room.number), "Room asset identity mismatch");
         require(room.surfaces.size() == room.asset->geometry().polygons.size(), "Incomplete room surface bindings");
         for (const auto& surface : room.surfaces) validateSurface(surface);
+        for (const auto& surface : room.surfaces) validateIndices(surface);
         require(finite(room.fog_color) && std::isfinite(room.fog_depth), "Invalid room fog");
         for (const auto& portal : room.portals)
             require(portal.polygon >= 0 && static_cast<size_t>(portal.polygon) < room.surfaces.size(),
@@ -185,6 +200,7 @@ PresentationRef Presentation::freeze(const FrameData& data) {
                 require(part.surfaces.size() == object.model->geometry().parts[i].geometry.polygons.size(),
                     "Incomplete model instance materials");
                 for (const auto& surface : part.surfaces) validateSurface(surface);
+                for (const auto& surface : part.surfaces) validateIndices(surface);
             }
         } else require(object.parts.empty(), "Model pose has no asset");
     }

@@ -49,6 +49,11 @@
 
 vis_effect* VisEffects = NULL;
 static short* Vis_free_list = NULL;
+static std::vector<uint64_t> Vis_effect_generations;
+static uint64_t Next_vis_effect_generation = 1;
+uint64_t VisEffectGeneration(int slot) {
+    return slot >= 0 && static_cast<size_t>(slot) < Vis_effect_generations.size() ? Vis_effect_generations[slot] : 0;
+}
 ushort* VisDeadList = NULL;
 
 ushort max_vis_effects = 0;
@@ -398,6 +403,8 @@ int VisEffectAllocate()
 	}
 
 	int n = Vis_free_list[Num_vis_effects++];
+	if (Vis_effect_generations.size() <= static_cast<size_t>(n)) Vis_effect_generations.resize(n+1);
+	Vis_effect_generations[n] = Next_vis_effect_generation++;
 	ASSERT(VisEffects[n].type == VIS_NONE);	// Get Jason
 
 	if (n > Highest_vis_effect_index)
@@ -5287,53 +5294,6 @@ void VisEffectMoveOne(vis_effect* vis)
 		}
 	}
 
-	// Do vis effect explosion lighting
-	if (Detail_settings.Dynamic_lighting && vis->lighting_color != 0 && (vis->lighting_color & OPAQUE_FLAG) && (vis->flags & VF_USES_LIFELEFT) && !(vis->flags & VF_DEAD))
-	{
-		float scalar;
-
-		scalar = (vis->lifetime - vis->lifeleft) / vis->lifetime;
-
-		if (scalar > .5)
-		{
-			scalar -= .5;
-
-			scalar = 1.0 - (scalar / .5);
-		}
-		else
-		{
-			scalar *= 2;
-		}
-
-		if (scalar > .05)
-		{
-			int color = GR_16_TO_COLOR(vis->lighting_color);
-			float r = (GR_COLOR_RED(color)) / 255.0;
-			float g = (GR_COLOR_GREEN(color)) / 255.0;
-			float b = (GR_COLOR_BLUE(color)) / 255.0;
-
-
-			if (ROOMNUM_OUTSIDE(vis->roomnum) ||
-				(vis->roomnum >= 0 && vis->roomnum <= Highest_room_index &&
-					Rooms[vis->roomnum].used))
-			{
-				ApplyLightingToWorld(&vis->pos, vis->roomnum,
-					vis->size * scalar * 3, r, g, b);
-			}
-			else
-				mprintf((0, "Vis effect not in world!\n"));
-		}
-
-	}
-
-	// Link this effect to the viewer if needed
-	if (vis->flags & VF_LINK_TO_VIEWER)
-	{
-		if (vis->roomnum != Viewer_object->roomnum)
-		{
-			VisEffectRelink(vis - VisEffects, Viewer_object->roomnum);
-		}
-	}
 
 }
 

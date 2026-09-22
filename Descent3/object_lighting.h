@@ -22,7 +22,7 @@
 #include "object.h"
 
 // Casts light from an object onto the rooms or terrain
-void DoObjectLight(object *obj);
+void DoObjectLight(object *obj) = delete;
 
 // Frees all the memory associated with lightmap objects
 void ClearAllObjectLightmaps (int terrain);

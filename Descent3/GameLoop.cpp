@@ -28,6 +28,7 @@
 #include <vector>
 #include "gameloop.h"
 #include "SceneExtraction.h"
+#include "../renderer/SceneLighting.h"
 #include "game.h"
 #include "render.h"
 #include "descent.h"
@@ -143,14 +144,7 @@ int Get60HzVisualAngle(float units_per_frame, int offset)
 
 uint32_t Get60HzVisualNoise(uint32_t key, uint32_t salt)
 {
-	uint32_t value = (uint32_t)Get60HzVisualTick() * 0x9e3779b9u;
-	value ^= key * 0x85ebca6bu;
-	value ^= salt * 0xc2b2ae35u;
-	value ^= value >> 16;
-	value *= 0x7feb352du;
-	value ^= value >> 15;
-	value *= 0x846ca68bu;
-	return value ^ (value >> 16);
+	return d3scene::visualNoise(Gametime,key,salt);
 }
 
 struct visual_60hz_event_clock
@@ -3022,10 +3016,6 @@ void GameRenderFrame(void)
 			EndFrame();
 		}
 
-		{
-			PERF_MARKER_SCOPE("UpdatePerPixelLightmapRendererData");
-			UpdatePerPixelLightmapRendererData();
-		}
 
 		// Publish once. Every world view below sees this same owned scene, not
 		// a second traversal of mutable simulation state.

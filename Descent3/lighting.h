@@ -78,7 +78,7 @@ void ApplyLightingToRooms (vector *,int,float,float,float,float,vector *light_di
 void ApplyLightingToWorld(vector *pos, int roomnum, float light_dist,
 	float red_scale, float green_scale, float blue_scale,
 	vector *light_direction=NULL, float dot_range=0,
-	bool per_pixel_headlight=false, vector *specular_position=NULL);
+	bool per_pixel_headlight=false, vector *specular_position=NULL) = delete;
 
 // Clears the used flag for the dynamic lightmaps
 void ClearDynamicLightmaps ();

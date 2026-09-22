@@ -105,6 +105,7 @@ private:
 // These are authoring bindings, not alternate material implementations. The
 // material compiler must resolve them before execution is enabled.
 struct SurfaceBinding {
+    std::vector<uint32_t> light_indices;
     Vec3 base_color{1, 1, 1};
     int32_t bitmap = -1, lightmap_bitmap = -1;
     float lightmap_u_scale = 1, lightmap_v_scale = 1;
@@ -153,6 +154,20 @@ struct ObjectState {
     std::vector<PreparedModelPart> parts;
 };
 
+enum class LightSource : uint8_t { Object, Effect };
+struct LightId {
+    LightSource source = LightSource::Object;
+    uint64_t owner = 0;
+    uint32_t channel = 0;
+};
+struct Light {
+    LightId id;
+    int32_t room = -1;
+    Vec3 position, color, direction{0,0,1};
+    float radius = 0, falloff = 1, cone = 0;
+    bool directional = false, headlight = false;
+};
+
 enum class PendingDomain : uint32_t {
     Materials = 1u << 0, ObjectPreparation = 1u << 1,
     Terrain = 1u << 2, Effects = 1u << 3, Lights = 1u << 4,
@@ -168,6 +183,7 @@ struct FrameData {
     uint32_t pending_domains = AllPendingDomains;
     std::vector<RoomState> rooms;
     std::vector<ObjectState> objects;
+    std::vector<Light> lights;
 };
 
 class Presentation final {

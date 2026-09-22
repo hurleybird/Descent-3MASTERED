@@ -50,6 +50,7 @@
 #include "pserror.h"
 #include "gl_shared.h"
 #include "IRenderer.h"
+#include <unordered_map>
 
 enum gl4_gpu_ao_mark
 {
@@ -129,6 +130,11 @@ class GL4Renderer : public IRenderer
 	void UploadSceneMesh(SceneMeshGpu&, d3scene::AssetId, const d3scene::MeshGeometry&);
 	uint64_t scene_asset_lifetime = 0;
 	ShaderProgram scene_shader;
+	GLuint scene_light_buffer = 0, scene_light_texture = 0;
+	GLuint scene_influence_buffer = 0, scene_influence_texture = 0;
+	uint64_t scene_light_sequence = 0;
+	std::unordered_map<const d3scene::SurfaceBinding*, ElementRange> scene_light_ranges;
+	void UploadSceneLighting(const d3scene::Presentation&);
 	void DestroySceneResources();
 	//MAIN
 	oeApplication* ParentApplication = nullptr;

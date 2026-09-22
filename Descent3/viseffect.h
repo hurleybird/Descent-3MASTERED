@@ -26,6 +26,7 @@ extern int Highest_vis_effect_index;
 
 // Returns the next free viseffect
 int VisEffectAllocate ();
+uint64_t VisEffectGeneration(int slot);
 
 // Frees up a viseffect for use
 int VisEffectFree (int visnum);

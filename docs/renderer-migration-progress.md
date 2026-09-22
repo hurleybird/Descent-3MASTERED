@@ -139,6 +139,44 @@ and Candidate are unchanged; working binary/captures use `scene-view-test`.
 Next upstream cut: canonical scene emitters/material evaluation, removing the
 simulation-to-dynamic-lightmap/per-draw transport rather than reconnecting it.
 
+## Continuation: canonical scene emitter table
+
+Visual emission now happens in PrepareGamePresentation, independent of camera
+visibility and simulation draw marks. `SceneLights.cpp` compiles player headlights,
+player glow/balls, object/weapon/explosion lights and visual-effect lights into one
+owned emitter table. Object allocation handles plus source channels identify
+emitters; visual-effect allocation generations were added outside its public ABI
+struct. Signed artistic colors and existing pulse/flicker/radius/cone conventions
+are retained. The shared visual-noise kernel takes explicit simulation time.
+
+The old DoObjectLight implementation and simulation calls, visual-effect movement
+light application, and GameRenderFrame's per-lightmap renderer upload were removed.
+DoObjectLight and ApplyLightingToWorld are compile barriers. The former world
+application body remains named RetiredApplyLightingToWorld for the deletion audit;
+it is not an execution fallback. Destructive/baked lightmap updates and their cleanup
+are not casually deleted with the obsolete dynamic-light transport.
+
+`SceneLighting` compiles uncapped surface index lists referencing the authoritative
+table. Room portals conservatively restrict reachable indoor influence; geometric
+range and directional-facing checks are view-independent. Exterior influence is
+still deliberately conservative pending terrain migration. The GPU uploads the
+emitter table and index buffer once per presentation and reuses them for all views;
+no alternate copied SSBO/uniform light definitions exist on this scene path.
+Auxiliary-view lighting policy remains explicit. Legacy additive-then-clamp room
+diffuse evaluation is retained, with no shadow visibility term.
+
+2,259 CPU checks pass; game builds; all eight `scene-light-corpus-clean` captures
+succeeded. Headlight illumination was visually inspected in save005
+(`scene-light-first`) and save002. Model ambient/lightmap/specular behavior and
+exterior qualification remain unfinished. No pending domain is cleared yet.
+
+Additional model repeatability finding: `scene-model-same-build-repeat.json`
+shows six exact captures, save002's previous small residual, and a larger save000
+variation (mean 0.031828342/255, 0.3519965% pixels above two, maximum 180).
+This repeats across the same binary and must be diagnosed before acceptance;
+do not dismiss it under the earlier room-only noise bound. Both images were viewed.
+The model checkpoint executable/HOG is preserved in `checkpoints/scene-model-e2bbf7e`.
+
 ## Preserved room-inspection test build
 
 - Runtime: `C:/tmp/D3RendererVerification/scene-test` (separate 2 GB copy).

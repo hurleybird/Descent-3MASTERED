@@ -157,12 +157,14 @@ void extractionTests() {
 int runSceneViewTests();
 int runModelPoseTests();
 int runModelSceneTests();
+int runLightTests();
 int main() {
     try {
         assetTests(); frameTests(); extractionTests();
         Checks += runSceneViewTests();
         Checks += runModelPoseTests();
         Checks += runModelSceneTests();
+        Checks += runLightTests();
         std::printf("PASS: %d renderer scene checks\n", Checks);
         return 0;
     } catch (const std::exception& error) {

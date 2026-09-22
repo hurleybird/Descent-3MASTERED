@@ -2251,7 +2251,7 @@ static int FindNearestTerrainConnectedRoom(vector* position, int cellnum,
 	return nearest_room;
 }
 
-void ApplyLightingToWorld(vector* pos, int roomnum, float light_dist,
+static void RetiredApplyLightingToWorld(vector* pos, int roomnum, float light_dist,
 	float red_scale, float green_scale, float blue_scale,
 	vector* light_direction, float dot_range, bool per_pixel_headlight,
 	vector* specular_position)
