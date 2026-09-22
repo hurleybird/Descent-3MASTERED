@@ -11,6 +11,8 @@
 #include "config.h"
 #include "gameloop.h"
 #include "game.h"
+#include "object.h"
+#include "args.h"
 #include <cmath>
 #include <algorithm>
 namespace {
@@ -26,6 +28,73 @@ bool special(int id) {
 d3scene::Vec3 value(const vector& v) { return {v.x,v.y,v.z}; }
 d3scene::Transform basis(const matrix& m) { return {{},value(m.rvec),value(m.uvec),value(m.fvec)}; }
 float alphaByte(float alpha) { return static_cast<int>((std::max)(0.f,(std::min)(255.f,alpha*255.f)))/255.f; }
+bool prepareAxisEffect(d3scene::FrameData& frame,const vis_effect& effect,const d3scene::MeshAssetRef& quad) {
+    const bool trail = effect.id == BILLBOARD_SMOKETRAIL_INDEX;
+    const bool beam = effect.id == THICK_LIGHTNING_INDEX;
+    const float age = (std::max)(0.f,static_cast<float>(frame.simulation_time)-effect.creation_time);
+    const float normalized = effect.lifetime > 0 ? (std::min)(.99999f,age/effect.lifetime) : 0;
+    const float remaining = effect.lifetime > 0 ? (std::max)(0.f,effect.lifeleft/effect.lifetime) : 0;
+    float width = effect.billboard_info.width;
+    float alpha = effect.flags & VF_EXPAND ? remaining : 1.f;
+    if (beam && !(effect.flags & VF_EXPAND)) alpha = .7f;
+    if (trail) {
+        width *= remaining;
+        if (remaining > .8f) width *= 1-(remaining-.8f)/.2f;
+        alpha = remaining*.7f;
+    }
+    if (!(width > 0) || !std::isfinite(width)) return false;
+    d3scene::PreparedMesh rod;
+    rod.asset = quad; rod.room = effect.roomnum; rod.alignment = d3scene::MeshAlignment::Axis;
+    rod.world = d3scene::axisBillboardPlacement(value(effect.pos),value(effect.end_pos),width);
+    auto& surface = rod.surface;
+    surface.unlit = true; surface.two_sided = true;
+    surface.texture_alpha = true; surface.texture_wrap = false;
+    surface.blend = d3scene::BlendMode::Alpha;
+    surface.soft_depth_range = Render_soft_vis_effects && !(effect.flags & VF_NO_SOFT_PARTICLES) ? 2.f : 0.f;
+    int bitmap = effect.custom_handle;
+    if (beam || trail || effect.billboard_info.texture) {
+        const int texture = effect.custom_handle;
+        if (texture < 0 || texture >= MAX_TEXTURES || !GameTextures[texture].used) return false;
+        const auto& material = GameTextures[texture];
+        if (beam) bitmap = GetTextureBitmapAtTime(texture,0,static_cast<float>(frame.simulation_time),true);
+        else if (material.flags & TF_ANIMATED) {
+            const int handle = material.bm_handle;
+            if (handle < 0 || handle >= MAX_VCLIPS || !GameVClips[handle].used) return false;
+            PageInVClip(handle);
+            const auto& animation = GameVClips[handle];
+            if (!animation.frames || animation.num_frames <= 0) return false;
+            bitmap = animation.frames[d3scene::animationFrames(animation.num_frames,normalized,false).frame0];
+        } else bitmap = GetTextureBitmapAtTime(texture,0,static_cast<float>(frame.simulation_time));
+        if (material.flags & TF_SATURATE) surface.blend = d3scene::BlendMode::Additive;
+        if (!trail && !beam) {
+            alpha *= material.alpha;
+            surface.u_offset = material.slide_u ? std::fmod(static_cast<float>(frame.simulation_time)/material.slide_u,1.f) : 0;
+            surface.v_offset = material.slide_v ? std::fmod(static_cast<float>(frame.simulation_time)/material.slide_v,1.f) : 0;
+            surface.texture_wrap = surface.u_offset != 0 || surface.v_offset != 0;
+        }
+    }
+    if (bitmap <= BAD_BITMAP_HANDLE || bitmap >= MAX_BITMAPS || !GameBitmaps[bitmap].used) return false;
+    if (trail || beam) {
+        const auto color = GR_16_TO_COLOR(effect.lighting_color);
+        surface.color_modulation = {GR_COLOR_RED(color)/255.f,GR_COLOR_GREEN(color)/255.f,GR_COLOR_BLUE(color)/255.f};
+    }
+    if (beam) {
+        auto delta = effect.end_pos-effect.pos;
+        const float length = vm_GetMagnitude(&delta);
+        if (length < 1 || !std::isfinite(effect.velocity.x) || effect.velocity.x <= 0) return false;
+        surface.texture_wrap = true; surface.blend = d3scene::BlendMode::Additive;
+        surface.texture_scale.y = effect.velocity.z*(effect.billboard_info.texture ? length/width : 1.f);
+        surface.v_offset = effect.velocity.y ? std::fmod(static_cast<float>(frame.simulation_time)/effect.velocity.y,1.f) : 0;
+        // Legacy repeats an identical additive quad ceil(velocity.x) times.
+        // Publish its total radiance once instead of replaying geometry.
+        const float copies = std::ceil(effect.velocity.x);
+        surface.color_modulation.x *= copies; surface.color_modulation.y *= copies; surface.color_modulation.z *= copies;
+    }
+    surface.bitmap = bitmap;
+    surface.alpha = trail ? (std::min)(1.f,alpha) : alphaByte(alpha);
+    frame.meshes.push_back(std::move(rod));
+    return true;
+}
 }
 void PrepareGameEffects(d3scene::FrameData& frame) {
     if (!VisEffects) return;
@@ -34,6 +103,11 @@ void PrepareGameEffects(d3scene::FrameData& frame) {
     for (int slot = 0; slot <= Highest_vis_effect_index; ++slot) {
         const auto& effect = VisEffects[slot];
         if (effect.type == VIS_NONE || (effect.flags & VF_DEAD)) continue;
+        if (effect.type == VIS_FIREBALL && (effect.id == AXIS_BILLBOARD_INDEX || effect.id == BILLBOARD_SMOKETRAIL_INDEX || effect.id == THICK_LIGHTNING_INDEX) &&
+            !(effect.flags & (VF_WINDSHIELD_EFFECT | VF_CLOSE_SCREEN_EFFECT))) {
+            if (prepareAxisEffect(frame,effect,quad)) ++prepared;
+            continue;
+        }
         if (effect.type != VIS_FIREBALL || special(effect.id) || effect.id >= NUM_FIREBALLS ||
             (effect.flags & (VF_WINDSHIELD_EFFECT | VF_CLOSE_SCREEN_EFFECT))) { ++pending; continue; }
         const auto& definition = Fireballs[effect.id];
@@ -130,6 +204,37 @@ void PrepareGameEffects(d3scene::FrameData& frame) {
         const bool blending = second_bitmap > BAD_BITMAP_HANDLE && second_weight > .001f;
         publish(first_bitmap,blending ? 1-second_weight : 1);
         if (blending) publish(second_bitmap,second_weight);
+    }
+    if (SceneGeometryInspection() && FindArg("-scene-axis-probe") && Viewer_object) {
+        // A local fixture, never inserted into VisEffects or the simulation.
+        // Exercise the same material/placement compiler as real trail content.
+        vis_effect probe{};
+        probe.type = VIS_FIREBALL; probe.id = AXIS_BILLBOARD_INDEX;
+        probe.roomnum = Viewer_object->roomnum;
+        probe.lifetime = 1; probe.lifeleft = .65f;
+        probe.creation_time = static_cast<float>(frame.simulation_time)-.35f;
+        probe.custom_handle = -1;
+        for (const auto& room : frame.rooms) for (const auto& surface : room.surfaces)
+            if (probe.custom_handle < 0 && surface.texture >= 0 && surface.bitmap > BAD_BITMAP_HANDLE)
+                probe.custom_handle = surface.texture;
+        if (AutomatedCaptureFrameIndex() == 0)
+            AutomatedCaptureLog("scene axis fixture texture=%d",probe.custom_handle);
+        probe.billboard_info.texture = 1; probe.billboard_info.width = 1;
+        const auto center = Viewer_object->pos+Viewer_object->orient.fvec*12;
+        probe.pos = center-Viewer_object->orient.rvec*4+Viewer_object->orient.uvec*2;
+        probe.end_pos = center+Viewer_object->orient.rvec*4+Viewer_object->orient.uvec*2;
+        if (!prepareAxisEffect(frame,probe,quad)) Error("Axis fixture could not publish its source texture");
+        probe.id = BILLBOARD_SMOKETRAIL_INDEX;
+        probe.lighting_color = GR_RGB16(180,220,255);
+        probe.pos -= Viewer_object->orient.uvec*4;
+        probe.end_pos -= Viewer_object->orient.uvec*4;
+        if (!prepareAxisEffect(frame,probe,quad)) Error("Trail fixture could not publish its source texture");
+        probe.id = THICK_LIGHTNING_INDEX;
+        probe.velocity = {2.2f,2.f,.5f};
+        probe.pos += Viewer_object->orient.uvec*2;
+        probe.end_pos += Viewer_object->orient.uvec*2;
+        if (!prepareAxisEffect(frame,probe,quad)) Error("Beam fixture could not publish its source texture");
+        prepared += 3;
     }
     if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
         AutomatedCaptureLog("scene effects sprites=%u pending=%u",prepared,pending);

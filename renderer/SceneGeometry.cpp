@@ -4,6 +4,16 @@
 #include <cmath>
 #include <stdexcept>
 namespace d3scene {
+Transform axisBillboardPlacement(Vec3 start,Vec3 end,float radius) {
+    if (!std::isfinite(radius) || radius < 0 || !std::isfinite(start.x) || !std::isfinite(start.y) ||
+        !std::isfinite(start.z) || !std::isfinite(end.x) || !std::isfinite(end.y) || !std::isfinite(end.z))
+        throw std::invalid_argument("Invalid axis billboard placement");
+    Transform placement;
+    placement.position = {start.x*.5f+end.x*.5f,start.y*.5f+end.y*.5f,start.z*.5f+end.z*.5f};
+    placement.up = {start.x*.5f-end.x*.5f,start.y*.5f-end.y*.5f,start.z*.5f-end.z*.5f};
+    placement.right = {radius,0,0};
+    return placement;
+}
 MeshGeometry unitBillboardQuad() {
     MeshGeometry mesh;
     mesh.vertices = {{-1,1,0},{1,1,0},{1,-1,0},{-1,-1,0}};

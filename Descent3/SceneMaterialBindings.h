@@ -2,6 +2,7 @@
 #pragma once
 #include "../renderer/Scene.h"
 d3scene::OcclusionClass SceneRoomOcclusionClass(int texture, bool exterior);
+bool SceneFacingUsesSoftIntersection(const char* model_name,const char* texture_name);
 int GetHighResolutionSkyBitmap(short texture_handle, int fallback_bitmap);
 struct SplitSpecularTexturePair
 {

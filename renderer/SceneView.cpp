@@ -132,20 +132,38 @@ Vec3 unproject(const Camera& camera,float x,float y,float depth) {
 }
 Transform resolveMeshTransform(const PreparedMesh& instance,const Camera& camera) {
     auto world = instance.world;
-    auto direction = subtract(world.position,camera.transform.position);
-    const auto length = std::sqrt(dot(direction,direction));
-    direction = length > 1.e-8 ? combine(direction,static_cast<float>(1/length),{},0) : camera.transform.forward;
+    auto direction = camera.transform.forward;
+    if (instance.eye_distance > 0 || instance.alignment == MeshAlignment::FacingEye) {
+        direction = subtract(world.position,camera.transform.position);
+        const auto length = std::sqrt(dot(direction,direction));
+        direction = length > 1.e-8 ? combine(direction,static_cast<float>(1/length),{},0) : camera.transform.forward;
+    }
     if (instance.eye_distance > 0)
         world.position = combine(camera.transform.position,1,direction,instance.eye_distance);
-    if (instance.alignment == MeshAlignment::Camera) {
+    if (instance.alignment == MeshAlignment::Axis) {
+        // end-start cross (start-eye), equivalent using the center because
+        // moving along the segment does not change the perpendicular.
+        const auto axis = world.up;
+        const auto to_eye = subtract(camera.transform.position,world.position);
+        Vec3 side{axis.y*to_eye.z-axis.z*to_eye.y,axis.z*to_eye.x-axis.x*to_eye.z,axis.x*to_eye.y-axis.y*to_eye.x};
+        const double length2 = dot(side,side);
+        const double radius = std::sqrt(dot(world.right,world.right));
+        // An end-on or zero-length rod has zero projected area. Collapse it;
+        // never normalize zero or choose a camera-dependent random meridian.
+        world.right = length2 > 1.e-16 ? combine(side,static_cast<float>(radius/std::sqrt(length2)),{},0) : Vec3{};
+    } else if (instance.alignment == MeshAlignment::Camera) {
         world.right = transformDirection(camera.transform,world.right);
         world.up = transformDirection(camera.transform,world.up);
         world.forward = transformDirection(camera.transform,world.forward);
-    } else if (instance.alignment == MeshAlignment::FacingEye) {
+    } else if (instance.alignment == MeshAlignment::FacingEye || instance.alignment == MeshAlignment::CameraUpright) {
+        if (instance.alignment == MeshAlignment::CameraUpright) direction = camera.transform.forward;
         Transform facing;
         facing.forward = direction;
         if (direction.x == 0 && direction.z == 0) {
-            facing.right = {1,0,0}; facing.up = {0,0,direction.y < 0 ? 1.f : -1.f};
+            // At a camera pole, bank is undefined. Preserve that view's basis,
+            // rather than snapping an upright overlay to an arbitrary meridian.
+            if (instance.alignment == MeshAlignment::CameraUpright) facing = camera.transform;
+            else { facing.right = {1,0,0}; facing.up = {0,0,direction.y < 0 ? 1.f : -1.f}; }
         } else {
             const float inverse = 1/std::sqrt(direction.x*direction.x+direction.z*direction.z);
             facing.right = {direction.z*inverse,0,-direction.x*inverse};
@@ -224,6 +242,7 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
     }
     for (size_t i = 0; i < frame.data().objects.size(); ++i) {
         const auto& object = frame.data().objects[i];
+        if (!object.visible) continue;
         if (view.exclude_object && object.handle == view.excluded_object) continue;
         PortalWindow window{-1,-1,1,1,true};
         const auto room = room_indices.find(object.room);
@@ -278,8 +297,12 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
             }
         }
     }
+    std::unordered_map<uint32_t,const ObjectState*> owners;
+    for (const auto& object : frame.data().objects) owners.emplace(object.handle,&object);
     for (size_t index = 0; index < frame.data().meshes.size(); ++index) {
         const auto& instance = frame.data().meshes[index];
+        if (instance.has_owner && ((view.exclude_object && instance.owner == view.excluded_object) ||
+            !owners.at(instance.owner)->visible)) continue;
         const auto& geometry = instance.asset->geometry();
         if (!instance.surface.draw_surface || geometry.polygons.empty() ||
             (instance.surface.material.layer == RenderLayer::Background && !result.exterior_visible)) continue;

@@ -267,7 +267,42 @@ int runSceneViewTests() {
     anchored.world.position = {0,100,0};
     const auto pole = d3scene::resolveMeshTransform(anchored,d3scene::prepareCamera(view()));
     check(near(pole.position.y,50) && near(pole.up.z,-3),"Vertical view anchor produced invalid orientation");
+    anchored.alignment = d3scene::MeshAlignment::CameraUpright;
+    for (float pitch : {-.9f,0.f,.7f}) for (float heading : {-1.f,0.f,2.f}) for (float bank : {-2.f,0.f,1.f}) {
+        const float sp = std::sin(pitch), cp = std::cos(pitch), sh = std::sin(heading), ch = std::cos(heading);
+        const float sb = std::sin(bank), cb = std::cos(bank);
+        auto rolled = view();
+        rolled.camera.right = {cb*ch+sp*sb*sh,sb*cp,sp*sb*ch-cb*sh};
+        rolled.camera.up = {sp*cb*sh-sb*ch,cb*cp,sb*sh+sp*cb*ch};
+        rolled.camera.forward = {sh*cp,-sp,ch*cp};
+        const auto upright = d3scene::resolveMeshTransform(anchored,d3scene::prepareCamera(rolled));
+        // Independent legacy composition: view-to-world times inverse bank.
+        const auto& r = rolled.camera.right; const auto& u = rolled.camera.up;
+        check(near(upright.right.x,2*(cb*r.x-sb*u.x)) && near(upright.right.y,2*(cb*r.y-sb*u.y)) &&
+            near(upright.right.z,2*(cb*r.z-sb*u.z)),"Upright overlay differs from bank-cancelled view basis");
+        check(near(upright.up.x,3*(sb*r.x+cb*u.x)) && near(upright.up.y,3*(sb*r.y+cb*u.y)) &&
+            near(upright.up.z,3*(sb*r.z+cb*u.z)),"Upright overlay lost aspect ratio or pitch");
+    }
+    auto vertical_view = view(); vertical_view.camera.right = {0,0,1};
+    vertical_view.camera.up = {1,0,0}; vertical_view.camera.forward = {0,1,0};
+    const auto upright_pole = d3scene::resolveMeshTransform(anchored,d3scene::prepareCamera(vertical_view));
+    check(near(upright_pole.right.z,2) && near(upright_pole.up.x,3),"Upright camera pole lost the view meridian");
     const auto ring = d3scene::billboardRing(.3f,102,0);
+    auto rod = billboard; rod.alignment = d3scene::MeshAlignment::Axis;
+    rod.world = d3scene::axisBillboardPlacement({0,2,10},{0,-2,10},.5f);
+    const auto rod_front = d3scene::resolveMeshTransform(rod,d3scene::prepareCamera(view()));
+    check(near(rod_front.right.x,-.5f) && near(rod_front.up.y,2) && near(rod_front.position.z,10),
+        "Axis billboard changed endpoints, radius or authored UV handedness");
+    auto rod_side_view = view(); rod_side_view.camera.position = {10,0,10};
+    const auto rod_side = d3scene::resolveMeshTransform(rod,d3scene::prepareCamera(rod_side_view));
+    check(near(rod_side.right.z,-.5f) && near(rod_side.right.x,0) && near(rod_side.up.y,2),
+        "Axis billboard reused another view's facing");
+    check(near(rod.world.right.x,.5f) && near(rod.world.up.y,2),"Axis billboard mutated published placement");
+    rod_side_view.camera.position = {0,4,10};
+    const auto rod_end = d3scene::resolveMeshTransform(rod,d3scene::prepareCamera(rod_side_view));
+    check(near(rod_end.right.x,0) && near(rod_end.right.y,0) && near(rod_end.right.z,0),"End-on rod produced nonfinite geometry");
+    rod.world = d3scene::axisBillboardPlacement({0,0,10},{0,0,10},1);
+    check(near(d3scene::resolveMeshTransform(rod,d3scene::prepareCamera(view())).right.x,0),"Zero-length rod did not collapse");
     check(ring.vertices.size() == 64 && ring.polygons.size() == 32 && ring.polygons.back().corners[1].vertex == 0,
         "Billboard ring has missing closure or incorrect topology");
     check(ring.polygons[0].corners[0].alpha == 0 && ring.polygons[0].corners[2].alpha == 102,
@@ -289,6 +324,22 @@ int runSceneViewTests() {
     bool rejected_marker_layer = false;
     try { d3scene::Presentation::freeze(marker_data); } catch (const std::invalid_argument&) { rejected_marker_layer = true; }
     check(rejected_marker_layer,"Raster marker entered unsupported world depth/history path");
+    marker_data.meshes[0].surface.layer = d3scene::RenderLayer::Background;
+    marker_data.meshes[0].has_owner = true; marker_data.meshes[0].owner = 91;
+    bool rejected_owner = false;
+    try { d3scene::Presentation::freeze(marker_data); } catch (const std::invalid_argument&) { rejected_owner = true; }
+    check(rejected_owner,"Mesh referencing an absent object lifetime was accepted");
+    d3scene::ObjectState marker_owner; marker_owner.handle = 91;
+    marker_data.objects.push_back(marker_owner);
+    const auto owned_marker = d3scene::Presentation::freeze(marker_data);
+    check(d3scene::queryView(*owned_marker,view()).surfaces.size() == 1,"Eligible owned effect disappeared");
+    auto excluded_view = view(); excluded_view.exclude_object = true; excluded_view.excluded_object = 91;
+    check(d3scene::queryView(*owned_marker,excluded_view).surfaces.empty(),"Camera did not exclude its owner's effect geometry");
+    excluded_view.excluded_object = 92;
+    check(d3scene::queryView(*owned_marker,excluded_view).surfaces.size() == 1,"Camera excluded another object's effect");
+    marker_data.objects[0].visible = false;
+    check(d3scene::queryView(*d3scene::Presentation::freeze(marker_data),view()).surfaces.empty(),"Ineligible owner left visible effect geometry");
+    check(d3scene::queryView(*owned_marker,view()).surfaces.size() == 1,"Visibility edit mutated retained presentation");
     d3scene::FrameData scheduled; scheduled.sequence = 5; scheduled.scene_lifetime = assets.lifetime();
     auto solid = background; solid.surface.layer = d3scene::RenderLayer::World;
     auto soft = solid; soft.surface.soft_depth_range = 2;

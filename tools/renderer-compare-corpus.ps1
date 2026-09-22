@@ -78,6 +78,12 @@ if ($referenceManifest.profile -ne $actualManifest.profile -or
     throw 'Capture profiles, frame, pilot or registry settings differ; comparison invalid.'
 }
 if ($referenceManifest.results.Count -ne $actualManifest.results.Count) { throw 'Corpus sizes differ.' }
+if ([bool]$referenceManifest.atmosphere_probe -ne [bool]$actualManifest.atmosphere_probe -and -not $DiagnosticComparison) {
+    throw 'Atmosphere fixture differs; use DiagnosticComparison for intentional fixture changes.'
+}
+if ([bool]$referenceManifest.axis_probe -ne [bool]$actualManifest.axis_probe -and -not $DiagnosticComparison) {
+    throw 'Axis fixture differs; use DiagnosticComparison for intentional fixture changes.'
+}
 if ([bool]$referenceManifest.satellite_probe -ne [bool]$actualManifest.satellite_probe -and -not $DiagnosticComparison) {
     throw 'Satellite probe mismatch requires DiagnosticComparison.'
 }

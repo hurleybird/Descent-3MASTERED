@@ -1,5 +1,39 @@
 # Renderer migration checkpoint
 
+## Continuation: environment materials and owned effect placement
+
+Published the primary exterior reflection source through immutable material
+assets, preserving the legacy white celestial-source convention. Added the
+masked atmosphere wash with camera-bank cancellation (27 orientation cases and
+pole handling). Reflection assets now use keyed storage: the initial sparse
+environment ID exposed a dense-array allocation bug in the test runtime; the
+registry fix and UINT32_MAX regression test prevent size-by-ID allocation.
+Failed capture directories are retained; successful reruns use fresh names.
+
+Axis billboards, billboard smoke trails and thick lightning now publish the same
+owned segment placement. Per-view facing preserves endpoints/radius and safely
+collapses end-on/zero-length rods. Material UV scale handles beam tiling, while
+identical additive beam repeats compile to one radiance-scaled draw. No game
+state or simulation RNG is advanced by these view queries.
+
+Model-facing subparts publish camera-facing meshes with explicit object owner
+identity. Camera exclusion and prepared owner eligibility apply to these meshes,
+not only the parent's triangles. Dummy and hidden-parent attachment eligibility
+is resolved before model compilation. Orphan mesh owners are rejected at freeze.
+The existing Gyro lamp soft-intersection policy moved to shared game-side
+material compilation, not a GPU model-name branch.
+
+Full build and 5,149 CPU checks pass. Eight scene-environment-material-effects,
+scene-axis-effects and scene-owned-facing-effects captures complete. Facing
+changes leave six saves byte-identical; 000/002 have localized differences
+(mean RGB 0.13973/0.04996). Inspected 000/003: the previously omitted powerup
+flare is restored. scene-beam-composition-probe/000 visibly exercises opaque,
+translucent and tiled additive segments using a deliberately ordinary wall
+texture. scene-atmosphere-bounded-assets/002 and /003 were visually inspected.
+These are migration checks, not full legacy parity or gameplay readiness.
+Glows/thrusters, other special models/effects, temporal sky streaks, composition,
+feedback, optimization and old-path deletion remain pending. Candidate unchanged.
+
 ## Continuation: owned celestial geometry
 
 Sky publication now supplies satellite quads, authored halos and one batched

@@ -38,6 +38,7 @@ void validateSurface(const SurfaceBinding& surface) {
     require(finite(surface.base_color) && finite(surface.color_modulation) && finite(surface.ambient_color) && finite(surface.ambient_direction) &&
         std::isfinite(surface.alpha) && surface.alpha >= 0 && surface.alpha <= 1 &&
         std::isfinite(surface.u_offset) && std::isfinite(surface.v_offset) &&
+        std::isfinite(surface.texture_scale.x) && std::isfinite(surface.texture_scale.y) &&
         std::isfinite(surface.lighting_modulation) && surface.lighting_modulation >= 0 &&
         std::isfinite(surface.lightmap_u_scale) && std::isfinite(surface.lightmap_v_scale), "Invalid scene material values");
 }
@@ -136,7 +137,8 @@ ReflectionAssetRef SceneAssets::publishReflection(uint32_t slot,ReflectionData d
         for (const auto& lobe : corner.lobes) require(finite(lobe.position) && finite(lobe.color) &&
             lobe.color.x >= 0 && lobe.color.y >= 0 && lobe.color.z >= 0,"Invalid reflected field lobe");
     }
-    const auto previous = slot < reflections_.size() ? reflections_[slot] : nullptr;
+    const auto found = reflections_.find(slot);
+    const auto previous = found != reflections_.end() ? found->second : nullptr;
     if (previous) {
         const auto& old = previous->data();
         bool same = old.sources.size() == data.sources.size() && old.corner_normals.size() == data.corner_normals.size() &&
@@ -154,7 +156,6 @@ ReflectionAssetRef SceneAssets::publishReflection(uint32_t slot,ReflectionData d
     }
     if (revision_ == std::numeric_limits<uint64_t>::max()) throw std::overflow_error("Scene revision exhausted");
     ReflectionAssetRef replacement(new ReflectionAsset({lifetime_,revision_+1,slot},std::move(data)));
-    if (reflections_.size() <= slot) reflections_.resize(size_t(slot)+1);
     reflections_[slot] = replacement;
     ++revision_;
     return replacement;
@@ -307,7 +308,8 @@ PresentationRef Presentation::freeze(const FrameData& data) {
         require(finite(mesh.world) && finite(mesh.camera_translation),"Invalid generic mesh transform");
         require(std::isfinite(mesh.eye_distance) && mesh.eye_distance >= 0,"Invalid view-relative mesh distance");
         require(mesh.alignment == MeshAlignment::World || mesh.alignment == MeshAlignment::Camera ||
-            mesh.alignment == MeshAlignment::FacingEye,"Invalid mesh alignment");
+            mesh.alignment == MeshAlignment::FacingEye || mesh.alignment == MeshAlignment::CameraUpright ||
+            mesh.alignment == MeshAlignment::Axis,"Invalid mesh alignment");
         validateSurface(mesh.surface); validateIndices(mesh.surface);
     }
     if (data.terrain.asset) {
@@ -372,6 +374,8 @@ PresentationRef Presentation::freeze(const FrameData& data) {
             }
         } else require(object.parts.empty(), "Model pose has no asset");
     }
+    for (const auto& mesh : data.meshes)
+        require(!mesh.has_owner || objects.count(mesh.owner),"Mesh owner is not part of this presentation");
     std::shared_ptr<Presentation> prepared(new Presentation(data));
     for (auto& mesh : prepared->data_.meshes) {
         mesh.surface.material = compileMaterialPolicy(mesh.surface,MeshPolygon{});

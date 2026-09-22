@@ -9,6 +9,7 @@
 #include "lightmap.h"
 #include "bitmap.h"
 #include "gameloop.h"
+#include "args.h"
 #include "pserror.h"
 #include <algorithm>
 #include <map>
@@ -220,7 +221,17 @@ void PrepareGameSky(d3scene::FrameData& frame) {
                 halo.surface.color_modulation = {r/scale,g/scale,b/scale};
                 frame.meshes.push_back(std::move(halo));
             }
-            frame.meshes.push_back(std::move(satellite));
+            frame.meshes.push_back(satellite);
+            const bool atmosphere_probe = SceneGeometryInspection() && FindArg("-scene-atmosphere-probe");
+            if ((Terrain_sky.satellite_flags[index] & TSF_ATMOSPHERE) || atmosphere_probe) {
+                // This authored wash faces the view with bank removed. Keep the
+                // bitmap as coverage, rather than adding an unmasked rectangle.
+                satellite.alignment = d3scene::MeshAlignment::CameraUpright;
+                satellite.surface.color_modulation = frame.sky_color;
+                satellite.surface.alpha = .4f;
+                satellite.surface.blend = d3scene::BlendMode::Additive;
+                frame.meshes.push_back(std::move(satellite));
+            }
         }
     }
 }

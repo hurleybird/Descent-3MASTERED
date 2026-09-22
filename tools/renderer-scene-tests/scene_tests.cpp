@@ -68,11 +68,22 @@ void frameTests() {
     d3scene::RoomState room;
     room.number = 0; room.asset = assets.publishRoom(0, triangle()); room.surfaces.resize(1);
     data.rooms.push_back(room);
+    data.rooms[0].surfaces[0].texture_scale = {-2,3};
+    const auto tiled_material = d3scene::Presentation::freeze(data);
+    check(tiled_material->data().rooms[0].surfaces[0].texture_scale.x == -2 &&
+        tiled_material->data().rooms[0].surfaces[0].texture_scale.y == 3,"Material lost reflected/tiled UV scale");
+    data.rooms[0].surfaces[0].texture_scale.x = std::numeric_limits<float>::infinity();
+    rejects([&] { d3scene::Presentation::freeze(data); },"Nonfinite material UV transform accepted");
+    data.rooms[0].surfaces[0].texture_scale = {1,1};
     d3scene::ReflectionData reflection;
     reflection.sources.push_back({{1,2,3},{.5f,.25f,1}});
     reflection.corner_normals = {{0,0,1},{0,0,1},{0,0,1}};
     const auto original_reflection = assets.publishReflection(7,reflection);
     check(assets.publishReflection(7,reflection) == original_reflection,"Unchanged reflection allocated a revision");
+    const auto sparse_reflection = assets.publishReflection(UINT32_MAX,reflection);
+    check(sparse_reflection->id().slot == UINT32_MAX && assets.publishReflection(UINT32_MAX,reflection) == sparse_reflection,
+        "Sparse environment identity lost publication caching");
+    check(assets.publishReflection(7,reflection) == original_reflection,"Sparse reflection replaced another asset identity");
     reflection.sources[0].position.x = 4;
     const auto changed_reflection = assets.publishReflection(7,reflection);
     check(changed_reflection->id() != original_reflection->id(),"Changed reflection reused identity");

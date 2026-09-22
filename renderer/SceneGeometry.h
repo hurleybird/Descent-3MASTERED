@@ -2,6 +2,7 @@
 #pragma once
 #include "Scene.h"
 namespace d3scene {
+Transform axisBillboardPlacement(Vec3 start,Vec3 end,float radius);
 // A view into one published frame, never into simulation scratch. All geometry
 // consumers use these positions, including conservative visibility and lighting.
 struct MeshView {

@@ -1,5 +1,8 @@
 // Descent 3MASTERED - GPL-3.0-or-later
 #include "SceneExtraction.h"
+#include "SceneMaterialBindings.h"
+#include "gametexture.h"
+#include "bitmap.h"
 #include "object.h"
 #include "objinfo.h"
 #include "polymodel.h"
@@ -30,6 +33,29 @@ d3scene::Transform value(const ModelSubmodelTransform& t) {
     return {value(t.translation), value(t.orientation.rvec), value(t.orientation.uvec), value(t.orientation.fvec)};
 }
 using RoomTable = std::unordered_map<int,const d3scene::RoomState*>;
+void prepareFacingPart(d3scene::FrameData& frame,const d3scene::ObjectState& owner,
+    const poly_model& model,size_t part_index,const d3scene::Transform& world) {
+    const auto& part = model.submodel[part_index];
+    if (part.num_faces < 1 || part.faces[0].texnum < 0 || part.faces[0].texnum >= model.n_textures || !(part.rad > 0)) return;
+    const int texture = model.textures[part.faces[0].texnum];
+    if (texture < 0 || texture >= MAX_TEXTURES || !GameTextures[texture].used)
+        throw std::invalid_argument("Facing model part references missing material");
+    const int bitmap = GetTextureBitmapAtTime(texture,0,static_cast<float>(frame.simulation_time));
+    const int width = bm_w(bitmap,0), height = bm_h(bitmap,0);
+    if (width <= 0 || height <= 0) return;
+    d3scene::PreparedMesh sprite;
+    sprite.asset = d3scene::assets().publishMesh(2,d3scene::unitBillboardQuad());
+    sprite.owner = owner.handle; sprite.has_owner = true; sprite.room = owner.room;
+    sprite.alignment = d3scene::MeshAlignment::Camera;
+    sprite.world.position = world.position;
+    sprite.world.right = {part.rad,0,0}; sprite.world.up = {0,part.rad*height/width,0};
+    sprite.surface.bitmap = bitmap; sprite.surface.texture_alpha = true; sprite.surface.texture_wrap = false;
+    sprite.surface.unlit = true; sprite.surface.two_sided = true;
+    sprite.surface.alpha = static_cast<unsigned>((std::max)(0.f,(std::min)(1.f,GameTextures[texture].alpha))*255)/255.f;
+    sprite.surface.blend = GameTextures[texture].flags & TF_SATURATE ? d3scene::BlendMode::Additive : d3scene::BlendMode::Alpha;
+    sprite.surface.soft_depth_range = SceneFacingUsesSoftIntersection(model.name,GameTextures[texture].name) ? 2.f : 0.f;
+    frame.meshes.push_back(std::move(sprite));
+}
 struct ModelAppearance {
     float alpha = 1, deformation = 0;
     d3scene::Vec3 color{1,1,1};
@@ -113,6 +139,13 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::FrameDat
     for (auto& instance : data.objects) {
         auto* source = ObjGet(instance.handle);
         if (!source) throw std::logic_error("Object changed during presentation preparation");
+        instance.visible = source->type != OBJ_DUMMY;
+        if (source->flags & OF_ATTACHED) {
+            const auto* parent = ObjGet(source->attach_ultimate_handle);
+            instance.visible = instance.visible && parent && !(parent->render_type == RT_NONE && parent->type != OBJ_POWERUP &&
+                (parent->type == OBJ_PLAYER || parent->movement_type != MT_NONE));
+        }
+        if (!instance.visible) continue;
         if (source->render_type != RT_POLYOBJ && source->render_type != RT_WEAPON) continue;
         if (source->render_type == RT_WEAPON && (Weapons[source->id].flags & (WF_IMAGE_BITMAP | WF_IMAGE_VCLIP))) continue;
         int model_number = source->type == OBJ_MARKER ? Marker_polynum : source->rtype.pobj_info.model_num;
@@ -168,6 +201,10 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::FrameDat
             // Special billboard/glow geometry needs explicit effect preparation.
             part.draw = !(asset_part.authored_flags & (SOF_SHELL | SOF_FRONTFACE | SOF_FACING | SOF_GLOW | SOF_THRUSTER));
             part.draw = part.draw && (source->rtype.pobj_info.subobj_flags & (1u << i));
+            if ((asset_part.authored_flags & SOF_FACING) &&
+                !(asset_part.authored_flags & (SOF_SHELL | SOF_FRONTFACE | SOF_GLOW | SOF_THRUSTER)) &&
+                (source->rtype.pobj_info.subobj_flags & (1u << i)))
+                prepareFacingPart(data,instance,*model,i,d3scene::compose(instance.current,part.current));
             for (size_t j = 0; j < asset_part.geometry.polygons.size(); ++j) {
                 d3scene::SurfaceBinding binding;
                 binding.occlusion_class = d3scene::OcclusionClass::Model;

@@ -8,6 +8,7 @@
 #include <vector>
 #include <utility>
 #include <array>
+#include <unordered_map>
 
 namespace d3scene {
 
@@ -190,7 +191,9 @@ private:
     std::vector<RoomAssetRef> rooms_;
     std::vector<ModelAssetRef> models_;
     std::vector<ImageAssetRef> images_;
-    std::vector<ReflectionAssetRef> reflections_;
+    // Reflection identities span authored faces, compiled fields and shared
+    // environment sources. Storage must scale with live assets, not max ID.
+    std::unordered_map<uint32_t,ReflectionAssetRef> reflections_;
     TerrainAssetRef terrain_;
     std::vector<MeshAssetRef> meshes_;
     FogAssetRef fog_;
@@ -240,6 +243,7 @@ struct SurfaceBinding {
     bool lightmap_wrap = false;
     float lightmap_u_scale = 1, lightmap_v_scale = 1;
     float u_offset = 0, v_offset = 0, alpha = 1;
+    Vec2 texture_scale{1,1};
     bool draw_surface = true, texture_alpha = false;
     int32_t texture = -1, lightmap = -1, special = -1, portal = -1;
     uint32_t authored_flags = 0;
@@ -251,7 +255,7 @@ struct TerrainState {
     std::vector<SurfaceBinding> materials;
     std::vector<std::vector<SurfaceBinding>> patches;
 };
-enum class MeshAlignment : uint8_t { World, Camera, FacingEye };
+enum class MeshAlignment : uint8_t { World, Camera, FacingEye, CameraUpright, Axis };
 struct PreparedMesh {
     MeshAssetRef asset;
     SurfaceBinding surface;
@@ -259,7 +263,11 @@ struct PreparedMesh {
     Vec3 camera_translation; // sky follows the eye with authored half-height parallax
     float eye_distance = 0; // positive projects the world anchor onto a view-centered shell
     MeshAlignment alignment = MeshAlignment::World;
+    // Axis alignment preserves world.up (half the segment, toward its start)
+    // and uses the length of world.right as radius. Facing is view-local.
     int32_t room = -1;
+    uint32_t owner = 0;
+    bool has_owner = false; // same allocation-generation identity as ObjectState
 };
 struct Portal {
     int32_t polygon = -1, destination_room = -1, destination_portal = -1;
@@ -316,6 +324,7 @@ struct PreparedModelPart {
 // records. Unprepared objects MUST NOT be sent to a legacy draw fallback.
 struct ObjectState {
     uint32_t handle = 0;
+    bool visible = true; // presentation eligibility, independent of a camera query
     int32_t room = -1;
     uint8_t type = 0, render_type = 0, lighting_type = 0;
     uint16_t authored_id = 0;

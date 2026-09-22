@@ -14,6 +14,8 @@ param(
     [switch]$TerrainProbe,
     [switch]$SkyProbe,
     [switch]$SatelliteProbe,
+    [switch]$AtmosphereProbe,
+    [switch]$AxisProbe,
     [switch]$HistoryProbe,
     [switch]$DeformationProbe
 )
@@ -21,6 +23,8 @@ param(
 # Run only copied installations and copied pilot/save data. Never point Runtime
 # at Candidate or the normal installation: the game may write local cache files.
 $ErrorActionPreference = 'Stop'
+if ($AtmosphereProbe) { $SatelliteProbe = $true }
+if ($AxisProbe -and -not $SceneInspection) { throw 'Axis probe requires the explicit scene inspection executor.' }
 if ($DeformationProbe -and -not $SceneInspection) { throw 'Deformation probe requires the explicit scene inspection executor.' }
 if ($TerrainProbe -and -not $SceneInspection) { throw 'Terrain probe requires the explicit scene inspection executor.' }
 if ($SkyProbe -and -not $SceneInspection) { throw 'Sky probe requires the explicit scene inspection executor.' }
@@ -55,6 +59,8 @@ $manifest = [ordered]@{
     terrain_probe = [bool]$TerrainProbe
     sky_probe = [bool]$SkyProbe
     satellite_probe = [bool]$SatelliteProbe
+    atmosphere_probe = [bool]$AtmosphereProbe
+    axis_probe = [bool]$AxisProbe
     history_probe = [bool]$HistoryProbe
     executable = (Get-FileHash -LiteralPath $exe).Hash
     shaders = (Get-FileHash -LiteralPath (Join-Path $runtimePath 'descent3mastered.hog')).Hash
@@ -89,6 +95,8 @@ try {
         if ($TerrainProbe) { $arguments += '-scene-terrain-probe' }
         if ($SkyProbe) { $arguments += '-scene-sky-probe' }
         if ($SatelliteProbe) { $arguments += '-scene-satellite-probe' }
+        if ($AtmosphereProbe) { $arguments += '-scene-atmosphere-probe' }
+        if ($AxisProbe) { $arguments += '-scene-axis-probe' }
         if ($DeformationProbe) { $arguments += '-scene-deformation-probe' }
         $started = Get-Date
         $process = Start-Process -FilePath $exe -ArgumentList $arguments -WorkingDirectory $runtimePath -WindowStyle Hidden -PassThru

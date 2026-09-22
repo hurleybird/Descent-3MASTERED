@@ -30,6 +30,7 @@
 #include "damage.h"
 #include "player.h"
 #include "special_face.h"
+#include "terrain.h"
 
 bool SceneGeometryInspection() { return FindArg("-scene-inspection") != 0; }
 
@@ -233,6 +234,14 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance_history) {
     // Capture mutable authoring tables at the game/renderer boundary. Retained
     // presentations keep their own revision even if a face is edited or freed.
     std::unordered_map<int,d3scene::ReflectionAssetRef> reflections;
+    // Exterior content historically reflects the primary celestial anchor in
+    // white, independently of the satellite's visible tint/halo. Compile that
+    // appearance convention once; execution consumes the same reflection asset
+    // contract as interior materials, never the mutable terrain sky table.
+    d3scene::ReflectionData exterior_reflection_data;
+    const auto& primary_anchor = Terrain_sky.satellite_vectors[0];
+    exterior_reflection_data.sources.push_back({{primary_anchor.x,primary_anchor.y,primary_anchor.z},{1,1,1}});
+    const auto exterior_reflection = d3scene::assets().publishReflection(UINT32_MAX,std::move(exterior_reflection_data));
     uint32_t reflection_slot = MAX_SPECIAL_FACES;
     for (auto& room : data.rooms) {
       room.exterior = (room.authored_flags & RF_EXTERNAL) != 0;
@@ -279,6 +288,7 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance_history) {
         }
         surface.occlusion_class = SceneRoomOcclusionClass(surface.texture,room.exterior);
         resolveMaterial(surface,static_cast<float>(data.simulation_time),false,room.exterior);
+        if (room.exterior && surface.specular_strength > 0) surface.reflection = exterior_reflection;
         surface.lighting_modulation = room.light_scalar;
         surface.draw_surface = !(surface.authored_flags & FF_FLOATING_TRIG);
         if (surface.portal >= 0 && surface.portal < static_cast<int>(room.portals.size()))

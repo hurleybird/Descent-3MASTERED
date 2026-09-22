@@ -6,6 +6,12 @@
 #include "config.h"
 #include "game.h"
 #include <cstring>
+bool SceneFacingUsesSoftIntersection(const char* model_name,const char* texture_name) {
+    // Preserve the authored Gyro lamp treatment at material compilation, not
+    // as a renderer-side model-name branch.
+    return Render_soft_vis_effects && model_name && texture_name && !stricmp(model_name,"gyro.OOF") &&
+        (!stricmp(texture_name,"red flare1") || !stricmp(texture_name,"blue flare1"));
+}
 struct high_resolution_sky
 {
 	const char* texture_name;

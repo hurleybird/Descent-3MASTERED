@@ -144,7 +144,7 @@ uniform vec3 eye, camera_forward, exterior_fog_color;
 uniform vec2 exterior_fog_range;
 uniform vec3 base_color;
 uniform vec3 color_modulation;
-uniform vec2 light_scale, texture_offset;
+uniform vec2 light_scale, texture_offset, texture_scale;
 uniform float material_alpha;
 uniform float alpha_cutoff;
 uniform float lighting_modulation;
@@ -251,7 +251,8 @@ vec3 applySceneFog(vec3 radiance,out float transmission) {
     return radiance;
 }
 void main() {
-    vec4 base=use_texture != 0 ? texture(colortexture,texcoord+texture_offset) : vec4(base_color,1);
+    vec2 material_uv=texcoord*texture_scale+texture_offset;
+    vec4 base=use_texture != 0 ? texture(colortexture,material_uv) : vec4(base_color,1);
     base.a=(use_texture_alpha != 0 ? base.a : 1.0)*vertex_alpha*material_alpha;
     if (soft_depth_range > 0.0) {
         ivec2 size = textureSize(opaque_depth,0);
@@ -304,7 +305,7 @@ void main() {
             reflected += texelFetch(scene_lights,light+1).rgb*attenuation*response*texelFetch(scene_lights,light+3).z;
         }
         reflected *= mix(vec3(1),clamp(use_reflection_field != 0 ? field_modulation : baked,vec3(0),vec3(1)),specular_response.z);
-        float mask = texture(specular_texture,texcoord+texture_offset).a;
+        float mask = texture(specular_texture,material_uv).a;
         color.rgb += clamp(reflected*specular_response.x,vec3(0),vec3(1))*
             clamp(mask*specular_response.w*vertex_alpha,0.0,1.0);
     }
@@ -1028,6 +1029,7 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
         glUniform1f(scene_shader.FindUniform("alpha_cutoff"),surface.material.alpha_cutoff);
         glUniform2f(scene_shader.FindUniform("light_scale"),surface.lightmap_u_scale,surface.lightmap_v_scale);
         glUniform2f(scene_shader.FindUniform("texture_offset"),surface.u_offset,surface.v_offset);
+        glUniform2f(scene_shader.FindUniform("texture_scale"),surface.texture_scale.x,surface.texture_scale.y);
         glUniform1f(scene_shader.FindUniform("material_alpha"),surface.alpha);
         if(surface.material.blended()) {
             glEnablei(GL_BLEND,0);

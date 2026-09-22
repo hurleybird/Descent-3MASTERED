@@ -37,6 +37,7 @@
 #include "gameloop.h"
 #include "config.h"
 #include "retained_polymodel.h"
+#include "../Descent3/SceneMaterialBindings.h"
 
 
 #include <stdio.h>
@@ -110,22 +111,6 @@ static bool PolymodelUseSoftGlowEffects(const poly_model* pm)
 	// Its legacy radius-sized forward bias pulls the lights through the shell;
 	// other polymodel coronas retain their authored hard presentation.
 	return stricmp(pm->name, "pumpingpipelarge.OOF") == 0;
-}
-
-static bool PolymodelFacingUsesSoftIntersection(const poly_model* pm,
-	const char* texture_name)
-{
-	if (!Render_soft_vis_effects || !pm ||
-		!texture_name || stricmp(pm->name, "gyro.OOF") != 0)
-	{
-		return false;
-	}
-
-	// The Gyro police bot's red and blue lamps intersect their own housing.
-	// Restrict soft depth intersection to those authored flare textures: its
-	// green facing light and every other model-facing sprite remain legacy-hard.
-	return stricmp(texture_name, "red flare1") == 0 ||
-		stricmp(texture_name, "blue flare1") == 0;
 }
 
 static int Multicolor_texture=-1;
@@ -2455,7 +2440,7 @@ void RenderSubmodel (poly_model *pm,bsp_info *sm, uint f_render_sub)
 	
 			rend_SetZBufferWriteMask (0);
 			const bool use_soft_intersection =
-				PolymodelFacingUsesSoftIntersection(pm, GameTextures[texture].name);
+				SceneFacingUsesSoftIntersection(pm->name, GameTextures[texture].name);
 			if (use_soft_intersection)
 				rend_SetSoftParticleState(1);
 			g3_DrawBitmap (&pos,sm->rad,(sm->rad*bm_h(bm_handle,0))/bm_w(bm_handle,0),bm_handle);
