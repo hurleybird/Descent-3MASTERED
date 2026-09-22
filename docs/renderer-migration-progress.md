@@ -1,5 +1,26 @@
 # Renderer migration checkpoint
 
+## Continuation: view-owned temporal history
+
+A pure history store keys completed views by kind and history identity. Preparing
+a view does not advance history; replaying the same presentation retains the
+same predecessor. Reusing a key for a different camera in one presentation is
+an error. Scene lifetime, camera owner/mode, explicit cuts, projection/viewport
+changes and skipped presentations invalidate reuse. Main-world post processing
+consumes this state rather than letting a later canvas draw choose the previous
+camera. Game view extraction supplies forward/rear mode explicitly.
+
+Full build and 4,872 CPU checks pass. All eight `scene-history-effects` captures
+complete; differences from the prior radiance corpus are at most two channel
+levels (AO history/jitter now starts from the explicit reset). A new rotating
+camera fixture cuts at frame 30, with distinct manifests so it cannot be mistaken
+for normal-view parity. Both `scene-history-probe-cut` and
+`scene-history-probe-motion` complete for saves 001/002; cut 001 and moving 002
+screenshots were inspected. The motion fixture repeats exactly for 002; 001 has
+only eight changed pixels, maximum one channel level, not a byte-identical claim.
+Dynamic-object motion vectors and effect/consumer-specific history validity still
+need migration; this checkpoint establishes camera-history ownership only.
+
 ## Continuation: scene image products and surface-radiance AO
 
 Removed the game-facing `CaptureBloomSource` API and late game-loop capture. The

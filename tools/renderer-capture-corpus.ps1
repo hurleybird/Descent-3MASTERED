@@ -11,6 +11,7 @@ param(
     [switch]$VertexLighting,
     [switch]$TerrainProbe,
     [switch]$SkyProbe,
+    [switch]$HistoryProbe,
     [switch]$DeformationProbe
 )
 
@@ -20,6 +21,7 @@ $ErrorActionPreference = 'Stop'
 if ($DeformationProbe -and -not $SceneInspection) { throw 'Deformation probe requires the explicit scene inspection executor.' }
 if ($TerrainProbe -and -not $SceneInspection) { throw 'Terrain probe requires the explicit scene inspection executor.' }
 if ($SkyProbe -and -not $SceneInspection) { throw 'Sky probe requires the explicit scene inspection executor.' }
+if ($HistoryProbe -and -not $SceneInspection) { throw 'History probe requires the explicit scene inspection executor.' }
 $runtimePath = (Resolve-Path -LiteralPath $Runtime).Path
 $seedPath = (Resolve-Path -LiteralPath $Seeds).Path
 $outputPath = [IO.Path]::GetFullPath($Output)
@@ -44,6 +46,7 @@ $manifest = [ordered]@{
     vertex_lighting = [bool]$VertexLighting
     terrain_probe = [bool]$TerrainProbe
     sky_probe = [bool]$SkyProbe
+    history_probe = [bool]$HistoryProbe
     executable = (Get-FileHash -LiteralPath $exe).Hash
     shaders = (Get-FileHash -LiteralPath (Join-Path $runtimePath 'descent3mastered.hog')).Hash
     pilot = (Get-FileHash -LiteralPath (Join-Path $seedPath 'Jeff.plt')).Hash
@@ -72,6 +75,7 @@ try {
         elseif ($Profile -eq 'antialias') { $arguments += @('-msaa','4','-ssaa','2','-noao','-nobloom') }
         else { $arguments += @('-msaa','4','-ssaa','2','-ao','-bloom') }
         if ($SceneInspection) { $arguments += '-scene-inspection' }
+        if ($HistoryProbe) { $arguments += '-scene-history-probe' }
         if ($VertexLighting) { $arguments += '-noperpixellighting' }
         if ($TerrainProbe) { $arguments += '-scene-terrain-probe' }
         if ($SkyProbe) { $arguments += '-scene-sky-probe' }

@@ -351,6 +351,7 @@ struct View {
     uint64_t history_key = 0;
     Transform camera;
     uint32_t camera_owner = 0;
+    uint32_t camera_variant = 0; // discontinuous source mode, e.g. forward/rear
     bool attached_camera = false;
     int32_t room = -1;
     uint32_t excluded_object = 0;

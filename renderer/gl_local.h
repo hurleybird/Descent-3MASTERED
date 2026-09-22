@@ -49,6 +49,7 @@
 #include "mono.h"
 #include "pserror.h"
 #include "SceneView.h"
+#include "SceneHistory.h"
 #include "gl_shared.h"
 #include "IRenderer.h"
 #include <unordered_map>
@@ -626,6 +627,8 @@ private:
 	void DrawMotionVectorDebugPreview(int supersampling_factor);
 	void UseSceneDrawBuffers();
 	void ExportOpaqueScene(const d3scene::Camera&);
+	d3scene::ViewHistory scene_view_history;
+	bool scene_temporal_reset = true;
 	// AO changes surface radiance, never fog/emissive radiance. This image stays
 	// in lockstep with scene compositing instead of estimating it from color.
 	GLuint scene_ao_radiance_texture = 0;

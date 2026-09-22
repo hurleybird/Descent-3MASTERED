@@ -3,6 +3,7 @@
 #include "../../renderer/ScenePortals.h"
 #include "../../renderer/SceneGeometry.h"
 #include "../../renderer/SceneCompositing.h"
+#include "../../renderer/SceneHistory.h"
 #include <cmath>
 #include <stdexcept>
 
@@ -317,5 +318,57 @@ int runSceneViewTests() {
     bool rejected_background = false;
     try { d3scene::unproject(asymmetric,0,0,1); } catch (const std::invalid_argument&) { rejected_background = true; }
     check(rejected_background,"Infinite background depth became a fabricated world position");
+    d3scene::ViewHistory histories;
+    d3scene::FrameData tick; tick.scene_lifetime = 7; tick.sequence = 1;
+    auto main_view = view(); main_view.camera_owner = 42;
+    auto first = histories.prepare(tick,main_view,d3scene::prepareCamera(main_view));
+    check(!first.previous_valid,"First view fabricated temporal history");
+    tick.sequence = 2;
+    check(!histories.prepare(tick,main_view,d3scene::prepareCamera(main_view)).previous_valid,
+        "Preparing an unexecuted view advanced history");
+    histories.commit(first);
+    main_view.camera.position.x = 3;
+    const auto second = histories.prepare(tick,main_view,d3scene::prepareCamera(main_view));
+    check(second.previous_valid && second.previous.view_projection == first.current.view_projection,
+        "Moving view did not retain its own predecessor");
+    histories.commit(second);
+    const auto replay = histories.prepare(tick,main_view,d3scene::prepareCamera(main_view));
+    check(replay.previous_valid && replay.previous.view_projection == first.current.view_projection,
+        "Pass replay replaced previous camera with the current one");
+    auto auxiliary = main_view; auxiliary.kind = d3scene::ViewKind::Auxiliary;
+    check(!histories.prepare(tick,auxiliary,d3scene::prepareCamera(auxiliary)).previous_valid,
+        "Auxiliary view borrowed main-view history through a numeric key collision");
+    histories.commit(histories.prepare(tick,auxiliary,d3scene::prepareCamera(auxiliary)));
+    bool conflicting_replay = false;
+    auto moved_replay = main_view; moved_replay.camera.position.y += 1;
+    try { histories.prepare(tick,moved_replay,d3scene::prepareCamera(moved_replay)); }
+    catch (const std::logic_error&) { conflicting_replay = true; }
+    check(conflicting_replay,"One history key accepted two different cameras in one presentation");
+    tick.sequence = 3;
+    for (int change = 0; change < 6; ++change) {
+        auto changed = main_view;
+        if (change == 0) changed.camera_owner++;
+        if (change == 1) changed.camera_variant++;
+        if (change == 2) changed.camera_cut = true;
+        if (change == 3) changed.viewport.width++;
+        if (change == 4) changed.projection_anchor.x++;
+        if (change == 5) changed.zoom *= 2;
+        check(!histories.prepare(tick,changed,d3scene::prepareCamera(changed)).previous_valid,
+            "Discontinuous camera identity or projection reused temporal history");
+    }
+    check(histories.prepare(tick,main_view,d3scene::prepareCamera(main_view)).previous_valid,
+        "Uncommitted alternative views damaged main-view history");
+    tick.sequence = 4;
+    check(!histories.prepare(tick,main_view,d3scene::prepareCamera(main_view)).previous_valid,
+        "Skipped presentation reused stale motion as a one-frame predecessor");
+    tick.sequence = 3; tick.scene_lifetime++;
+    check(!histories.prepare(tick,main_view,d3scene::prepareCamera(main_view)).previous_valid,
+        "Level transition retained the previous scene's history");
+    bool older_commit = false;
+    try { histories.commit(first); } catch (const std::logic_error&) { older_commit = true; }
+    check(older_commit,"An older presentation overwrote newer view history");
+    histories.clear(); tick.scene_lifetime--;
+    check(!histories.prepare(tick,main_view,d3scene::prepareCamera(main_view)).previous_valid,
+        "Renderer reset retained temporal camera state");
     return Checks;
 }

@@ -221,6 +221,8 @@ void main() {
 }
 
 void GL4Renderer::DestroySceneResources() {
+    scene_view_history.clear();
+    scene_temporal_reset = true;
     if (scene_ao_radiance_texture) {
         GLint target; glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING,&target);
         for (const auto& framebuffer : framebuffers) if (framebuffer.Handle()) {
@@ -494,6 +496,12 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
     if (scene_asset_lifetime != presentation.data().scene_lifetime) {
         DestroySceneResources();
         scene_asset_lifetime = presentation.data().scene_lifetime;
+    }
+    const auto history = scene_view_history.prepare(presentation.data(),view,visibility.camera);
+    if (view.kind == d3scene::ViewKind::Main) {
+        scene_temporal_reset = !history.previous_valid;
+        have_previous_view_projection = history.previous_valid;
+        std::memcpy(previous_view_projection,history.previous.view_projection.data(),sizeof(previous_view_projection));
     }
     if (!scene_shader.Handle()) scene_shader.AttachSource(SceneVertexShader.c_str(), SceneFragmentShader.c_str());
     UploadSceneFrame(presentation);
@@ -775,6 +783,7 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
     glActiveTexture(GL_TEXTURE0); Last_texel_unit_set = 0;
     rendTEMP_UnbindVertexBuffer();
     rend_NotifyDepthBufferWrite();
+    scene_view_history.commit(history);
     // Broad-phase geometry inspection is NOT gameplay visibility. Do not mark
     // every submitted room explored merely because it was depth-tested.
     d3scene::VisibilityReport result;

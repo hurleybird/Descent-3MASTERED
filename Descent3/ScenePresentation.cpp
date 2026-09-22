@@ -230,6 +230,17 @@ void RenderGameSceneView(const d3scene::Presentation& frame, d3scene::View view)
         Error("Renderer migration is incomplete. This test build requires -scene-inspection; use the preserved Candidate for gameplay.");
     view.geometry_inspection = true;
     view.feedback = d3scene::NoFeedback;
+    if (FindArg("-scene-history-probe")) {
+        const int index = AutomatedCaptureFrameIndex();
+        const float angle = .006f*index+(index >= 30 ? .35f : 0.f);
+        const float c = std::cos(angle), s = std::sin(angle);
+        const auto right = view.camera.right, forward = view.camera.forward;
+        view.camera.right = {right.x*c-forward.x*s,right.y*c-forward.y*s,right.z*c-forward.z*s};
+        view.camera.forward = {forward.x*c+right.x*s,forward.y*c+right.y*s,forward.z*c+right.z*s};
+        view.camera_variant = index >= 30 ? 2 : 0;
+        view.camera_cut = index == 30;
+        AutomatedCaptureLog("scene history fixture frame=%d cut=%d variant=%u",index,view.camera_cut,view.camera_variant);
+    }
     if ((FindArg("-scene-terrain-probe") || FindArg("-scene-sky-probe")) && frame.data().terrain.asset) {
         const auto& grid = frame.data().terrain.asset->grid();
         const uint32_t x = grid.width/2, z = grid.depth/4;

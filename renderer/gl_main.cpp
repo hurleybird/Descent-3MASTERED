@@ -2217,16 +2217,12 @@ bool GL4Renderer::BeginPostPresentFrameInternal(bool defer_bloom_composite)
 			visible_width != (int)present_framebuffer->Width() ||
 			visible_height != (int)present_framebuffer->Height();
 
-		float near_z = last_nearz;
-		float far_z = last_farz;
-		if (fabsf(ao_projection[10] - 1.0f) > 1e-6f &&
-			fabsf(ao_projection[10] + 1.0f) > 1e-6f)
-		{
-			near_z = ao_projection[14] / (ao_projection[10] - 1.0f);
-			far_z = ao_projection[14] / (ao_projection[10] + 1.0f);
-			if (near_z <= 0.0f) near_z = 1.0f;
-			if (far_z <= near_z) far_z = near_z * 1000.0f;
-		}
+		const float near_denominator = -ao_projection[11]-ao_projection[10];
+		const float far_denominator = ao_projection[11]-ao_projection[10];
+		const float near_z = fabsf(near_denominator) > 1.e-6f ? fabsf(ao_projection[14]/near_denominator) : 1.f;
+		// Infinite projection has no far plane. This is the AO working range,
+		// not a fabricated finite projection used to linearize scene depth.
+		const float far_z = fabsf(far_denominator) > 1.e-6f ? fabsf(ao_projection[14]/far_denominator) : 10000.f;
 
 		bool deferred_ao = ao_scene_valid && bloom_source_valid &&
 			bloom_source_framebuffer.Handle() != 0 &&
@@ -2241,7 +2237,7 @@ bool GL4Renderer::BeginPostPresentFrameInternal(bool defer_bloom_composite)
 		// Motion data from the last live frame is stale while paused, so exclude
 		// both dynamic and reconstructed motion rather than reprojecting it.
 		const bool ao_motion_frozen = MotionVectorsFrozen();
-		const bool ao_reset_temporal_history = false;
+		const bool ao_reset_temporal_history = scene_temporal_reset;
 		GLuint ao_velocity_texture = 0;
 		GLuint ao_object_id_texture = 0;
 		bool ao_has_dynamic_velocity = false;
@@ -2487,12 +2483,9 @@ bool GL4Renderer::BeginPostPresentFrameInternal(bool defer_bloom_composite)
 		}
 	}
 
-	if (!MotionVectorsFrozen() && framebuffer_ok && captured_scene_view_projection_valid)
-	{
-		memcpy(previous_view_projection, captured_scene_view_projection, sizeof(previous_view_projection));
-		have_previous_view_projection = true;
-	}
-	else if (!MotionVectorsFrozen() && framebuffer_ok && have_current_view_projection)
+	// Scene history is committed by its own view identity. Legacy-only canvas
+	// presentation must not overwrite that predecessor during main-view post.
+	if (!captured_scene_view_projection_valid && !MotionVectorsFrozen() && framebuffer_ok && have_current_view_projection)
 	{
 		memcpy(previous_view_projection, current_view_projection, sizeof(previous_view_projection));
 		have_previous_view_projection = true;
