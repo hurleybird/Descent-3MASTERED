@@ -2663,6 +2663,10 @@ void GL4Renderer::EndPostPresentFrame()
 		motion_vectors_capture_locked = false;
 		post_present_pending_swap = false;
 		cockpit_scene_frame_active = false;
+		// Presentation inputs expire with the composed frame. Menu/canvas frames
+		// must not reuse movement from the last world view.
+		scene_delta_time = scene_afterburner_factor = 0;
+		scene_player_control_delta = {};
 	}
 	if (msaa_downshift_release_frames > 0)
 	{

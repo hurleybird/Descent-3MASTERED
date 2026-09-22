@@ -233,4 +233,5 @@ void ObjInitPositionHistory(object *obj);
 void ObjFreePositionHistory(object *obj);
 void ObjResetPositionHistory(void);
 void ObjReInitPositionHistory(void);
+vector GetPlayerControlledTranslationDelta();
 #endif

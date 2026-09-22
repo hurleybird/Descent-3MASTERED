@@ -270,6 +270,8 @@ PresentationRef Presentation::freeze(const FrameData& data) {
     require(data.sequence != 0 && data.scene_lifetime != 0, "Unidentified presentation frame");
     require(std::isfinite(data.simulation_time) && std::isfinite(data.delta_time) && data.delta_time >= 0,
         "Invalid presentation clock");
+    require(finite(data.player_control_delta) && std::isfinite(data.afterburner_factor) &&
+        data.afterburner_factor >= 0 && data.afterburner_factor <= 1,"Invalid presentation motion inputs");
     require((data.pending_domains & ~AllPendingDomains) == 0, "Unknown pending scene domain");
     require(data.lighting_quality == LightingQuality::Vertex || data.lighting_quality == LightingQuality::Pixel,
         "Unknown lighting quality");

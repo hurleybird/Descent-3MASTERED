@@ -1,5 +1,17 @@
 # Renderer migration checkpoint
 
+## Continuation: presentation-owned movement inputs
+
+Motion composition now consumes frozen frame time, realized player-control
+translation and afterburner intensity. Removed the simulation-to-renderer setter
+side channel; simulation retains ownership and extraction copies the result.
+Inputs expire at frame completion and reject nonfinite/out-of-range publication.
+Full build and 5,200 checks pass. Moving-camera, motion-enabled 000/002 captures
+complete: 002 is exact against scene-compositor-motion-effects; 000 differs around
+the robot (mean RGB error .0373, 0.548% of pixels above two channel values). The
+000 output was visually inspected. Camera-reconstruction fallback and pause-state
+ownership remain the next motion boundary to replace. No Candidate deployment.
+
 ## Continuation: complete world composition before overlay rendering
 
 Removed the cockpit-dependent deferred-bloom branch and its cross-layer pending

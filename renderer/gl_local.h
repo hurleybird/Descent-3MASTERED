@@ -251,6 +251,8 @@ class GL4Renderer : public IRenderer
 	bool frozen_static_motion_valid = false;
 	bool cockpit_scene_frame_active = false;
 	float presentation_gamma = 1.0f;
+	float scene_delta_time = 0, scene_afterburner_factor = 0;
+	d3scene::Vec3 scene_player_control_delta;
 	float current_projection[16] = {};
 	float current_view_projection[16] = {};
 	float current_inverse_view_projection[16] = {};

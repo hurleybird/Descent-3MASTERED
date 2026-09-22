@@ -504,8 +504,6 @@ renderer_draw_call_3d_category rend_Set3DDrawCallCategory(renderer_draw_call_3d_
 renderer_draw_call_3d_category rend_Get3DDrawCallCategory();
 void rend_SetMotionVectorDebugSample(const renderer_motion_vector_debug_sample *sample);
 void rend_GetMotionVectorDebugSample(renderer_motion_vector_debug_sample *sample);
-void rend_SetMotionBlurPlayerTranslationDelta(const vector *world_delta);
-void rend_GetMotionBlurPlayerTranslationDelta(vector *world_delta);
 
 #ifdef __cplusplus
 class renderer_3d_draw_call_scope

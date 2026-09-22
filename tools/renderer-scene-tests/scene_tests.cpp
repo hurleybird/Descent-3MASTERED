@@ -144,7 +144,21 @@ void frameTests() {
     material.specular_strength = 0;
     d3scene::ObjectState object;
     object.handle = 42; data.objects.push_back(object);
+    data.player_control_delta = {1,2,3};
+    data.afterburner_factor = .75f;
     const auto frozen = d3scene::Presentation::freeze(data);
+    data.player_control_delta = {};
+    data.afterburner_factor = 0;
+    check(frozen->data().player_control_delta.y == 2 && frozen->data().afterburner_factor == .75f,
+        "Presentation motion inputs alias simulation state");
+    data.player_control_delta.z = std::numeric_limits<float>::quiet_NaN();
+    rejects([&] { d3scene::Presentation::freeze(data); }, "Nonfinite controlled translation accepted");
+    data.player_control_delta = {};
+    for (float invalid : {-1.0f, 1.01f, std::numeric_limits<float>::infinity()}) {
+        data.afterburner_factor = invalid;
+        rejects([&] { d3scene::Presentation::freeze(data); }, "Invalid afterburner factor accepted");
+    }
+    data.afterburner_factor = 0;
     data.lighting_quality = d3scene::LightingQuality::Vertex;
     const auto low_quality = d3scene::Presentation::freeze(data);
     check(low_quality->data().lighting_quality == d3scene::LightingQuality::Vertex &&

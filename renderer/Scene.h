@@ -377,6 +377,8 @@ struct FrameData {
     double simulation_time = 0;
     float delta_time = 0;
     bool paused = false;
+    Vec3 player_control_delta; // realized player-controlled translation, not camera motion
+    float afterburner_factor = 0;
     LightingQuality lighting_quality = LightingQuality::Pixel;
     uint32_t pending_domains = AllPendingDomains;
     std::vector<RoomState> rooms;

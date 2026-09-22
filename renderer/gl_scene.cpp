@@ -327,6 +327,8 @@ void main() {
 
 void GL4Renderer::DestroySceneResources() {
     scene_view_history.clear();
+    scene_delta_time = scene_afterburner_factor = 0;
+    scene_player_control_delta = {};
     scene_temporal_reset = true;
     if (scene_ao_radiance_texture) {
         GLint target; glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING,&target);
@@ -737,6 +739,9 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
     }
     const auto history = scene_view_history.prepare(presentation.data(),view,visibility.camera);
     if (view.kind == d3scene::ViewKind::Main) {
+        scene_delta_time = presentation.data().delta_time;
+        scene_afterburner_factor = presentation.data().afterburner_factor;
+        scene_player_control_delta = presentation.data().player_control_delta;
         scene_temporal_reset = !history.previous_valid;
         have_previous_view_projection = history.previous_valid;
         std::memcpy(previous_view_projection,history.previous.view_projection.data(),sizeof(previous_view_projection));

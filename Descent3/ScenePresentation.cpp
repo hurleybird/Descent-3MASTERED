@@ -217,6 +217,9 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance_history) {
     const unsigned int simulation_random = ps_rand_get_state();
     const auto source = ExtractGamePresentation(Gametime, Frametime, Game_paused, advance_history);
     auto data = source->data();
+    const auto control_delta = GetPlayerControlledTranslationDelta();
+    data.player_control_delta = {control_delta.x,control_delta.y,control_delta.z};
+    data.afterburner_factor = (std::max)(0.f,(std::min)(1.f,Render_afterburner_visual_factor));
     data.lighting_quality = Render_preferred_state.per_pixel_lighting ?
         d3scene::LightingQuality::Pixel : d3scene::LightingQuality::Vertex;
     if (Player_object) {

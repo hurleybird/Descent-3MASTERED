@@ -524,7 +524,7 @@ void GL4Renderer::ApplyPixelMotionBlur(int supersampling_factor)
 		std::min(OpenGL_preferred_state.pixel_motion_blur_strength, 4.0f));
 	float legacy_object_strength = std::max(0.0f,
 		std::min(OpenGL_preferred_state.pixel_motion_blur_legacy_object_strength, 4.0f));
-	const float afterburner_factor = std::max(0.0f, std::min(Render_afterburner_visual_factor, 1.0f));
+	const float afterburner_factor = scene_afterburner_factor;
 	const float afterburner_blur_multiplier = std::max(0.0f,
 		std::min(OpenGL_preferred_state.afterburner_pixel_blur_multiplier, 4.0f));
 	const float afterburner_blur_scale = 1.0f + (afterburner_factor * afterburner_blur_multiplier);
@@ -579,7 +579,7 @@ void GL4Renderer::ApplyPixelMotionBlur(int supersampling_factor)
 		glUniform2f(motionblur_velocity_uv_origin, uv_origin_x, uv_origin_y);
 	if (motionblur_velocity_uv_scale != -1)
 		glUniform2f(motionblur_velocity_uv_scale, uv_scale_x, uv_scale_y);
-	float frame_time = Frametime;
+	float frame_time = scene_delta_time;
 	if (frame_time < 0.001f)
 		frame_time = PIXEL_MOTION_BLUR_REFERENCE_FRAME_TIME;
 	float frame_scale = PIXEL_MOTION_BLUR_REFERENCE_FRAME_TIME / frame_time;
@@ -634,10 +634,8 @@ void GL4Renderer::ApplyPixelMotionBlur(int supersampling_factor)
 		glUniform1i(motionblur_has_dynamic_velocity, has_dynamic_velocity ? 1 : 0);
 	if (motionblur_player_translation_delta != -1)
 	{
-		vector player_translation_delta = {};
-		rend_GetMotionBlurPlayerTranslationDelta(&player_translation_delta);
 		glUniform3f(motionblur_player_translation_delta,
-			player_translation_delta.x, player_translation_delta.y, player_translation_delta.z);
+			scene_player_control_delta.x, scene_player_control_delta.y, scene_player_control_delta.z);
 	}
 
 	rend_ClearBoundTextures();

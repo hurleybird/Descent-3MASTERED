@@ -1293,6 +1293,11 @@ static vector Motion_blur_external_velocity = {};
 static int Motion_blur_player_control_handle = -1;
 static float Motion_blur_player_control_gametime = -1.0f;
 
+vector GetPlayerControlledTranslationDelta()
+{
+	return Motion_blur_player_control_delta;
+}
+
 static void ResetMotionBlurPlayerTranslation()
 {
 	Motion_blur_player_control_velocity = {};
@@ -1301,7 +1306,6 @@ static void ResetMotionBlurPlayerTranslation()
 	Motion_blur_external_velocity = {};
 	Motion_blur_player_control_handle = -1;
 	Motion_blur_player_control_gametime = -1.0f;
-	rend_SetMotionBlurPlayerTranslationDelta(NULL);
 }
 
 static void UpdateMotionBlurPlayerTranslation(const object& obj, bool apply_player_thrust)
@@ -1367,7 +1371,6 @@ static void UpdateMotionBlurPlayerTranslation(const object& obj, bool apply_play
 
 	Motion_blur_player_control_gametime = Gametime;
 	Motion_blur_player_control_delta = player_delta;
-	rend_SetMotionBlurPlayerTranslationDelta(&player_delta);
 }
 
 static void FinalizeMotionBlurPlayerTranslation(const object& obj)
@@ -1389,8 +1392,6 @@ static void FinalizeMotionBlurPlayerTranslation(const object& obj)
 			actual_delta - Motion_blur_external_translation_delta;
 		Motion_blur_player_control_velocity =
 			obj.mtype.phys_info.velocity - Motion_blur_external_velocity;
-		rend_SetMotionBlurPlayerTranslationDelta(
-			&Motion_blur_player_control_delta);
 	}
 }
 
