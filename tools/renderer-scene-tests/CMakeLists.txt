@@ -4,6 +4,10 @@ enable_testing()
 add_executable(renderer_scene_tests
     scene_tests.cpp
     view_tests.cpp
+    model_pose_tests.cpp
+    ../../model/ModelPose.cpp
+    ../../vecmat/vector.cpp
+    ../../fix/fix.cpp
     ../../renderer/Scene.cpp
     ../../renderer/SceneView.cpp
     ../../Descent3/SceneExtraction.cpp)

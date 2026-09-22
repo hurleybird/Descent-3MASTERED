@@ -54,6 +54,56 @@ Validation:
 - No objects, terrain, lighting, effects, cockpit, portal feedback or shadows
   were silently marked complete by this change. Continue their migration.
 
+## Continuation: instance-owned model pose evaluation
+
+`model/ModelPose.h/.cpp` is now the single production animation evaluator.
+It reads authored tracks, accepts explicit simulation time, and returns owned
+submodel angles/translations without touching shared `bsp_info` scratch, RNG,
+render state or motion history. Hierarchy composition returns owned local-to-model
+transforms, handles parents appearing after children, and rejects invalid/cyclic
+parent chains. It preserves the legacy matrix-interpolation and timed/null-input
+conventions; this is an ownership migration, not a new animation aesthetic.
+
+The old interpolation implementations and separate SetModelAngles/SetModelInterpPos
+entry points were removed. SetModelAnglesAndPos is a remaining simulation/legacy
+scratch adapter to the one evaluator, with its old mask semantics. Both
+GetPolyModelPointInWorld overloads now own their pose and transforms instead of
+rewriting model scratch. Existing explicit submodel offset adjustments are applied
+to the local pose; no cancelled cockpit geometry work was resumed. Attached
+effects no longer pre-write shared pose before their point queries.
+
+Validation and discovered defects:
+
+- 2,119 CPU checks pass in total. A test-only frozen copy of the former evaluator
+  compares 404 combinations of timed/uniform tracks, model formats, animation
+  inputs and clocks, plus null inputs. Checks also cover independent held poses,
+  no source mutation/RNG calls, single-key tracks, invalid input, rest-pose bank
+  initialization, and hierarchy position/direction parity with the old point walk.
+- The full game builds. Initial captures passed saves 000/001 but failed 002 in
+  collision evaluation: SetNormalizedTimeObj could leave timed player/weapon and
+  unassigned track inputs uninitialized. It now initializes every output slot.
+  All in-repo callers provide MAX_SUBOBJECTS arrays. This was fixed at normalization,
+  not hidden by weakening the evaluator's input checks. Failed evidence is retained
+  in `model-pose-corpus-clean`; the focused successful retry is
+  `model-pose-normalized-clean`.
+- Final eight-save run `model-pose-final-clean` loaded/captured/exited successfully.
+  `model-pose-final-parity.json` compares against `scene-view-corpus-clean`:
+  seven exact captures; save002 mean RGB delta 0.001182364/255, 0.027126736% pixels
+  above two levels, maximum seven. Save002 was visually inspected. These magnitudes
+  are within previously measured repeat variation, not proof of full equivalence.
+- The prior view-query executable/HOG is preserved in
+  `checkpoints/view-query-b7951bf`; current verification binary is in `scene-view-test`.
+  User-facing `scene-test`, Candidate and Previous Candidate were not replaced.
+  Candidate executable/HOG hashes remain unchanged.
+
+Limits/next upstream cut: this does NOT publish model assets/instance poses into
+the immutable scene yet, render objects, or complete ObjectPreparation. The
+evaluator still reads legacy authored model storage at preparation time. Move
+authored model geometry/hierarchy into revisioned immutable assets, normalize
+instance animation/effects once during preparation, and publish owned poses for
+all views. Collision still consumes the explicit scratch adapter; audit/migrate
+its consumers rather than claiming all shared state has disappeared. No shadows.
+
 ## Preserved room-inspection test build
 
 - Runtime: `C:/tmp/D3RendererVerification/scene-test` (separate 2 GB copy).

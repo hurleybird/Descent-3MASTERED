@@ -2226,7 +2226,6 @@ void RenderSubmodelFacesUnsorted (poly_model *pm,bsp_info *sm)
 }
 
 
-void BuildModelAngleMatrix( matrix *mat, angle ang,vector *axis);
 void StartLightInstance (vector *,matrix *);
 void DoneLightInstance();
 

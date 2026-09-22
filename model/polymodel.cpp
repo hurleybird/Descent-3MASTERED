@@ -20,6 +20,7 @@
 #include <unordered_map>
 #include "objinfo.h"
 #include "polymodel.h"
+#include "ModelPose.h"
 #include "pserror.h"
 #include "3d.h"
 #include "mono.h"
@@ -792,31 +793,6 @@ int ReloadModelTextures (int modelnum)
 	return 1;
 }
 
-void BuildModelAngleMatrix( matrix *mat, angle ang,vector *axis)
-{
-	float x,y,z;
-	float s,c,t;
-
-	x = axis->x;
-	y = axis->y;
-	z = axis->z;
-
-	s = (float)FixSin(ang);
-	c = (float)FixCos(ang);
-	t = 1.0f - c;
-
-	mat->rvec.x = t*x*x + c;
-	mat->rvec.y = t*x*y + s*z;
-	mat->rvec.z = t*x*z - s*y;
-
-	mat->uvec.x = t*x*y - s*z;
-	mat->uvec.y = t*y*y + c;
-	mat->uvec.z = t*y*z + s*x;		
-
-	mat->fvec.x = t*x*z + s*y;
-	mat->fvec.y = t*y*z - s*x;
-	mat->fvec.z = t*z*z + c;
-}
 
 void SetPolymodelProperties (bsp_info *subobj,char *props)
 {
@@ -2292,9 +2268,9 @@ void SetNormalizedTimeObjTimed(object *obj, float *normalized_time)
 {
 	int i,j;
 	poly_model *pm=&Poly_models[obj->rtype.pobj_info.model_num];
-	object_info *obj_info = &Object_info[obj->id];
 
 	if(obj->type == OBJ_PLAYER || obj->type == OBJ_WEAPON) return;
+	object_info *obj_info = &Object_info[obj->id];
 
 	// Setup all the subobjects for the keyframe
 	float frame=obj->rtype.pobj_info.anim_frame;
@@ -2318,7 +2294,7 @@ void SetNormalizedTimeObjTimed(object *obj, float *normalized_time)
 		}
 		else if((sm->flags & SOF_WB) && !(sm->flags & SOF_TURRET))
 		{
-			static float w_frame;
+			float w_frame;
 			ASSERT(x >= 0 && x < MAX_WBS_PER_OBJ);
 			
 			if(obj->dynamic_wb)
@@ -2372,6 +2348,9 @@ void SetNormalizedTimeObjTimed(object *obj, float *normalized_time)
 void SetNormalizedTimeObj(object *obj, float *normalized_time)
 {
 	int i,j;
+	// Timed players/weapons and unassigned turret tracks deliberately keep
+	// their rest values; never inherit uninitialized caller stack contents.
+	std::fill(normalized_time, normalized_time + MAX_SUBOBJECTS, 0.f);
 
 	if (Poly_models[obj->rtype.pobj_info.model_num].flags & PMF_TIMED)
 	{
@@ -2470,386 +2449,23 @@ void SetNormalizedTimeAnim(float anim_frame, float *normalized_time, 	poly_model
 	}
 }
 
-//Given a model pointer and an array of floats that go from 0..1, calculate the angles of each
-// corresponding subobject
-void SetModelAngles (poly_model *po,float *normalized_angles)
-{
-	int i;
-
-	ASSERT (!(po->flags & PMF_NOT_RESIDENT));
-
-	if (po->num_key_angles>0 && normalized_angles)
-	{
-		// get time per keyframe state
-		float state_time=1.0/(po->num_key_angles-1);
-		float cur_state_time;
-		int cur_state;
-		float normal_state_time;
-		
-		for (i=0;i<po->n_models;i++)
-		{
-			// Don't rotate turrets or auto-rotators or weapon battery submodels
-			if (!(po->submodel[i].flags & (SOF_ROTATE | SOF_TURRET )))
-			{
-
-				// Find out which keyframe we're at
-		
-				cur_state=normalized_angles[i]/state_time;
-				matrix dest_matrix;
-												
-				// Find out how far into that keyframe we are
-				cur_state_time=normalized_angles[i]-((float)cur_state*state_time);
-				normal_state_time=cur_state_time/state_time;
-
-				// Now do a parametric adjustment on the angles
-
-				int cur_angle=0;
-
-				// If we're already at the high point of the interpolation then just
-				// stuff some values
-				if (cur_state==po->num_key_angles-1)
-				{
-					vm_ExtractAnglesFromMatrix (&po->submodel[i].angs,&po->submodel[i].keyframe_matrix[po->num_key_angles-1]);
-					continue;
-
-				}
-
-				dest_matrix=po->submodel[i].keyframe_matrix[cur_state]+
-					((po->submodel[i].keyframe_matrix[cur_state+1]-po->submodel[i].keyframe_matrix[cur_state])*normal_state_time);
-
-				vm_ExtractAnglesFromMatrix (&po->submodel[i].angs,&dest_matrix);
-				//po->submodel[i].mod_matrix=dest_matrix;
-
-			}
-			else if (po->submodel[i].flags & SOF_ROTATE)
-			{
-				float flrot=Gametime*po->submodel[i].rps;
-				int introt=flrot;
-
-				float fdiff=flrot-introt;
-			
-				ASSERT (fdiff>=0 && fdiff<=1);
-	
-				// fdiff now equals 0 to 1
-				matrix temp_matrix;
-				vector temp_vec;
-				if (po->new_style)
-					temp_vec=po->submodel[i].keyframe_axis[1];
-				else
-					temp_vec=po->submodel[i].norm;
-
-				BuildModelAngleMatrix (&temp_matrix,fdiff*65535,&temp_vec);
-				vm_ExtractAnglesFromMatrix (&po->submodel[i].angs,&temp_matrix);
-			}
-			else if (po->submodel[i].flags & SOF_TURRET)
-			{
-				matrix temp_matrix;
-				if (po->new_style)
-					BuildModelAngleMatrix (&temp_matrix,normalized_angles[i]*65535,&po->submodel[i].keyframe_axis[1]);
-				else
-					BuildModelAngleMatrix (&temp_matrix,normalized_angles[i]*65535,&po->submodel[i].norm);
-					
-				vm_ExtractAnglesFromMatrix (&po->submodel[i].angs,&temp_matrix);
-			}
-		}
-	}
-	else
-	{
-		for (i=0;i<po->n_models;i++)
-		{
-			if (po->submodel[i].flags & SOF_ROTATE)
-			{
-				float flrot=Gametime*po->submodel[i].rps;
-				int introt=flrot;
-	
-				float fdiff=flrot-introt;
-				
-				ASSERT (fdiff>=0 && fdiff<=1);
-
-				// fdiff now equals 0 to 1
-				matrix temp_matrix;
-				vector temp_vec;
-				if (po->new_style)
-					temp_vec=po->submodel[i].keyframe_axis[1];
-				else
-					temp_vec=po->submodel[i].norm;
-
-				BuildModelAngleMatrix (&temp_matrix,fdiff*65535,&temp_vec);
-				vm_ExtractAnglesFromMatrix (&po->submodel[i].angs,&temp_matrix);
-			}
-			else if (po->submodel[i].flags & SOF_TURRET)
-			{
-				// We need to find where in this rotation is relative to gametime
-				float flrot = Gametime;
-				int introt = flrot;
-	
-				float fdiff=flrot-introt;
-					
-				// fdiff now equals 0 to 1
-				matrix temp_matrix;
-				if (po->new_style)
-					BuildModelAngleMatrix (&temp_matrix,fdiff*65535,&po->submodel[i].keyframe_axis[0]);
-				else
-					BuildModelAngleMatrix (&temp_matrix,fdiff*65535,&po->submodel[i].norm);
-					
-				vm_ExtractAnglesFromMatrix (&po->submodel[i].angs,&temp_matrix);
-			}
-			else
-			{
-				po->submodel[i].angs.h=0;
-				po->submodel[i].angs.p=0;
-				po->submodel[i].angs.h=0;
-			}
-		}
-	}
-
-}
-
-//Given a model pointer and an array of floats that go from 0..1, calculate the interpolated 
-//position of each corresponding subobject
-void SetModelInterpPos (poly_model *po,float *normalized_pos)
-{
-	int i;
-
-	ASSERT (!(po->flags & PMF_NOT_RESIDENT));
-	
-	if (normalized_pos && po->num_key_pos>0)
-	{
-		for (i=0;i<po->n_models;i++)
-		{
-			bsp_info *sm=&po->submodel[i];
-
-			// get time per keyframe state
-			float state_time=1.0/(po->num_key_pos-1);
-			float cur_state_time;
-			int cur_state;
-			float normal_state_time;
-		
-			// Find out which keyframe we're at
-			cur_state=normalized_pos[i]/state_time;
-			
-			// Find out how far into that keyframe we are
-			cur_state_time=normalized_pos[i]-((float)cur_state*state_time);
-			normal_state_time=cur_state_time/state_time;
-
-			// Now do a parametric adjustment on the positions
-
-			vector total_delta_pos={0,0,0};
-			vector subpos;
-			vector final_pos;
-
-			// If we're already at the high point of the interpolation then just
-			// stuff some values
-			if (cur_state==sm->num_key_pos-1)
-			{
-				po->submodel[i].mod_pos=po->submodel[i].keyframe_pos[po->num_key_pos-1];
-				continue;
-			}
-			
-			if (cur_state==0)
-				po->submodel[i].mod_pos=normal_state_time*po->submodel[i].keyframe_pos[1];
-			else
-			{
-				vm_SubVectors (&subpos,&po->submodel[i].keyframe_pos[cur_state+1],&po->submodel[i].keyframe_pos[cur_state]);
-				final_pos=po->submodel[i].keyframe_pos[cur_state]+(subpos*normal_state_time);
-				po->submodel[i].mod_pos=final_pos;
-			}
-			
-		}
-	}
-	else
-	{
-		for (i=0;i<po->n_models;i++)
-		{
-			po->submodel[i].mod_pos.x=0;
-			po->submodel[i].mod_pos.y=0;
-			po->submodel[i].mod_pos.z=0;
-		}
-	}
+// The only bridge back to mutable model scratch is for not-yet-migrated
+// simulation/legacy consumers. New presentation code owns ModelPose values.
+// There is one evaluator; these adapters do not maintain alternate pose math.
+void SetModelAnglesAndPos(poly_model* model, float* normalized_time, uint subobj_flags) {
+    const auto pose = EvaluateModelPose(*model, normalized_time, Gametime);
+    for (int i = 0; i < pose.count; ++i) {
+        // Preserve old masked scratch only at this simulation boundary.
+        if ((model->flags & PMF_TIMED) && normalized_time && !(subobj_flags & (1u << i))) continue;
+        model->submodel[i].angs = pose.submodels[i].angles;
+        model->submodel[i].mod_pos = pose.submodels[i].translation;
+    }
 }
 
 // Sets the effect used by a polymodel
 void SetPolymodelEffect (polymodel_effect *poly_effect)
 {
 	Polymodel_effect=*poly_effect;
-}
-
-//Given a model pointer and an array of floats that go from 0..1, calculate the interpolated 
-//position/angle of each corresponding subobject
-void SetModelAnglesAndPosTimed (poly_model *po,float *normalized_time,uint subobj_flags)
-{
-	int i;
-
-	ASSERT (!(po->flags & PMF_NOT_RESIDENT));
-
-	if (normalized_time)
-	{
-		// get time per keyframe state
-		
-		for (i=0;i<po->n_models;i++)
-		{
-			bsp_info *sm=&po->submodel[i];
-			int int_tick,current_frame,total_ticks;
-			float normal_state_time,current_tick;
-
-			if (!(subobj_flags & (1<<i)))
-				continue;
-			
-			if (sm->num_key_pos<=1)
-			{
-				vm_MakeZero(&sm->mod_pos);
-				goto do_angles;
-			}
-
-			if (normalized_time[i]==1.0)
-			{
-				sm->mod_pos=sm->keyframe_pos[sm->num_key_pos-1];
-				goto do_angles;
-			}
-
-			// Find out which keyframe we're at
-			total_ticks=sm->pos_track_max-sm->pos_track_min;
-			current_tick=(normalized_time[i]*total_ticks)+sm->pos_track_min;
-			int_tick=current_tick;
-			current_frame=sm->tick_pos_remap[int_tick-sm->pos_track_min];
-
-			ASSERT (current_frame>=0 && current_frame<=sm->num_key_pos-1);
-
-			if (current_frame==sm->num_key_pos-1)
-			{
-				sm->mod_pos=sm->keyframe_pos[sm->num_key_pos-1];
-				goto do_angles;
-			}
-			else
-			{
-				int ticks_between_frames=sm->pos_start_time[current_frame+1]-sm->pos_start_time[current_frame];
-				float this_tick=current_tick-sm->pos_start_time[current_frame];
-				normal_state_time=(float)this_tick/(float)ticks_between_frames;
-
-				vector subpos;
-				vm_SubVectors (&subpos,&sm->keyframe_pos[current_frame+1],&sm->keyframe_pos[current_frame]);
-				sm->mod_pos=sm->keyframe_pos[current_frame]+(subpos*normal_state_time);
-			}
-
-
-			// Now do angle stuff here
-			do_angles:
-			// Don't rotate turrets or auto-rotators
-			if (!(sm->flags & (SOF_TURRET | SOF_ROTATE)))
-			{
-				if (sm->num_key_angles<=1)
-				{
-					sm->angs.p=0;
-					sm->angs.h=0;
-					sm->angs.b=0;
-					continue;
-				}
-
-				if (normalized_time[i]==1.0)
-				{
-					vm_ExtractAnglesFromMatrix (&po->submodel[i].angs,&po->submodel[i].keyframe_matrix[sm->num_key_angles-1]);
-					continue;
-				}
-
-				// Find out which keyframe we're at	
-				total_ticks=sm->rot_track_max-sm->rot_track_min;
-				current_tick=(normalized_time[i]*total_ticks)+sm->rot_track_min;
-				int_tick=current_tick;
-				current_frame=sm->tick_ang_remap[int_tick-sm->rot_track_min];
-
-				ASSERT (current_frame>=0 && current_frame<=sm->num_key_angles-1);
-										
-				if (current_frame==sm->num_key_angles-1)
-				{
-					vm_ExtractAnglesFromMatrix (&po->submodel[i].angs,&po->submodel[i].keyframe_matrix[sm->num_key_angles-1]);
-					continue;
-				}
-				else
-				{
-					int ticks_between_frames=sm->rot_start_time[current_frame+1]-sm->rot_start_time[current_frame];
-					float this_tick=current_tick-sm->rot_start_time[current_frame];
-					normal_state_time=(float)this_tick/(float)ticks_between_frames;
-
-					// Now do a parametric adjustment on the angles
-
-					matrix dest_matrix=sm->keyframe_matrix[current_frame]+
-					((sm->keyframe_matrix[current_frame+1]-sm->keyframe_matrix[current_frame])*normal_state_time);
-
-					vm_ExtractAnglesFromMatrix (&sm->angs,&dest_matrix);
-				}
-
-				
-			}
-			else
-			{
-				 // Adjust special subobjects
-				if (po->submodel[i].flags & SOF_ROTATE)
-				{
-					float flrot=Gametime*po->submodel[i].rps;
-					int introt=flrot;
-	
-					float fdiff=flrot-introt;
-				
-					ASSERT (fdiff>=0 && fdiff<=1);
-		
-					// fdiff now equals 0 to 1
-					matrix temp_matrix;
-					vector temp_vec;
-					if (po->new_style)
-						temp_vec=po->submodel[i].keyframe_axis[1];
-					else
-						temp_vec=po->submodel[i].norm;
-
-					BuildModelAngleMatrix (&temp_matrix,fdiff*65535,&temp_vec);
-					vm_ExtractAnglesFromMatrix (&po->submodel[i].angs,&temp_matrix);
-				}
-				else if (po->submodel[i].flags & SOF_TURRET)
-				{
-					matrix temp_matrix;
-					if (po->new_style)
-						BuildModelAngleMatrix (&temp_matrix,normalized_time[i]*65535,&po->submodel[i].keyframe_axis[1]);
-					else
-						BuildModelAngleMatrix (&temp_matrix,normalized_time[i]*65535,&po->submodel[i].norm);
-						
-					vm_ExtractAnglesFromMatrix (&po->submodel[i].angs,&temp_matrix);
-				}
-			}
-
-		}
-
-	}
-	else
-	{
-		for (i=0;i<po->n_models;i++)
-		{
-			po->submodel[i].mod_pos.x=0;
-			po->submodel[i].mod_pos.y=0;
-			po->submodel[i].mod_pos.z=0;
-
-			po->submodel[i].angs.p=0;
-			po->submodel[i].angs.h=0;
-			po->submodel[i].angs.b=0;
-		}
-	}
-}
-
-// Sets the position and rotation of a polymodel.  Used for rendering and collision detection
-void SetModelAnglesAndPos (poly_model *po,float *normalized_time,uint subobj_flags)
-{
-	ASSERT (!(po->flags & PMF_NOT_RESIDENT));
-
-
-	if (po->flags & PMF_TIMED)
-	{
-		SetModelAnglesAndPosTimed(po,normalized_time,subobj_flags);
-		return;
-	}
-	else
-	{
-		SetModelAngles(po,normalized_time);
-		SetModelInterpPos (po,normalized_time);
-
-	}
 }
 
 
@@ -3327,110 +2943,29 @@ int CountFacesInPolymodel (poly_model *pm)
 	return count;
 }
 
-// Given an object, a submodel, and a vertex number, calculates the world position
-// of that point
-void GetPolyModelPointInWorld (vector *dest,poly_model *pm, vector *wpos, matrix *orient,int subnum, vector *pos,vector *norm)
-{
-	bsp_info *sm=&pm->submodel[subnum];
-	float normalized_time[MAX_SUBOBJECTS];
-	int i;
-
-	ASSERT (!(pm->flags & PMF_NOT_RESIDENT));
-
-	if (!pm->new_style)
-		return;
-
-	for (i=0;i<MAX_SUBOBJECTS;i++)
-		normalized_time[i]=0.0;
-
-	SetModelAnglesAndPos (pm,normalized_time);
-	ApplyPolymodelSubmodelOffsetAdjustments(pm);
-	
-	vector pnt    = *pos;
-	int mn     = subnum;
-	vector cur_norm;
-
-	if (norm!=NULL)
-		cur_norm=*norm;
-
-	matrix m;
-
-	// Instance up the tree for this gun
-	while (mn != -1)
-	{
-		vector tpnt;
-
-		vm_AnglesToMatrix(&m, pm->submodel[mn].angs.p,pm->submodel[mn].angs.h, pm->submodel[mn].angs.b);
-		vm_TransposeMatrix(&m);
-
-		tpnt    = pnt * m;
-
-		if (norm!=NULL)
-			cur_norm = cur_norm *m;
-	
-		pnt = tpnt + pm->submodel[mn].offset+pm->submodel[mn].mod_pos;
-		
-		mn = pm->submodel[mn].parent;
-	}
-
-	//now instance for the entire object
-	m = *orient;
-	vm_TransposeMatrix(&m);
-
-	if (norm!=NULL)
-		*norm=(cur_norm * m);
-   *dest  = pnt * m;
-	*dest += (*wpos);
+// Attachment queries own their pose rather than mutating shared model scratch.
+void GetPolyModelPointInWorld(vector* dest, poly_model* model, vector* position,
+    matrix* orientation, int submodel, vector* point, vector* normal) {
+    float normalized_time[MAX_SUBOBJECTS]{};
+    GetPolyModelPointInWorld(dest, model, position, orientation, submodel, normalized_time, point, normal);
 }
 
-
-void GetPolyModelPointInWorld (vector *dest,poly_model *pm, vector *wpos, matrix *orient,int subnum, float *normalized_time, vector *pos, vector *norm)
-{
-	bsp_info *sm=&pm->submodel[subnum];
-
-	ASSERT (!(pm->flags & PMF_NOT_RESIDENT));
-
-	if (!pm->new_style)
-		return;
-
-	SetModelAnglesAndPos (pm,normalized_time);
-	ApplyPolymodelSubmodelOffsetAdjustments(pm);
-	
-	vector pnt    = *pos;
-	int mn     = subnum;
-	vector cur_norm;
-
-	if (norm!=NULL)
-		cur_norm=*norm;
-
-	matrix m;
-
-	// Instance up the tree for this gun
-	while (mn != -1)
-	{
-		vector tpnt;
-
-		vm_AnglesToMatrix(&m, pm->submodel[mn].angs.p,pm->submodel[mn].angs.h, pm->submodel[mn].angs.b);
-		vm_TransposeMatrix(&m);
-
-		tpnt    = pnt * m;
-
-		if (norm!=NULL)
-			cur_norm = cur_norm *m;
-			
-		pnt = tpnt + pm->submodel[mn].offset+pm->submodel[mn].mod_pos;
-		
-		mn = pm->submodel[mn].parent;
-	}
-
-	//now instance for the entire object
-	m = *orient;
-	vm_TransposeMatrix(&m);
-
-	if (norm!=NULL)
-		*norm=(cur_norm * m);
-   *dest  = pnt * m;
-	*dest += (*wpos);
+void GetPolyModelPointInWorld(vector* dest, poly_model* model, vector* position,
+    matrix* orientation, int submodel, float* normalized_time, vector* point, vector* normal) {
+    ASSERT(!(model->flags & PMF_NOT_RESIDENT));
+    if (!model->new_style) return;
+    auto pose = EvaluateModelPose(*model, normalized_time, Gametime);
+    // Apply existing caller-supplied offsets to this instance value only.
+    if (model->id == Polymodel_submodel_adjust_model)
+        for (int i = 0; i < std::min(pose.count, Polymodel_submodel_adjust_count); ++i)
+            pose.submodels[i].translation += Polymodel_submodel_adjustments[i];
+    const auto transforms = ComposeModelPose(*model, pose);
+    ASSERT(submodel >= 0 && submodel < transforms.count);
+    if (submodel < 0 || submodel >= transforms.count) return;
+    const auto& local = transforms.submodels[submodel];
+    const ModelSubmodelTransform world{*orientation, *position};
+    *dest = TransformModelPoint(world, TransformModelPoint(local, *point));
+    if (normal) *normal = TransformModelDirection(world, TransformModelDirection(local, *normal));
 }
 
 

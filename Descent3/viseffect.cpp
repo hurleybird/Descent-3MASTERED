@@ -5263,8 +5263,6 @@ void VisEffectMoveOne(vis_effect* vis)
 					int i;
 
 					SetNormalizedTimeObj(obj, normalized_time);
-					SetModelAngles(pm, normalized_time);
-					SetModelInterpPos(pm, normalized_time);
 
 
 					for (i = vis - VisEffects; i <= Highest_vis_effect_index; i++)
