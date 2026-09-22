@@ -6,11 +6,38 @@
 #include "SceneImages.h"
 #include <cstring>
 #include <cmath>
+#include <string>
 extern int Last_texel_unit_set;
 
 namespace {
 struct SceneVertex { d3scene::Vec3 position; float u, v, lu, lv, alpha; d3scene::Vec3 normal; };
-const char* SceneVertexShader = R"GLSL(#version 330 core
+const char* SceneLightingShader = R"GLSL(#version 330 core
+uniform samplerBuffer scene_lights;
+uniform isamplerBuffer scene_influences;
+uniform int influence_offset, influence_count;
+uniform int lighting_per_pixel;
+vec3 sceneDynamicLighting(vec3 world_position) {
+    vec3 dynamic_color = vec3(0);
+    for (int index = 0; index < influence_count; ++index) {
+        int light = texelFetch(scene_influences,influence_offset+index).r*4;
+        vec4 position_radius = texelFetch(scene_lights,light);
+        vec4 color_falloff = texelFetch(scene_lights,light+1);
+        vec4 direction_cone = texelFetch(scene_lights,light+2);
+        vec4 flags = texelFetch(scene_lights,light+3);
+        vec3 delta = world_position-position_radius.xyz;
+        float distance = length(delta);
+        if (distance >= position_radius.w) continue;
+        float attenuation = pow(1.0-distance/position_radius.w,color_falloff.w);
+        if (flags.x != 0) {
+            float cone = distance > 0.000001 ? dot(delta/distance,direction_cone.xyz) : 1.0;
+            attenuation *= max(0.0,(cone-direction_cone.w)/max(0.000001,1.0-direction_cone.w));
+        }
+        dynamic_color += color_falloff.rgb*attenuation;
+    }
+    return dynamic_color;
+}
+)GLSL";
+const std::string SceneVertexShader = std::string(SceneLightingShader) + R"GLSL(
 layout(location=0) in vec3 position;
 layout(location=1) in vec2 uv;
 layout(location=2) in vec2 light_uv;
@@ -30,11 +57,13 @@ out vec2 texcoord, lightcoord;
 out float vertex_alpha;
 out vec3 world_position;
 out vec3 ambient;
+out vec3 vertex_dynamic;
 void main() {
     vec3 prepared = use_instance_positions != 0 ? texelFetch(instance_positions,gl_VertexID+instance_position_offset).rgb : position;
     vec3 world = model_position + model_right*prepared.x + model_up*prepared.y + model_forward*prepared.z;
     vec3 relative = world-eye;
     world_position = world;
+    vertex_dynamic = lighting_per_pixel != 0 ? vec3(0) : sceneDynamicLighting(world);
     float z = dot(relative,camera_forward);
     gl_Position = vec4(dot(relative,camera_right)*projection.x + z*projection.z,
                        dot(relative,camera_up)*projection.y + z*projection.w, z-2.0*near_distance,z);
@@ -45,7 +74,7 @@ void main() {
     ambient = ambient_color*shade;
 }
 )GLSL";
-const char* SceneFragmentShader = R"GLSL(#version 330 core
+const std::string SceneFragmentShader = std::string(SceneLightingShader) + R"GLSL(
 uniform sampler2D colortexture, lightmaptexture;
 uniform int use_lightmap, use_texture_alpha;
 uniform int use_texture;
@@ -55,11 +84,9 @@ uniform vec2 light_scale, texture_offset;
 uniform float material_alpha;
 uniform float alpha_cutoff;
 uniform float lighting_modulation;
-uniform samplerBuffer scene_lights;
-uniform isamplerBuffer scene_influences;
-uniform int influence_offset, influence_count;
 in vec3 world_position;
 in vec3 ambient;
+in vec3 vertex_dynamic;
 in vec2 texcoord, lightcoord;
 in float vertex_alpha;
 layout(location=0) out vec4 color;
@@ -68,23 +95,7 @@ void main() {
     base.a=(use_texture_alpha != 0 ? base.a : 1.0)*vertex_alpha*material_alpha;
     if(base.a < alpha_cutoff) discard;
     vec3 illumination = use_lightmap != 0 ? texture(lightmaptexture,lightcoord*light_scale).rgb : ambient;
-    vec3 dynamic_color = vec3(0);
-    for (int index = 0; index < influence_count; ++index) {
-        int light = texelFetch(scene_influences,influence_offset+index).r*4;
-        vec4 position_radius = texelFetch(scene_lights,light);
-        vec4 color_falloff = texelFetch(scene_lights,light+1);
-        vec4 direction_cone = texelFetch(scene_lights,light+2);
-        vec4 flags = texelFetch(scene_lights,light+3);
-        vec3 delta = world_position-position_radius.xyz;
-        float distance = length(delta);
-        if (distance >= position_radius.w) continue;
-        float attenuation = pow(1.0-distance/position_radius.w,color_falloff.w);
-        if (flags.x != 0) {
-            float cone = distance > 0.000001 ? dot(delta/distance,direction_cone.xyz) : 1.0;
-            attenuation *= max(0.0,(cone-direction_cone.w)/max(0.000001,1.0-direction_cone.w));
-        }
-        dynamic_color += color_falloff.rgb*attenuation;
-    }
+    vec3 dynamic_color = lighting_per_pixel != 0 ? sceneDynamicLighting(world_position) : vertex_dynamic;
     illumination = clamp(illumination+dynamic_color,vec3(0),vec3(1));
     color=vec4(base.rgb*color_modulation*illumination*lighting_modulation,base.a);
 }
@@ -273,7 +284,7 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
         DestroySceneResources();
         scene_asset_lifetime = presentation.data().scene_lifetime;
     }
-    if (!scene_shader.Handle()) scene_shader.AttachSource(SceneVertexShader, SceneFragmentShader);
+    if (!scene_shader.Handle()) scene_shader.AttachSource(SceneVertexShader.c_str(), SceneFragmentShader.c_str());
     UploadSceneFrame(presentation);
 
     // The pass owns depth/blend/culling policy. No game draw-state capture and
@@ -298,6 +309,7 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
     glUniform4f(scene_shader.FindUniform("projection"),projection.x_scale,projection.y_scale,
         projection.x_offset,projection.y_offset);
     glUniform1f(scene_shader.FindUniform("near_distance"),projection.near_distance);
+    glUniform1i(scene_shader.FindUniform("lighting_per_pixel"),presentation.data().lighting_quality == d3scene::LightingQuality::Pixel);
     glUniform1i(scene_shader.FindUniform("colortexture"),0);
     glUniform1i(scene_shader.FindUniform("lightmaptexture"),1);
     glUniform1i(scene_shader.FindUniform("scene_lights"),2);

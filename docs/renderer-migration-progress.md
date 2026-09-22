@@ -1,5 +1,22 @@
 # Renderer migration checkpoint
 
+## Continuation: frame lighting quality and material clock
+
+The published frame owns vertex/per-pixel lighting selection. Both shader stages
+use one GLSL emitter evaluator, canonical light table and influence indices;
+there is no low-quality legacy-renderer fallback. This is a vertex-sampled
+approximation of the same lighting field, not parity with the old mutable
+low-quality lightmap implementation. All eight `scene-quality-pixel` captures
+are pixel-identical to `scene-material-clean`. All eight vertex-mode captures
+passed; saves 003/005 were visually inspected, including expected coarse lighting
+on close geometry. The harness records quality and requires diagnostic mode for
+cross-quality comparisons. CPU tests validate frame ownership and invalid enums.
+
+Material animation/procedural resolution now accepts the presentation clock;
+the legacy GetTextureBitmap accessor is only a game-clock adapter. This final
+clock-only change builds but still needs the next runtime corpus. Earlier quality
+captures predate it. No domain or full renderer declared complete.
+
 ## Continuation: published material coverage policy
 
 Publication now compiles solid/cutout/alpha/additive policy from surface, image

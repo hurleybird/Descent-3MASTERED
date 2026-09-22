@@ -28,6 +28,7 @@
 #include "bumpmap.h"
 #include <stdlib.h>
 #include <string.h>
+#include <cmath>
 #include "procedurals.h"
 #include "../renderer/SceneProcedural.h"
 #include "ddio.h"
@@ -337,6 +338,11 @@ bool IsBloomProtectedTextureBitmap(int bitmap_handle)
 
 int GetTextureBitmap(int handle, int framenum, bool force)
 {
+	return GetTextureBitmapAtTime(handle, framenum, Gametime, force);
+}
+
+int GetTextureBitmapAtTime(int handle, int framenum, float presentation_time, bool force)
+{
 	int src_bitmap;
 
 	if (!GameTextures[handle].used)
@@ -357,7 +363,7 @@ int GetTextureBitmap(int handle, int framenum, bool force)
 			// Ping pong this texture
 
 			float frametime = tex->speed / vc->num_frames;
-			cur_frametime = Gametime / frametime;
+			cur_frametime = presentation_time / frametime;
 			int_frame = cur_frametime;
 			int_frame += framenum;
 
@@ -371,7 +377,7 @@ int GetTextureBitmap(int handle, int framenum, bool force)
 		else
 		{
 			float frametime = tex->speed / vc->num_frames;
-			cur_frametime = Gametime / frametime;
+			cur_frametime = presentation_time / frametime;
 			int_frame = cur_frametime;
 			int_frame += framenum;
 			src_bitmap = vc->frames[int_frame % vc->num_frames];
@@ -387,7 +393,7 @@ int GetTextureBitmap(int handle, int framenum, bool force)
 		if (GameTextures[handle].procedural == NULL)
 			AllocateProceduralForTexture(handle);
 
-		const int visual_tick = Get60HzVisualTick();
+		const int visual_tick = static_cast<int>(std::floor(static_cast<double>(presentation_time) * 60.0));
 		const int steps = d3scene::proceduralSteps(
 			GameTextures[handle].procedural->last_procedural_tick, visual_tick,
 			force || Detail_settings.Procedurals_enabled);

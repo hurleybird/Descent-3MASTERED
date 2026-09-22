@@ -188,6 +188,8 @@ PresentationRef Presentation::freeze(const FrameData& data) {
     require(std::isfinite(data.simulation_time) && std::isfinite(data.delta_time) && data.delta_time >= 0,
         "Invalid presentation clock");
     require((data.pending_domains & ~AllPendingDomains) == 0, "Unknown pending scene domain");
+    require(data.lighting_quality == LightingQuality::Vertex || data.lighting_quality == LightingQuality::Pixel,
+        "Unknown lighting quality");
     std::set<std::tuple<LightSource,uint64_t,uint32_t>> emitters;
     for (const auto& light : data.lights) {
         require(emitters.emplace(light.id.source,light.id.owner,light.id.channel).second, "Duplicate scene emitter identity");

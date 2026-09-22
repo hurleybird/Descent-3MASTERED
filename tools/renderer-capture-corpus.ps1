@@ -8,6 +8,7 @@ param(
     [int]$TimeoutSeconds = 120,
     [ValidateSet('clean','effects')][string]$Profile = 'effects',
     [switch]$SceneInspection,
+    [switch]$VertexLighting,
     [switch]$DeformationProbe
 )
 
@@ -36,6 +37,7 @@ $settings | Set-Content -LiteralPath (Join-Path $outputPath 'settings.json') -En
 $manifest = [ordered]@{
     runtime = $runtimePath; profile = $Profile; frame = $Frame; seed = $Seed; scene_inspection = [bool]$SceneInspection
     deformation_probe = [bool]$DeformationProbe
+    vertex_lighting = [bool]$VertexLighting
     executable = (Get-FileHash -LiteralPath $exe).Hash
     shaders = (Get-FileHash -LiteralPath (Join-Path $runtimePath 'descent3mastered.hog')).Hash
     pilot = (Get-FileHash -LiteralPath (Join-Path $seedPath 'Jeff.plt')).Hash
@@ -63,6 +65,7 @@ try {
         if ($Profile -eq 'clean') { $arguments += @('-msaa','0','-ssaa','1','-noao','-nobloom') }
         else { $arguments += @('-msaa','4','-ssaa','2','-ao','-bloom') }
         if ($SceneInspection) { $arguments += '-scene-inspection' }
+        if ($VertexLighting) { $arguments += '-noperpixellighting' }
         if ($DeformationProbe) { $arguments += '-scene-deformation-probe' }
         $started = Get-Date
         $process = Start-Process -FilePath $exe -ArgumentList $arguments -WorkingDirectory $runtimePath -WindowStyle Hidden -PassThru

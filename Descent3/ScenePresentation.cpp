@@ -129,7 +129,7 @@ void resolveMaterial(d3scene::SurfaceBinding& surface, float time, bool model) {
     if (base_texture < 0 || base_texture >= MAX_TEXTURES || !GameTextures[base_texture].used)
         Error("Scene material references missing base texture %d", base_texture);
     const auto& texture = GameTextures[base_texture];
-    surface.bitmap = GetTextureBitmap(base_texture, 0);
+    surface.bitmap = GetTextureBitmapAtTime(base_texture, 0, time);
     surface.u_offset = authored.slide_u ? std::fmod(time / authored.slide_u, 1.f) : 0;
     surface.v_offset = authored.slide_v ? std::fmod(time / authored.slide_v, 1.f) : 0;
     surface.alpha *= texture.alpha;
@@ -154,6 +154,8 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance_history) {
     const unsigned int simulation_random = ps_rand_get_state();
     const auto source = ExtractGamePresentation(Gametime, Frametime, Game_paused, advance_history);
     auto data = source->data();
+    data.lighting_quality = Render_preferred_state.per_pixel_lighting ?
+        d3scene::LightingQuality::Pixel : d3scene::LightingQuality::Vertex;
     static d3scene::PresentationRef previous_models;
     static uint64_t material_lifetime = 0;
     if (material_lifetime != data.scene_lifetime) {

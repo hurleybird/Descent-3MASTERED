@@ -71,6 +71,13 @@ void frameTests() {
     d3scene::ObjectState object;
     object.handle = 42; data.objects.push_back(object);
     const auto frozen = d3scene::Presentation::freeze(data);
+    data.lighting_quality = d3scene::LightingQuality::Vertex;
+    const auto low_quality = d3scene::Presentation::freeze(data);
+    check(low_quality->data().lighting_quality == d3scene::LightingQuality::Vertex &&
+        frozen->data().lighting_quality == d3scene::LightingQuality::Pixel,"Lighting quality is not frame-owned");
+    data.lighting_quality = static_cast<d3scene::LightingQuality>(255);
+    rejects([&] { d3scene::Presentation::freeze(data); }, "Invalid lighting quality accepted");
+    data.lighting_quality = d3scene::LightingQuality::Pixel;
     data.rooms[0].surfaces[0].texture = 99;
     data.objects[0].current.position.x = 22;
     check(frozen->data().rooms[0].surfaces[0].texture == -1, "frame aliases surface bindings");

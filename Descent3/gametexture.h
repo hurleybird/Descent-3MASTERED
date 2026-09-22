@@ -177,6 +177,8 @@ int FindTextureBitmapName (char *name);
 // Given a texture handle, returns that textures bitmap
 // If the texture is animated, returns framenum mod num_of_frames in the animation
 int GetTextureBitmap (int handle,int framenum,bool force=false);
+// Presentation compilation supplies its clock; the legacy accessor is an adapter.
+int GetTextureBitmapAtTime(int handle, int framenum, float presentation_time, bool force=false);
 bool IsBloomProtectedTextureBitmap(int bitmap_handle);
 
 // Given a filename, loads either the bitmap or vclip found in that file.  If type

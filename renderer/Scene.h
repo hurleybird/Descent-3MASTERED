@@ -236,11 +236,13 @@ enum class PendingDomain : uint32_t {
 };
 constexpr uint32_t AllPendingDomains = (1u << 7) - 1;
 
+enum class LightingQuality : uint8_t { Vertex, Pixel };
 struct FrameData {
     uint64_t sequence = 0, scene_lifetime = 0;
     double simulation_time = 0;
     float delta_time = 0;
     bool paused = false;
+    LightingQuality lighting_quality = LightingQuality::Pixel;
     uint32_t pending_domains = AllPendingDomains;
     std::vector<RoomState> rooms;
     std::vector<ObjectState> objects;
