@@ -1,5 +1,23 @@
 # Renderer migration checkpoint
 
+## Continuation: coherent image-resource history invalidation
+
+Deleted the resize-time velocity preservation path (RG16F snapshot, resampling
+shader, restore flags and extents). It could not preserve the replacement surface
+record's validity, material class and identity together with depth. Framebuffer
+updates now invalidate view/exposure history as a unit; main execution regenerates
+all products. No partial surface history is transplanted across allocations.
+
+Full build and 5,214 checks pass. ResourceProbe switches 1x/0, 2x/2, 4x/4, 1x/0,
+then restores requested sampling at frames 10/20/30/40/50 without saving settings.
+Motion-enabled, moving-camera captures 000/003 complete. GPU readbacks show zero
+valid motion at every transition and valid motion on each following frame. The
+harness checks these events and guards fixture identity in comparisons. Frame-31
+003 and final 003 were visually inspected. Diagnostic final comparisons against
+no-transition controls differ (000 mean .1277, 003 .0495/max 2); temporal history
+has deliberately restarted and this is not a pixel-parity acceptance claim.
+Candidate and Previous Candidate remain unchanged. Migration is still incomplete.
+
 ## Continuation: scheduled opaque-image contract
 
 Replaced bloom-named capture storage with an owned opaque-scene product. Removed

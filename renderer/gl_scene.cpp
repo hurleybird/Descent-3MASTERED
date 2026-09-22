@@ -8,6 +8,7 @@
 #include "SceneFog.h"
 #include "SceneMotion.h"
 #include "gameloop.h"
+#include "args.h"
 #include <cstring>
 #include <cmath>
 #include <string>
@@ -786,7 +787,6 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
         surface_records.ClearAttached(framebuffers[framebuffer_current_draw].Handle());
         bind_outputs();
         surface_records.MarkDirty(); motion_vectors_dirty = true;
-        motion_vectors_cleared_this_frame = true;
     }
     post_protection_mask.resolve_valid = false;
     if (visibility.exterior_visible && presentation.data().sky_enabled) {
@@ -884,7 +884,8 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
         // the history fixture's cut. This never runs in interactive rendering.
         const int capture_frame = AutomatedCaptureFrameIndex();
         if (writes_motion &&
-            (capture_frame == 0 || capture_frame == 30 || capture_frame == 31 || capture_frame == 59)) {
+            (capture_frame == 0 || capture_frame == 30 || capture_frame == 31 || capture_frame == 59 ||
+                (FindArg("-scene-resource-probe") && capture_frame >= 10 && capture_frame <= 51 && capture_frame % 10 <= 1))) {
             const size_t pixels = size_t(surface_records.width)*surface_records.height;
             std::vector<float> vectors(pixels*4);
             std::vector<GLuint> identities(pixels);

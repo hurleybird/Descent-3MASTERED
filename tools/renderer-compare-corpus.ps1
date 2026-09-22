@@ -111,6 +111,9 @@ if ([bool]$referenceManifest.sky_probe -ne [bool]$actualManifest.sky_probe -and 
 if ([bool]$referenceManifest.history_probe -ne [bool]$actualManifest.history_probe -and -not $DiagnosticComparison) {
     throw 'History-probe fixtures differ; this is not a parity comparison.'
 }
+if ([bool]$referenceManifest.resource_probe -ne [bool]$actualManifest.resource_probe -and -not $DiagnosticComparison) {
+    throw 'Resource transition fixtures differ; this is not a parity comparison.'
+}
 if ([bool]$referenceManifest.terrain_probe -ne [bool]$actualManifest.terrain_probe -and -not $DiagnosticComparison) {
     throw 'Terrain fixture differs; use -DiagnosticComparison, never treat this as parity acceptance.'
 }

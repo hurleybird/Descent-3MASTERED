@@ -726,7 +726,6 @@ int GL4Renderer::Init(oeApplication* app, renderer_preferred_state* pref_state)
 	extern const char* fontVertexSrc;
 	extern const char* fontFragmentSrc;
 	extern const char* motionVectorDebugFragmentSrc;
-	extern const char* motionVectorCopyFragmentSrc;
 	extern const char* pixelMotionBlurFragmentSrc;
 	extern const char* aoDeferredCompositeFragmentSrc;
 	extern const char* roomFogEntryVertexSrc;
@@ -805,17 +804,6 @@ int GL4Renderer::Init(oeApplication* app, renderer_preferred_state* pref_state)
 		motionvectordebug_has_static_reconstruction == -1 ||
 		motionvectordebug_has_dynamic_velocity == -1)
 		Error("GLRenderer::Init: Failed to find motion-vector debug uniforms!");
-
-	motionvectorcopyshader.AttachSource(blitVertexSrc, motionVectorCopyFragmentSrc);
-	motionvectorcopyshader.Use();
-	motionvectorcopy_velocity_source = motionvectorcopyshader.FindUniform("velocity_source");
-	motionvectorcopy_uv_origin = motionvectorcopyshader.FindUniform("uv_origin");
-	motionvectorcopy_uv_scale = motionvectorcopyshader.FindUniform("uv_scale");
-	if (motionvectorcopy_velocity_source != -1)
-		glUniform1i(motionvectorcopy_velocity_source, 0);
-	if (motionvectorcopy_velocity_source == -1 || motionvectorcopy_uv_origin == -1 ||
-		motionvectorcopy_uv_scale == -1)
-		Error("GLRenderer::Init: Failed to find motion-vector copy uniforms!");
 
 	motionblurshader.AttachSource(blitVertexSrc, pixelMotionBlurFragmentSrc);
 	motionblurshader.Use();
@@ -927,7 +915,6 @@ void GL4Renderer::Close()
 	downsampleshader.Destroy();
 	fontshader.Destroy();
 	motionvectordebugshader.Destroy();
-	motionvectorcopyshader.Destroy();
 	motionblurshader.Destroy();
 	ao_compositeshader.Destroy();
 	roomfogentryshader.Destroy();

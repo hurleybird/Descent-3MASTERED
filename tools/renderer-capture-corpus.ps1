@@ -21,6 +21,7 @@ param(
     [switch]$ScorchViewProbe,
     [switch]$MotionBlur,
     [switch]$LayerProbe,
+    [switch]$ResourceProbe,
     [switch]$HistoryProbe,
     [switch]$DeformationProbe
 )
@@ -30,6 +31,7 @@ param(
 $ErrorActionPreference = 'Stop'
 if ($AtmosphereProbe) { $SatelliteProbe = $true }
 if ($LayerProbe -and -not $SceneInspection) { throw 'Layer probe requires scene inspection.' }
+if ($ResourceProbe -and -not $SceneInspection) { throw 'Resource probe requires scene inspection.' }
 if ($ScorchViewProbe) {
     if (-not $SceneInspection -or $TerrainProbe -or $SkyProbe -or $SatelliteProbe -or $HistoryProbe -or $ModelEffectsProbe) {
         throw 'Scorch view probe requires scene inspection and no other camera probe.'
@@ -81,6 +83,7 @@ $manifest = [ordered]@{
     scorch_view_probe = [bool]$ScorchViewProbe
     motion_blur = [bool]$MotionBlur
     layer_probe = [bool]$LayerProbe
+    resource_probe = [bool]$ResourceProbe
     model_effects_revision = $(if ($ModelEffectsProbe) { 2 } else { 0 })
     history_probe = [bool]$HistoryProbe
     executable = (Get-FileHash -LiteralPath $exe).Hash
@@ -125,6 +128,7 @@ try {
         if ($ScorchProbe) { $arguments += '-capture-scorch' }
         if ($ScorchViewProbe) { $arguments += '-scene-scorch-view-probe' }
         if ($LayerProbe) { $arguments += '-scene-layer-probe' }
+        if ($ResourceProbe) { $arguments += '-scene-resource-probe' }
         if ($DeformationProbe) { $arguments += '-scene-deformation-probe' }
         $started = Get-Date
         $process = Start-Process -FilePath $exe -ArgumentList $arguments -WorkingDirectory $runtimePath -WindowStyle Hidden -PassThru
@@ -141,8 +145,22 @@ try {
         }
         $process.WaitForExit()
         $logText = if (Test-Path -LiteralPath $log) { Get-Content -LiteralPath $log -Raw } else { '' }
+        $resourceValidated = $true
+        if ($ResourceProbe) {
+            foreach ($transition in @(10,20,30,40,50)) {
+                if ($transition -ge $Frame) { continue }
+                $resourceValidated = $resourceValidated -and $logText.Contains("scene resource transition frame=$transition ")
+                if ($Profile -in @('effects','occlusion') -or $MotionBlur) {
+                    $resourceValidated = $resourceValidated -and $logText.Contains("scene motion frame=$transition camera_history=0 ")
+                    $following = $transition + 1
+                    if ($following -lt $Frame) {
+                        $resourceValidated = $resourceValidated -and $logText.Contains("scene motion frame=$following camera_history=1 ")
+                    }
+                }
+            }
+        }
         # HandledWinMain returns 1 after a normal run, not conventional exit 0.
-        $ok = -not $timedOut -and $process.ExitCode -eq 1 -and
+        $ok = -not $timedOut -and $resourceValidated -and $process.ExitCode -eq 1 -and
             (Test-Path -LiteralPath $png) -and $logText.Contains('capture saved') -and
             $logText.Contains('capture headlight enabled') -and
             $logText.Contains("capture rng seed=$Seed") -and
@@ -150,6 +168,7 @@ try {
         $manifest.results += [ordered]@{
             save=$save; save_hash=(Get-FileHash -LiteralPath $savePath).Hash
             success=$ok; exit_code=$process.ExitCode; timeout=$timedOut
+            resource_transitions_validated=$resourceValidated
             seconds=((Get-Date)-$started).TotalSeconds; arguments=$arguments
             image_hash=$(if (Test-Path -LiteralPath $png) { (Get-FileHash -LiteralPath $png).Hash } else { $null })
         }

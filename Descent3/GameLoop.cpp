@@ -2953,6 +2953,21 @@ void GameRenderFrame(void)
 		return;
 
 	PerfMarkersBeginFrame();
+	if (SceneGeometryInspection() && FindArg("-scene-resource-probe")) {
+		const int index = AutomatedCaptureFrameIndex();
+		if (index >= 10 && index <= 50 && index % 10 == 0) {
+			// Capture-only resource transitions. Do not change or save the user's
+			// preferred settings; exercise the normal in-place renderer API.
+			auto state = Render_preferred_state;
+			if (index == 10 || index == 40) { state.supersampling_factor = 1; state.msaa_samples = 0; }
+			if (index == 20) { state.supersampling_factor = 2; state.msaa_samples = 2; }
+			if (index == 30) { state.supersampling_factor = 4; state.msaa_samples = 4; }
+			state.antialised = state.msaa_samples > 0;
+			if (!rend_SetPreferredState(&state)) Error("Resource transition fixture could not apply renderer state");
+			AutomatedCaptureLog("scene resource transition frame=%d ssaa=%u msaa=%u",index,
+				unsigned(state.supersampling_factor),unsigned(state.msaa_samples));
+		}
+	}
 
 #ifndef RELEASE
 	Mine_depth = 0;
