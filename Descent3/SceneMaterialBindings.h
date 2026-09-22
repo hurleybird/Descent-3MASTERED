@@ -1,5 +1,7 @@
 // Descent 3MASTERED - GPL-3.0-or-later
 #pragma once
+#include "../renderer/Scene.h"
+d3scene::OcclusionClass SceneRoomOcclusionClass(int texture, bool exterior);
 int GetHighResolutionSkyBitmap(short texture_handle, int fallback_bitmap);
 struct SplitSpecularTexturePair
 {

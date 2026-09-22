@@ -1,5 +1,28 @@
 # Renderer migration checkpoint
 
+## Continuation: depth-owned material classification
+
+The former motion resource is now a scene surface-record resource: RG velocity,
+B correspondence validity, A semantic surface class, plus paired integer
+identity. AO reads class from this nearest-depth-selected record, not the
+averaged post-effect coverage mask. Non-temporal AO also requests the record;
+opaque export resolves it before canvas depth changes, including paused draws.
+The GPU self-test additionally verifies exact class 3 from the selected sample.
+
+Surface bindings now own a validated occlusion-class enum. Game preparation
+resolves terrain/model/interior/exterior and the existing rock/rubble content
+heuristic; the executor no longer infers class from geometry kind. The old room
+adapter uses the same content-classification function. No new image allocation
+was needed: classification occupies the surface record's fourth component.
+
+Full build and 4,886 CPU checks pass. All eight `scene-surface-record-effects`
+and both rotating/deformed probe captures pass strict GL checks. The subsequent
+`scene-authored-class-effects` corpus also passes all eight: six images are
+byte-identical to the preceding run; saves 005/006 change with restored material
+classification (mean RGB error 0.1451 / 0.000784). Images 000/002/005 inspected.
+Paused interactive behavior, memory/performance and full compositing remain
+qualification work, not implied complete by these capture results.
+
 ## Continuation: owned model motion and explicit temporal validity
 
 Model motion now composes previous object/part transforms and paired current/

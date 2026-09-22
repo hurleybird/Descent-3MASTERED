@@ -135,6 +135,12 @@ int runModelSceneTests() {
     malformed = frame->data(); malformed.objects[0].parts[0].surfaces[0].alpha = std::numeric_limits<float>::quiet_NaN();
     rejects([&] { Presentation::freeze(malformed); });
     auto motion_data = frame->data();
+    malformed = frame->data();
+    malformed.objects[0].parts[0].surfaces[0].occlusion_class = static_cast<OcclusionClass>(255);
+    rejects([&] { Presentation::freeze(malformed); });
+    motion_data.objects[0].parts[0].surfaces[0].occlusion_class = OcclusionClass::Model;
+    check(Presentation::freeze(motion_data)->data().objects[0].parts[0].surfaces[0].occlusion_class == OcclusionClass::Model,
+        "Publication lost explicit material occlusion semantics");
     auto& moving = motion_data.objects[0];
     moving.has_previous = true; moving.parts[0].has_previous = true;
     moving.previous.position = {2,3,4}; moving.parts[0].previous.position = {5,6,7};

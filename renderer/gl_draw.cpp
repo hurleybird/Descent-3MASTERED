@@ -422,27 +422,24 @@ void GL4Renderer::RestoreLegacy()
 	glBindVertexArray(drawvao);
 }
 
-bool GL4Renderer::PixelMotionVectorConsumerActive() const
+bool GL4Renderer::SceneSurfaceConsumerActive() const
 {
-	const bool ao_temporal_vectors =
-		OpenGL_preferred_state.ao_enabled &&
-		(OpenGL_preferred_state.ao_temporal_blend > 0.0f ||
-			OpenGL_preferred_state.ao_temporal_debug_preview);
 	const bool new_motion_blur_vectors =
 		OpenGL_preferred_state.combined_motion_blur &&
 		(OpenGL_preferred_state.pixel_motion_blur_strength > 0.0f ||
 			OpenGL_preferred_state.pixel_motion_blur_legacy_object_strength > 0.0f);
-	return ao_temporal_vectors || new_motion_blur_vectors;
+	// Even non-temporal AO consumes the depth owner's material class.
+	return OpenGL_preferred_state.ao_enabled || new_motion_blur_vectors;
 }
 
-bool GL4Renderer::MotionVectorTargetEnabled() const
+bool GL4Renderer::SceneSurfaceTargetEnabled() const
 {
-	return PixelMotionVectorConsumerActive() && motion_vectors.velocity_texture != 0;
+	return SceneSurfaceConsumerActive() && surface_records.velocity_texture != 0;
 }
 
 bool GL4Renderer::PixelMotionVectorModeEnabled() const
 {
-	return MotionVectorTargetEnabled();
+	return SceneSurfaceTargetEnabled();
 }
 
 bool GL4Renderer::MotionVectorsFrozen() const
@@ -535,12 +532,12 @@ void GL4Renderer::ApplyPixelMotionBlur(int supersampling_factor)
 	legacy_object_strength *= afterburner_blur_scale;
 	if ((scene_strength <= 0.0f && legacy_object_strength <= 0.0f) ||
 		motionblurshader.Handle() == 0 || post_present_framebuffer.Handle() == 0 ||
-		!MotionVectorTargetEnabled())
+		!SceneSurfaceTargetEnabled())
 	{
 		return;
 	}
 
-	if (motion_vectors.width == 0 || motion_vectors.height == 0)
+	if (surface_records.width == 0 || surface_records.height == 0)
 		return;
 	GLuint depth_texture = bloom_source_valid && bloom_source_framebuffer.Handle() != 0 ?
 		bloom_source_framebuffer.DepthTextureForRead() :
@@ -549,17 +546,17 @@ void GL4Renderer::ApplyPixelMotionBlur(int supersampling_factor)
 	if (scene_strength <= 0.0f && !has_dynamic_velocity)
 		return;
 	GLuint velocity_texture = has_dynamic_velocity ?
-		motion_vectors.TextureForRead(framebuffers[framebuffer_current_draw].Handle()) : 0;
+		surface_records.TextureForRead(framebuffers[framebuffer_current_draw].Handle()) : 0;
 	GLuint object_id_texture = has_dynamic_velocity ?
-		motion_vectors.ObjectIdTextureForRead(framebuffers[framebuffer_current_draw].Handle()) : 0;
+		surface_records.ObjectIdTextureForRead(framebuffers[framebuffer_current_draw].Handle()) : 0;
 	if (has_dynamic_velocity && (velocity_texture == 0 || object_id_texture == 0))
 		return;
 	if (supersampling_factor < 1)
 		supersampling_factor = 1;
 	const int framebuffer_logical_bottom_offset =
 		framebuffer_logical_height - OpenGL_state.screen_height - framebuffer_logical_offset_y;
-	const float source_width = (float)motion_vectors.width;
-	const float source_height = (float)motion_vectors.height;
+	const float source_width = (float)surface_records.width;
+	const float source_height = (float)surface_records.height;
 	const float uv_origin_x = (float)(framebuffer_logical_offset_x * supersampling_factor) / source_width;
 	const float uv_origin_y = (float)(framebuffer_logical_bottom_offset * supersampling_factor) / source_height;
 	const float uv_scale_x = (float)(OpenGL_state.screen_width * supersampling_factor) / source_width;
@@ -660,19 +657,19 @@ void GL4Renderer::ApplyPixelMotionBlur(int supersampling_factor)
 void GL4Renderer::DrawMotionVectorDebugPreview(int supersampling_factor)
 {
 	renderer_motion_vector_debug_sample debug_sample = {};
-	debug_sample.mode = PixelMotionVectorConsumerActive() ?
+	debug_sample.mode = SceneSurfaceConsumerActive() ?
 		RENDERER_MOTION_VECTOR_PIXEL : RENDERER_MOTION_VECTOR_OFF;
 
 	if (!OpenGL_preferred_state.motion_vector_debug_preview || Game_mode == GM_NONE ||
-		!MotionVectorTargetEnabled() || motionvectordebugshader.Handle() == 0 ||
+		!SceneSurfaceTargetEnabled() || motionvectordebugshader.Handle() == 0 ||
 		post_present_framebuffer.Handle() == 0)
 	{
 		rend_SetMotionVectorDebugSample(nullptr);
 		return;
 	}
 
-	GLuint velocity_texture = motion_vectors.TextureForRead(framebuffers[framebuffer_current_draw].Handle());
-	if (velocity_texture == 0 || motion_vectors.width == 0 || motion_vectors.height == 0)
+	GLuint velocity_texture = surface_records.TextureForRead(framebuffers[framebuffer_current_draw].Handle());
+	if (velocity_texture == 0 || surface_records.width == 0 || surface_records.height == 0)
 	{
 		rend_SetMotionVectorDebugSample(&debug_sample);
 		return;
@@ -680,28 +677,28 @@ void GL4Renderer::DrawMotionVectorDebugPreview(int supersampling_factor)
 	GLuint depth_texture = bloom_source_valid && bloom_source_framebuffer.Handle() != 0 ?
 		bloom_source_framebuffer.DepthTextureForRead() :
 		framebuffers[framebuffer_current_draw].DepthTextureForRead();
-	GLuint object_id_texture = motion_vectors.ObjectIdTextureForRead(framebuffers[framebuffer_current_draw].Handle());
+	GLuint object_id_texture = surface_records.ObjectIdTextureForRead(framebuffers[framebuffer_current_draw].Handle());
 
 	if (supersampling_factor < 1)
 		supersampling_factor = 1;
 	const int framebuffer_logical_bottom_offset =
 		framebuffer_logical_height - OpenGL_state.screen_height - framebuffer_logical_offset_y;
-	const float source_width = (float)motion_vectors.width;
-	const float source_height = (float)motion_vectors.height;
+	const float source_width = (float)surface_records.width;
+	const float source_height = (float)surface_records.height;
 	const float uv_origin_x = (float)(framebuffer_logical_offset_x * supersampling_factor) / source_width;
 	const float uv_origin_y = (float)(framebuffer_logical_bottom_offset * supersampling_factor) / source_height;
 	const float uv_scale_x = (float)(OpenGL_state.screen_width * supersampling_factor) / source_width;
 	const float uv_scale_y = (float)(OpenGL_state.screen_height * supersampling_factor) / source_height;
-	const int center_x = std::max(0, std::min((int)motion_vectors.width - 1,
+	const int center_x = std::max(0, std::min((int)surface_records.width - 1,
 		(int)((uv_origin_x + uv_scale_x * 0.5f) * source_width)));
-	const int center_y = std::max(0, std::min((int)motion_vectors.height - 1,
+	const int center_y = std::max(0, std::min((int)surface_records.height - 1,
 		(int)((uv_origin_y + uv_scale_y * 0.5f) * source_height)));
 
 	GLint old_read = 0;
 	glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &old_read);
 	GLint old_read_buffer = GL_COLOR_ATTACHMENT0;
 	glGetIntegerv(GL_READ_BUFFER, &old_read_buffer);
-	glBindFramebuffer(GL_READ_FRAMEBUFFER, motion_vectors.resolve_framebuffer);
+	glBindFramebuffer(GL_READ_FRAMEBUFFER, surface_records.resolve_framebuffer);
 	glReadBuffer(GL_COLOR_ATTACHMENT0);
 	float center_velocity[2] = {};
 	glReadPixels(center_x, center_y, 1, 1, GL_RG, GL_FLOAT, center_velocity);
@@ -717,9 +714,9 @@ void GL4Renderer::DrawMotionVectorDebugPreview(int supersampling_factor)
 		{
 			const float u = ((float)column + 0.5f) / (float)sample_columns;
 			const float v = ((float)row + 0.5f) / (float)sample_rows;
-			const int sample_x = std::max(0, std::min((int)motion_vectors.width - 1,
+			const int sample_x = std::max(0, std::min((int)surface_records.width - 1,
 				(int)((uv_origin_x + uv_scale_x * u) * source_width)));
-			const int sample_y = std::max(0, std::min((int)motion_vectors.height - 1,
+			const int sample_y = std::max(0, std::min((int)surface_records.height - 1,
 				(int)((uv_origin_y + uv_scale_y * v) * source_height)));
 			float velocity[2] = {};
 			glReadPixels(sample_x, sample_y, 1, 1, GL_RG, GL_FLOAT, velocity);
@@ -739,8 +736,8 @@ void GL4Renderer::DrawMotionVectorDebugPreview(int supersampling_factor)
 	debug_sample.valid = true;
 	debug_sample.x = center_x;
 	debug_sample.y = center_y;
-	debug_sample.width = (int)motion_vectors.width;
-	debug_sample.height = (int)motion_vectors.height;
+	debug_sample.width = (int)surface_records.width;
+	debug_sample.height = (int)surface_records.height;
 	debug_sample.vx = center_velocity[0];
 	debug_sample.vy = center_velocity[1];
 	debug_sample.max_x = max_x;
@@ -2290,7 +2287,7 @@ void GL4Renderer::DrawPolygon3D(int handle, g3Point** p, int nv, int map_type)
 	if (include_motion_vectors || include_motion_object_ids)
 	{
 		motion_vectors_dirty = true;
-		motion_vectors.MarkDirty();
+		surface_records.MarkDirty();
 	}
 	if (override_draw_buffers)
 	{
@@ -2437,7 +2434,7 @@ void GL4Renderer::DrawPolygon3DBatch(int handle, const renderer_poly_batch_item 
 	if (include_motion_vectors || include_motion_object_ids)
 	{
 		motion_vectors_dirty = true;
-		motion_vectors.MarkDirty();
+		surface_records.MarkDirty();
 	}
 	if (override_draw_buffers)
 	{
@@ -2787,7 +2784,7 @@ bool GL4Renderer::DrawWeatherQuadBatch(int handle, const renderer_weather_quad *
 	if (include_motion_vectors || include_motion_object_ids)
 	{
 		motion_vectors_dirty = true;
-		motion_vectors.MarkDirty();
+		surface_records.MarkDirty();
 	}
 	if (override_draw_buffers)
 		UseSceneDrawBuffers();
@@ -3042,7 +3039,7 @@ void GL4Renderer::EndRetainedPolymodelDraw()
 	if (retained_include_motion_vectors || retained_include_motion_object_ids)
 	{
 		motion_vectors_dirty = true;
-		motion_vectors.MarkDirty();
+		surface_records.MarkDirty();
 	}
 	if (retained_override_draw_buffers)
 	{
@@ -3378,8 +3375,8 @@ void GL4Renderer::BeginMotionObject(int object_handle, int motion_object_flags)
 	motion_object_active = object_handle >= 0 && framebuffer_ok &&
 		!post_present_pending_swap &&
 		(!motion_vectors_capture_locked || cockpit_draw) &&
-		PixelMotionVectorConsumerActive() &&
-		motion_vectors.velocity_texture != 0;
+		SceneSurfaceConsumerActive() &&
+		surface_records.velocity_texture != 0;
 	if (motion_object_active && cockpit_draw)
 		cockpit_motion_object_active = true;
 	else if (motion_object_active)
@@ -3425,7 +3422,7 @@ void GL4Renderer::FillMotionVectorRegion(int object_handle)
 	FlushFontBatch();
 
 	if (!PixelMotionVectorModeEnabled() || MotionVectorsFrozen() ||
-		post_present_pending_swap || !framebuffer_ok || motion_vectors.velocity_texture == 0)
+		post_present_pending_swap || !framebuffer_ok || surface_records.velocity_texture == 0)
 	{
 		return;
 	}
@@ -3468,7 +3465,7 @@ void GL4Renderer::FillMotionVectorRegion(int object_handle)
 	glClearBufferuiv(GL_COLOR, 0, fill_id);
 
 	motion_vectors_dirty = true;
-	motion_vectors.MarkDirty();
+	surface_records.MarkDirty();
 
 	if (scissor_was_enabled)
 	{

@@ -17,6 +17,7 @@
 */
 
 #include "render.h"
+#include "SceneMaterialBindings.h"
 #include "../renderer/SceneLighting.h"
 #include <stdlib.h>
 #include <string.h>
@@ -73,32 +74,6 @@ static int Faces_rendered = 0;
 static int Room_base_batch_count = 0;
 static int Room_base_batched_face_count = 0;
 
-static bool TextureNameContainsNoCase(const char* name, const char* needle)
-{
-	if (!name || !needle || !needle[0])
-		return false;
-
-	size_t needle_len = strlen(needle);
-	for (const char* p = name; *p; p++)
-	{
-		if (!strnicmp(p, needle, needle_len))
-			return true;
-	}
-
-	return false;
-}
-
-static bool TextureLooksLikeMineRock(int tmap)
-{
-	if (tmap < 0 || tmap >= MAX_TEXTURES || !GameTextures[tmap].used)
-		return false;
-
-	if (GameTextures[tmap].flags & TF_RUBBLE)
-		return true;
-
-	return TextureNameContainsNoCase(GameTextures[tmap].name, "rock") ||
-		TextureNameContainsNoCase(GameTextures[tmap].name, "rubble");
-}
 
 static bool RenderObjectHasWeaponStreamer(const object* objp)
 {
@@ -110,8 +85,7 @@ int RoomFaceAOClass(room* rp, face* fp)
 	if (!rp || !fp || (rp->flags & RF_EXTERNAL))
 		return RENDERER_AO_CLASS_DEFAULT;
 
-	return TextureLooksLikeMineRock(fp->tmap) ?
-		RENDERER_AO_CLASS_MINE_ROCK : RENDERER_AO_CLASS_MINE;
+	return static_cast<int>(SceneRoomOcclusionClass(fp->tmap,false));
 }
 
 extern double GetFPS();

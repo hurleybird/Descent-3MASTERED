@@ -30,6 +30,20 @@
 
 bool SceneGeometryInspection() { return FindArg("-scene-inspection") != 0; }
 
+d3scene::OcclusionClass SceneRoomOcclusionClass(int texture, bool exterior) {
+    if (exterior) return d3scene::OcclusionClass::Default;
+    // Compatibility interpretation of legacy content, resolved once upstream.
+    // The GPU receives a semantic class and never guesses from geometry type.
+    if (texture >= 0 && texture < MAX_TEXTURES && GameTextures[texture].used) {
+        const auto& source = GameTextures[texture];
+        if (source.flags & TF_RUBBLE) return d3scene::OcclusionClass::MineRock;
+        for (const char* name = source.name; *name; ++name)
+            if (!strnicmp(name,"rock",4) || !strnicmp(name,"rubble",6))
+                return d3scene::OcclusionClass::MineRock;
+    }
+    return d3scene::OcclusionClass::Mine;
+}
+
 namespace {
 void prepareImages(d3scene::FrameData& data) {
     std::unordered_map<int,d3scene::ImageAssetRef> images;
@@ -192,6 +206,7 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance_history) {
           room.pulse_offset,room.number,(room.authored_flags & RF_STROBE) != 0,
           (room.authored_flags & RF_FLICKER) != 0,GetFunctionMode() == EDITOR_MODE);
       for (auto& surface : room.surfaces) {
+        surface.occlusion_class = SceneRoomOcclusionClass(surface.texture,room.exterior);
         resolveMaterial(surface,static_cast<float>(data.simulation_time),false);
         surface.lighting_modulation = room.light_scalar;
         surface.draw_surface = !(surface.authored_flags & FF_FLOATING_TRIG);

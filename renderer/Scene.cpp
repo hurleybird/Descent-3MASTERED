@@ -23,6 +23,8 @@ void require(bool condition, const char* message) {
     if (!condition) throw std::invalid_argument(message);
 }
 void validateSurface(const SurfaceBinding& surface) {
+    require(static_cast<unsigned>(surface.occlusion_class) <= static_cast<unsigned>(OcclusionClass::Mine),
+        "Unknown surface occlusion class");
     require(std::isfinite(surface.soft_depth_range) && surface.soft_depth_range >= 0,"Invalid soft intersection range");
     require(surface.blend == BlendMode::Solid || surface.blend == BlendMode::Alpha || surface.blend == BlendMode::Additive ||
         surface.blend == BlendMode::Multiply,"Invalid material blend mode");

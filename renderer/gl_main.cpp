@@ -1726,7 +1726,7 @@ void GL4Renderer::StartFrame(int x1, int y1, int x2, int y2, int clear_flags)
 			OpenGL_preferred_state = msaa_deferred_preferred_state;
 			msaa_deferred_preferred_state_valid = false;
 		}
-		if (PixelMotionVectorConsumerActive())
+		if (SceneSurfaceConsumerActive())
 			preserve_motion_vectors_on_next_framebuffer_update = true;
 		UpdateWindow();
 		SetViewport();
@@ -1826,9 +1826,9 @@ void GL4Renderer::StartFrame(int x1, int y1, int x2, int y2, int clear_flags)
 			post_protection_mask_cleared_this_frame = true;
 			terrain_post_mask_default_initialized = false;
 		}
-		if (MotionVectorTargetEnabled() && !MotionVectorsFrozen() && !motion_vectors_cleared_this_frame)
+		if (SceneSurfaceTargetEnabled() && !MotionVectorsFrozen() && !motion_vectors_cleared_this_frame)
 		{
-			motion_vectors.ClearAttached(framebuffers[framebuffer_current_draw].Handle());
+			surface_records.ClearAttached(framebuffers[framebuffer_current_draw].Handle());
 			motion_vectors_dirty = false;
 			motion_vectors_cleared_this_frame = true;
 		}
@@ -2189,7 +2189,7 @@ bool GL4Renderer::BeginPostPresentFrameInternal(bool defer_bloom_composite)
 		post_protection_mask.TextureForRead(framebuffers[framebuffer_current_draw].Handle()) : 0;
 	GLuint ao_suppression_mask_texture = protection_mask_texture;
 	GLuint ao_class_texture = ao_enabled ?
-		post_protection_mask.AOClassTextureForRead(framebuffers[framebuffer_current_draw].Handle()) : 0;
+		surface_records.TextureForRead(framebuffers[framebuffer_current_draw].Handle()) : 0;
 
 	GL4PerfGpuSplitMark(GL4_GPU_SPLIT_AFTER_PREP);
 
@@ -2241,11 +2241,11 @@ bool GL4Renderer::BeginPostPresentFrameInternal(bool defer_bloom_composite)
 		GLuint ao_velocity_texture = 0;
 		GLuint ao_object_id_texture = 0;
 		bool ao_has_dynamic_velocity = false;
-		if (ao_temporal_wants_motion && !ao_motion_frozen && MotionVectorTargetEnabled() &&
-			motion_vectors.width > 0 && motion_vectors.height > 0 && motion_vectors_dirty)
+		if (ao_temporal_wants_motion && !ao_motion_frozen && SceneSurfaceTargetEnabled() &&
+			surface_records.width > 0 && surface_records.height > 0 && motion_vectors_dirty)
 		{
-			ao_velocity_texture = motion_vectors.TextureForRead(framebuffers[framebuffer_current_draw].Handle());
-			ao_object_id_texture = motion_vectors.ObjectIdTextureForRead(framebuffers[framebuffer_current_draw].Handle());
+			ao_velocity_texture = surface_records.TextureForRead(framebuffers[framebuffer_current_draw].Handle());
+			ao_object_id_texture = surface_records.ObjectIdTextureForRead(framebuffers[framebuffer_current_draw].Handle());
 			ao_has_dynamic_velocity = ao_velocity_texture != 0 && ao_object_id_texture != 0;
 		}
 		const bool use_frozen_static_motion = MotionVectorsFrozen() && frozen_static_motion_valid;
@@ -2270,7 +2270,7 @@ bool GL4Renderer::BeginPostPresentFrameInternal(bool defer_bloom_composite)
 				ao_weight_texture, ao_weight_is_direct, 0, 0, 0, 0,
 				ao_noise_origin_x, ao_noise_origin_y,
 				ao_velocity_texture, ao_object_id_texture,
-				(int)motion_vectors.width, (int)motion_vectors.height, supersampling_factor,
+				(int)surface_records.width, (int)surface_records.height, supersampling_factor,
 				ao_motion_projection, ao_motion_inverse_modelview,
 				ao_motion_previous_view_projection, ao_has_static_reconstruction,
 				ao_has_dynamic_velocity, ao_reset_temporal_history, false, &ao_result);
@@ -2319,7 +2319,7 @@ bool GL4Renderer::BeginPostPresentFrameInternal(bool defer_bloom_composite)
 				ao_weight_texture, ao_weight_is_direct, 0, 0, 0, 0,
 				ao_noise_origin_x, ao_noise_origin_y,
 				ao_velocity_texture, ao_object_id_texture,
-				(int)motion_vectors.width, (int)motion_vectors.height, supersampling_factor,
+				(int)surface_records.width, (int)surface_records.height, supersampling_factor,
 				ao_motion_projection, ao_motion_inverse_modelview,
 				ao_motion_previous_view_projection, ao_has_static_reconstruction,
 				ao_has_dynamic_velocity, ao_reset_temporal_history);
@@ -2462,7 +2462,7 @@ bool GL4Renderer::BeginPostPresentFrameInternal(bool defer_bloom_composite)
 
 	GL4PerfGpuSplitMark(GL4_GPU_SPLIT_AFTER_BLOOM);
 
-	if (!MotionVectorsFrozen() && framebuffer_ok && MotionVectorTargetEnabled() &&
+	if (!MotionVectorsFrozen() && framebuffer_ok && SceneSurfaceTargetEnabled() &&
 		have_previous_view_projection)
 	{
 		const bool have_captured_static_matrices =
@@ -3333,11 +3333,11 @@ void GL4Renderer::ExportOpaqueScene(const d3scene::Camera& camera)
 
 		framebuffers[framebuffer_current_draw].ClearAlphaToZero();
 		UseSceneDrawBuffers();
-		if (MotionVectorTargetEnabled() && !MotionVectorsFrozen())
+		if (SceneSurfaceTargetEnabled())
 		{
 			// Resolve the complete surface record while opaque scene depth is
 			// still live, before canvas setup can clear that attachment.
-			motion_vectors.Resolve(framebuffers[framebuffer_current_draw].Handle());
+			surface_records.Resolve(framebuffers[framebuffer_current_draw].Handle());
 			motion_vectors_capture_locked = true;
 			UseSceneDrawBuffers();
 		}
@@ -4503,18 +4503,18 @@ void GL4Renderer::UpdateFramebuffer(void)
 		SupersamplingFactor(), OpenGL_preferred_state.bloom_enabled ? 1 : 0,
 		OpenGL_preferred_state.ao_enabled ? 1 : 0,
 		(unsigned)post_protection_mask.mask_texture, (unsigned)post_protection_mask.samples,
-		(unsigned)motion_vectors.velocity_texture, (unsigned)motion_vectors.samples));
+		(unsigned)surface_records.velocity_texture, (unsigned)surface_records.samples));
 	bool framebuffer_state_changed = framebuffers[0].Handle() != 0 &&
 		(framebuffers[0].RequestedSamples() != (uint32_t)target_samples ||
 		 framebuffers[0].Width() != (uint32_t)target_width ||
 		 framebuffers[0].Height() != (uint32_t)target_height);
-	const bool motion_vectors_enabled = PixelMotionVectorConsumerActive();
+	const bool motion_vectors_enabled = SceneSurfaceConsumerActive();
 	GL4MotionVectorPreserveSnapshot preserved_motion_vectors;
-	if (framebuffer_state_changed && motion_vectors_enabled && motion_vectors.velocity_texture != 0)
+	if (framebuffer_state_changed && motion_vectors_enabled && surface_records.velocity_texture != 0)
 	{
-		GLuint source_texture = motion_vectors.TextureForRead(framebuffers[framebuffer_current_draw].Handle());
+		GLuint source_texture = surface_records.TextureForRead(framebuffers[framebuffer_current_draw].Handle());
 		GL4CaptureMotionVectorPreserveSnapshot(source_texture,
-			(int)motion_vectors.width, (int)motion_vectors.height,
+			(int)surface_records.width, (int)surface_records.height,
 			old_motion_vector_visible_origin_x, old_motion_vector_visible_origin_y,
 			old_motion_vector_visible_width, old_motion_vector_visible_height,
 			preserved_motion_vectors);
@@ -4544,22 +4544,22 @@ void GL4Renderer::UpdateFramebuffer(void)
 		motion_blur_framebuffer.Destroy();
 		soft_particle_depth_copy_valid = false;
 		soft_particle_depth_source_framebuffer = 0;
-		motion_vectors.Destroy();
+		surface_records.Destroy();
 		post_protection_mask.Destroy();
 		GL_UnbindFramebufferTextures();
 		glFinish();
 	}
 	ao.DestroyFramebuffers();
 	if (!motion_vectors_enabled)
-		motion_vectors.Destroy();
+		surface_records.Destroy();
 
 	for (int i = 0; i < NUM_GL4_FBOS; i++)
 	{
 		framebuffers[i].Update(target_width, target_height, target_samples);
 		if (motion_vectors_enabled)
 		{
-			motion_vectors.Update(target_width, target_height, framebuffers[i].Samples());
-			motion_vectors.AttachToFramebuffer(framebuffers[i].Handle());
+			surface_records.Update(target_width, target_height, framebuffers[i].Samples());
+			surface_records.AttachToFramebuffer(framebuffers[i].Handle());
 		}
 		post_protection_mask.Update(target_width, target_height, framebuffers[i].Samples());
 		post_protection_mask.AttachToFramebuffer(framebuffers[i].Handle());
@@ -4568,7 +4568,7 @@ void GL4Renderer::UpdateFramebuffer(void)
 			framebuffers[i].ClearAll();
 			if (motion_vectors_enabled)
 			{
-				motion_vectors.ClearAttached(framebuffers[i].Handle());
+				surface_records.ClearAttached(framebuffers[i].Handle());
 			}
 			post_protection_mask.ClearAttached(framebuffers[i].Handle());
 		}
@@ -4576,7 +4576,7 @@ void GL4Renderer::UpdateFramebuffer(void)
 	}
 	bool restored_motion_vectors = false;
 	if (motion_vectors_enabled && preserved_motion_vectors.texture != 0 &&
-		motion_vectors.velocity_texture != 0)
+		surface_records.velocity_texture != 0)
 	{
 		restored_motion_vectors = GL4RestoreMotionVectorPreserveSnapshot(preserved_motion_vectors,
 			framebuffers[0].Handle(), motionvectorcopyshader, motionvectorcopy_velocity_source,
@@ -4607,7 +4607,7 @@ void GL4Renderer::UpdateFramebuffer(void)
 	post_protection_mask_cleared_this_frame = false;
 	const bool kept_existing_motion_vectors =
 		preserve_motion_vectors_for_update && !framebuffer_state_changed &&
-		motion_vectors_enabled && motion_vectors.velocity_texture != 0;
+		motion_vectors_enabled && surface_records.velocity_texture != 0;
 	motion_vectors_cleared_this_frame = restored_motion_vectors || kept_existing_motion_vectors;
 	motion_vectors_capture_locked = false;
 	motion_vector_visible_origin_x = current_motion_vector_visible_origin_x;
@@ -4631,7 +4631,7 @@ void GL4Renderer::UpdateFramebuffer(void)
 		(unsigned)resolved_framebuffer.Handle(), (unsigned)downscale_framebuffer.Handle(),
 		(unsigned)post_present_framebuffer.Handle(),
 		(unsigned)post_protection_mask.mask_texture, (unsigned)post_protection_mask.samples,
-		(unsigned)motion_vectors.velocity_texture, (unsigned)motion_vectors.samples));
+		(unsigned)surface_records.velocity_texture, (unsigned)surface_records.samples));
 	GL4PerfFramebufferResourceState("UpdateEnd", framebuffers[0], preferred_samples,
 		target_samples, supersampling_factor, post_protection_mask.mask_texture,
 		post_protection_mask.samples, post_protection_mask.msaa_renderbuffer_storage,
@@ -4671,7 +4671,7 @@ void GL4Renderer::CloseFramebuffer(void)
 	bloom_source_valid = false;
 	ao_scene_valid = false;
 	deferred_bloom_apply_pending = false;
-	motion_vectors.Destroy();
+	surface_records.Destroy();
 	frozen_static_motion_valid = false;
 	post_protection_mask.Destroy();
 	if (room_fog_portal_buffer != 0)

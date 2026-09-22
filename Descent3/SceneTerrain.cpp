@@ -77,6 +77,7 @@ void PrepareGameTerrain(d3scene::FrameData& frame) {
     frame.terrain.asset = asset;
     for (const auto& material : asset->grid().materials) {
         d3scene::SurfaceBinding binding;
+        binding.occlusion_class = d3scene::OcclusionClass::Terrain;
         binding.texture = material.texture;
         binding.lightmap_bitmap = material.lightmap;
         if (material.lightmap >= 0 && material.lightmap < MAX_LIGHTMAPS) {

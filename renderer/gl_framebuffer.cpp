@@ -809,7 +809,7 @@ void Framebuffer::DownsampleTo(GLuint target, unsigned int x, unsigned int y, un
 	rend_RestoreLegacy();
 }
 
-void MotionVectorResources::Update(uint32_t new_width, uint32_t new_height, uint32_t msaa_samples)
+void SceneSurfaceResources::Update(uint32_t new_width, uint32_t new_height, uint32_t msaa_samples)
 {
 	if (new_width == 0 || new_height == 0)
 	{
@@ -893,7 +893,7 @@ void MotionVectorResources::Update(uint32_t new_width, uint32_t new_height, uint
 	glBindRenderbuffer(GL_RENDERBUFFER, 0);
 }
 
-void MotionVectorResources::Destroy()
+void SceneSurfaceResources::Destroy()
 {
 	resolve_shader.Destroy();
 	glDeleteFramebuffers(1, &resolve_framebuffer);
@@ -911,7 +911,7 @@ void MotionVectorResources::Destroy()
 	object_id_resolve_valid = false;
 }
 
-void MotionVectorResources::AttachToFramebuffer(GLuint framebuffer)
+void SceneSurfaceResources::AttachToFramebuffer(GLuint framebuffer)
 {
 	if (velocity_texture == 0)
 		return;
@@ -926,7 +926,7 @@ void MotionVectorResources::AttachToFramebuffer(GLuint framebuffer)
 	GLenum fbstatus = glCheckFramebufferStatus(GL_FRAMEBUFFER);
 	if (fbstatus != GL_FRAMEBUFFER_COMPLETE)
 	{
-		mprintf((0, "MotionVectorResources::AttachToFramebuffer: disabling motion vectors, framebuffer status 0x%x.\n",
+		mprintf((0, "SceneSurfaceResources::AttachToFramebuffer: disabling motion vectors, framebuffer status 0x%x.\n",
 			fbstatus));
 		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, texture_type, 0, 0);
 		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT4, texture_type, 0, 0);
@@ -934,7 +934,7 @@ void MotionVectorResources::AttachToFramebuffer(GLuint framebuffer)
 	}
 }
 
-void MotionVectorResources::ClearAttached(GLuint framebuffer)
+void SceneSurfaceResources::ClearAttached(GLuint framebuffer)
 {
 	if (velocity_texture == 0)
 		return;
@@ -960,13 +960,13 @@ void MotionVectorResources::ClearAttached(GLuint framebuffer)
 	MarkDirty();
 }
 
-void MotionVectorResources::MarkDirty()
+void SceneSurfaceResources::MarkDirty()
 {
 	velocity_resolve_valid = false;
 	object_id_resolve_valid = false;
 }
 
-void MotionVectorResources::Resolve(GLuint source_framebuffer)
+void SceneSurfaceResources::Resolve(GLuint source_framebuffer)
 {
     if (samples < 2 || !velocity_texture || (velocity_resolve_valid && object_id_resolve_valid)) return;
     SampleResolveScope scope;
@@ -1007,14 +1007,14 @@ void main() {
     velocity_resolve_valid = object_id_resolve_valid = true;
 }
 
-GLuint MotionVectorResources::TextureForRead(GLuint source_framebuffer)
+GLuint SceneSurfaceResources::TextureForRead(GLuint source_framebuffer)
 {
     if (!velocity_texture) return 0;
     Resolve(source_framebuffer);
     return samples >= 2 ? resolved_texture : velocity_texture;
 }
 
-GLuint MotionVectorResources::ObjectIdTextureForRead(GLuint source_framebuffer)
+GLuint SceneSurfaceResources::ObjectIdTextureForRead(GLuint source_framebuffer)
 {
     if (!object_id_texture) return 0;
     Resolve(source_framebuffer);
@@ -1030,7 +1030,7 @@ void GL_VerifySceneSampleResolve()
     Framebuffer target;
     target.Update(1,1,4);
     if (target.Samples() < 2) Error("Scene sample test requires multisample storage");
-    MotionVectorResources motion;
+    SceneSurfaceResources motion;
     motion.Update(1,1,target.Samples());
     motion.AttachToFramebuffer(target.Handle());
     const GLenum outputs[5] = {GL_COLOR_ATTACHMENT0,GL_COLOR_ATTACHMENT1,GL_NONE,GL_NONE,GL_COLOR_ATTACHMENT4};
@@ -1048,7 +1048,7 @@ void main() {
     int sample_index = gl_SampleID;
     gl_FragDepth = sample_index == 1 || sample_index == 2 ? .2 : .8;
     color = vec4(1);
-    velocity = vec4(sample_index,10+sample_index,sample_index == 1 ? 1 : 0,0);
+    velocity = vec4(sample_index,10+sample_index,sample_index == 1 ? 1 : 0,(sample_index+2)/255.0);
     identity = uint(100+sample_index);
 }
 )GLSL");
@@ -1067,12 +1067,13 @@ void main() {
     GLuint identity = 0;
     glReadPixels(0,0,1,1,GL_RED_INTEGER,GL_UNSIGNED_INT,&identity);
     glReadBuffer(GL_COLOR_ATTACHMENT0);
-    if (fabsf(resolved_depth-.2f) > .00001f || velocity[0] != 1 || velocity[1] != 11 || velocity[2] != 1 || identity != 101)
+    if (fabsf(resolved_depth-.2f) > .00001f || velocity[0] != 1 || velocity[1] != 11 || velocity[2] != 1 ||
+        int(velocity[3]*255+.5f) != 3 || identity != 101)
         Error("Scene sample resolve mixed surfaces: depth=%g velocity=%g,%g identity=%u",resolved_depth,velocity[0],velocity[1],identity);
     shader.Destroy(); motion.Destroy(); target.Destroy();
     glMinSampleShading(minimum);
     GL_SetEnabledState(GL_SAMPLE_SHADING,sample_shading); GL_SetEnabledState(GL_MULTISAMPLE,multisample);
-    AutomatedCaptureLog("scene sample resolve verified: nearest sample=1 depth=0.2 velocity=1,11 identity=101");
+    AutomatedCaptureLog("scene sample resolve verified: nearest sample=1 depth=0.2 velocity=1,11 validity=1 class=3 identity=101");
 }
 
 void PostProtectionMaskResources::Update(uint32_t new_width, uint32_t new_height, uint32_t msaa_samples)
@@ -1267,11 +1268,6 @@ GLuint PostProtectionMaskResources::TextureForRead(GLuint source_framebuffer)
 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, old_draw);
 	resolve_valid = true;
 	return resolved_texture;
-}
-
-GLuint PostProtectionMaskResources::AOClassTextureForRead(GLuint source_framebuffer)
-{
-	return TextureForRead(source_framebuffer);
 }
 
 void Framebuffer::BindForRead()

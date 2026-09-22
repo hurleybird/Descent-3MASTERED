@@ -249,8 +249,11 @@ public:
 	}
 };
 
-struct MotionVectorResources
+struct SceneSurfaceResources
 {
+	// One opaque surface record: RG motion, B correspondence validity, A class;
+	// integer identity shares its nearest-depth MSAA sample. Color coverage is
+	// intentionally separate and is never interpreted as categorical metadata.
 	ShaderProgram resolve_shader;
 	GLuint velocity_texture = 0;
 	GLuint resolved_texture = 0;
@@ -291,7 +294,6 @@ struct PostProtectionMaskResources
 	void UseSceneDrawBuffers(GLuint framebuffer, bool include_motion_vectors = false,
 		bool include_motion_object_ids = false);
 	GLuint TextureForRead(GLuint source_framebuffer);
-	GLuint AOClassTextureForRead(GLuint source_framebuffer);
 };
 
 void GL_BindFramebufferTexture(GLuint texture, int unit, GLenum filter);

@@ -170,6 +170,7 @@ private:
 enum class RenderLayer : uint8_t { Background, World };
 enum class BlendMode : uint8_t { Solid, Alpha, Additive, Multiply };
 enum class TextureAlpha : uint8_t { Ignore, Cutout, Continuous };
+enum class OcclusionClass : uint8_t { Default, Terrain, Model, MineRock, Mine };
 struct MaterialPolicy {
     RenderLayer layer = RenderLayer::World;
     BlendMode blend = BlendMode::Solid;
@@ -184,6 +185,7 @@ struct MaterialPolicy {
 // material compiler must resolve them before execution is enabled.
 struct SurfaceBinding {
     MaterialPolicy material; // compiled by publication, shared by all consumers
+    OcclusionClass occlusion_class = OcclusionClass::Default;
     RenderLayer layer = RenderLayer::World;
     bool unlit = false, two_sided = false;
     BlendMode blend = BlendMode::Solid; // non-solid modes explicitly request compositing

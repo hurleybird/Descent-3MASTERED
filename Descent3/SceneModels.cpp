@@ -170,6 +170,7 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::FrameDat
             part.draw = part.draw && (source->rtype.pobj_info.subobj_flags & (1u << i));
             for (size_t j = 0; j < asset_part.geometry.polygons.size(); ++j) {
                 d3scene::SurfaceBinding binding;
+                binding.occlusion_class = d3scene::OcclusionClass::Model;
                 binding.ambient_color = ambient;
                 binding.directional_ambient = directional;
                 binding.alpha = effect.alpha;

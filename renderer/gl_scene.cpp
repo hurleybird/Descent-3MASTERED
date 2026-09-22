@@ -14,6 +14,11 @@
 extern int Last_texel_unit_set;
 
 namespace {
+static_assert(static_cast<int>(d3scene::OcclusionClass::Default) == RENDERER_AO_CLASS_DEFAULT &&
+    static_cast<int>(d3scene::OcclusionClass::Terrain) == RENDERER_AO_CLASS_TERRAIN &&
+    static_cast<int>(d3scene::OcclusionClass::Model) == RENDERER_AO_CLASS_POLYOBJECT &&
+    static_cast<int>(d3scene::OcclusionClass::MineRock) == RENDERER_AO_CLASS_MINE_ROCK &&
+    static_cast<int>(d3scene::OcclusionClass::Mine) == RENDERER_AO_CLASS_MINE,"Canvas AO class adapter differs from scene contract");
 struct SceneVertex { d3scene::Vec3 position; float u, v, lu, lv, alpha; d3scene::Vec3 normal, color; };
 const char* SceneLightingShader = R"GLSL(#version 330 core
 uniform samplerBuffer scene_lights;
@@ -99,7 +104,7 @@ uniform float occlusion_class;
 uniform uint motion_identity;
 uniform int motion_valid;
 in vec4 current_clip, previous_clip;
-layout(location=1) out vec4 surface_motion; // XY displacement, Z history validity
+layout(location=1) out vec4 surface_motion; // XY displacement, Z history validity, W surface class
 layout(location=4) out uint surface_identity;
 uniform samplerBuffer scene_fog;
 uniform int fog_volume_count, fog_enabled, fog_additive, fog_exterior;
@@ -122,9 +127,8 @@ in vec3 authored_color;
 in vec2 texcoord, lightcoord;
 in float vertex_alpha;
 layout(location=0) out vec4 color;
-// Material metadata: G retains the current bloom-protection contract and A
-// identifies the opaque depth owner's AO class. AO uses eligible RGB below,
-// not an estimated fog/brightness suppression mask.
+// G retains the current bloom-protection contract. Surface class is part of
+// the depth-selected surface record, never this averaged coverage product.
 layout(location=2) out vec4 post_coverage;
 layout(location=3) out vec4 ao_radiance;
 bool fogHit(vec3 a,vec3 b,vec3 c,vec3 direction,out float distance) {
@@ -231,9 +235,10 @@ void main() {
     float transmission;
     color.rgb = applySceneFog(color.rgb,transmission);
     ao_radiance = vec4(multiply_material != 0 ? color.rgb : surface_radiance*transmission,base.a);
-    post_coverage = vec4(0,1.0-transmission,0,occlusion_class/255.0);
+    post_coverage = vec4(0,1.0-transmission,0,0);
     bool valid = motion_valid != 0 && current_clip.w > 1.e-6 && previous_clip.w > 1.e-6;
     surface_motion = valid ? vec4((current_clip.xy/current_clip.w-previous_clip.xy/previous_clip.w)*.5,1,0) : vec4(0);
+    surface_motion.w = occlusion_class/255.0;
     surface_identity = motion_identity;
 }
 )GLSL";
@@ -547,7 +552,7 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
     const d3scene::ViewProducts products{view.kind == d3scene::ViewKind::Main,
         view.kind == d3scene::ViewKind::Main && OpenGL_preferred_state.ao_enabled && framebuffer_ok};
     if (products.occlusion_radiance) BeginSceneRadianceProduct();
-    const bool writes_motion = products.opaque_scene && MotionVectorTargetEnabled() && !MotionVectorsFrozen();
+    const bool writes_motion = products.opaque_scene && SceneSurfaceTargetEnabled();
     const auto bind_outputs = [&] {
         glBindFramebuffer(GL_DRAW_FRAMEBUFFER,framebuffers[framebuffer_current_draw].Handle());
         const GLenum targets[5] = {GL_COLOR_ATTACHMENT0,
@@ -559,7 +564,7 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
         glDisablei(GL_BLEND,1); glDisablei(GL_BLEND,4);
     };
     bind_outputs();
-    if (writes_motion) { motion_vectors.MarkDirty(); motion_vectors_dirty = true; }
+    if (writes_motion) { surface_records.MarkDirty(); motion_vectors_dirty = true; }
     post_protection_mask.resolve_valid = false;
     if (visibility.exterior_visible && presentation.data().sky_enabled) {
         // Clear only this view's color attachment. Background geometry never
@@ -654,12 +659,12 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
         const int capture_frame = AutomatedCaptureFrameIndex();
         if (writes_motion &&
             (capture_frame == 0 || capture_frame == 30 || capture_frame == 31 || capture_frame == 59)) {
-            const size_t pixels = size_t(motion_vectors.width)*motion_vectors.height;
+            const size_t pixels = size_t(surface_records.width)*surface_records.height;
             std::vector<float> vectors(pixels*4);
             std::vector<GLuint> identities(pixels);
             const auto source = framebuffers[framebuffer_current_draw].Handle();
-            const auto velocity_texture = motion_vectors.TextureForRead(source);
-            const auto identity_texture = motion_vectors.ObjectIdTextureForRead(source);
+            const auto velocity_texture = surface_records.TextureForRead(source);
+            const auto identity_texture = surface_records.ObjectIdTextureForRead(source);
             GLint texture_binding; glGetIntegerv(GL_TEXTURE_BINDING_2D,&texture_binding);
             glBindTexture(GL_TEXTURE_2D,velocity_texture);
             glGetTexImage(GL_TEXTURE_2D,0,GL_RGBA,GL_FLOAT,vectors.data());
@@ -784,8 +789,7 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
         glUniform1i(scene_shader.FindUniform("influence_offset"),influences.offset);
         glUniform1i(scene_shader.FindUniform("influence_count"),view.dynamic_lighting && !surface.unlit ? influences.count : 0);
         glUniform1i(scene_shader.FindUniform("unlit"),surface.unlit);
-        glUniform1f(scene_shader.FindUniform("occlusion_class"),item.terrain ? RENDERER_AO_CLASS_TERRAIN :
-            (item.model ? RENDERER_AO_CLASS_POLYOBJECT : RENDERER_AO_CLASS_MINE));
+        glUniform1f(scene_shader.FindUniform("occlusion_class"),static_cast<unsigned>(surface.occlusion_class));
         glUniform1f(scene_shader.FindUniform("soft_depth_range"),surface.material.layer == d3scene::RenderLayer::World ? surface.soft_depth_range : 0);
         glUniform1i(scene_shader.FindUniform("fog_enabled"),surface.material.layer == d3scene::RenderLayer::World);
         glUniform1i(scene_shader.FindUniform("fog_additive"),surface.material.blend == d3scene::BlendMode::Additive);

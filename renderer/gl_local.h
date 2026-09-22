@@ -181,7 +181,7 @@ class GL4Renderer : public IRenderer
 	GLint modal_ui_destination_draw_buffer = GL_COLOR_ATTACHMENT0;
 	GLint modal_ui_destination_viewport[4] = {};
 	GLuint soft_particle_depth_texture = 0;
-	MotionVectorResources motion_vectors;
+	SceneSurfaceResources surface_records;
 	PostProtectionMaskResources post_protection_mask;
 
 	static constexpr int FRAME_PACING_FENCE_COUNT = 4;
@@ -614,8 +614,8 @@ private:
 	int GetFontTextureLayer(int bm_handle);
 	void UploadFontTextureLayer(int layer, int bm_handle);
 	void DestroyFontBatchResources();
-	bool PixelMotionVectorConsumerActive() const;
-	bool MotionVectorTargetEnabled() const;
+	bool SceneSurfaceConsumerActive() const;
+	bool SceneSurfaceTargetEnabled() const;
 	bool PixelMotionVectorModeEnabled() const;
 	bool MotionVectorsFrozen() const;
 	bool MotionVectorWritesEnabled() const;
