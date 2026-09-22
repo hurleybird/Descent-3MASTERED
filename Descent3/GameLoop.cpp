@@ -3061,6 +3061,8 @@ void GameRenderFrame(void)
 				AutomatedCaptureLog("scene layer fixture composed");
 		}
 
+		if (SceneGeometryInspection() && FindArg("-scene-reticle-probe"))
+			RenderPreparedReticle(*presentation);
 		if (SceneGeometryInspection() && FindArg("-scene-cockpit-probe"))
 			RenderPreparedCockpit(*presentation,{Game_window_x,Game_window_y,Game_window_w,Game_window_h},HUD_RENDER_ZOOM);
 

@@ -1,5 +1,34 @@
 # Renderer migration checkpoint
 
+## Continuation: prepared native-resolution reticle canvas
+
+SceneCanvas now publishes textured/flat ordered quads and constructs explicit
+top-left orthographic views. Gauge text shares that view constructor. Reticle
+publication derives masks/readiness and centered 4:3 layout without touching
+the legacy mask cache or HUD aspect globals; transitional player/model guards
+are shared with ResetReticle and preserved. The reticle uses a display-only
+ForegroundLayer before cockpit composition, matching the authored ordering.
+ReticleProbe is separate from CockpitProbe. Guided/zoom reticles, broader HUD
+items/messages and visibility policy remain unimplemented/unqualified.
+
+The diagnostic ReticleReference fixture runs only the old reticle operation
+over the same inspection world, never as a runtime fallback. Remove it during
+the final migration fixture/deletion audit. Effects 003, clean/native 003 and
+SSAA4 effects 003 are pixel-identical between old and prepared executors;
+effects 000's measured region (590,340,100,50) also matches exactly. Effects
+000/003 and clean 003 were visually inspected. The source-baseline 003 contains
+a bright effect behind the reticle, so its raw regional comparison is not
+reticle parity evidence. Comparison tooling now records optional explicit
+sampling regions without altering source images or relaxing profile checks.
+
+Full builds and the existing 5,327 contract checks pass. Normal 003 remains
+pixel-identical to foreground-normal. Normal 000 has a larger simulation-pose
+variation (mean .0719944/max 161, bounds 552,374..847,573): logged Buddybot 6978
+position is 602.82428,112.062515,867.295593 versus the prior
+602.804565,112.062302,867.334595, with different pose hash. This is recorded,
+not accepted through a global tolerance; deterministic simulation qualification
+is still pending. All domain gates remain set; Candidate remains unchanged.
+
 ## Continuation: renderer-owned foreground schedule
 
 Prepared cockpit composition now submits one ForegroundLayer containing ordered

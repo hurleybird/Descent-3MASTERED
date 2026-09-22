@@ -17,6 +17,9 @@
 */
 
 #include "hud.h"
+#include "SceneCanvas.h"
+#include "SceneExtraction.h"
+#include "args.h"
 #include "gauges.h"
 #include "grdefs.h"
 #include "game.h"
@@ -2423,7 +2426,7 @@ void FreeReticle()
 
 //	resets reticle based off current player object.
 //	and the ship's weapon configuration
-void ResetReticle()
+static bool PrepareReticleMasks(ushort& Ret_prim_mask,ushort& Ret_sec_mask)
 {
 	Ret_prim_mask = 0;
 	Ret_sec_mask = 0;
@@ -2433,31 +2436,31 @@ void ResetReticle()
 	// player and object are restored later, at which point the reticle is reset
 	// again.  Do not dereference that transitional state here.
 	if (Player_num < 0 || Player_num >= MAX_PLAYERS)
-		return;
+		return false;
 
 	player* player = &Players[Player_num];
 	if (player->objnum < 0 || player->objnum > Highest_object_index)
-		return;
+		return false;
 
 	// Make sure we're not resetting a non-existent object
 	object* pobj = &Objects[player->objnum];
 	if (pobj->type != OBJ_PLAYER && pobj->type != OBJ_GHOST && pobj->type != OBJ_OBSERVER)
-		return;
+		return false;
 	if (player->ship_index < 0 || player->ship_index >= MAX_SHIPS ||
 		!Ships[player->ship_index].used)
-		return;
+		return false;
 	if (player->weapon[PW_PRIMARY].index < 0 || player->weapon[PW_PRIMARY].index >= MAX_PLAYER_WEAPONS ||
 		player->weapon[PW_SECONDARY].index < 0 || player->weapon[PW_SECONDARY].index >= MAX_PLAYER_WEAPONS ||
 		pobj->dynamic_wb == nullptr)
-		return;
+		return false;
 
 	const int model_num = pobj->rtype.pobj_info.model_num;
 	if (model_num < 0 || model_num >= MAX_POLY_MODELS)
-		return;
+		return false;
 
 	poly_model* pm = &Poly_models[model_num];
 	if (pm->num_wbs <= 0 || pm->poly_wb == nullptr)
-		return;
+		return false;
 
 	otype_wb_info* prim_wb = &Ships[player->ship_index].static_wb[player->weapon[PW_PRIMARY].index];
 	otype_wb_info* sec_wb = &Ships[player->ship_index].static_wb[player->weapon[PW_SECONDARY].index];
@@ -2497,8 +2500,13 @@ void ResetReticle()
 				Ret_sec_mask |= (1 << i);
 		}
 	}
+	return true;
 }
 
+void ResetReticle()
+{
+	PrepareReticleMasks(Ret_prim_mask,Ret_sec_mask);
+}
 
 //	creates the reticle display bitmap mask to be used by the reticle renderer.
 inline ushort reticle_mask(object* pobj, otype_wb_info* static_wb, int wb_index)
@@ -2593,6 +2601,78 @@ inline void draw_reticle_sub(int cx, int cy, int rw, int rh, ushort on_mask, ush
 
 
 //	renders the reticle
+void PrepareGameReticle(d3scene::FrameData& frame)
+{
+	extern bool HUD_disabled, Guided_missile_smallview;
+	if (Player_num < 0 || Player_num >= MAX_PLAYERS) return;
+	if (HUD_disabled || Cinematic_inuse || !Game_toggles.show_reticle ||
+		(Players[Player_num].guided_obj && !Guided_missile_smallview) ||
+		(Players[Player_num].flags & (PLAYER_FLAGS_ZOOMED | PLAYER_FLAGS_REARVIEW)))
+		return; // guided/zoom canvases are separate publication work, not a normal reticle fallback
+	const auto mode = GetHUDMode();
+	if (mode != HUD_FULLSCREEN && mode != HUD_COCKPIT) return;
+	ushort primary_mask = 0, secondary_mask = 0;
+	if (!PrepareReticleMasks(primary_mask,secondary_mask)) return;
+	auto& player = Players[Player_num];
+	auto* object = &Objects[player.objnum];
+	auto& ship = Ships[player.ship_index];
+	const int primary = player.weapon[PW_PRIMARY].index, secondary = player.weapon[PW_SECONDARY].index;
+	const int width = Game_window_h*4/3, height = Game_window_h;
+	const float scale_x = float(width)/DEFAULT_HUD_WIDTH, scale_y = float(height)/DEFAULT_HUD_HEIGHT;
+	const int cx = Ret_x_off+(FIXED_SCREEN_WIDTH>>1), cy = Ret_y_off+(FIXED_SCREEN_HEIGHT>>1)+6;
+	int32_t order = 0;
+	const auto quad = [&](int x,int y,int bitmap) {
+		if (bitmap < 0) return;
+		SceneQuadStyle style; style.bitmap = bitmap; style.alpha = 192.f/255;
+		PrepareSceneQuad(frame,SceneReticle,order,{int(x*scale_x),int(y*scale_y),
+			int(RET_IMAGE_WIDTH*scale_x),int(RET_IMAGE_HEIGHT*scale_y)},style);
+	};
+	const auto battery = [&](ushort on,ushort mask,const int* elements) {
+		for (int i = 0; i < MAX_WB_GUNPOINTS+1; ++i) if (mask & (1<<i)) {
+			const int index = elements[i];
+			if (index < 0 || index >= MAX_RETICLE_ELEMS) continue;
+			const auto& element = Reticle_elem_array[index];
+			const int x = element.align == 'l' ? cx-RET_IMAGE_WIDTH :
+				element.align == 'c' ? cx-RET_IMAGE_WIDTH/2 : cx;
+			quad(x,cy-RET_IMAGE_HEIGHT/2,(on & (1<<i)) ? element.bmp_on : element.bmp_off);
+		}
+	};
+	battery(reticle_mask(object,&ship.static_wb[primary],primary),primary_mask,Ret_prim_wb);
+	battery(reticle_mask(object,&ship.static_wb[secondary],secondary),secondary_mask,Ret_sec_wb);
+	quad(cx-RET_IMAGE_WIDTH,cy-RET_IMAGE_HEIGHT/2,Reticle_elem_array[RET_LGUNSIGHT].bmp_off);
+	quad(cx,cy-RET_IMAGE_HEIGHT/2,Reticle_elem_array[RET_RGUNSIGHT].bmp_off);
+	if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
+		AutomatedCaptureLog("scene reticle prepared quads=%d",order);
+}
+
+void RenderPreparedReticle(const d3scene::Presentation& frame)
+{
+	if (!SceneGeometryInspection()) Error("HUD publication has not passed gameplay acceptance");
+	bool present = false;
+	for (const auto& mesh : frame.data().meshes) present = present || mesh.collection == SceneReticle;
+	if (!present) return;
+	const int width = Game_window_h*4/3;
+	// Diagnostic oracle only: run the frozen legacy HUD operation over exactly
+	// the same inspection world. Never selected by normal rendering or as a
+	// fallback when publication fails. Remove with the migration fixture audit.
+	if (FindArg("-scene-reticle-reference")) {
+		const int x = Game_window_x+(Game_window_w-width)/2;
+		const float old_x = Hud_aspect_x, old_y = Hud_aspect_y;
+		Hud_aspect_x = float(width)/DEFAULT_HUD_WIDTH;
+		Hud_aspect_y = float(Game_window_h)/DEFAULT_HUD_HEIGHT;
+		if (!rend_BeginPostPresentFrame()) Error("Reticle reference requires world image");
+		rend_StartPostPresentFrame(x,Game_window_y,x+width,Game_window_y+Game_window_h,RF_CLEAR_ZBUFFER);
+		RenderReticle(); rend_EndFrame();
+		Hud_aspect_x = old_x; Hud_aspect_y = old_y;
+		return;
+	}
+	d3scene::ForegroundLayer layer;
+	layer.display_views.push_back(MakeSceneCanvasView(SceneReticle,
+		{Game_window_x+(Game_window_w-width)/2,Game_window_y,width,Game_window_h},
+		d3scene::ViewTarget::Display,true));
+	d3scene::renderForeground(frame,layer);
+}
+
 void RenderReticle()
 {
 	static ushort primary_index_last_frame = 0xffff;

@@ -3,6 +3,7 @@ param(
     [Parameter(Mandatory=$true)][string]$Actual,
     [Parameter(Mandatory=$true)][string]$Report,
     [string]$Save,
+    [string]$Region,
     [switch]$DiagnosticComparison
 )
 $ErrorActionPreference = 'Stop'
@@ -10,6 +11,7 @@ if ($PSVersionTable.PSEdition -eq 'Core') {
     $forwarded = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$PSCommandPath,'-Reference',$Reference,'-Actual',$Actual,'-Report',$Report)
     if ($DiagnosticComparison) { $forwarded += '-DiagnosticComparison' }
     if ($Save) { $forwarded += @('-Save',$Save) }
+    if ($Region) { $forwarded += @('-Region',$Region) }
     & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" @forwarded
     if ($LASTEXITCODE -ne 0) { throw 'Image comparison failed in Windows PowerShell.' }
     return
@@ -21,11 +23,15 @@ using System.Drawing;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 public static class RendererImageComparison {
-    public static double[] Measure(string leftPath, string rightPath) {
+    public static double[] Measure(string leftPath, string rightPath, int[] region) {
         using (var left = new Bitmap(leftPath))
         using (var right = new Bitmap(rightPath)) {
             if (left.Size != right.Size) throw new Exception("Image dimensions differ");
             var rect = new Rectangle(0, 0, left.Width, left.Height);
+            var sample = region.Length == 0 ? rect : new Rectangle(region[0],region[1],region[2],region[3]);
+            if (sample.Width <= 0 || sample.Height <= 0 || sample.X < 0 || sample.Y < 0 ||
+                (long)sample.X+sample.Width > left.Width || (long)sample.Y+sample.Height > left.Height)
+                throw new Exception("Comparison region is outside the image");
             var a = left.LockBits(rect, ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
             var b = right.LockBits(rect, ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
             try {
@@ -34,10 +40,10 @@ public static class RendererImageComparison {
                 long sum = 0, different = 0, aboveTwo = 0;
                 int maximum = 0;
                 int minX = left.Width, minY = left.Height, maxX = -1, maxY = -1;
-                for (int y = 0; y < left.Height; ++y) {
+                for (int y = sample.Top; y < sample.Bottom; ++y) {
                     Marshal.Copy(IntPtr.Add(a.Scan0, y*a.Stride), rowA, 0, rowA.Length);
                     Marshal.Copy(IntPtr.Add(b.Scan0, y*b.Stride), rowB, 0, rowB.Length);
-                    for (int x = 0; x < rowA.Length; x += 4) {
+                    for (int x = sample.Left*4; x < sample.Right*4; x += 4) {
                         int peak = 0;
                         for (int c = 0; c < 3; ++c) {
                             int delta = Math.Abs(rowA[x+c] - rowB[x+c]);
@@ -52,7 +58,7 @@ public static class RendererImageComparison {
                         maximum = Math.Max(maximum, peak);
                     }
                 }
-                double pixels = (double)left.Width * left.Height;
+                double pixels = (double)sample.Width * sample.Height;
                 return new double[] {left.Width, left.Height, sum/(pixels*3),
                     different/pixels*100, aboveTwo/pixels*100, maximum,
                     maxX < 0 ? -1 : minX,maxX < 0 ? -1 : minY,maxX,maxY};
@@ -62,6 +68,11 @@ public static class RendererImageComparison {
 }
 '@
 $referencePath = (Resolve-Path -LiteralPath $Reference).Path
+[int[]]$sampleRegion = @()
+if ($Region) {
+    if ($Region -notmatch '^\d+,\d+,\d+,\d+$') { throw 'Region must be x,y,width,height.' }
+    $sampleRegion = $Region.Split(',') | ForEach-Object { [int]$_ }
+}
 $actualPath = (Resolve-Path -LiteralPath $Actual).Path
 $referenceManifest = Get-Content -LiteralPath (Join-Path $referencePath 'manifest.json') -Raw | ConvertFrom-Json
 $actualManifest = Get-Content -LiteralPath (Join-Path $actualPath 'manifest.json') -Raw | ConvertFrom-Json
@@ -90,6 +101,12 @@ if ($referenceManifest.profile -ne $actualManifest.profile -or
 if ($referenceManifest.results.Count -ne $actualManifest.results.Count) { throw 'Corpus sizes differ.' }
 if ([bool]$referenceManifest.layer_probe -ne [bool]$actualManifest.layer_probe -and -not $DiagnosticComparison) {
     throw 'Layer fixture differs; use DiagnosticComparison for intentional composition changes.'
+}
+if ([bool]$referenceManifest.reticle_probe -ne [bool]$actualManifest.reticle_probe -and -not $DiagnosticComparison) {
+    throw 'Reticle fixture differs; use DiagnosticComparison for intentional HUD changes.'
+}
+if ([bool]$referenceManifest.reticle_reference -ne [bool]$actualManifest.reticle_reference -and -not $DiagnosticComparison) {
+    throw 'Reticle executor differs; use DiagnosticComparison for the legacy reference check.'
 }
 if ([bool]$referenceManifest.motion_blur -ne [bool]$actualManifest.motion_blur -and -not $DiagnosticComparison) {
     throw 'Motion blur differs; use DiagnosticComparison for intentional processing changes.'
@@ -174,9 +191,9 @@ $results = foreach ($entry in $referenceManifest.results) {
         throw "Missing, failed or mismatched save: $($entry.save)"
     }
     $metrics = [RendererImageComparison]::Measure((Join-Path $referencePath "$($entry.save).png"),
-        (Join-Path $actualPath "$($entry.save).png"))
+        (Join-Path $actualPath "$($entry.save).png"),$sampleRegion)
     [pscustomobject]@{save=$entry.save; diagnostic_comparison=[bool]$DiagnosticComparison; width=$metrics[0]; height=$metrics[1]; mean_rgb_error=$metrics[2];
-        changed_percent=$metrics[3]; above_two_percent=$metrics[4]; max_channel_error=$metrics[5];
+        region=$sampleRegion; changed_percent=$metrics[3]; above_two_percent=$metrics[4]; max_channel_error=$metrics[5];
         above_two_bounds=@($metrics[6],$metrics[7],$metrics[8],$metrics[9])}
 }
 if (Test-Path -LiteralPath $Report) { throw 'Report already exists.' }

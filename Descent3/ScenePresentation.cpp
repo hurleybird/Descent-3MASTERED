@@ -38,6 +38,41 @@
 
 bool SceneGeometryInspection() { return FindArg("-scene-inspection") != 0; }
 
+d3scene::View MakeSceneCanvasView(uint64_t collection,d3scene::Rect viewport,
+    d3scene::ViewTarget target,bool inspection) {
+    d3scene::View view;
+    view.geometry_inspection = inspection; view.kind = d3scene::ViewKind::Preview;
+    view.collection = view.history_key = collection;
+    view.viewport = viewport; view.projection_anchor = {0,0,viewport.width,viewport.height};
+    view.target = target; view.ordering = d3scene::ViewOrdering::Compositing;
+    view.projection = d3scene::ViewProjection::Orthographic;
+    view.orthographic_size = {float(viewport.width),float(viewport.height)};
+    view.camera.position = {viewport.width*.5f,viewport.height*.5f,0};
+    view.camera.up = {0,-1,0}; view.dynamic_lighting = false; view.portal_visibility = false;
+    d3scene::validateView(view);
+    return view;
+}
+
+void PrepareSceneQuad(d3scene::FrameData& frame,uint64_t collection,int32_t& next_order,
+    d3scene::Rect rectangle,const SceneQuadStyle& style) {
+    if (rectangle.width <= 0 || rectangle.height <= 0) return;
+    d3scene::PreparedMesh quad;
+    quad.asset = d3scene::assets().publishMesh(2,d3scene::unitBillboardQuad());
+    quad.collection = collection;
+    const float left = float(rectangle.x), top = float(rectangle.y);
+    const float right = left+rectangle.width, bottom = top+rectangle.height;
+    quad.vertices = {{left,top,.5f},{right,top,.5f},{right,bottom,.5f},{left,bottom,.5f}};
+    quad.texture_uvs = {style.uv_min,{style.uv_max.x,style.uv_min.y},style.uv_max,
+        {style.uv_min.x,style.uv_max.y}};
+    auto& surface = quad.surface;
+    surface.composition_order = next_order++; surface.bitmap = style.bitmap;
+    surface.texture_alpha = true; surface.texture_wrap = false;
+    surface.unlit = true; surface.two_sided = true; surface.depth = d3scene::DepthMode::Disabled;
+    surface.blend = style.additive ? d3scene::BlendMode::Additive : d3scene::BlendMode::Alpha;
+    surface.alpha = style.alpha; surface.color_modulation = style.color;
+    frame.meshes.push_back(std::move(quad));
+}
+
 void PrepareSceneText(d3scene::FrameData& frame,uint64_t collection,int32_t& next_order,
     int x,int y,const char* text,const SceneTextStyle& style) {
     if (!text || style.font < 0 || !std::isfinite(style.scale) || style.scale <= 0)
@@ -356,6 +391,7 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance_history) {
     PrepareGameObjectEffects(data);
     PrepareGameScorches(data);
     if (SceneGeometryInspection() && FindArg("-scene-cockpit-probe")) PrepareGameCockpit(data,advance_history);
+    if (SceneGeometryInspection() && FindArg("-scene-reticle-probe")) PrepareGameReticle(data);
     if (SceneGeometryInspection() && FindArg("-scene-standalone-model-probe") && Player_object) {
         const auto owner = uint32_t(Player_object->handle);
         unsigned detached = 0;
@@ -563,13 +599,7 @@ void RenderPreparedCockpit(const d3scene::Presentation& frame, d3scene::Rect vie
         view.ordering = d3scene::ViewOrdering::Depth;
     }
     if (text) {
-        auto canvas = view;
-        canvas.collection = canvas.history_key = SceneCockpitText;
-        canvas.ordering = d3scene::ViewOrdering::Compositing;
-        canvas.projection = d3scene::ViewProjection::Orthographic;
-        canvas.orthographic_size = {float(viewport.width),float(viewport.height)};
-        canvas.camera.position = {viewport.width*.5f,viewport.height*.5f,0};
-        canvas.camera.up = {0,-1,0};
+        auto canvas = MakeSceneCanvasView(SceneCockpitText,viewport,d3scene::ViewTarget::Scene,true);
         layer.scene_views.push_back(canvas);
     }
     if (layered) {

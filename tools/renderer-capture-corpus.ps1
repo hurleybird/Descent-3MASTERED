@@ -23,6 +23,8 @@ param(
     [switch]$ModelCollectionProbe,
     [switch]$DisplayViewProbe,
     [switch]$CockpitProbe,
+    [switch]$ReticleProbe,
+    [switch]$ReticleReference,
     [switch]$ScorchProbe,
     [switch]$ScorchViewProbe,
     [switch]$MotionBlur,
@@ -38,6 +40,10 @@ param(
 $ErrorActionPreference = 'Stop'
 if ($AtmosphereProbe) { $SatelliteProbe = $true }
 if ($DisplayViewProbe) { $ModelCollectionProbe = $true }
+if ($ReticleReference -and -not $ReticleProbe) { throw 'Reticle reference requires the reticle inspection fixture.' }
+if ($ReticleProbe -and (-not $SceneInspection -or $DisplayViewProbe -or $LayerProbe)) {
+    throw 'Reticle probe requires scene inspection without other display fixtures.'
+}
 if ($CockpitProbe -and (-not $SceneInspection -or $DisplayViewProbe -or $LayerProbe -or $ModelCollectionProbe -or $LodProbeTier -ge 0)) {
     throw 'Cockpit probe requires scene inspection without other composition/LOD fixtures.'
 }
@@ -107,6 +113,8 @@ $manifest = [ordered]@{
     model_collection_probe = [bool]$ModelCollectionProbe
     display_view_probe = [bool]$DisplayViewProbe
     cockpit_probe = [bool]$CockpitProbe
+    reticle_probe = [bool]$ReticleProbe
+    reticle_reference = [bool]$ReticleReference
     cockpit_probe_revision = $(if ($CockpitProbe) { 4 } else { 0 })
     scorch_probe = [bool]$ScorchProbe
     scorch_view_probe = [bool]$ScorchViewProbe
@@ -159,6 +167,8 @@ try {
         if ($ModelCollectionProbe) { $arguments += '-scene-model-collection-probe' }
         if ($DisplayViewProbe) { $arguments += '-scene-display-view-probe' }
         if ($CockpitProbe) { $arguments += '-scene-cockpit-probe' }
+        if ($ReticleProbe) { $arguments += '-scene-reticle-probe' }
+        if ($ReticleReference) { $arguments += '-scene-reticle-reference' }
         if ($RingProbe) { $arguments += '-scene-ring-probe' }
         if ($DepthPolicyProbe) { $arguments += '-scene-depth-policy-probe' }
         if ($ModelEffectsProbe) { $arguments += '-scene-model-effects-probe' }
@@ -189,6 +199,7 @@ try {
         if ($ModelCollectionProbe) { $resourceValidated = $resourceValidated -and $logText.Contains('scene model collection fixture world=0 preview=1') }
         if ($DisplayViewProbe) { $resourceValidated = $resourceValidated -and $logText.Contains('scene display view fixture target=display viewport=bottom_right') }
         if ($CockpitProbe) { $resourceValidated = $resourceValidated -and $logText.Contains('scene cockpit prepared ') -and $logText.Contains('scene cockpit composed ') }
+        if ($ReticleProbe) { $resourceValidated = $resourceValidated -and $logText.Contains('scene reticle prepared ') }
         if ($RingProbe) { $resourceValidated = $resourceValidated -and $logText.Contains('scene ring fixture facing=1 planar_reverse=1 object=1 gravity=1') }
         if ($LodProbeTier -ge 0) {
             $resourceValidated = $resourceValidated -and $logText.Contains("scene LOD fixture tier=$LodProbeTier ") -and $logText.Contains('scene LOD visible ')
