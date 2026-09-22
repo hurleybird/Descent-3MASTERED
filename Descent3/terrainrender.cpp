@@ -1502,7 +1502,7 @@ void RenderTerrainRooms()
 			}
 			PERF_MARKER_SCOPE(mine_marker);
 #ifndef NEWEDITOR
-			RenderMine(obj->id, 0, 1);
+			Error("Legacy terrain-to-mine execution is retired; migrate this view to the scene executor.");
 #else
 			RenderMine(obj->id, 0, 1, 1, 0, 0, NULL);
 #endif

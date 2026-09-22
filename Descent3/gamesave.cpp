@@ -17,6 +17,7 @@
 */
 
 #include "gamesave.h"
+#include "SceneExtraction.h"
 #include "args.h"
 #include "descent.h"
 #include "newui.h"
@@ -1307,7 +1308,7 @@ void SGSSnapshot(CFILE* fp)
 	ResetFacings();
 
 	//Render the world
-	GameRenderWorld(Viewer_object, &Viewer_object->pos, Viewer_object->roomnum, &Viewer_object->orient, Render_zoom, false);
+	RenderModuleSceneView(Viewer_object, &Viewer_object->pos, Viewer_object->roomnum, &Viewer_object->orient, Render_zoom, false);
 
 	//Done rendering
 	g3_EndFrame();

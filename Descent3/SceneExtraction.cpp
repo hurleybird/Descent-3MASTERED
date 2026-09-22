@@ -60,7 +60,7 @@ void ResetGamePresentationScene() {
     d3scene::assets().reset();
 }
 
-d3scene::PresentationRef ExtractGamePresentation(double time, float delta, bool paused) {
+d3scene::PresentationRef ExtractGamePresentation(double time, float delta, bool paused, bool advance_history) {
     if (Sequence == std::numeric_limits<uint64_t>::max())
         throw std::overflow_error("Presentation sequence exhausted");
     auto& assets = d3scene::assets();
@@ -134,7 +134,7 @@ d3scene::PresentationRef ExtractGamePresentation(double time, float delta, bool 
     auto frame = d3scene::Presentation::freeze(data);
     // Commit presentation history once, never when rendering a view/pass.
     ++Sequence;
-    Previous = frame;
+    if (advance_history) Previous = frame;
     return frame;
 }
 

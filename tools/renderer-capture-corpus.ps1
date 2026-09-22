@@ -6,7 +6,8 @@ param(
     [int]$Frame = 60,
     [uint32]$Seed = 12345,
     [int]$TimeoutSeconds = 120,
-    [ValidateSet('clean','effects')][string]$Profile = 'effects'
+    [ValidateSet('clean','effects')][string]$Profile = 'effects',
+    [switch]$SceneInspection
 )
 
 # Run only copied installations and copied pilot/save data. Never point Runtime
@@ -31,7 +32,7 @@ function Read-Settings {
 $settings = Read-Settings
 $settings | Set-Content -LiteralPath (Join-Path $outputPath 'settings.json') -Encoding UTF8
 $manifest = [ordered]@{
-    runtime = $runtimePath; profile = $Profile; frame = $Frame; seed = $Seed
+    runtime = $runtimePath; profile = $Profile; frame = $Frame; seed = $Seed; scene_inspection = [bool]$SceneInspection
     executable = (Get-FileHash -LiteralPath $exe).Hash
     shaders = (Get-FileHash -LiteralPath (Join-Path $runtimePath 'descent3mastered.hog')).Hash
     pilot = (Get-FileHash -LiteralPath (Join-Path $seedPath 'Jeff.plt')).Hash
@@ -58,6 +59,7 @@ try {
             '-perpixellighting','-nomotionblur')
         if ($Profile -eq 'clean') { $arguments += @('-msaa','0','-ssaa','1','-noao','-nobloom') }
         else { $arguments += @('-msaa','4','-ssaa','2','-ao','-bloom') }
+        if ($SceneInspection) { $arguments += '-scene-inspection' }
         $started = Get-Date
         $process = Start-Process -FilePath $exe -ArgumentList $arguments -WorkingDirectory $runtimePath -WindowStyle Hidden -PassThru
         $timedOut = $false

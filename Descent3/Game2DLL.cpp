@@ -17,6 +17,7 @@
 */
 
 #include "pstypes.h"
+#include "SceneExtraction.h"
 #include "pserror.h"
 #include "game.h"
 #include "game2dll.h"
@@ -396,7 +397,7 @@ void GetGameAPI(game_api* api)
 	NEXTFP = (int*)dStartFrame;
 	NEXTFP = (int*)EndFrame;
 	NEXTFP = (int*)ResetFacings;
-	NEXTFP = (int*)GameRenderWorld;
+	NEXTFP = (int*)RenderModuleSceneView;
 	NEXTFP = (int*)GetFrameParameters;
 	NEXTFP = (int*)rend_SetZBufferState;
 	NEXTFP = (int*)rend_SetLighting;

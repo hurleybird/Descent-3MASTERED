@@ -124,6 +124,12 @@ void extractionTests() {
     check(view.camera.forward.z == -1 && Objects[0].orient.fvec.z == 1, "rear view changed simulation pose");
     check(!view.dynamic_lighting && view.excluded_object == 2048, "auxiliary view lost explicit policy");
     check(b->data().sequence == a->data().sequence + 1, "view request advanced presentation history");
+    Objects[0].pos.x = 77;
+    const auto thumbnail = ExtractGamePresentation(2.5, 0, false, false);
+    check(thumbnail->data().objects[0].current.position.x == 77, "thumbnail did not capture its requested state");
+    Objects[0].pos.x = 8;
+    const auto after_thumbnail = ExtractGamePresentation(2.6, 0, false);
+    check(after_thumbnail->data().objects[0].previous.position.x == 5, "thumbnail advanced gameplay presentation history");
     Objects[0].handle += HANDLE_COUNT_INCREMENT;
     vertices[0].x = 7; surface.tmap = 8;
     const auto c = ExtractGamePresentation(3, 0.016f, false);

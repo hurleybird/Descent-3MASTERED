@@ -1,6 +1,9 @@
 SET (MAIN_SOURCES
 		Descent3/SceneExtraction.h
 		Descent3/SceneExtraction.cpp
+		Descent3/ScenePresentation.cpp
+		Descent3/SceneMaterialBindings.h
+		Descent3/SceneMaterialBindings.cpp
 		Descent3/aiambient.h
 		Descent3/AIGoal.h
 		Descent3/AIMain.h

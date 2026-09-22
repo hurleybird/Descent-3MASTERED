@@ -917,6 +917,7 @@ void GL4Renderer::Close()
 
 	CHECK_ERROR(5);
 	glFinish();
+	DestroySceneResources();
 
 	blitshader.Destroy();
 	downsampleshader.Destroy();

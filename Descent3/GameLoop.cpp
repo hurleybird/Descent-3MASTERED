@@ -2837,7 +2837,7 @@ void GameDrawMainView(const d3scene::Presentation& presentation)
 			Viewer_object->pos, Viewer_object->roomnum, Viewer_object->orient, Render_zoom, rear_view,
 			{main_view_x1, main_view_y1, main_view_x2 - main_view_x1, main_view_y2 - main_view_y1},
 			{main_view_anchor_x, main_view_anchor_y, Game_window_w, Game_window_h});
-		CommitGameVisibility(presentation, d3scene::renderView(presentation, view));
+		RenderGameSceneView(presentation, view);
 	}
 	rend_PerfGpuSceneMark(RENDERER_GPU_SCENE_AFTER_MAIN_WORLD);
 	Rendering_main_view = false;
@@ -2856,14 +2856,14 @@ void GameDrawMainView(const d3scene::Presentation& presentation)
 	// Draw Matcen Effects
 	{
 		PERF_MARKER_SCOPE("DoMatcensRenderFrame");
-		DoMatcensRenderFrame();
+		if (!SceneGeometryInspection()) DoMatcensRenderFrame();
 	}
 	rend_PerfGpuSceneMark(RENDERER_GPU_SCENE_AFTER_MATCENS);
 
 	// Draw any render events
 	{
 		PERF_MARKER_SCOPE("ProcessRenderEvents");
-		ProcessRenderEvents();
+		if (!SceneGeometryInspection()) ProcessRenderEvents();
 	}
 	rend_PerfGpuSceneMark(RENDERER_GPU_SCENE_AFTER_RENDER_EVENTS);
 	VisEffectEndCloseScreenCollection();
@@ -3029,7 +3029,7 @@ void GameRenderFrame(void)
 
 		// Publish once. Every world view below sees this same owned scene, not
 		// a second traversal of mutable simulation state.
-		const auto presentation = ExtractGamePresentation(Gametime, Frametime, Game_paused);
+		const auto presentation = PrepareGamePresentation();
 
 		// Draw the big 3d view
 		{
@@ -3048,7 +3048,7 @@ void GameRenderFrame(void)
 		// Do Cockpit/Hud
 		// Cinematics own their presentation through Cinematic_RenderFrame below.
 		// Do not run either the primary or auxiliary gameplay HUD while one is active.
-		if (!HUD_disabled && !Cinematic_inuse)
+		if (!HUD_disabled && !Cinematic_inuse && !SceneGeometryInspection())
 		{
 			PERF_MARKER_SCOPE("GameDrawHud.Total");
 			GameDrawHud();
@@ -3061,7 +3061,7 @@ void GameRenderFrame(void)
 			const bool cinematic_frame = Cinematic_inuse;
 			if (cinematic_frame)
 				StartFrame(0, 0, Max_window_w, Max_window_h, false);
-			Cinematic_RenderFrame();
+			if (!SceneGeometryInspection()) Cinematic_RenderFrame();
 			if (cinematic_frame)
 				EndFrame();
 		}
@@ -3096,6 +3096,17 @@ void GameRenderFrame(void)
 			RenderHUDText(GR_RGB(255, 40, 40), 255, 1, x, y, buffer); y += height;
 			sprintf(buffer, "Uploads=%d", stats.texture_uploads);
 			RenderHUDText(GR_RGB(255, 40, 40), 255, 1, x, y, buffer); y += height;
+			grtext_Flush();
+			EndFrame();
+		}
+		if (SceneGeometryInspection())
+		{
+			StartFrame(0, 0, Max_window_w, Max_window_h, false);
+			grtext_SetFont(HUD_FONT);
+			RenderHUDText(GR_RGB(255, 220, 80), 255, 1, 12, 12,
+				"RENDERER TEST: room geometry + base materials only");
+			RenderHUDText(GR_RGB(255, 220, 80), 255, 1, 12, 28,
+				"Not migrated: objects, terrain, effects, specular, fog, cockpit");
 			grtext_Flush();
 			EndFrame();
 		}

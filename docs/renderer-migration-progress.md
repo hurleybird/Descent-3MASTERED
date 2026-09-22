@@ -5,10 +5,70 @@
 The user approved renderer rearchitecture and background save-game comparisons,
 with an explicit gate: **do not touch shadows until the new renderer is verified**.
 The replacement has started at the game/renderer scene boundary. The development
-game target is intentionally **not buildable** while downstream code is migrated.
-The independent scene/extraction tests build and pass. No new renderer executable
-has been produced or visually verified, and no shadow implementation was added.
+game target now builds with an explicit **room-geometry inspection executor**.
+Normal presentation still rejects incomplete domains; this is not a playable or
+accepted full replacement. Scene/extraction tests pass, and all eight saved-game
+inspection captures loaded/rendered/exited successfully. No shadows were added.
 Do not mistake the frozen baseline results below for new-renderer results.
+
+## Runnable inspection checkpoint
+
+- Runtime: `C:/tmp/D3RendererVerification/scene-test` (separate 2 GB copy).
+- User launcher: `Launch Renderer Test.cmd` in that runtime. It invokes
+  `tools/renderer-scene-test-launch.ps1`, copies pilot/save/counter from the
+  preserved seeds, and defaults to saveg003. Supply `-Save saveg004` etc. to choose
+  another of the eight copies. `-Capture` performs a deterministic hidden capture.
+- Executor: `renderer/gl_scene.cpp`. Owns room GPU buffers keyed by scene
+  lifetime/revision, uses explicit camera projection and per-view face lists,
+  renders base textures/lightmaps and basic alpha materials. It never calls
+  RenderMine/RenderTerrain/RenderObject. GPU caches are cleared across level
+  lifetimes and before renderer/context teardown.
+- Inspection is explicitly requested by `-scene-inspection`, not an automatic
+  unsupported-material fallback, and is labeled on screen. The pending-domain
+  mask remains intact. This does NOT mark gameplay visibility or claim full
+  immutable texture/lighting/resource ownership has been migrated.
+- `SceneMaterialBindings` contains the existing split diffuse/specular asset
+  resolver moved out of render.cpp, not duplicated. The initial capture showed
+  specular-mask textures as wall colors; moving and using this resolver corrected
+  the inspected hazard-stripe scene. Destroyed textures and legacy texture-slide
+  periods are resolved during preparation.
+- Save thumbnails and the existing Game2DLL world-view slot now translate to
+  the explicit view entry. Thumbnails do not advance gameplay transform history.
+  ABI slot ordering and argument types remain unchanged. Full module compatibility
+  has NOT been tested. Legacy terrain-to-mine calls fail conspicuously; the old
+  mine implementation is renamed static migration source, not a callable fallback.
+- World-side matcen/render-event drawing and cockpit/cinematic rendering are
+  withheld in inspection mode, not represented as migrated. Normal mode remains
+  unavailable. The launcher disables AO, bloom and motion blur for this first
+  geometry test; post-pass integration is pending.
+
+### Inspection evidence and limits
+
+- 41 standalone scene/extraction checks, including save-thumbnail history isolation.
+- `scene-corpus-clean`: eight deterministic inspection captures, all normal exits.
+- `baseline-clean-seeded`: eight matching clean-profile baseline captures.
+- `scene-vs-baseline-diagnostic.json`: explicit diagnostic comparison, NOT parity.
+  Mean RGB differences span 14.33 to 55.73 (0–255). Missing content/appearance is
+  substantial and has not been hidden behind an acceptance threshold.
+- All eight inspection images were visually opened. Stable room landmarks and
+  base textures are visible; save005 is dark without migrated dynamic lighting.
+  The first failed-material and subsequent diagnostic captures are retained as
+  evidence (`scene-first`, `scene-alpha-fixed`, `scene-material-fixed`).
+- The exact launcher was smoke-tested with `-Capture`. Its final-build saveg003
+  PNG is byte-identical to the corpus image (SHA-256
+  `6E2842522E8A8A0F543C839E488971395C788428F5597BB74548A4EBDB034956`).
+  Final test executable SHA-256:
+  `194A10434746AEA051C9D4A59DEC9CC892414A709A98A772312FF62C1BED3953`.
+  Candidate EXE/HOG hashes were rechecked and match the preserved values below.
+- Test normal flight/look controls only, not combat or mission progress: objects
+  (including doors and enemies), terrain, fog, specular, dynamic/headlight lighting,
+  effects and cockpit remain unfinished. Simulation is still live, so invisible
+  objects can still collide/interact. Use the isolated copies and do not save over
+  original gameplay files. No runtime was deployed to Candidate or Prev Candidate.
+
+The executable is something the user can inspect, not the end of renderer work.
+Continue migrating the omitted domains and pass/visibility/feedback ownership;
+keep shadows gated until full acceptance, not merely this inspection milestone.
 
 ## First replacement cut
 
@@ -60,11 +120,11 @@ duplicate identities, incomplete bindings and execution refusal, presentation
 history, object allocation generations, clock rewind, non-mutating rear views,
 auxiliary policy and exclusion of transient camera/specular face marks.
 
-### Explicit build blockers / migration queue
+### First-cut build blockers (historical) / migration queue
 
-The full game build was attempted with Ninja `-k 0` to expose all compilation
+At the first boundary cut, the full game build was attempted with Ninja `-k 0` to expose all compilation
 failures rather than stop at the first. Log: `out/renderer-migration-build.log`.
-The observed blockers are:
+The observed blockers were (see runnable checkpoint above for current disposition):
 
 1. `renderer/renderer.cpp`: GL4 is abstract until the new scene executor exists.
 2. Main/small-view callers: `CommitGameVisibility` is deleted pending the explicit

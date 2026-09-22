@@ -72,6 +72,10 @@ private:
 // These are authoring bindings, not alternate material implementations. The
 // material compiler must resolve them before execution is enabled.
 struct SurfaceBinding {
+    int32_t bitmap = -1, lightmap_bitmap = -1;
+    float lightmap_u_scale = 1, lightmap_v_scale = 1;
+    float u_offset = 0, v_offset = 0, alpha = 1;
+    bool draw_surface = true, additive = false, texture_alpha = false;
     int32_t texture = -1, lightmap = -1, special = -1, portal = -1;
     uint32_t authored_flags = 0;
     uint8_t light_multiple = 0;
@@ -141,6 +145,8 @@ enum class ViewKind { Main, Auxiliary, Mirror, SaveThumbnail, Automap, Preview }
 struct Rect { int32_t x = 0, y = 0, width = 0, height = 0; };
 enum Feedback : uint8_t { NoFeedback = 0, Automap = 1, ObjectVisibility = 2, EffectEligibility = 4 };
 struct View {
+    // Explicit diagnostic execution, never a fallback selected by capability.
+    bool geometry_inspection = false;
     ViewKind kind = ViewKind::Main;
     uint64_t history_key = 0;
     Transform camera;

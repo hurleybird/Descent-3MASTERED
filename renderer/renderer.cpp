@@ -29,7 +29,8 @@ static IRenderer* renderer_inst;
 
 d3scene::VisibilityReport d3scene::renderView(const Presentation& frame, const View& view)
 {
-	frame.requireExecutable();
+	if (!view.geometry_inspection)
+		frame.requireExecutable();
 	validateView(view);
 	return renderer_inst->RenderSceneView(frame, view);
 }

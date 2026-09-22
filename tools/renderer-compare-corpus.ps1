@@ -1,11 +1,14 @@
 param(
     [Parameter(Mandatory=$true)][string]$Reference,
     [Parameter(Mandatory=$true)][string]$Actual,
-    [Parameter(Mandatory=$true)][string]$Report
+    [Parameter(Mandatory=$true)][string]$Report,
+    [switch]$DiagnosticComparison
 )
 $ErrorActionPreference = 'Stop'
 if ($PSVersionTable.PSEdition -eq 'Core') {
-    & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File $PSCommandPath -Reference $Reference -Actual $Actual -Report $Report
+    $forwarded = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$PSCommandPath,'-Reference',$Reference,'-Actual',$Actual,'-Report',$Report)
+    if ($DiagnosticComparison) { $forwarded += '-DiagnosticComparison' }
+    & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" @forwarded
     if ($LASTEXITCODE -ne 0) { throw 'Image comparison failed in Windows PowerShell.' }
     return
 }
@@ -63,6 +66,9 @@ if ($referenceManifest.profile -ne $actualManifest.profile -or
     throw 'Capture profiles, frame, pilot or registry settings differ; comparison invalid.'
 }
 if ($referenceManifest.results.Count -ne $actualManifest.results.Count) { throw 'Corpus sizes differ.' }
+if ([bool]$referenceManifest.scene_inspection -ne [bool]$actualManifest.scene_inspection -and -not $DiagnosticComparison) {
+    throw 'Inspection and complete-renderer captures differ in scope; use -DiagnosticComparison, never treat this as parity acceptance.'
+}
 $results = foreach ($entry in $referenceManifest.results) {
     $other = @($actualManifest.results | Where-Object save -eq $entry.save)
     if ($other.Count -ne 1 -or -not $entry.success -or -not $other[0].success -or $entry.save_hash -ne $other[0].save_hash) {
@@ -70,7 +76,7 @@ $results = foreach ($entry in $referenceManifest.results) {
     }
     $metrics = [RendererImageComparison]::Measure((Join-Path $referencePath "$($entry.save).png"),
         (Join-Path $actualPath "$($entry.save).png"))
-    [pscustomobject]@{save=$entry.save; width=$metrics[0]; height=$metrics[1]; mean_rgb_error=$metrics[2];
+    [pscustomobject]@{save=$entry.save; diagnostic_comparison=[bool]$DiagnosticComparison; width=$metrics[0]; height=$metrics[1]; mean_rgb_error=$metrics[2];
         changed_percent=$metrics[3]; above_two_percent=$metrics[4]; max_channel_error=$metrics[5]}
 }
 if (Test-Path -LiteralPath $Report) { throw 'Report already exists.' }

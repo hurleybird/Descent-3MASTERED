@@ -261,7 +261,7 @@ void RenderSmallWindow(const d3scene::Presentation& presentation, int view_slot,
 		const auto view = MakeGameSceneView(d3scene::ViewKind::Auxiliary,
 			static_cast<uint64_t>(view_slot) + 2, viewer, *viewer_eye, viewer_roomnum,
 			*viewer_orient, zoom, rear_view, {left, top, width, height}, {0, 0, width, height});
-		CommitGameVisibility(presentation, d3scene::renderView(presentation, view));
+		RenderGameSceneView(presentation, view);
 	}
 
 	DrawSmallViewScanlineOverlay(width, height, cockpit_embedded);
