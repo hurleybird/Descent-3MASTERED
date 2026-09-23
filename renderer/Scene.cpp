@@ -279,6 +279,12 @@ MaterialPolicy compileMaterialPolicy(const SurfaceBinding& surface, const MeshPo
     return result;
 }
 
+const ForegroundLayer* Presentation::foreground(uint64_t identity) const {
+    for (const auto& foreground : data_.foregrounds)
+        if (foreground.identity == identity) return &foreground.layer;
+    return nullptr;
+}
+
 PresentationRef Presentation::freeze(const FrameData& data) {
     require(data.sequence != 0 && data.scene_lifetime != 0, "Unidentified presentation frame");
     require(std::isfinite(data.simulation_time) && std::isfinite(data.delta_time) && data.delta_time >= 0,
@@ -286,6 +292,21 @@ PresentationRef Presentation::freeze(const FrameData& data) {
     require(finite(data.player_control_delta) && std::isfinite(data.afterburner_factor) &&
         data.afterburner_factor >= 0 && data.afterburner_factor <= 1,"Invalid presentation motion inputs");
     require((data.pending_domains & ~AllPendingDomains) == 0, "Unknown pending scene domain");
+    std::unordered_set<uint64_t> foreground_ids;
+    for (const auto& foreground : data.foregrounds) {
+        require(foreground.identity && foreground_ids.insert(foreground.identity).second,
+            "Invalid or duplicate foreground identity");
+        for (const auto& view : foreground.layer.scene_views) {
+            validateView(view);
+            require(view.target == ViewTarget::Scene && view.feedback == NoFeedback,
+                "Invalid prepared foreground scene view");
+        }
+        for (const auto& view : foreground.layer.display_views) {
+            validateView(view);
+            require(view.target == ViewTarget::Display && view.feedback == NoFeedback,
+                "Invalid prepared foreground display view");
+        }
+    }
     require(data.lighting_quality == LightingQuality::Vertex || data.lighting_quality == LightingQuality::Pixel,
         "Unknown lighting quality");
     std::set<std::tuple<LightSource,uint64_t,uint32_t>> emitters;

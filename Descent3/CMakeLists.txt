@@ -2,6 +2,7 @@ SET (MAIN_SOURCES
 		Descent3/SceneExtraction.h
 		Descent3/SceneExtraction.cpp
 		Descent3/ScenePresentation.cpp
+		Descent3/SceneCanvas.cpp
 		Descent3/SceneObservations.cpp
 		Descent3/SceneModels.cpp
 		Descent3/SceneLights.cpp

@@ -31,6 +31,9 @@
 #include "config.h"
 #include "multi.h"
 #include "render.h"
+#include "gamefont.h"
+#include "SceneCanvas.h"
+#include "SceneExtraction.h"
 
 #include <stdio.h>
 #include <stdarg.h>
@@ -40,31 +43,22 @@
 //	Data
 
 //renders the description for the current inventory item
-void RenderHUDInventory(tHUDItem* item);
 
 //renders the shield rating for the ship
-void RenderHUDShieldValue(tHUDItem* item);
 
 //renders the energy rating for the ship
-void RenderHUDEnergyValue(tHUDItem* item);
 
 //	draws the afterburner hud gauge.
-void RenderHUDAfterburner(tHUDItem* item);
 
 //	draws the primary weapon current in.
-void RenderHUDPrimary(tHUDItem* item);
 
 //	draw secondary weapon current in.
-void RenderHUDSecondary(tHUDItem* item);
 
 //	renders ship status.
-void RenderHUDShipStatus(tHUDItem* item);
 
 //	renders warnings like system failures or missile locks.
-void RenderHUDWarnings(tHUDItem* item);
 
 // render hud countermeasures
-void RenderHUDCountermeasures(tHUDItem* item);
 
 //	returns the weapon's icon.
 inline int get_weapon_icon(int player, int type)
@@ -89,6 +83,91 @@ enum tHUDTextAlign
 	HUD_TEXT_LEFT,
 	HUD_TEXT_CENTER,
 	HUD_TEXT_RIGHT
+};
+
+
+class SceneHUDLayout {
+    d3scene::FrameData& frame;
+    uint64_t collection;
+    int32_t order = 0;
+    float font_scale;
+    bool advance;
+    float Hud_aspect_x, Hud_aspect_y;
+    int item_type = 0, anchor_priority = 0, anchor_x = 0, anchor_y = 0;
+    bool anchor_valid = false;
+public:
+    SceneHUDLayout(d3scene::FrameData& data,uint64_t layer,d3scene::Rect viewport,bool tick)
+        : frame(data), collection(layer), advance(tick),
+          Hud_aspect_x(float(viewport.width)/DEFAULT_HUD_WIDTH),
+          Hud_aspect_y(float(viewport.height)/DEFAULT_HUD_HEIGHT) {
+        const float ratio = float(viewport.height)/Max_window_h;
+        const float extra = (std::max)(1.f,float(Max_window_h)/1080);
+        font_scale = (ratio <= .6f ? .6f : ratio <= .8f ? .8f : 1.f)*extra*ConfigNormalizeHudTextScale(Hud_text_scale);
+    }
+    void item(tHUDItem* value) { item_type = value->type; HudDisplayRouter(value); }
+    int grtext_GetTextLineWidth(const char* value) const {
+        SceneTextStyle style; style.font = HUD_FONT; style.scale = font_scale;
+        return MeasureSceneText(value,style).width;
+    }
+    int RenderHUDGetTextHeight(const char* value) const {
+        SceneTextStyle style; style.font = HUD_FONT; style.scale = font_scale;
+        return int(MeasureSceneText(value,style).height/Hud_aspect_y+.5f);
+    }
+    bool RenderHUDGetTopLeftTextAnchor(int* x,int* y) const {
+        if (!anchor_valid) return false;
+        if (x) *x = anchor_x;
+        if (y) *y = anchor_y;
+        return true;
+    }
+    void text(ddgr_color color,ubyte alpha,int saturation,int x,int y,int align,const char* value) {
+        int draw_x = int(x*Hud_aspect_x), draw_y = int(y*Hud_aspect_y);
+        if (align == HUD_TEXT_LEFT && x <= DEFAULT_HUD_WIDTH/2 && y <= DEFAULT_HUD_HEIGHT/2) {
+            const int priority = item_type == HUD_ITEM_PRIMARY ? 4 : item_type == HUD_ITEM_INVENTORY ? 3 :
+                item_type == HUD_ITEM_SECONDARY ? 2 : item_type == HUD_ITEM_CNTRMEASURE ? 1 : 0;
+            if (priority && (!anchor_valid || priority > anchor_priority ||
+                (priority == anchor_priority && (y < anchor_y || (y == anchor_y && x < anchor_x))))) {
+                anchor_valid = true; anchor_priority = priority; anchor_x = x; anchor_y = y;
+            }
+        }
+        if (align == HUD_TEXT_CENTER) draw_x -= grtext_GetTextLineWidth(value)/2;
+        else if (align == HUD_TEXT_RIGHT) draw_x -= grtext_GetTextLineWidth(value);
+        SceneTextStyle style; style.font = HUD_FONT; style.scale = font_scale;
+        style.alpha = alpha/255.f; style.additive = saturation != 0;
+        style.color = {GR_COLOR_RED(color)/255.f,GR_COLOR_GREEN(color)/255.f,GR_COLOR_BLUE(color)/255.f};
+        for (int pass = 0; pass <= saturation; ++pass)
+            PrepareSceneText(frame,collection,order,(std::max)(0,draw_x),draw_y,value,style);
+    }
+    void RenderHUDText(ddgr_color color,ubyte alpha,int saturation,int x,int y,const char* format,...) {
+        char value[128]; va_list args; va_start(args,format);
+        Pvsprintf(value,sizeof(value),format,args); va_end(args);
+        text(color,alpha,saturation,x,y,HUD_TEXT_LEFT,value);
+    }
+    void RenderHUDTextFlagsNoFormat(int flags,ddgr_color color,ubyte alpha,int saturation,int x,int y,const char* value) {
+        const bool centered = (flags & HUDTEXT_CENTERED) != 0;
+        text(color,alpha,saturation,centered ? int(DEFAULT_HUD_WIDTH/2) : x,y,centered ? HUD_TEXT_CENTER : HUD_TEXT_LEFT,value);
+    }
+    void RenderHUDRightAlignedText(ddgr_color color,ubyte alpha,int saturation,int x,int y,const char* value) {
+        text(color,alpha,saturation,x,y,HUD_TEXT_RIGHT,value);
+    }
+    void RenderHUDQuad(int x,int y,int w,int h,float u0,float v0,float u1,float v1,int bitmap,ubyte alpha,int saturation=0) {
+        SceneQuadStyle style; style.bitmap = bitmap; style.alpha = alpha/255.f;
+        style.additive = saturation != 0; style.uv_min = {u0,v0}; style.uv_max = {u1,v1};
+        for (int pass = 0; pass <= saturation; ++pass)
+            PrepareSceneQuad(frame,collection,order,{int(x*Hud_aspect_x),int(y*Hud_aspect_y),
+                int(w*Hud_aspect_x),int(h*Hud_aspect_y)},style);
+    }
+    void HudDisplayRouter(tHUDItem* item);
+    void RenderHUDInventory(tHUDItem* item);
+    void RenderHUDShieldValue(tHUDItem* item);
+    void RenderHUDEnergyValue(tHUDItem* item);
+    void RenderHUDAfterburner(tHUDItem* item);
+    void RenderHUDPrimary(tHUDItem* item);
+    void RenderHUDSecondary(tHUDItem* item);
+    void RenderHUDShipStatus(tHUDItem* item);
+    void RenderHUDWarnings(tHUDItem* item);
+    void RenderHUDCountermeasures(tHUDItem* item);
+    void RenderHUDScore(tHUDItem* item);
+    void RenderHUDTimer(tHUDItem* item);
 };
 
 static bool HUD_text_pass_active = false;
@@ -147,625 +226,44 @@ bool RenderHUDGetTopLeftTextBottom(int* bottom)
 //////////////////////////////////////////////////////////////////////////////
 //	Hud item display routines.
 
-void HudDisplayRouter(tHUDItem* item)
-{
-	grtext_SetAlpha(192);
-	grtext_SetFlags(0);
 
-	switch (item->type)
-	{
-	case HUD_ITEM_PRIMARY:
-		RenderHUDPrimary(item);
-		break;
-
-	case HUD_ITEM_SECONDARY:
-		RenderHUDSecondary(item);
-		break;
-
-	case HUD_ITEM_SHIELD:
-		RenderHUDShieldValue(item);
-		break;
-
-	case HUD_ITEM_ENERGY:
-		RenderHUDEnergyValue(item);
-		break;
-
-	case HUD_ITEM_AFTERBURNER:
-		RenderHUDAfterburner(item);
-		break;
-
-	case HUD_ITEM_INVENTORY:
-		RenderHUDInventory(item);
-		break;
-
-	case HUD_ITEM_SHIPSTATUS:
-		RenderHUDShipStatus(item);
-		break;
-
-	case HUD_ITEM_WARNINGS:
-		RenderHUDWarnings(item);
-		break;
-
-	case HUD_ITEM_CNTRMEASURE:
-		RenderHUDCountermeasures(item);
-		break;
-
-	case HUD_ITEM_CUSTOMTEXT:
-		if (item->data.text)
-			RenderHUDText(item->color, item->alpha, item->saturation_count, item->x, item->y, item->data.text);
-		break;
-
-	case HUD_ITEM_CUSTOMTEXT2:
-		if (item->data.text)
-			RenderHUDTextFlagsNoFormat(0, item->color, item->alpha, item->saturation_count, 2, 240, item->data.text);
-		break;
-
-	case HUD_ITEM_CUSTOMIMAGE:
-		break;
-
-	default:
-		Int3();
-	}
-}
 
 //////////////////////////////////////////////////////////////////////////////
 //	Hud item functions.
 
 //renders the description for the current inventory item
-void RenderHUDInventory(tHUDItem* item)
-{
-	tInvenList ilist[MAX_UNIQUE_INVEN_ITEMS];
-	int cur_sel;
-	int count = Players[Player_num].inventory.GetInventoryItemList(ilist, MAX_UNIQUE_INVEN_ITEMS, &cur_sel);
-	if (!count)
-		return;
 
-	int y;
-	//[ISB] uninitialized aaaaa
-	float img_w = 0;
-	int line_gap = (Hud_aspect_y >= 3.0f) ? 1 : 0;
-
-	if (cur_sel != -1)
-	{
-		ASSERT(cur_sel < MAX_UNIQUE_INVEN_ITEMS);
-
-		//render currently selected item
-		if (ilist[cur_sel].hud_name)
-		{
-			img_w = bm_w(HUD_resources.arrow_bmp, 0) * HUD_ARROW_SCALE;
-
-			RenderHUDQuad(item->x, item->y + 2, img_w, bm_h(HUD_resources.arrow_bmp, 0) * HUD_ARROW_SCALE, 0, 0, 1, 1, HUD_resources.arrow_bmp, item->alpha, item->saturation_count);
-
-			if (ilist[cur_sel].amount > 1)
-				RenderHUDText(item->color, item->alpha, item->saturation_count, item->x + img_w, item->y, "%s (%d)", ilist[cur_sel].hud_name, ilist[cur_sel].amount);
-			else
-				RenderHUDText(item->color, item->alpha, item->saturation_count, item->x + img_w, item->y, "%s", ilist[cur_sel].hud_name);
-		}
-	}
-
-	// render non usable list.
-	if (cur_sel != -1 && ilist[cur_sel].hud_name)
-		y = item->y + RenderHUDGetTextHeight(ilist[cur_sel].hud_name) + 6 + line_gap;
-	else
-		y = item->y + 16 + line_gap;
-
-	for (int i = 0; i < count; i++)
-	{
-		if (cur_sel == i)
-			continue;
-		if (ilist[i].selectable)
-			continue;
-		if (!ilist[i].hud_name)
-			continue;
-
-		if (ilist[i].amount > 1)
-			RenderHUDText(item->color, item->alpha, item->saturation_count, item->x + img_w, y, "%s (%d)", ilist[i].hud_name, ilist[i].amount);
-		else
-			RenderHUDText(item->color, item->alpha, item->saturation_count, item->x + img_w, y, "%s", ilist[i].hud_name);
-
-		y += RenderHUDGetTextHeight(ilist[i].hud_name) + line_gap;
-	}
-
-	/*
-	Inventory *inventory = &Players[Player_num].inventory;
-
-	if(inventory->Size())	//make sure there is at least one item in the inventory
-	{
-		int size, y;
-		int current_inv_pos = inventory->GetPos();
-		float img_w = bm_w(HUD_resources.arrow_bmp,0)*HUD_ARROW_SCALE;
-		char *name = inventory->GetPosName();
-
-		if(name && inventory->IsUsable()) {
-			RenderHUDQuad(item->x, item->y+2, img_w, bm_h(HUD_resources.arrow_bmp,0)*HUD_ARROW_SCALE, 0,0,1,1,HUD_resources.arrow_bmp,
-				item->alpha, item->saturation_count);
-			int count = inventory->GetPosCount();
-			if(count>1)
-				RenderHUDText(item->color, item->alpha, item->saturation_count, item->x+img_w, item->y, "%s (%d)", name,count);
-			else
-				RenderHUDText(item->color, item->alpha, item->saturation_count, item->x+img_w, item->y, "%s", name);
-		}
-
-
-	// render non usable list.
-		inventory->ResetPos();
-		size = inventory->Size();
-		if (name) {
-			y = item->y + RenderHUDGetTextHeight(name) + 6;
-		}
-		else {
-			y = item->y + 16;
-		}
-		while (size)
-		{
-			if (!inventory->IsUsable()) {
-				name = inventory->GetPosName();
-				if(name) {
-					int count = inventory->GetPosCount();
-					if(count>1) {
-						RenderHUDText(item->color, item->alpha, item->saturation_count, item->x+img_w, y, "%s (%d)", name,count);
-					}
-					else {
-						RenderHUDText(item->color, item->alpha, item->saturation_count, item->x+img_w, y, "%s", name);
-					}
-					y+= RenderHUDGetTextHeight(name);
-				}
-			}
-			inventory->NextPos(true);
-			size--;
-		}
-
-	// restore inventory position
-		inventory->GotoPos(current_inv_pos);
-	}
-	*/
-}
 
 
 //renders the shield rating for the ship
-void RenderHUDShieldValue(tHUDItem* item)
-{
-	const int SHIELD_NUM_X = 86, SHIELD_NUM_Y = 14;
-	const int SHIELD_IMG_X = 21, SHIELD_IMG_Y = 57;
-	const int WARNING_IMG_X = 110, WARNING_IMG_Y = 8;
-	float alpha_mod = (Objects[Players[Player_num].objnum].shields) / (float)INITIAL_SHIELDS;
 
-	if (alpha_mod > 1.0f)
-		alpha_mod = 1.0f;
-
-	if (item->stat & STAT_GRAPHICAL)
-	{
-		// GRAPHICAL VERSION
-		//	display text and warning dot
-		int img = (int)ceil((1.0f - alpha_mod - 0.1f) * NUM_SHIELD_GAUGE_FRAMES);
-		float grscalex = (item->grscalex != 0.0f) ? item->grscalex : HUD_SHIELD_SCALE;
-		float grscaley = (item->grscaley != 0.0f) ? item->grscaley : HUD_SHIELD_SCALE;
-
-		RenderHUDText(item->color, item->alpha, item->saturation_count, item->x + SHIELD_NUM_X, item->y + SHIELD_NUM_Y,
-			"%03d", (int)Objects[Players[Player_num].objnum].shields);
-
-		if (alpha_mod <= 0.20f)
-		{
-			RenderHUDQuad(item->x + WARNING_IMG_X, item->y + WARNING_IMG_Y,
-				bm_w(HUD_resources.dot_bmp, 0) * HUD_DOT_SCALE, bm_h(HUD_resources.dot_bmp, 0) * HUD_DOT_SCALE,
-				0, 0, 1, 1,
-				HUD_resources.dot_bmp, item->alpha, 1);
-		}
-
-		if (img < NUM_SHIELD_GAUGE_FRAMES)
-		{
-			if (img < 0)
-				img = 0;
-			img = HUD_resources.shield_bmp[img];
-			RenderHUDQuad(item->x + SHIELD_IMG_X, item->y + SHIELD_IMG_Y,
-				bm_w(img, 0) * grscalex, bm_h(img, 0) * grscaley,
-				0, 0, 1, 1, img,
-				item->alpha, item->saturation_count);
-		}
-	}
-	else if (item->stat & STAT_SPECIAL)
-	{
-		RenderHUDText(item->color, item->alpha, item->saturation_count, item->x, item->y,
-			"%03d", (int)Objects[Players[Player_num].objnum].shields);
-
-		if (alpha_mod <= 0.20f)
-		{
-			RenderHUDQuad(item->x + 30, item->y - 10,
-				bm_w(HUD_resources.dot_bmp, 0) * HUD_DOT_SCALE, bm_h(HUD_resources.dot_bmp, 0) * HUD_DOT_SCALE,
-				0, 0, 1, 1,
-				HUD_resources.dot_bmp, item->alpha, 1);
-		}
-	}
-	else
-	{
-		// TEXT VERSION
-		RenderHUDText(item->tcolor, item->alpha, (alpha_mod <= .20f) ? item->saturation_count + 1 : item->saturation_count,
-			item->tx, item->ty, "%s: %03d", TXT_HUD_SHIELDS, (int)Objects[Players[Player_num].objnum].shields);
-	}
-}
 
 
 //renders the energy rating for the ship
-void RenderHUDEnergyValue(tHUDItem* item)
-{
-	float normalized_energy = (float)Players[Player_num].energy / (float)INITIAL_ENERGY;
 
-	// cap off energy to 1.0 normalized 
-	if (normalized_energy > 1.0f)
-		normalized_energy = 1.0f;
-
-	//	display text and warning dot
-	if (item->stat & STAT_GRAPHICAL)
-	{
-		const int ENERGY_NUM_X = 15, ENERGY_NUM_Y = 14;
-		//	int ENERGY_IMG_X = 3, ENERGY_IMG_Y = 74;
-		//	int ENERGY_IMG_X2 = 119;
-		const int WARNING_IMG_X = 6, WARNING_IMG_Y = 8;
-		float grscalex = (item->grscalex != 0.0f) ? item->grscalex : HUD_ENERGY_SCALE;
-		float grscaley = (item->grscaley != 0.0f) ? item->grscaley : HUD_ENERGY_SCALE;
-
-		float img_w = bm_w(HUD_resources.energy_bmp, 0) * grscalex;
-		float img_h = bm_h(HUD_resources.energy_bmp, 0) * grscaley;
-		int img_energy_h;
-
-		RenderHUDText(item->color, item->alpha, item->saturation_count, item->x + ENERGY_NUM_X, item->y + ENERGY_NUM_Y,
-			"%03d", (int)Players[Player_num].energy);
-
-		if (normalized_energy <= 0.20f)
-		{
-			RenderHUDQuad(item->x + WARNING_IMG_X, item->y + WARNING_IMG_Y,
-				bm_w(HUD_resources.dot_bmp, 0) * HUD_DOT_SCALE, bm_h(HUD_resources.dot_bmp, 0) * HUD_DOT_SCALE,
-				0, 0, 1, 1,
-				HUD_resources.dot_bmp, item->alpha, 1);
-		}
-
-		img_energy_h = (int)floor((normalized_energy * img_h) + 0.5f);
-
-		//	draw energy gauge, showing how much energy below 100% you have. draw energy spent faded.
-		RenderHUDQuad(item->x + item->xa, item->y + item->ya,
-			img_w, img_h - img_energy_h, 0, 0, 1.0, 1.0f - normalized_energy,
-			HUD_resources.energy_bmp, item->alpha / 4, 0);
-
-		RenderHUDQuad(item->x + item->xb - img_w, item->y + item->yb,
-			img_w, img_h - img_energy_h, 1.0, 0, 0, 1.0f - normalized_energy,
-			HUD_resources.energy_bmp, item->alpha / 4, 0);
-
-		RenderHUDQuad(item->x + item->xa, item->y + item->ya + (int)(img_h - img_energy_h),
-			img_w, img_energy_h,
-			0, 1.0f - normalized_energy, 1, 1,
-			HUD_resources.energy_bmp, item->alpha, item->saturation_count);
-
-		RenderHUDQuad(item->x + item->xb - img_w, item->y + item->yb + (int)(img_h - img_energy_h),
-			img_w, img_energy_h,
-			1, 1.0f - normalized_energy, 0, 1,
-			HUD_resources.energy_bmp, item->alpha, item->saturation_count);
-	}
-	else if (item->stat & STAT_SPECIAL)
-	{
-		RenderHUDText(item->color, item->alpha, item->saturation_count, item->x, item->y,
-			"%03d", (int)Players[Player_num].energy);
-
-		if (normalized_energy <= 0.20f)
-		{
-			RenderHUDQuad(item->x - 10, item->y - 10,
-				bm_w(HUD_resources.dot_bmp, 0) * HUD_DOT_SCALE, bm_h(HUD_resources.dot_bmp, 0) * HUD_DOT_SCALE,
-				0, 0, 1, 1,
-				HUD_resources.dot_bmp, item->alpha, 1);
-		}
-	}
-	else
-	{
-		// TEXT VERSION
-		RenderHUDText(item->tcolor, item->alpha, (normalized_energy <= .20f) ? item->saturation_count + 1 : item->saturation_count,
-			item->tx, item->ty, "%s: %03d", TXT_HUD_ENERGY, (int)Players[Player_num].energy);
-	}
-}
 
 
 //	draws the afterburner hud gauge.
-void RenderHUDAfterburner(tHUDItem* item)
-{
-	float val = (Players[Player_num].afterburn_time_left / AFTERBURN_TIME);
-	char str[8];
 
-	if (item->stat & STAT_GRAPHICAL)
-	{
-		const int BURNER_NUM_X = 24;
-		float grscalex = (item->grscalex != 0.0f) ? item->grscalex : HUD_BURN_SCALE;
-		float grscaley = (item->grscaley != 0.0f) ? item->grscaley : HUD_BURN_SCALE;
-		float img_w = bm_w(HUD_resources.afterburn_bmp, 0) * grscalex;
-		float img_h = bm_h(HUD_resources.afterburn_bmp, 0) * grscaley;
-		int img_burn_w = (int)floor((val * img_w) + 0.5f);
-
-		//	draw afterburn spent.
-		RenderHUDQuad(item->x + item->xa + img_burn_w, item->y + item->ya,
-			img_w - img_burn_w, img_h, val, 0, 1, 1,
-			HUD_resources.afterburn_bmp, item->alpha / 4, 0);
-
-		//	draw afterburn left
-		RenderHUDQuad(item->x + item->xa, item->y + item->ya,
-			img_burn_w, img_h, 0, 0, val, 1,
-			HUD_resources.afterburn_bmp, item->alpha, item->saturation_count);
-
-		sprintf(str, "%d%%", (int)(val * 100.0f));
-		RenderHUDText(item->color, item->alpha, item->saturation_count, item->x + BURNER_NUM_X, item->y, str);
-	}
-	else if (item->stat & STAT_SPECIAL)
-	{
-		sprintf(str, "%d%%", (int)(val * 100.0f));
-		RenderHUDText(item->color, item->alpha, item->saturation_count, item->x, item->y, str);
-	}
-	else
-	{
-		// TEXT VERSION
-		RenderHUDText(item->tcolor, item->alpha, (val <= .30f) ? item->saturation_count + 1 : item->saturation_count,
-			item->tx, item->ty, "%s: %d%%", TXT_HUD_AFTERBURNER, (int)(val * 100.0f));
-	}
-}
 
 
 //	draws the primary weapon current in.
-void RenderHUDPrimary(tHUDItem* item)
-{
-	int index = Players[Player_num].weapon[PW_PRIMARY].index;
-	ship* ship = &Ships[Players[Player_num].ship_index];
-	otype_wb_info* wb = &ship->static_wb[index];
-	const char* text = TXT(Static_weapon_names_msg[index]);
-	float txt_w = (int)(grtext_GetLineWidth(text) / Hud_aspect_x) + 4;
-	char ammo_string[10];
 
-	if (!wb)
-		return;
-
-	if (wb->ammo_usage)
-	{
-		int ammo = Players[Player_num].weapon_ammo[index];
-		if (ship->fire_flags[index] & SFF_TENTHS)
-			sprintf(ammo_string, "%d.%d", ammo / 10, ammo % 10);
-		else
-			sprintf(ammo_string, "%d", ammo);
-	}
-
-	if (item->stat & STAT_GRAPHICAL)
-	{
-		const int WPN_INFO_W = 100;
-		float grscalex = (item->grscalex != 0.0f) ? item->grscalex : HUD_WPN_SCALE;
-		float grscaley = (item->grscaley != 0.0f) ? item->grscaley : HUD_WPN_SCALE;
-
-		float img_w = bm_w(HUD_resources.wpn_bmp, 0) * grscalex;
-		int icon;
-
-		int y = item->y;
-
-		if (wb->ammo_usage) {
-			int w2 = (int)(grtext_GetLineWidth("00000") / Hud_aspect_x) + 2;
-			RenderHUDText(item->color, item->alpha, item->saturation_count, item->x + WPN_INFO_W - img_w - w2, y + 13,
-				ammo_string);
-		}
-		else
-			y += 13 / 2;		//If just one line, move it down
-
-		RenderHUDText(item->color, item->alpha, item->saturation_count, item->x + WPN_INFO_W - img_w - txt_w, y,
-			"%s", text);
-
-		icon = get_weapon_icon(Player_num, PW_PRIMARY);
-
-		if (icon != HUD_resources.wpn_bmp)
-		{
-			RenderHUDQuad(item->x + WPN_INFO_W - img_w, item->y, img_w, bm_h(icon, 0) * grscaley, 0, 0, 1, 1,
-				icon, item->alpha, item->saturation_count);
-		}
-	}
-	else if (item->stat & STAT_SPECIAL)
-	{
-	}
-	else
-	{
-		// TEXT VERSION
-		if (wb->ammo_usage)
-		{
-			RenderHUDText(item->tcolor, item->alpha, item->saturation_count, item->tx, item->ty,
-				"%s %s", text, ammo_string);
-		}
-		else
-		{
-			RenderHUDText(item->tcolor, item->alpha, item->saturation_count, item->tx, item->ty,
-				"%s", text);
-		}
-	}
-}
 
 
 //	draw secondary weapon current in.
-void RenderHUDSecondary(tHUDItem* item)
-{
-	int index = Players[Player_num].weapon[PW_SECONDARY].index;
-	ship* ship = &Ships[Players[Player_num].ship_index];
-	otype_wb_info* wb = &ship->static_wb[index];
-	weapon* wpn = GetWeaponFromIndex(Player_num, index);
-	const char* text = TXT(Static_weapon_names_msg[index]);
-	float txt_w = (int)(grtext_GetLineWidth(text) / Hud_aspect_x) + 2;
-
-	if (item->stat & STAT_GRAPHICAL)
-	{
-		int icon;
-		float grscalex = (item->grscalex != 0.0f) ? item->grscalex : HUD_WPN_SCALE;
-		float grscaley = (item->grscaley != 0.0f) ? item->grscaley : HUD_WPN_SCALE;
-
-		float img_w = bm_w(HUD_resources.wpn_bmp, 0) * grscalex;
-
-		RenderHUDText(item->color, item->alpha, item->saturation_count, item->x + img_w + 2, item->y,
-			"%s", text);
-		if (wb->ammo_usage)
-		{
-			RenderHUDText(item->color, item->alpha, item->saturation_count, item->x + img_w + 16, item->y + 13,
-				"%d", Players[Player_num].weapon_ammo[Players[Player_num].weapon[PW_SECONDARY].index]);
-		}
-
-		icon = get_weapon_icon(Player_num, PW_SECONDARY);
-
-		if (icon != HUD_resources.wpn_bmp)
-		{
-			RenderHUDQuad(item->x, item->y, img_w, bm_h(icon, 0) * grscaley, 0, 0, 1, 1,
-				icon, item->alpha, item->saturation_count);
-		}
-	}
-	else if (item->stat & STAT_SPECIAL)
-	{
-
-	}
-	else
-	{
-		//	TEXT VERSION
-		RenderHUDText(item->tcolor, item->alpha, item->saturation_count, item->tx, item->ty,
-			"%s %d", text, Players[Player_num].weapon_ammo[Players[Player_num].weapon[PW_SECONDARY].index]);
-	}
-}
 
 
-void RenderHUDShipStatus(tHUDItem* item)
-{
-	float clk_time_frame, inv_time_frame;
-	ubyte clk_alpha, inv_alpha;
-
-	//	render text status
-	if (Objects[Players[Player_num].objnum].effect_info->type_flags & EF_CLOAKED)
-	{
-		clk_time_frame = Objects[Players[Player_num].objnum].effect_info->cloak_time;
-		if (clk_time_frame < HUD_CLOAKEND_TIME)
-			clk_alpha = 128 - 127 * FixCos(65536.0f * (clk_time_frame - (int)clk_time_frame));
-		else
-			clk_alpha = 0;
-	}
-	if (Players[Player_num].flags & PLAYER_FLAGS_INVULNERABLE)
-	{
-		// do invulnerablity animation.
-		inv_time_frame = (Gametime - (int)Gametime);
-		inv_alpha = (255 * inv_time_frame);
-	}
 
 
-	if (item->stat & STAT_GRAPHICAL)
-	{
-		const int STATUS_IMG_X = 0, STATUS_IMG_Y = 68;
-		const int STATUS_TXT_X = 8;
-		const int STATUS_TXT_Y = -1, STATUS_TXT_Y2 = 9;
-		float grscalex = (item->grscalex != 0.0f) ? item->grscalex : HUD_SHIP_SCALE;
-		float grscaley = (item->grscaley != 0.0f) ? item->grscaley : HUD_SHIP_SCALE;
-
-		int x = item->x + STATUS_IMG_X;
-		int y = item->y + STATUS_IMG_Y;
-		int w = bm_w(HUD_resources.ship_bmp, 0) * grscalex;
-		int h = bm_w(HUD_resources.ship_bmp, 0) * grscaley;
-
-		if (Objects[Players[Player_num].objnum].effect_info->type_flags & EF_CLOAKED)
-		{
-			RenderHUDQuad(x, y, w, h, 0, 0, 1, 1, HUD_resources.ship_bmp, clk_alpha, item->saturation_count);
-			RenderHUDText(item->color, 255 - clk_alpha, item->saturation_count, item->x + STATUS_TXT_X, item->y + STATUS_TXT_Y2, TXT_CLK);
-		}
-		else
-		{
-			// non cloaked ship
-			RenderHUDQuad(x, y, w, h, 0, 0, 1, 1, HUD_resources.ship_bmp, item->alpha, item->saturation_count);
-		}
-
-		if (Players[Player_num].flags & PLAYER_FLAGS_INVULNERABLE)
-		{
-			x = x - (w * inv_time_frame * 0.5f);
-			y = y - (h * inv_time_frame * 0.5f);
-
-			RenderHUDQuad(x, y, (1.0f + inv_time_frame) * w, (1.0f + inv_time_frame) * h, 0, 0, 1, 1,
-				HUD_resources.invpulse_bmp, inv_alpha, item->saturation_count);
-			RenderHUDText(item->color, item->alpha, item->saturation_count, item->x + STATUS_TXT_X + 2, item->y + STATUS_TXT_Y,
-				TXT_INV);
-		}
-	}
-	else if (item->stat & STAT_SPECIAL)
-	{
-
-	}
-	else
-	{
-		if (Players[Player_num].flags & PLAYER_FLAGS_INVULNERABLE)
-			RenderHUDText(item->tcolor, 255 - clk_alpha, item->saturation_count, item->tx, item->ty, TXT_HUD_INVULN);
-		if (Objects[Players[Player_num].objnum].effect_info->type_flags & EF_CLOAKED)
-			RenderHUDText(item->tcolor, 255 - clk_alpha, item->saturation_count, item->tx, item->ty + 12, TXT_HUD_CLOAKED);
-	}
-}
 
 
 //	renders warnings like system failures or missile locks.
-void RenderHUDWarnings(tHUDItem* item)
-{
-	object* playerobj = &Objects[Players[Player_num].objnum];
 
-	if (item->stat & STAT_GRAPHICAL)
-	{
-		const int LOCK_IMG_X = 8, LOCK_IMG_Y = 2;
-		const int ANTIGRAV_X = 8, ANTIGRAV_Y = 64;
-
-		float img_w, img_h;
-		float grscalex = (item->grscalex != 0.0f) ? item->grscalex : HUD_LOCK_SCALE;
-		float grscaley = (item->grscaley != 0.0f) ? item->grscaley : HUD_LOCK_SCALE;
-
-
-		if (Players[Player_num].last_homing_warning_sound_time == Gametime && Gametime > 0.0f)
-		{
-			//	draw graphical rep of missile lock warning.
-			img_w = bm_w(HUD_resources.lock_bmp[0], 0) * grscalex;
-			img_h = bm_h(HUD_resources.lock_bmp[1], 0) * grscaley;
-
-			RenderHUDQuad(item->x + LOCK_IMG_X, item->y + LOCK_IMG_Y,
-				img_w, img_h, 0, 0, 1, 1, HUD_resources.lock_bmp[0], item->alpha, item->saturation_count);
-			RenderHUDQuad(item->x + LOCK_IMG_X + img_w, item->y + LOCK_IMG_Y,
-				img_w, img_h, 0, 0, 1, 1, HUD_resources.lock_bmp[1], item->alpha, item->saturation_count);
-		}
-
-		if (playerobj->mtype.phys_info.flags & PF_GRAVITY)
-		{
-			//	draw graphical rep of missile lock warning.
-			img_w = bm_w(HUD_resources.antigrav_bmp[0], 0) * grscalex;
-			img_h = bm_h(HUD_resources.antigrav_bmp[1], 0) * grscaley;
-
-			RenderHUDQuad(item->x + ANTIGRAV_X, item->y + ANTIGRAV_Y,
-				img_w, img_h, 0, 0, 1, 1, HUD_resources.antigrav_bmp[0], item->alpha, item->saturation_count);
-			RenderHUDQuad(item->x + ANTIGRAV_X + img_w, item->y + ANTIGRAV_Y,
-				img_w, img_h, 0, 0, 1, 1, HUD_resources.antigrav_bmp[1], item->alpha, item->saturation_count);
-		}
-	}
-	else
-	{
-		if (Players[Player_num].last_homing_warning_sound_time == Gametime)
-			RenderHUDText(item->tcolor, item->alpha, item->saturation_count, item->tx, item->ty, TXT_HUDITM_LOCK);
-		if (playerobj->mtype.phys_info.flags & PF_GRAVITY)
-			RenderHUDText(item->tcolor, item->alpha, item->saturation_count, item->tx, item->ty + 12, TXT_HUDITM_ANTIGRAV);
-	}
-}
 
 
 // render hud countermeasures
-void RenderHUDCountermeasures(tHUDItem* item)
-{
-	tInvenList ilist[MAX_UNIQUE_INVEN_ITEMS];
-	int cur_sel;
-	int count = Players[Player_num].counter_measures.GetInventoryItemList(ilist, MAX_UNIQUE_INVEN_ITEMS, &cur_sel);
-	if (!count)
-		return;
 
-	if (cur_sel != -1)
-	{
-		ASSERT(cur_sel < MAX_UNIQUE_INVEN_ITEMS);
-
-		//render currently selected item
-		if (ilist[cur_sel].hud_name)
-		{
-			if (item->stat & STAT_GRAPHICAL)
-				RenderHUDText(item->color, item->alpha, item->saturation_count, item->x, item->y, "%s %d", ilist[cur_sel].hud_name, ilist[cur_sel].amount);
-			else
-				RenderHUDText(item->color, item->alpha, item->saturation_count, item->tx, item->ty, "%s %d", ilist[cur_sel].hud_name, ilist[cur_sel].amount);
-		}
-	}
-}
 
 
 //////////////////////////////////////////////////////////////////////////////
@@ -969,7 +467,565 @@ static void RenderHUDRightAlignedText(ddgr_color col, ubyte alpha, int sat_count
 }
 
 //Show the score
-void RenderHUDScore(tHUDItem* item)
+
+
+extern float Osiris_TimerTimeRemaining(int handle);
+
+//Show the timer
+
+
+
+////////////////////////////////////////////////////////////////////////////////////////	
+void SceneHUDLayout::HudDisplayRouter(tHUDItem* item)
+{
+
+	switch (item->type)
+	{
+	case HUD_ITEM_SCORE: RenderHUDScore(item); break;
+	case HUD_ITEM_TIMER: RenderHUDTimer(item); break;
+	case HUD_ITEM_PRIMARY:
+		RenderHUDPrimary(item);
+		break;
+
+	case HUD_ITEM_SECONDARY:
+		RenderHUDSecondary(item);
+		break;
+
+	case HUD_ITEM_SHIELD:
+		RenderHUDShieldValue(item);
+		break;
+
+	case HUD_ITEM_ENERGY:
+		RenderHUDEnergyValue(item);
+		break;
+
+	case HUD_ITEM_AFTERBURNER:
+		RenderHUDAfterburner(item);
+		break;
+
+	case HUD_ITEM_INVENTORY:
+		RenderHUDInventory(item);
+		break;
+
+	case HUD_ITEM_SHIPSTATUS:
+		RenderHUDShipStatus(item);
+		break;
+
+	case HUD_ITEM_WARNINGS:
+		RenderHUDWarnings(item);
+		break;
+
+	case HUD_ITEM_CNTRMEASURE:
+		RenderHUDCountermeasures(item);
+		break;
+
+	case HUD_ITEM_CUSTOMTEXT:
+		if (item->data.text)
+			RenderHUDText(item->color, item->alpha, item->saturation_count, item->x, item->y, "%s", item->data.text);
+		break;
+
+	case HUD_ITEM_CUSTOMTEXT2:
+		if (item->data.text)
+			RenderHUDTextFlagsNoFormat(0, item->color, item->alpha, item->saturation_count, 2, 240, item->data.text);
+		break;
+
+	case HUD_ITEM_CUSTOMIMAGE:
+		break;
+
+	default:
+		Int3();
+	}
+}
+
+void SceneHUDLayout::RenderHUDInventory(tHUDItem* item)
+{
+	tInvenList ilist[MAX_UNIQUE_INVEN_ITEMS];
+	int cur_sel;
+	int count = Players[Player_num].inventory.GetInventoryItemList(ilist, MAX_UNIQUE_INVEN_ITEMS, &cur_sel);
+	if (!count)
+		return;
+
+	int y;
+	//[ISB] uninitialized aaaaa
+	float img_w = 0;
+	int line_gap = (Hud_aspect_y >= 3.0f) ? 1 : 0;
+
+	if (cur_sel != -1)
+	{
+		ASSERT(cur_sel < MAX_UNIQUE_INVEN_ITEMS);
+
+		//render currently selected item
+		if (ilist[cur_sel].hud_name)
+		{
+			img_w = bm_w(HUD_resources.arrow_bmp, 0) * HUD_ARROW_SCALE;
+
+			RenderHUDQuad(item->x, item->y + 2, img_w, bm_h(HUD_resources.arrow_bmp, 0) * HUD_ARROW_SCALE, 0, 0, 1, 1, HUD_resources.arrow_bmp, item->alpha, item->saturation_count);
+
+			if (ilist[cur_sel].amount > 1)
+				RenderHUDText(item->color, item->alpha, item->saturation_count, item->x + img_w, item->y, "%s (%d)", ilist[cur_sel].hud_name, ilist[cur_sel].amount);
+			else
+				RenderHUDText(item->color, item->alpha, item->saturation_count, item->x + img_w, item->y, "%s", ilist[cur_sel].hud_name);
+		}
+	}
+
+	// render non usable list.
+	if (cur_sel != -1 && ilist[cur_sel].hud_name)
+		y = item->y + RenderHUDGetTextHeight(ilist[cur_sel].hud_name) + 6 + line_gap;
+	else
+		y = item->y + 16 + line_gap;
+
+	for (int i = 0; i < count; i++)
+	{
+		if (cur_sel == i)
+			continue;
+		if (ilist[i].selectable)
+			continue;
+		if (!ilist[i].hud_name)
+			continue;
+
+		if (ilist[i].amount > 1)
+			RenderHUDText(item->color, item->alpha, item->saturation_count, item->x + img_w, y, "%s (%d)", ilist[i].hud_name, ilist[i].amount);
+		else
+			RenderHUDText(item->color, item->alpha, item->saturation_count, item->x + img_w, y, "%s", ilist[i].hud_name);
+
+		y += RenderHUDGetTextHeight(ilist[i].hud_name) + line_gap;
+	}
+
+
+}
+
+void SceneHUDLayout::RenderHUDShieldValue(tHUDItem* item)
+{
+	const int SHIELD_NUM_X = 86, SHIELD_NUM_Y = 14;
+	const int SHIELD_IMG_X = 21, SHIELD_IMG_Y = 57;
+	const int WARNING_IMG_X = 110, WARNING_IMG_Y = 8;
+	float alpha_mod = (Objects[Players[Player_num].objnum].shields) / (float)INITIAL_SHIELDS;
+
+	if (alpha_mod > 1.0f)
+		alpha_mod = 1.0f;
+
+	if (item->stat & STAT_GRAPHICAL)
+	{
+		// GRAPHICAL VERSION
+		//	display text and warning dot
+		int img = (int)ceil((1.0f - alpha_mod - 0.1f) * NUM_SHIELD_GAUGE_FRAMES);
+		float grscalex = (item->grscalex != 0.0f) ? item->grscalex : HUD_SHIELD_SCALE;
+		float grscaley = (item->grscaley != 0.0f) ? item->grscaley : HUD_SHIELD_SCALE;
+
+		RenderHUDText(item->color, item->alpha, item->saturation_count, item->x + SHIELD_NUM_X, item->y + SHIELD_NUM_Y,
+			"%03d", (int)Objects[Players[Player_num].objnum].shields);
+
+		if (alpha_mod <= 0.20f)
+		{
+			RenderHUDQuad(item->x + WARNING_IMG_X, item->y + WARNING_IMG_Y,
+				bm_w(HUD_resources.dot_bmp, 0) * HUD_DOT_SCALE, bm_h(HUD_resources.dot_bmp, 0) * HUD_DOT_SCALE,
+				0, 0, 1, 1,
+				HUD_resources.dot_bmp, item->alpha, 1);
+		}
+
+		if (img < NUM_SHIELD_GAUGE_FRAMES)
+		{
+			if (img < 0)
+				img = 0;
+			img = HUD_resources.shield_bmp[img];
+			RenderHUDQuad(item->x + SHIELD_IMG_X, item->y + SHIELD_IMG_Y,
+				bm_w(img, 0) * grscalex, bm_h(img, 0) * grscaley,
+				0, 0, 1, 1, img,
+				item->alpha, item->saturation_count);
+		}
+	}
+	else if (item->stat & STAT_SPECIAL)
+	{
+		RenderHUDText(item->color, item->alpha, item->saturation_count, item->x, item->y,
+			"%03d", (int)Objects[Players[Player_num].objnum].shields);
+
+		if (alpha_mod <= 0.20f)
+		{
+			RenderHUDQuad(item->x + 30, item->y - 10,
+				bm_w(HUD_resources.dot_bmp, 0) * HUD_DOT_SCALE, bm_h(HUD_resources.dot_bmp, 0) * HUD_DOT_SCALE,
+				0, 0, 1, 1,
+				HUD_resources.dot_bmp, item->alpha, 1);
+		}
+	}
+	else
+	{
+		// TEXT VERSION
+		RenderHUDText(item->tcolor, item->alpha, (alpha_mod <= .20f) ? item->saturation_count + 1 : item->saturation_count,
+			item->tx, item->ty, "%s: %03d", TXT_HUD_SHIELDS, (int)Objects[Players[Player_num].objnum].shields);
+	}
+}
+
+void SceneHUDLayout::RenderHUDEnergyValue(tHUDItem* item)
+{
+	float normalized_energy = (float)Players[Player_num].energy / (float)INITIAL_ENERGY;
+
+	// cap off energy to 1.0 normalized 
+	if (normalized_energy > 1.0f)
+		normalized_energy = 1.0f;
+
+	//	display text and warning dot
+	if (item->stat & STAT_GRAPHICAL)
+	{
+		const int ENERGY_NUM_X = 15, ENERGY_NUM_Y = 14;
+		//	int ENERGY_IMG_X = 3, ENERGY_IMG_Y = 74;
+		//	int ENERGY_IMG_X2 = 119;
+		const int WARNING_IMG_X = 6, WARNING_IMG_Y = 8;
+		float grscalex = (item->grscalex != 0.0f) ? item->grscalex : HUD_ENERGY_SCALE;
+		float grscaley = (item->grscaley != 0.0f) ? item->grscaley : HUD_ENERGY_SCALE;
+
+		float img_w = bm_w(HUD_resources.energy_bmp, 0) * grscalex;
+		float img_h = bm_h(HUD_resources.energy_bmp, 0) * grscaley;
+		int img_energy_h;
+
+		RenderHUDText(item->color, item->alpha, item->saturation_count, item->x + ENERGY_NUM_X, item->y + ENERGY_NUM_Y,
+			"%03d", (int)Players[Player_num].energy);
+
+		if (normalized_energy <= 0.20f)
+		{
+			RenderHUDQuad(item->x + WARNING_IMG_X, item->y + WARNING_IMG_Y,
+				bm_w(HUD_resources.dot_bmp, 0) * HUD_DOT_SCALE, bm_h(HUD_resources.dot_bmp, 0) * HUD_DOT_SCALE,
+				0, 0, 1, 1,
+				HUD_resources.dot_bmp, item->alpha, 1);
+		}
+
+		img_energy_h = (int)floor((normalized_energy * img_h) + 0.5f);
+
+		//	draw energy gauge, showing how much energy below 100% you have. draw energy spent faded.
+		RenderHUDQuad(item->x + item->xa, item->y + item->ya,
+			img_w, img_h - img_energy_h, 0, 0, 1.0, 1.0f - normalized_energy,
+			HUD_resources.energy_bmp, item->alpha / 4, 0);
+
+		RenderHUDQuad(item->x + item->xb - img_w, item->y + item->yb,
+			img_w, img_h - img_energy_h, 1.0, 0, 0, 1.0f - normalized_energy,
+			HUD_resources.energy_bmp, item->alpha / 4, 0);
+
+		RenderHUDQuad(item->x + item->xa, item->y + item->ya + (int)(img_h - img_energy_h),
+			img_w, img_energy_h,
+			0, 1.0f - normalized_energy, 1, 1,
+			HUD_resources.energy_bmp, item->alpha, item->saturation_count);
+
+		RenderHUDQuad(item->x + item->xb - img_w, item->y + item->yb + (int)(img_h - img_energy_h),
+			img_w, img_energy_h,
+			1, 1.0f - normalized_energy, 0, 1,
+			HUD_resources.energy_bmp, item->alpha, item->saturation_count);
+	}
+	else if (item->stat & STAT_SPECIAL)
+	{
+		RenderHUDText(item->color, item->alpha, item->saturation_count, item->x, item->y,
+			"%03d", (int)Players[Player_num].energy);
+
+		if (normalized_energy <= 0.20f)
+		{
+			RenderHUDQuad(item->x - 10, item->y - 10,
+				bm_w(HUD_resources.dot_bmp, 0) * HUD_DOT_SCALE, bm_h(HUD_resources.dot_bmp, 0) * HUD_DOT_SCALE,
+				0, 0, 1, 1,
+				HUD_resources.dot_bmp, item->alpha, 1);
+		}
+	}
+	else
+	{
+		// TEXT VERSION
+		RenderHUDText(item->tcolor, item->alpha, (normalized_energy <= .20f) ? item->saturation_count + 1 : item->saturation_count,
+			item->tx, item->ty, "%s: %03d", TXT_HUD_ENERGY, (int)Players[Player_num].energy);
+	}
+}
+
+void SceneHUDLayout::RenderHUDAfterburner(tHUDItem* item)
+{
+	float val = (Players[Player_num].afterburn_time_left / AFTERBURN_TIME);
+	char str[8];
+
+	if (item->stat & STAT_GRAPHICAL)
+	{
+		const int BURNER_NUM_X = 24;
+		float grscalex = (item->grscalex != 0.0f) ? item->grscalex : HUD_BURN_SCALE;
+		float grscaley = (item->grscaley != 0.0f) ? item->grscaley : HUD_BURN_SCALE;
+		float img_w = bm_w(HUD_resources.afterburn_bmp, 0) * grscalex;
+		float img_h = bm_h(HUD_resources.afterburn_bmp, 0) * grscaley;
+		int img_burn_w = (int)floor((val * img_w) + 0.5f);
+
+		//	draw afterburn spent.
+		RenderHUDQuad(item->x + item->xa + img_burn_w, item->y + item->ya,
+			img_w - img_burn_w, img_h, val, 0, 1, 1,
+			HUD_resources.afterburn_bmp, item->alpha / 4, 0);
+
+		//	draw afterburn left
+		RenderHUDQuad(item->x + item->xa, item->y + item->ya,
+			img_burn_w, img_h, 0, 0, val, 1,
+			HUD_resources.afterburn_bmp, item->alpha, item->saturation_count);
+
+		sprintf(str, "%d%%", (int)(val * 100.0f));
+		RenderHUDText(item->color, item->alpha, item->saturation_count, item->x + BURNER_NUM_X, item->y, str);
+	}
+	else if (item->stat & STAT_SPECIAL)
+	{
+		sprintf(str, "%d%%", (int)(val * 100.0f));
+		RenderHUDText(item->color, item->alpha, item->saturation_count, item->x, item->y, str);
+	}
+	else
+	{
+		// TEXT VERSION
+		RenderHUDText(item->tcolor, item->alpha, (val <= .30f) ? item->saturation_count + 1 : item->saturation_count,
+			item->tx, item->ty, "%s: %d%%", TXT_HUD_AFTERBURNER, (int)(val * 100.0f));
+	}
+}
+
+void SceneHUDLayout::RenderHUDPrimary(tHUDItem* item)
+{
+	int index = Players[Player_num].weapon[PW_PRIMARY].index;
+	ship* ship = &Ships[Players[Player_num].ship_index];
+	otype_wb_info* wb = &ship->static_wb[index];
+	const char* text = TXT(Static_weapon_names_msg[index]);
+	float txt_w = (int)(grtext_GetLineWidth(text) / Hud_aspect_x) + 4;
+	char ammo_string[10];
+
+	if (!wb)
+		return;
+
+	if (wb->ammo_usage)
+	{
+		int ammo = Players[Player_num].weapon_ammo[index];
+		if (ship->fire_flags[index] & SFF_TENTHS)
+			sprintf(ammo_string, "%d.%d", ammo / 10, ammo % 10);
+		else
+			sprintf(ammo_string, "%d", ammo);
+	}
+
+	if (item->stat & STAT_GRAPHICAL)
+	{
+		const int WPN_INFO_W = 100;
+		float grscalex = (item->grscalex != 0.0f) ? item->grscalex : HUD_WPN_SCALE;
+		float grscaley = (item->grscaley != 0.0f) ? item->grscaley : HUD_WPN_SCALE;
+
+		float img_w = bm_w(HUD_resources.wpn_bmp, 0) * grscalex;
+		int icon;
+
+		int y = item->y;
+
+		if (wb->ammo_usage) {
+			int w2 = (int)(grtext_GetLineWidth("00000") / Hud_aspect_x) + 2;
+			RenderHUDText(item->color, item->alpha, item->saturation_count, item->x + WPN_INFO_W - img_w - w2, y + 13,
+				ammo_string);
+		}
+		else
+			y += 13 / 2;		//If just one line, move it down
+
+		RenderHUDText(item->color, item->alpha, item->saturation_count, item->x + WPN_INFO_W - img_w - txt_w, y,
+			"%s", text);
+
+		icon = get_weapon_icon(Player_num, PW_PRIMARY);
+
+		if (icon != HUD_resources.wpn_bmp)
+		{
+			RenderHUDQuad(item->x + WPN_INFO_W - img_w, item->y, img_w, bm_h(icon, 0) * grscaley, 0, 0, 1, 1,
+				icon, item->alpha, item->saturation_count);
+		}
+	}
+	else if (item->stat & STAT_SPECIAL)
+	{
+	}
+	else
+	{
+		// TEXT VERSION
+		if (wb->ammo_usage)
+		{
+			RenderHUDText(item->tcolor, item->alpha, item->saturation_count, item->tx, item->ty,
+				"%s %s", text, ammo_string);
+		}
+		else
+		{
+			RenderHUDText(item->tcolor, item->alpha, item->saturation_count, item->tx, item->ty,
+				"%s", text);
+		}
+	}
+}
+
+void SceneHUDLayout::RenderHUDSecondary(tHUDItem* item)
+{
+	int index = Players[Player_num].weapon[PW_SECONDARY].index;
+	ship* ship = &Ships[Players[Player_num].ship_index];
+	otype_wb_info* wb = &ship->static_wb[index];
+	weapon* wpn = GetWeaponFromIndex(Player_num, index);
+	const char* text = TXT(Static_weapon_names_msg[index]);
+	float txt_w = (int)(grtext_GetLineWidth(text) / Hud_aspect_x) + 2;
+
+	if (item->stat & STAT_GRAPHICAL)
+	{
+		int icon;
+		float grscalex = (item->grscalex != 0.0f) ? item->grscalex : HUD_WPN_SCALE;
+		float grscaley = (item->grscaley != 0.0f) ? item->grscaley : HUD_WPN_SCALE;
+
+		float img_w = bm_w(HUD_resources.wpn_bmp, 0) * grscalex;
+
+		RenderHUDText(item->color, item->alpha, item->saturation_count, item->x + img_w + 2, item->y,
+			"%s", text);
+		if (wb->ammo_usage)
+		{
+			RenderHUDText(item->color, item->alpha, item->saturation_count, item->x + img_w + 16, item->y + 13,
+				"%d", Players[Player_num].weapon_ammo[Players[Player_num].weapon[PW_SECONDARY].index]);
+		}
+
+		icon = get_weapon_icon(Player_num, PW_SECONDARY);
+
+		if (icon != HUD_resources.wpn_bmp)
+		{
+			RenderHUDQuad(item->x, item->y, img_w, bm_h(icon, 0) * grscaley, 0, 0, 1, 1,
+				icon, item->alpha, item->saturation_count);
+		}
+	}
+	else if (item->stat & STAT_SPECIAL)
+	{
+
+	}
+	else
+	{
+		//	TEXT VERSION
+		RenderHUDText(item->tcolor, item->alpha, item->saturation_count, item->tx, item->ty,
+			"%s %d", text, Players[Player_num].weapon_ammo[Players[Player_num].weapon[PW_SECONDARY].index]);
+	}
+}
+
+void SceneHUDLayout::RenderHUDShipStatus(tHUDItem* item)
+{
+	float clk_time_frame, inv_time_frame;
+	ubyte clk_alpha = 0, inv_alpha = 0;
+
+	//	render text status
+	if (Objects[Players[Player_num].objnum].effect_info->type_flags & EF_CLOAKED)
+	{
+		clk_time_frame = Objects[Players[Player_num].objnum].effect_info->cloak_time;
+		if (clk_time_frame < HUD_CLOAKEND_TIME)
+			clk_alpha = 128 - 127 * FixCos(65536.0f * (clk_time_frame - (int)clk_time_frame));
+		else
+			clk_alpha = 0;
+	}
+	if (Players[Player_num].flags & PLAYER_FLAGS_INVULNERABLE)
+	{
+		// do invulnerablity animation.
+		inv_time_frame = (Gametime - (int)Gametime);
+		inv_alpha = (255 * inv_time_frame);
+	}
+
+
+	if (item->stat & STAT_GRAPHICAL)
+	{
+		const int STATUS_IMG_X = 0, STATUS_IMG_Y = 68;
+		const int STATUS_TXT_X = 8;
+		const int STATUS_TXT_Y = -1, STATUS_TXT_Y2 = 9;
+		float grscalex = (item->grscalex != 0.0f) ? item->grscalex : HUD_SHIP_SCALE;
+		float grscaley = (item->grscaley != 0.0f) ? item->grscaley : HUD_SHIP_SCALE;
+
+		int x = item->x + STATUS_IMG_X;
+		int y = item->y + STATUS_IMG_Y;
+		int w = bm_w(HUD_resources.ship_bmp, 0) * grscalex;
+		int h = bm_w(HUD_resources.ship_bmp, 0) * grscaley;
+
+		if (Objects[Players[Player_num].objnum].effect_info->type_flags & EF_CLOAKED)
+		{
+			RenderHUDQuad(x, y, w, h, 0, 0, 1, 1, HUD_resources.ship_bmp, clk_alpha, item->saturation_count);
+			RenderHUDText(item->color, 255 - clk_alpha, item->saturation_count, item->x + STATUS_TXT_X, item->y + STATUS_TXT_Y2, TXT_CLK);
+		}
+		else
+		{
+			// non cloaked ship
+			RenderHUDQuad(x, y, w, h, 0, 0, 1, 1, HUD_resources.ship_bmp, item->alpha, item->saturation_count);
+		}
+
+		if (Players[Player_num].flags & PLAYER_FLAGS_INVULNERABLE)
+		{
+			x = x - (w * inv_time_frame * 0.5f);
+			y = y - (h * inv_time_frame * 0.5f);
+
+			RenderHUDQuad(x, y, (1.0f + inv_time_frame) * w, (1.0f + inv_time_frame) * h, 0, 0, 1, 1,
+				HUD_resources.invpulse_bmp, inv_alpha, item->saturation_count);
+			RenderHUDText(item->color, item->alpha, item->saturation_count, item->x + STATUS_TXT_X + 2, item->y + STATUS_TXT_Y,
+				TXT_INV);
+		}
+	}
+	else if (item->stat & STAT_SPECIAL)
+	{
+
+	}
+	else
+	{
+		if (Players[Player_num].flags & PLAYER_FLAGS_INVULNERABLE)
+			RenderHUDText(item->tcolor, 255 - clk_alpha, item->saturation_count, item->tx, item->ty, TXT_HUD_INVULN);
+		if (Objects[Players[Player_num].objnum].effect_info->type_flags & EF_CLOAKED)
+			RenderHUDText(item->tcolor, 255 - clk_alpha, item->saturation_count, item->tx, item->ty + 12, TXT_HUD_CLOAKED);
+	}
+}
+
+void SceneHUDLayout::RenderHUDWarnings(tHUDItem* item)
+{
+	object* playerobj = &Objects[Players[Player_num].objnum];
+
+	if (item->stat & STAT_GRAPHICAL)
+	{
+		const int LOCK_IMG_X = 8, LOCK_IMG_Y = 2;
+		const int ANTIGRAV_X = 8, ANTIGRAV_Y = 64;
+
+		float img_w, img_h;
+		float grscalex = (item->grscalex != 0.0f) ? item->grscalex : HUD_LOCK_SCALE;
+		float grscaley = (item->grscaley != 0.0f) ? item->grscaley : HUD_LOCK_SCALE;
+
+
+		if (Players[Player_num].last_homing_warning_sound_time == Gametime && Gametime > 0.0f)
+		{
+			//	draw graphical rep of missile lock warning.
+			img_w = bm_w(HUD_resources.lock_bmp[0], 0) * grscalex;
+			img_h = bm_h(HUD_resources.lock_bmp[1], 0) * grscaley;
+
+			RenderHUDQuad(item->x + LOCK_IMG_X, item->y + LOCK_IMG_Y,
+				img_w, img_h, 0, 0, 1, 1, HUD_resources.lock_bmp[0], item->alpha, item->saturation_count);
+			RenderHUDQuad(item->x + LOCK_IMG_X + img_w, item->y + LOCK_IMG_Y,
+				img_w, img_h, 0, 0, 1, 1, HUD_resources.lock_bmp[1], item->alpha, item->saturation_count);
+		}
+
+		if (playerobj->mtype.phys_info.flags & PF_GRAVITY)
+		{
+			//	draw graphical rep of missile lock warning.
+			img_w = bm_w(HUD_resources.antigrav_bmp[0], 0) * grscalex;
+			img_h = bm_h(HUD_resources.antigrav_bmp[1], 0) * grscaley;
+
+			RenderHUDQuad(item->x + ANTIGRAV_X, item->y + ANTIGRAV_Y,
+				img_w, img_h, 0, 0, 1, 1, HUD_resources.antigrav_bmp[0], item->alpha, item->saturation_count);
+			RenderHUDQuad(item->x + ANTIGRAV_X + img_w, item->y + ANTIGRAV_Y,
+				img_w, img_h, 0, 0, 1, 1, HUD_resources.antigrav_bmp[1], item->alpha, item->saturation_count);
+		}
+	}
+	else
+	{
+		if (Players[Player_num].last_homing_warning_sound_time == Gametime)
+			RenderHUDText(item->tcolor, item->alpha, item->saturation_count, item->tx, item->ty, TXT_HUDITM_LOCK);
+		if (playerobj->mtype.phys_info.flags & PF_GRAVITY)
+			RenderHUDText(item->tcolor, item->alpha, item->saturation_count, item->tx, item->ty + 12, TXT_HUDITM_ANTIGRAV);
+	}
+}
+
+void SceneHUDLayout::RenderHUDCountermeasures(tHUDItem* item)
+{
+	tInvenList ilist[MAX_UNIQUE_INVEN_ITEMS];
+	int cur_sel;
+	int count = Players[Player_num].counter_measures.GetInventoryItemList(ilist, MAX_UNIQUE_INVEN_ITEMS, &cur_sel);
+	if (!count)
+		return;
+
+	if (cur_sel != -1)
+	{
+		ASSERT(cur_sel < MAX_UNIQUE_INVEN_ITEMS);
+
+		//render currently selected item
+		if (ilist[cur_sel].hud_name)
+		{
+			if (item->stat & STAT_GRAPHICAL)
+				RenderHUDText(item->color, item->alpha, item->saturation_count, item->x, item->y, "%s %d", ilist[cur_sel].hud_name, ilist[cur_sel].amount);
+			else
+				RenderHUDText(item->color, item->alpha, item->saturation_count, item->tx, item->ty, "%s %d", ilist[cur_sel].hud_name, ilist[cur_sel].amount);
+		}
+	}
+}
+
+void SceneHUDLayout::RenderHUDScore(tHUDItem* item)
 {
 	char buf[100];
 
@@ -996,14 +1052,11 @@ void RenderHUDScore(tHUDItem* item)
 		sprintf(buf, "%d", Score_added);
 		ubyte alpha = std::min((double)HUD_ALPHA, HUD_ALPHA * 4 * Score_added_timer / SCORE_ADDED_TIME);
 		RenderHUDRightAlignedText(item->color, alpha, 0, right_x, y + text_height, buf);
-		Score_added_timer -= Frametime;
+		if (advance) Score_added_timer -= Frametime;
 	}
 }
 
-extern float Osiris_TimerTimeRemaining(int handle);
-
-//Show the timer
-void RenderHUDTimer(tHUDItem* item)
+void SceneHUDLayout::RenderHUDTimer(tHUDItem* item)
 {
 	float time;
 	int min, secs;
@@ -1014,7 +1067,7 @@ void RenderHUDTimer(tHUDItem* item)
 	//If no more time, kill item
 	if (time < 0)
 	{
-		item->stat = 0;
+		if (advance) item->stat = 0;
 		return;
 	}
 
@@ -1030,8 +1083,28 @@ void RenderHUDTimer(tHUDItem* item)
 	RenderHUDTextFlagsNoFormat(HUDTEXT_CENTERED, item->color, HUD_ALPHA, 0, 0, h * 4, buf);
 }
 
+void HudDisplayRouter(tHUDItem*) { Error("HUD item drawing was replaced by scene publication"); }
+void RenderHUDScore(tHUDItem*) { Error("HUD score drawing was replaced by scene publication"); }
+void RenderHUDTimer(tHUDItem*) { Error("HUD timer drawing was replaced by scene publication"); }
 
-////////////////////////////////////////////////////////////////////////////////////////	
+void PrepareHUDItemCanvas(d3scene::FrameData& frame,uint64_t collection,d3scene::Rect viewport,
+    tHUDItem* items,int count,uint16_t mask,int small_filter,bool advance) {
+    SceneHUDLayout layout(frame,collection,viewport,advance);
+    tHUDItem* score = nullptr;
+    for (int i = 0; i < count; ++i) {
+        auto& item = items[i];
+        if (!(item.stat & mask)) continue;
+        const bool is_small_item = (item.flags & HUD_FLAG_SMALL) != 0;
+        if ((small_filter == 0 && is_small_item) || (small_filter == 1 && !is_small_item)) continue;
+        if (item.render_fn && item.render_fn != HudDisplayRouter &&
+            item.render_fn != RenderHUDScore && item.render_fn != RenderHUDTimer)
+            Error("Custom HUD callbacks require the module canvas translator");
+        if (item.type == HUD_ITEM_SCORE) { score = &item; continue; }
+        layout.item(&item);
+    }
+    if (score) layout.item(score);
+}
+
 void tDirtyRect::fill(ddgr_color col)
 {
 	int i;

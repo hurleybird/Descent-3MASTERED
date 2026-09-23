@@ -2601,6 +2601,38 @@ inline void draw_reticle_sub(int cx, int cy, int rw, int rh, ushort on_mask, ush
 
 
 //	renders the reticle
+static d3scene::Rect PreparedHUDViewport()
+{
+    const auto mode = GetHUDMode();
+    const int width = mode == HUD_FULLSCREEN || mode == HUD_COCKPIT ? Game_window_h*4/3 : Game_window_w;
+    return {Game_window_x+(Game_window_w-width)/2,Game_window_y,width,Game_window_h};
+}
+
+void PrepareGameHUD(d3scene::FrameData& frame,bool advance)
+{
+    extern bool HUD_disabled, Guided_missile_smallview;
+    if (HUD_disabled || Cinematic_inuse || Player_num < 0 || Player_num >= MAX_PLAYERS) return;
+    if ((Players[Player_num].guided_obj && !Guided_missile_smallview) ||
+        (Players[Player_num].flags & (PLAYER_FLAGS_ZOOMED | PLAYER_FLAGS_REARVIEW))) return;
+    auto mask = Hud_stat_mask;
+    if (IsCleanGameplayScreenshotActive())
+        mask &= STAT_PRIMARYLOAD | STAT_SECONDARYLOAD | STAT_SHIELDS | STAT_ENERGY | STAT_AFTERBURN;
+    const auto viewport = PreparedHUDViewport();
+    const bool is_small_hud = float(Game_window_h)/Max_window_h <= .80f;
+    PrepareHUDItemCanvas(frame,SceneHUDItems,viewport,HUD_array,MAX_HUD_ITEMS,mask,is_small_hud ? 0 : -1,advance);
+    d3scene::PreparedForeground foreground; foreground.identity = SceneHUDItems;
+    foreground.layer.display_views.push_back(MakeSceneCanvasView(SceneHUDItems,viewport,d3scene::ViewTarget::Display,true));
+    frame.foregrounds.push_back(std::move(foreground));
+    if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
+        AutomatedCaptureLog("scene HUD items prepared mask=%u mode=%u small=%d",unsigned(mask),unsigned(GetHUDMode()),is_small_hud);
+}
+
+void RenderPreparedHUD(const d3scene::Presentation& frame)
+{
+    if (!SceneGeometryInspection()) Error("HUD publication has not passed gameplay acceptance");
+    if (const auto* layer = frame.foreground(SceneHUDItems)) d3scene::renderForeground(frame,*layer);
+}
+
 void PrepareGameReticle(d3scene::FrameData& frame)
 {
 	extern bool HUD_disabled, Guided_missile_smallview;
@@ -2641,6 +2673,10 @@ void PrepareGameReticle(d3scene::FrameData& frame)
 	battery(reticle_mask(object,&ship.static_wb[secondary],secondary),secondary_mask,Ret_sec_wb);
 	quad(cx-RET_IMAGE_WIDTH,cy-RET_IMAGE_HEIGHT/2,Reticle_elem_array[RET_LGUNSIGHT].bmp_off);
 	quad(cx,cy-RET_IMAGE_HEIGHT/2,Reticle_elem_array[RET_RGUNSIGHT].bmp_off);
+	d3scene::PreparedForeground foreground; foreground.identity = SceneReticle;
+	foreground.layer.display_views.push_back(MakeSceneCanvasView(SceneReticle,
+		{Game_window_x+(Game_window_w-width)/2,Game_window_y,width,height},d3scene::ViewTarget::Display,true));
+	frame.foregrounds.push_back(std::move(foreground));
 	if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
 		AutomatedCaptureLog("scene reticle prepared quads=%d",order);
 }
@@ -2648,29 +2684,24 @@ void PrepareGameReticle(d3scene::FrameData& frame)
 void RenderPreparedReticle(const d3scene::Presentation& frame)
 {
 	if (!SceneGeometryInspection()) Error("HUD publication has not passed gameplay acceptance");
-	bool present = false;
-	for (const auto& mesh : frame.data().meshes) present = present || mesh.collection == SceneReticle;
-	if (!present) return;
-	const int width = Game_window_h*4/3;
+	const auto* layer = frame.foreground(SceneReticle);
+	if (!layer) return;
 	// Diagnostic oracle only: run the frozen legacy HUD operation over exactly
 	// the same inspection world. Never selected by normal rendering or as a
 	// fallback when publication fails. Remove with the migration fixture audit.
 	if (FindArg("-scene-reticle-reference")) {
-		const int x = Game_window_x+(Game_window_w-width)/2;
+		const auto viewport = layer->display_views.front().viewport;
+		const int x = viewport.x, width = viewport.width;
 		const float old_x = Hud_aspect_x, old_y = Hud_aspect_y;
 		Hud_aspect_x = float(width)/DEFAULT_HUD_WIDTH;
-		Hud_aspect_y = float(Game_window_h)/DEFAULT_HUD_HEIGHT;
+		Hud_aspect_y = float(viewport.height)/DEFAULT_HUD_HEIGHT;
 		if (!rend_BeginPostPresentFrame()) Error("Reticle reference requires world image");
-		rend_StartPostPresentFrame(x,Game_window_y,x+width,Game_window_y+Game_window_h,RF_CLEAR_ZBUFFER);
+		rend_StartPostPresentFrame(x,viewport.y,x+width,viewport.y+viewport.height,RF_CLEAR_ZBUFFER);
 		RenderReticle(); rend_EndFrame();
 		Hud_aspect_x = old_x; Hud_aspect_y = old_y;
 		return;
 	}
-	d3scene::ForegroundLayer layer;
-	layer.display_views.push_back(MakeSceneCanvasView(SceneReticle,
-		{Game_window_x+(Game_window_w-width)/2,Game_window_y,width,Game_window_h},
-		d3scene::ViewTarget::Display,true));
-	d3scene::renderForeground(frame,layer);
+	d3scene::renderForeground(frame,*layer);
 }
 
 void RenderReticle()

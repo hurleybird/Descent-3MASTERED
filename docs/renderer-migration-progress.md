@@ -1,5 +1,30 @@
 # Renderer migration checkpoint
 
+## Continuation: owned foreground layout and default HUD publication
+
+Default HUD item layout now publishes text/quad geometry through an explicit
+canvas context. The previous stock item draw implementations were moved, not
+retained as fallbacks; old draw callback identities reject execution. Custom
+module callbacks still require translation. Score/timer advancement is guarded
+by the preparation advance flag, rather than repeated by GPU execution.
+
+FrameData now owns named foreground layers, including their cameras, viewport,
+ordering and target. HUD, reticle, cockpit, banner and preview composition are
+prepared with their geometry. Their drawing no longer reconstructs placement
+from mutable game-window state. Publication rejects duplicate identities,
+invalid views, incorrect targets and gameplay feedback in foreground layers.
+Held presentations retain their original layout across subsequent preparation.
+
+Shared canvas text layout is isolated in SceneCanvas.cpp and tested against a
+read-only font fixture, without any grtext command buffer or renderer globals.
+Measurement and glyph publication share kerning, scaling, control parsing and
+atlas/color batch splitting. Full build and 5,695 checks pass. The inspected
+scene-foreground-owned save 003 is pixel-identical to scene-hud-publication.
+This verifies ownership refactoring, not final HUD parity: auxiliary/small HUD,
+messages, special modes and module canvases remain unfinished. Broader save
+qualification continues. All migration gates remain set; installed Candidates
+and shadows remain untouched.
+
 ## Continuation: integrated planar image materials
 
 Visible published mirror groups now schedule independent reflected images.

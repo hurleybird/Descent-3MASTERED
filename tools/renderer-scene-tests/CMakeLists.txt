@@ -12,6 +12,8 @@ add_executable(renderer_scene_tests
     terrain_tests.cpp
     fog_tests.cpp
     feedback_tests.cpp
+    canvas_tests.cpp
+    ../../Descent3/SceneCanvas.cpp
     ../../renderer/SceneLighting.cpp
     ../../renderer/SceneGeometry.cpp
     ../../renderer/ScenePortals.cpp

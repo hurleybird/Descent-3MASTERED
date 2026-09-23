@@ -41,84 +41,6 @@
 
 bool SceneGeometryInspection() { return FindArg("-scene-inspection") != 0; }
 
-d3scene::View MakeSceneCanvasView(uint64_t collection,d3scene::Rect viewport,
-    d3scene::ViewTarget target,bool inspection) {
-    d3scene::View view;
-    view.geometry_inspection = inspection; view.kind = d3scene::ViewKind::Preview;
-    view.collection = view.history_key = collection;
-    view.viewport = viewport; view.projection_anchor = {0,0,viewport.width,viewport.height};
-    view.target = target; view.ordering = d3scene::ViewOrdering::Compositing;
-    view.projection = d3scene::ViewProjection::Orthographic;
-    view.orthographic_size = {float(viewport.width),float(viewport.height)};
-    view.camera.position = {viewport.width*.5f,viewport.height*.5f,0};
-    view.camera.up = {0,-1,0}; view.dynamic_lighting = false; view.portal_visibility = false;
-    d3scene::validateView(view);
-    return view;
-}
-
-void PrepareSceneQuad(d3scene::FrameData& frame,uint64_t collection,int32_t& next_order,
-    d3scene::Rect rectangle,const SceneQuadStyle& style) {
-    if (rectangle.width <= 0 || rectangle.height <= 0) return;
-    d3scene::PreparedMesh quad;
-    quad.asset = d3scene::assets().publishMesh(2,d3scene::unitBillboardQuad());
-    quad.collection = collection;
-    const float left = float(rectangle.x), top = float(rectangle.y);
-    const float right = left+rectangle.width, bottom = top+rectangle.height;
-    quad.vertices = {{left,top,.5f},{right,top,.5f},{right,bottom,.5f},{left,bottom,.5f}};
-    quad.texture_uvs = {style.uv_min,{style.uv_max.x,style.uv_min.y},style.uv_max,
-        {style.uv_min.x,style.uv_max.y}};
-    auto& surface = quad.surface;
-    surface.composition_order = next_order++; surface.bitmap = style.bitmap;
-    surface.texture_alpha = true; surface.texture_wrap = false;
-    surface.unlit = true; surface.two_sided = true; surface.depth = d3scene::DepthMode::Disabled;
-    surface.blend = style.additive ? d3scene::BlendMode::Additive : d3scene::BlendMode::Alpha;
-    surface.alpha = style.alpha; surface.color_modulation = style.color;
-    frame.meshes.push_back(std::move(quad));
-}
-
-void PrepareSceneText(d3scene::FrameData& frame,uint64_t collection,int32_t& next_order,
-    int x,int y,const char* text,const SceneTextStyle& style) {
-    if (!text || style.font < 0 || !std::isfinite(style.scale) || style.scale <= 0)
-        throw std::invalid_argument("Invalid prepared text input");
-    const int origin = x, spacing = 1+grfont_GetTracking(style.font);
-    d3scene::PreparedMesh run;
-    const auto flush = [&] {
-        if (run.vertices.empty()) return;
-        const auto count = static_cast<uint32_t>(run.vertices.size()/4);
-        // Game mesh slots 257..384 are canonical quad-count templates. UVs and
-        // positions are frame attributes, never new assets for changing text.
-        run.asset = d3scene::assets().publishMesh(256+count,d3scene::unitQuadBatch(count));
-        frame.meshes.push_back(std::move(run)); run = {};
-    };
-    for (const auto* cursor = reinterpret_cast<const unsigned char*>(text); *cursor; ++cursor) {
-        if (*cursor == '\n') { x = origin; y += int(grfont_GetHeight(style.font)*style.scale)+1; continue; }
-        if (*cursor == ' ') { x += int(grfont_GetCharWidth(style.font,' ')*style.scale)+spacing; continue; }
-        tFontGlyph glyph;
-        const bool found = grfont_GetGlyph(style.font,*cursor,glyph);
-        if (found && glyph.width > 0 && glyph.height > 0) {
-            const int right = int(x+glyph.width*style.scale), bottom = int(y+glyph.height*style.scale);
-            if (right > x && bottom > y) {
-                if (!run.vertices.empty() && (run.surface.bitmap != glyph.bitmap || run.vertices.size() == 128*4)) flush();
-                if (run.vertices.empty()) {
-                    run.collection = collection;
-                    auto& surface = run.surface;
-                    surface.composition_order = next_order++;
-                    surface.bitmap = glyph.bitmap; surface.texture_alpha = true; surface.texture_wrap = false;
-                    surface.unlit = true; surface.two_sided = true; surface.depth = d3scene::DepthMode::Disabled;
-                    surface.blend = style.additive ? d3scene::BlendMode::Additive : d3scene::BlendMode::Alpha;
-                    surface.alpha = style.alpha; surface.color_modulation = style.color;
-                }
-                run.vertices.insert(run.vertices.end(),{{float(x),float(y),.5f},{float(right),float(y),.5f},
-                    {float(right),float(bottom),.5f},{float(x),float(bottom),.5f}});
-                run.texture_uvs.insert(run.texture_uvs.end(),{{glyph.u,glyph.v},{glyph.u+glyph.uv_width,glyph.v},
-                    {glyph.u+glyph.uv_width,glyph.v+glyph.uv_height},{glyph.u,glyph.v+glyph.uv_height}});
-            }
-        }
-        x += (found ? int(glyph.width*style.scale) : 1)+spacing+
-            grfont_GetKernedSpacing(style.font,*cursor,cursor[1]);
-    }
-    flush();
-}
 
 d3scene::OcclusionClass SceneRoomOcclusionClass(int texture, bool exterior) {
     if (exterior) return d3scene::OcclusionClass::Default;
@@ -408,8 +330,12 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance_history) {
     PrepareGameModelInstances(data, previous_models ? &previous_models->data() : nullptr);
     PrepareGameObjectEffects(data);
     PrepareGameScorches(data);
-    if (SceneGeometryInspection() && FindArg("-scene-cockpit-probe")) PrepareGameCockpit(data,advance_history);
+    if (SceneGeometryInspection() && FindArg("-scene-cockpit-probe")) {
+        PrepareGameCockpit(data,advance_history);
+        PrepareCockpitComposition(data,{Game_window_x,Game_window_y,Game_window_w,Game_window_h},SceneCockpitZoom);
+    }
     if (SceneGeometryInspection() && FindArg("-scene-reticle-probe")) PrepareGameReticle(data);
+    if (SceneGeometryInspection() && FindArg("-scene-hud-probe")) PrepareGameHUD(data,advance_history);
     if (SceneGeometryInspection()) {
         SceneTextStyle style; style.font = HUD_FONT; style.color = {1,220/255.f,80/255.f}; style.additive = true;
         int order = 0;
@@ -417,11 +343,20 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance_history) {
             "RENDERER MIGRATION TEST",style);
         for (int pass = 0; pass < 2; ++pass) PrepareSceneText(data,SceneInspectionBanner,order,12,28,
             "Incomplete - not yet qualified for gameplay",style);
+        d3scene::PreparedForeground foreground; foreground.identity = SceneInspectionBanner;
+        foreground.layer.display_views.push_back(MakeSceneCanvasView(SceneInspectionBanner,{0,0,Max_window_w,Max_window_h},
+            d3scene::ViewTarget::Display,true));
+        data.foregrounds.push_back(std::move(foreground));
     }
     if (SceneGeometryInspection() && FindArg("-scene-view-image-probe")) {
         int order = 0; SceneQuadStyle style; style.uv_min = {0,1}; style.uv_max = {1,0};
         PrepareSceneQuad(data,SceneViewImageProbe,order,{16,72,320,180},style);
         data.meshes.back().surface.view_image_slot = 1;
+        d3scene::PreparedForeground foreground; foreground.identity = SceneViewImageProbe;
+        foreground.layer.display_views.push_back(MakeSceneCanvasView(SceneViewImageProbe,{0,0,Max_window_w,Max_window_h},
+            d3scene::ViewTarget::Display,true));
+        foreground.layer.display_views.back().image_inputs.push_back({1,SceneViewImageProbe+1});
+        data.foregrounds.push_back(std::move(foreground));
         PrepareSceneQuad(data,SceneViewImageProbe+1,order,{0,0,320,180},style);
         data.meshes.back().surface.view_image_slot = 1;
     }
@@ -668,27 +603,20 @@ d3scene::VisibilityReport RenderGameSceneView(const d3scene::Presentation& frame
 }
 
 void RenderPreparedViewImageProbe(const d3scene::Presentation& frame) {
-    d3scene::ForegroundLayer layer;
-    layer.display_views.push_back(MakeSceneCanvasView(SceneViewImageProbe,{0,0,Max_window_w,Max_window_h},
-        d3scene::ViewTarget::Display,true));
-    layer.display_views.back().image_inputs.push_back({1,SceneViewImageProbe+1});
-    d3scene::renderForeground(frame,layer);
+    if (const auto* layer = frame.foreground(SceneViewImageProbe)) d3scene::renderForeground(frame,*layer);
 }
 void RenderPreparedInspectionBanner(const d3scene::Presentation& frame) {
-    d3scene::ForegroundLayer layer;
-    layer.display_views.push_back(MakeSceneCanvasView(SceneInspectionBanner,{0,0,Max_window_w,Max_window_h},
-        d3scene::ViewTarget::Display,true));
-    d3scene::renderForeground(frame,layer);
+    if (const auto* layer = frame.foreground(SceneInspectionBanner)) d3scene::renderForeground(frame,*layer);
 }
-void RenderPreparedCockpit(const d3scene::Presentation& frame, d3scene::Rect viewport, float zoom) {
+void PrepareCockpitComposition(d3scene::FrameData& frame,d3scene::Rect viewport,float zoom) {
     if (!SceneGeometryInspection()) Error("Cockpit migration has not passed gameplay acceptance");
     bool base = false, layered = false, late = false, gauges = false, monitors = false, text = false;
-    for (const auto& instance : frame.data().model_instances) {
+    for (const auto& instance : frame.model_instances) {
         base = base || instance.collection == SceneCockpitBase;
         layered = layered || instance.collection == SceneCockpitAfterGauges;
         late = late || instance.collection == SceneCockpitLate;
     }
-    for (const auto& mesh : frame.data().meshes) {
+    for (const auto& mesh : frame.meshes) {
         gauges = gauges || mesh.collection == SceneCockpitGauges;
         monitors = monitors || mesh.collection == SceneCockpitMonitorBacking;
         text = text || mesh.collection == SceneCockpitText;
@@ -728,9 +656,16 @@ void RenderPreparedCockpit(const d3scene::Presentation& frame, d3scene::Rect vie
         view.target = d3scene::ViewTarget::Display;
         layer.display_views.push_back(view);
     }
-    d3scene::renderForeground(frame,layer);
+    frame.foregrounds.push_back({SceneCockpitBase,std::move(layer)});
     if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
         AutomatedCaptureLog("scene cockpit composed base=%d late=%d gauges=%d text=%d",base,late,gauges,text);
+}
+
+void RenderPreparedCockpit(const d3scene::Presentation& frame) {
+    if (!SceneGeometryInspection()) Error("Cockpit migration has not passed gameplay acceptance");
+    const auto* layer = frame.foreground(SceneCockpitBase);
+    if (!layer) Error("Cockpit fixture has no published composition");
+    d3scene::renderForeground(frame,*layer);
 }
 
 void RenderModuleSceneView(object* viewer, vector* eye, int room, matrix* orientation,

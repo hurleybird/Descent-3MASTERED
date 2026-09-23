@@ -7,7 +7,13 @@ struct SceneTextStyle {
     float scale = 1, alpha = 1;
     d3scene::Vec3 color{1,1,1};
     bool additive = false;
+    int tab_columns = 4;
 };
+struct SceneTextExtent { int width = 0, height = 0; };
+SceneTextExtent MeasureSceneText(const char*,const SceneTextStyle&);
+struct tHUDItem;
+void PrepareHUDItemCanvas(d3scene::FrameData&,uint64_t collection,d3scene::Rect viewport,
+    tHUDItem*,int count,uint16_t mask,int small_filter,bool advance);
 struct SceneQuadStyle {
     int bitmap = -1;
     float alpha = 1;

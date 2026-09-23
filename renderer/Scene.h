@@ -428,40 +428,7 @@ struct CameraPerturbation {
     uint32_t owner = 0;
     Transform rotation; // world-space rotation only; never moves simulation geometry
 };
-struct FrameData {
-    uint64_t sequence = 0, scene_lifetime = 0;
-    double simulation_time = 0;
-    float delta_time = 0;
-    bool paused = false;
-    bool observation_inputs_prepared = false;
-    Vec3 player_control_delta; // realized player-controlled translation, not camera motion
-    float afterburner_factor = 0;
-    LightingQuality lighting_quality = LightingQuality::Pixel;
-    uint32_t pending_domains = AllPendingDomains;
-    std::vector<RoomState> rooms;
-    std::vector<ObjectState> objects;
-    std::vector<ModelInstance> model_instances;
-    std::vector<Light> lights;
-    std::vector<CameraPerturbation> camera_perturbations;
-    TerrainState terrain;
-    std::vector<PreparedMesh> meshes;
-    bool sky_enabled = false;
-    Vec3 sky_color;
-    FogAssetRef fog;
-    ExteriorFog exterior_fog;
-};
-
-class Presentation final {
-public:
-    // Copies at the publication boundary so a caller retaining a mutable
-    // reference cannot change an already-published frame.
-    static std::shared_ptr<const Presentation> freeze(const FrameData& data);
-    const FrameData& data() const { return data_; }
-    void requireExecutable() const;
-private:
-    explicit Presentation(const FrameData& data) : data_(data) {}
-    FrameData data_;
-};
+class Presentation;
 using PresentationRef = std::shared_ptr<const Presentation>;
 
 enum class ViewKind { Main, Auxiliary, Mirror, SaveThumbnail, Automap, Preview };
@@ -548,5 +515,45 @@ struct ForegroundLayer {
     std::vector<View> display_views;
 };
 void renderForeground(const Presentation& frame, const ForegroundLayer& layer);
+
+// Game layout publishes camera, placement and ordering alongside geometry.
+// Execution selects a named layer; it never consults live window/HUD state.
+struct PreparedForeground { uint64_t identity = 0; ForegroundLayer layer; };
+struct FrameData {
+    uint64_t sequence = 0, scene_lifetime = 0;
+    double simulation_time = 0;
+    float delta_time = 0;
+    bool paused = false;
+    bool observation_inputs_prepared = false;
+    Vec3 player_control_delta; // realized player-controlled translation, not camera motion
+    float afterburner_factor = 0;
+    LightingQuality lighting_quality = LightingQuality::Pixel;
+    uint32_t pending_domains = AllPendingDomains;
+    std::vector<RoomState> rooms;
+    std::vector<ObjectState> objects;
+    std::vector<ModelInstance> model_instances;
+    std::vector<Light> lights;
+    std::vector<CameraPerturbation> camera_perturbations;
+    TerrainState terrain;
+    std::vector<PreparedMesh> meshes;
+    std::vector<PreparedForeground> foregrounds;
+    bool sky_enabled = false;
+    Vec3 sky_color;
+    FogAssetRef fog;
+    ExteriorFog exterior_fog;
+};
+
+class Presentation final {
+public:
+    // Copies at the publication boundary so a caller retaining a mutable
+    // reference cannot change an already-published frame.
+    static PresentationRef freeze(const FrameData& data);
+    const FrameData& data() const { return data_; }
+    const ForegroundLayer* foreground(uint64_t identity) const;
+    void requireExecutable() const;
+private:
+    explicit Presentation(const FrameData& data) : data_(data) {}
+    FrameData data_;
+};
 
 } // namespace d3scene
