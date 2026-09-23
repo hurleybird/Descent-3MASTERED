@@ -64,7 +64,7 @@ template<class Emit> SceneTextExtent layoutSceneText(const char* text,const Scen
         if (*cursor == '\t') {
             const int tab = (int(grfont_GetCharWidth(style.font,' ')*style.scale)+spacing)*style.tab_columns;
             if (tab <= 0) throw std::invalid_argument("Invalid canvas tab width");
-            x = (x+tab)/tab*tab; continue;
+            x = origin+(x-origin+tab)/tab*tab; continue;
         }
         tFontGlyph glyph;
         const bool found = grfont_GetGlyph(style.font,*cursor,glyph);

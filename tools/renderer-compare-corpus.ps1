@@ -138,6 +138,12 @@ if ([bool]$referenceManifest.view_image_probe -ne [bool]$actualManifest.view_ima
 if ([bool]$referenceManifest.hud_probe -ne [bool]$actualManifest.hud_probe -and -not $DiagnosticComparison) {
     throw 'HUD publication fixture mismatch requires DiagnosticComparison.'
 }
+if ([bool]$referenceManifest.hud_message_probe -ne [bool]$actualManifest.hud_message_probe -and -not $DiagnosticComparison) {
+    throw 'HUD message fixture mismatch requires DiagnosticComparison.'
+}
+if ([bool]$referenceManifest.hud_small_probe -ne [bool]$actualManifest.hud_small_probe -and -not $DiagnosticComparison) {
+    throw 'Small HUD fixture mismatch requires DiagnosticComparison.'
+}
 if (([bool]$referenceManifest.mirror_surface_probe -ne [bool]$actualManifest.mirror_surface_probe -or
      [int]$referenceManifest.planar_composition_revision -ne [int]$actualManifest.planar_composition_revision) -and -not $DiagnosticComparison) {
     throw 'Planar surface composition changed; use DiagnosticComparison for intentional renderer changes.'

@@ -45,6 +45,9 @@
 #include "hlsoundlib.h"
 #include "args.h"
 #include "renderer.h"
+#include "SceneCanvas.h"
+#include "gameloop.h"
+#include <algorithm>
 
 #define HUD_MESSAGE_NORMAL		0
 #define HUD_MESSAGE_BLINKING	1
@@ -779,13 +782,13 @@ void DoHUDInputMessageKey (int key)
 }
 
 // Simply renders the hud input message if there is one
-void RenderHUDInputMessage ()
+static void PrepareHUDInputMessage(d3scene::FrameData& frame,uint64_t collection,int32_t& order,
+    d3scene::Rect viewport,bool auxiliary,SceneTextStyle style)
 {
 	char message[255];
 	int y,x,lw;
 
-	ddgr_color text_color=HUD_COLOR;
-	grtext_SetColor(text_color);
+	style.color = {GR_COLOR_RED(HUD_COLOR)/255.f,GR_COLOR_GREEN(HUD_COLOR)/255.f,GR_COLOR_BLUE(HUD_COLOR)/255.f};
 
 	if(Doing_input_message==HUD_MESSAGE_TEAM){
 		sprintf (message,TXT_HUD_TEAMSAY,HudInputMessage);
@@ -798,21 +801,17 @@ void RenderHUDInputMessage ()
 			sprintf (message,TXT_MESSAGE,HudInputMessage);
 	}
 
-	grtext_SetAlpha(HUD_ALPHA);
-	grtext_SetFlags(0);
-
-//	RenderHUDTextNoFormatFlags(HUDTEXT_CENTERED, HUD_COLOR, HUD_ALPHA, 1, 0, y, message);
-	lw = grtext_GetTextLineWidth(message);
-	x = (Game_window_w-lw)/2;
-	if (Small_hud_flag) 
+	style.alpha = HUD_ALPHA/255.f;
+	lw = MeasureSceneText(message,style).width;
+	x = (viewport.width-lw)/2;
+	if (auxiliary)
 	{
-		y = Max_window_h - (int)(40*((float)Max_window_h/(float)DEFAULT_HUD_HEIGHT));
-		HUD_inmsg_dirty_rect.set(x,y,x+lw,y+grfont_GetHeight(HUD_FONT));
+		y = viewport.height - (int)(40*(float(viewport.height)/DEFAULT_HUD_HEIGHT));
 	}
 	else
-		y = (Game_window_h*3/5)+Game_window_y;
+		y = viewport.height*3/5;
 
-	grtext_Puts(x, y, message);	
+	PrepareSceneText(frame,collection,order,x,y,message,style);
 }
 
 int testcolor=200;
@@ -843,35 +842,24 @@ void HUDUnpauseMessages(void)
 
 // Renders all the messages we have in the message list.  If HUD_MESSAGE_TIME has
 // elapsed, then punt the oldest message and move the others up one
-void RenderScrollingHUDMessages ()
+static void PrepareScrollingHUDMessages(d3scene::FrameData& frame,uint64_t collection,int32_t& order,
+    d3scene::Rect viewport,bool auxiliary,const SceneTextStyle& style)
 {
 	if(Hud_messages_paused)
 		return;
 
 	int shade;
 	int text_height;
-	short l,t,r,b;
 	int i;
-
-	// Check for wraps
-	if (Gametime<Hud_timer)
-		Hud_timer=Gametime;
-
-	grtext_SetFont(HUD_FONT);
 	text_height=grfont_GetHeight(HUD_FONT);
-
-	text_height+= (3*Hud_aspect_y);		// add this for a spacer
+	text_height += int(3*float(viewport.height)/DEFAULT_HUD_HEIGHT);
 
 	if (Doing_input_message>HUD_MESSAGE_NONE)
-		RenderHUDInputMessage ();
+		PrepareHUDInputMessage(frame,collection,order,viewport,auxiliary,style);
 
 	if (Num_hud_messages==0)
 		return;
 		
-	l = (Small_hud_flag) ? (Max_window_w/2) : (Game_window_w/2);
-	r = l;
-	t = 0;
-	b = 0;
 	for (i=0;i<Num_hud_messages;i++)
 	{
 		int x;
@@ -899,43 +887,33 @@ void RenderScrollingHUDMessages ()
 			shade=255;
 
 		char *message=HUD_messages[i];
-		int text_width=grtext_GetTextLineWidth(message);
-		int vp_width=Game_window_w;
+		int text_width=MeasureSceneText(message,style).width;
 		int y=(i*text_height)+Hud_scroll_offset;
+		auto message_style = style;
 	
 		if (HUD_message_type[i]==HUD_MESSAGE_BLINKING)
 		{
 			ddgr_color text_color;
 			text_color=(GR_RGB(shade,0,0));
-			grtext_SetColor(text_color);
+			message_style.color = {GR_COLOR_RED(text_color)/255.f,GR_COLOR_GREEN(text_color)/255.f,GR_COLOR_BLUE(text_color)/255.f};
 		}
 		else
 		{
 			ddgr_color text_color;
 			text_color=HUD_message_color[i];
-			grtext_SetColor(text_color);
+			message_style.color = {GR_COLOR_RED(text_color)/255.f,GR_COLOR_GREEN(text_color)/255.f,GR_COLOR_BLUE(text_color)/255.f};
 		}
 
-		grtext_SetAlpha(HUD_ALPHA);
-		grtext_SetFlags(0);
-
-		if (Small_hud_flag) 
-		{
-			x = (Max_window_w-text_width)/2;
-			if (x < l) l = x;
-			if ((x+text_width) > r) r = x+text_width;
-			b += text_height;
-		}
-		else
-			x = (Game_window_w-text_width)/2;
-		
-		grtext_Puts(x, y, message);
+		message_style.alpha = HUD_ALPHA/255.f;
+		x = (viewport.width-text_width)/2;
+		PrepareSceneText(frame,collection,order,x,y,message,message_style);
 	}
-	if (Small_hud_flag && (i>0)) 
-		HUD_msg_dirty_rect.set(l, t,r, b);
+}
 
-	// Now see if the topmost message is old
-
+static void AdvanceScrollingHUDMessages(int text_height)
+{
+	if (Gametime < Hud_timer) Hud_timer = Gametime;
+	if (!Num_hud_messages) return;
 	float new_time=Gametime;
 
 	if ((new_time-Hud_timer)>HUD_MESSAGE_TIME)
@@ -977,13 +955,10 @@ void RenderScrollingHUDMessages ()
 
 // Renders all the messages we have in the message list.  If HUD_MESSAGE_TIME has
 // elapsed, then punt the oldest message and move the others up one
-void RenderHUDMessages ()
+static void AdvancePersistentHUDMessages(const SceneTextStyle& style,d3scene::Rect viewport)
 {
 	if(Hud_messages_paused)
 		return;
-
-	//Render & update the scrolling message list
-	RenderScrollingHUDMessages();
 
 	// do persistent hud message system
 	if (Hud_persistent_msg_id != HUD_INVALID_ID) 
@@ -998,18 +973,8 @@ void RenderHUDMessages ()
 			//Do fadeout
 			if (Hud_persistent_msg_flags & HPF_FADEOUT) 
 			{
-				if (Hud_persistent_msg_timer < FADEOUT_TIME) 
-					item->alpha = HUD_ALPHA * Hud_persistent_msg_timer / FADEOUT_TIME;
-			}
-
-			if (item && Small_hud_flag) 
-			{
-				grtext_SetFont(HUD_FONT);
-				short l = item->x*Max_window_w/DEFAULT_HUD_WIDTH;
-				short t = item->y*Max_window_h/DEFAULT_HUD_HEIGHT;
-				short r = l + grtext_GetTextLineWidth(item->data.text)+10;
-				short b = t + grtext_GetTextHeight(item->data.text);
-				item->dirty_rect.set(l,t,r,b);
+				if (item && Hud_persistent_msg_timer < FADEOUT_TIME)
+					item->alpha = HUD_ALPHA * (std::max)(0.f,Hud_persistent_msg_timer) / FADEOUT_TIME;
 			}
 
 			//Do FreeSpace printing effect
@@ -1038,7 +1003,8 @@ void RenderHUDMessages ()
 						//dp next char
 						item2->data.text[0] = item->data.text[Hud_persistent_msg_current_len];
 						item->data.text[Hud_persistent_msg_current_len] = 0;
-						item2->x = item->x + RenderHUDGetTextLineWidth(item->data.text);
+						item2->x = item->x + int(MeasureSceneText(item->data.text,style).width*
+							float(DEFAULT_HUD_WIDTH)/viewport.width+.5f);
 						Hud_persistent_msg_char_timer += CHAR_DELAY;
 					}
 				}
@@ -1053,6 +1019,25 @@ void RenderHUDMessages ()
 		}
 	}
 }
+
+void PrepareHUDMessageCanvas(d3scene::FrameData& frame,uint64_t collection,d3scene::Rect viewport,bool auxiliary,bool advance)
+{
+	if (Hud_messages_paused) return;
+	const auto style = MakeHUDTextStyle(viewport);
+	int32_t order = 0;
+	PrepareScrollingHUDMessages(frame,collection,order,viewport,auxiliary,style);
+	// Preserve authored display-before-update timing, but never advance for a
+	// secondary extraction or when replaying the published frame.
+	if (advance) {
+		AdvanceScrollingHUDMessages(grfont_GetHeight(HUD_FONT)+int(3*float(viewport.height)/DEFAULT_HUD_HEIGHT));
+		AdvancePersistentHUDMessages(style,viewport);
+	}
+	if (FindArg("-scene-hud-message-probe") && (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0))
+		AutomatedCaptureLog("scene HUD messages prepared count=%d persistent=%d timer=%.4f advance=%d",
+			Num_hud_messages,Hud_persistent_msg_id != HUD_INVALID_ID,Hud_persistent_msg_timer,advance);
+}
+
+void RenderHUDMessages() { Error("HUD messages were replaced by scene publication"); }
 
 
 void RenderHUDMsgDirtyRects()
@@ -1129,9 +1114,9 @@ void StartPersistentHUDMessage(ddgr_color color,int x, int y, float time, int fl
 	}
 
 // set x and y if special formatting.
-	grtext_SetFont(HUD_FONT);
+	const auto style = MakeHUDTextStyle({Game_window_x,Game_window_y,Game_window_w,Game_window_h});
 	if (x == HUD_MSG_PERSISTENT_CENTER)
-		x = Game_window_x + (Game_window_w - grtext_GetLineWidth(message))/2;
+		x = Game_window_x + (Game_window_w - MeasureSceneText(message,style).width)/2;
 	if (y == HUD_MSG_PERSISTENT_CENTER)
 		y = Game_window_y + (Game_window_h - grfont_GetHeight(HUD_FONT))/2;
 

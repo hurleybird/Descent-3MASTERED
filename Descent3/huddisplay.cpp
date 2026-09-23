@@ -86,6 +86,18 @@ enum tHUDTextAlign
 };
 
 
+SceneTextStyle MakeHUDTextStyle(d3scene::Rect viewport) {
+    const float ratio = float(viewport.height)/Max_window_h;
+    const float extra = (std::max)(1.f,float(Max_window_h)/1080);
+    SceneTextStyle style; style.font = HUD_FONT;
+    style.scale = (ratio <= .6f ? .6f : ratio <= .8f ? .8f : 1.f)*extra*ConfigNormalizeHudTextScale(Hud_text_scale);
+    return style;
+}
+
+void HudDisplayRouter(tHUDItem*);
+void RenderHUDScore(tHUDItem*);
+void RenderHUDTimer(tHUDItem*);
+
 class SceneHUDLayout {
     d3scene::FrameData& frame;
     uint64_t collection;
@@ -100,11 +112,14 @@ public:
         : frame(data), collection(layer), advance(tick),
           Hud_aspect_x(float(viewport.width)/DEFAULT_HUD_WIDTH),
           Hud_aspect_y(float(viewport.height)/DEFAULT_HUD_HEIGHT) {
-        const float ratio = float(viewport.height)/Max_window_h;
-        const float extra = (std::max)(1.f,float(Max_window_h)/1080);
-        font_scale = (ratio <= .6f ? .6f : ratio <= .8f ? .8f : 1.f)*extra*ConfigNormalizeHudTextScale(Hud_text_scale);
+        font_scale = MakeHUDTextStyle(viewport).scale;
     }
-    void item(tHUDItem* value) { item_type = value->type; HudDisplayRouter(value); }
+    void item(tHUDItem* value) {
+        if (value->render_fn && value->render_fn != ::HudDisplayRouter &&
+            value->render_fn != ::RenderHUDScore && value->render_fn != ::RenderHUDTimer)
+            Error("Custom HUD callbacks require the module canvas translator");
+        item_type = value->type; HudDisplayRouter(value);
+    }
     int grtext_GetTextLineWidth(const char* value) const {
         SceneTextStyle style; style.font = HUD_FONT; style.scale = font_scale;
         return MeasureSceneText(value,style).width;
@@ -415,7 +430,7 @@ void RenderHUDQuad(int x, int y, int w, int h, float u0, float v0, float u1, flo
 }
 
 
-//	renders text, scaled, alphaed, saturated, 
+//	renders text, scaled, alphaed, saturated
 void RenderHUDText(ddgr_color col, ubyte alpha, int sat_count, int x, int y, char* fmt, ...)
 {
 	va_list arglist;
@@ -429,7 +444,7 @@ void RenderHUDText(ddgr_color col, ubyte alpha, int sat_count, int x, int y, cha
 }
 
 
-//	renders text, scaled, alphaed, saturated, 
+//	renders text, scaled, alphaed, saturated
 void RenderHUDTextFlagsNoFormat(int flags, ddgr_color col, ubyte alpha, int sat_count, int x, int y, char* str)
 {
 	tHUDTextAlign align = (flags & HUDTEXT_CENTERED) ? HUD_TEXT_CENTER : HUD_TEXT_LEFT;
@@ -475,7 +490,7 @@ extern float Osiris_TimerTimeRemaining(int handle);
 
 
 
-////////////////////////////////////////////////////////////////////////////////////////	
+////////////////////////////////////////////////////////////////////////////////////////
 void SceneHUDLayout::HudDisplayRouter(tHUDItem* item)
 {
 
@@ -1087,22 +1102,26 @@ void HudDisplayRouter(tHUDItem*) { Error("HUD item drawing was replaced by scene
 void RenderHUDScore(tHUDItem*) { Error("HUD score drawing was replaced by scene publication"); }
 void RenderHUDTimer(tHUDItem*) { Error("HUD timer drawing was replaced by scene publication"); }
 
-void PrepareHUDItemCanvas(d3scene::FrameData& frame,uint64_t collection,d3scene::Rect viewport,
-    tHUDItem* items,int count,uint16_t mask,int small_filter,bool advance) {
+bool PrepareHUDItemCanvas(d3scene::FrameData& frame,uint64_t collection,d3scene::Rect viewport,
+    tHUDItem* items,int count,uint16_t mask,int small_filter,bool advance,bool deferred_score) {
     SceneHUDLayout layout(frame,collection,viewport,advance);
     tHUDItem* score = nullptr;
+    bool score_matches = false;
     for (int i = 0; i < count; ++i) {
         auto& item = items[i];
         if (!(item.stat & mask)) continue;
         const bool is_small_item = (item.flags & HUD_FLAG_SMALL) != 0;
-        if ((small_filter == 0 && is_small_item) || (small_filter == 1 && !is_small_item)) continue;
-        if (item.render_fn && item.render_fn != HudDisplayRouter &&
-            item.render_fn != RenderHUDScore && item.render_fn != RenderHUDTimer)
-            Error("Custom HUD callbacks require the module canvas translator");
-        if (item.type == HUD_ITEM_SCORE) { score = &item; continue; }
+        const bool matches = !((small_filter == 0 && is_small_item) || (small_filter == 1 && !is_small_item));
+        if (item.type == HUD_ITEM_SCORE) { score = &item; score_matches = matches; continue; }
+        if (!matches) continue;
         layout.item(&item);
     }
-    if (score) layout.item(score);
+    if (score) {
+        const bool defer = small_filter == 0 && !layout.RenderHUDGetTopLeftTextAnchor(nullptr,nullptr);
+        if ((score_matches && !defer) || (small_filter == 1 && deferred_score)) layout.item(score);
+        else if (score_matches && defer) return true;
+    }
+    return false;
 }
 
 void tDirtyRect::fill(ddgr_color col)

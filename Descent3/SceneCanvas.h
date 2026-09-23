@@ -11,9 +11,11 @@ struct SceneTextStyle {
 };
 struct SceneTextExtent { int width = 0, height = 0; };
 SceneTextExtent MeasureSceneText(const char*,const SceneTextStyle&);
+SceneTextStyle MakeHUDTextStyle(d3scene::Rect viewport);
+void PrepareHUDMessageCanvas(d3scene::FrameData&,uint64_t collection,d3scene::Rect viewport,bool auxiliary,bool advance);
 struct tHUDItem;
-void PrepareHUDItemCanvas(d3scene::FrameData&,uint64_t collection,d3scene::Rect viewport,
-    tHUDItem*,int count,uint16_t mask,int small_filter,bool advance);
+bool PrepareHUDItemCanvas(d3scene::FrameData&,uint64_t collection,d3scene::Rect viewport,
+    tHUDItem*,int count,uint16_t mask,int small_filter,bool advance,bool deferred_score = false);
 struct SceneQuadStyle {
     int bitmap = -1;
     float alpha = 1;

@@ -25,6 +25,8 @@ param(
     [switch]$CockpitProbe,
     [switch]$ReticleProbe,
     [switch]$HudProbe,
+    [switch]$HudMessageProbe,
+    [switch]$HudSmallProbe,
     [switch]$ReticleReference,
     [switch]$ObservationProbe,
     [switch]$MirrorCameraProbe,
@@ -79,6 +81,8 @@ if ($DeformationProbe -and -not $SceneInspection) { throw 'Deformation probe req
 if ($TerrainProbe -and -not $SceneInspection) { throw 'Terrain probe requires the explicit scene inspection executor.' }
 if ($ViewImageProbe -and -not $SceneInspection) { throw 'View image probe requires scene inspection.' }
 if ($HudProbe -and -not $SceneInspection) { throw 'HUD publication probe requires scene inspection.' }
+if ($HudMessageProbe -and -not $HudProbe) { throw 'HUD message probe requires HUD publication.' }
+if ($HudSmallProbe -and -not $HudProbe) { throw 'Small HUD probe requires HUD publication.' }
 if ($MirrorSurfaceProbe -and (-not $SceneInspection -or $MirrorCameraProbe)) { throw 'Mirror surface probe requires scene inspection and its own camera.' }
 if ($MirrorCameraProbe -and (-not $SceneInspection -or $ObservationProbe -or $TerrainProbe -or $SkyProbe -or $SatelliteProbe -or $HistoryProbe -or $ScorchViewProbe -or $ModelEffectsProbe -or $LodProbeTier -ge 0)) {
     throw 'Mirror camera probe requires isolated scene inspection without other camera/observation probes.'
@@ -135,6 +139,8 @@ $manifest = [ordered]@{
     planar_composition_revision = $(if ($SceneInspection) { 2 } else { 0 })
     view_image_probe = [bool]$ViewImageProbe
     hud_probe = [bool]$HudProbe
+    hud_message_probe = [bool]$HudMessageProbe
+    hud_small_probe = [bool]$HudSmallProbe
     view_image_revision = $(if ($ViewImageProbe) { 2 } else { 0 })
     cockpit_probe_revision = $(if ($CockpitProbe) { 4 } else { 0 })
     scorch_probe = [bool]$ScorchProbe
@@ -194,6 +200,8 @@ try {
         if ($MirrorCameraProbe) { $arguments += '-scene-mirror-camera-probe' }
         if ($ViewImageProbe) { $arguments += '-scene-view-image-probe' }
         if ($HudProbe) { $arguments += '-scene-hud-probe' }
+        if ($HudMessageProbe) { $arguments += '-scene-hud-message-probe' }
+        if ($HudSmallProbe) { $arguments += '-scene-hud-small-probe' }
         if ($MirrorSurfaceProbe) { $arguments += '-scene-mirror-surface-probe' }
         if ($RingProbe) { $arguments += '-scene-ring-probe' }
         if ($DepthPolicyProbe) { $arguments += '-scene-depth-policy-probe' }
@@ -247,6 +255,7 @@ try {
         # HandledWinMain returns 1 after a normal run, not conventional exit 0.
         $ok = -not $timedOut -and $resourceValidated -and (-not $MirrorCameraProbe -or $logText.Contains('scene mirror camera room=')) -and
             (-not $HudProbe -or $logText.Contains('scene HUD items prepared')) -and
+            (-not $HudMessageProbe -or $logText.Contains('scene HUD messages prepared')) -and
             (-not $ViewImageProbe -or $logText.Contains('scene view image key=')) -and
             (-not $MirrorSurfaceProbe -or ($logText.Contains('scene mirror surface camera') -and $logText.Contains('scene view image key='))) -and $process.ExitCode -eq 1 -and
             (Test-Path -LiteralPath $png) -and $logText.Contains('capture saved') -and

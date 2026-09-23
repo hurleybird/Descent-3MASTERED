@@ -2954,6 +2954,10 @@ void GameRenderFrame(void)
 		return;
 
 	PerfMarkersBeginFrame();
+	if (SceneGeometryInspection() && FindArg("-scene-hud-small-probe")) {
+		Game_window_w = Max_window_w*3/5; Game_window_h = Max_window_h*3/5;
+		Game_window_x = (Max_window_w-Game_window_w)/2; Game_window_y = (Max_window_h-Game_window_h)/2;
+	}
 	if (SceneGeometryInspection() && FindArg("-scene-resource-probe")) {
 		const int index = AutomatedCaptureFrameIndex();
 		if (index >= 10 && index <= 50 && index % 10 == 0) {
@@ -3079,6 +3083,8 @@ void GameRenderFrame(void)
 			RenderPreparedViewImageProbe(*presentation);
 		if (SceneGeometryInspection() && FindArg("-scene-cockpit-probe"))
 			RenderPreparedCockpit(*presentation);
+		if (SceneGeometryInspection() && FindArg("-scene-hud-probe"))
+			RenderPreparedHUDAuxiliary(*presentation);
 
 		// Do Cockpit/Hud
 		// Cinematics own their presentation through Cinematic_RenderFrame below.

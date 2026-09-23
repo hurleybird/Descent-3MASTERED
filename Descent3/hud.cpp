@@ -2614,15 +2614,37 @@ void PrepareGameHUD(d3scene::FrameData& frame,bool advance)
     if (HUD_disabled || Cinematic_inuse || Player_num < 0 || Player_num >= MAX_PLAYERS) return;
     if ((Players[Player_num].guided_obj && !Guided_missile_smallview) ||
         (Players[Player_num].flags & (PLAYER_FLAGS_ZOOMED | PLAYER_FLAGS_REARVIEW))) return;
+    if (advance && FindArg("-scene-hud-message-probe") && AutomatedCaptureFrameIndex() == 0) {
+        ResetHUDMessages();
+        AddColoredHUDMessage(GR_RGB(80,210,255),"Prepared scrolling message");
+        AddBlinkingHUDMessage("Prepared blinking warning");
+        AddPersistentHUDMessage(GR_RGB(255,210,80),300,180,2.f,HPF_FADEOUT | HPF_FREESPACE_DRAW,-1,
+            "Prepared typewriter message");
+    }
     auto mask = Hud_stat_mask;
     if (IsCleanGameplayScreenshotActive())
         mask &= STAT_PRIMARYLOAD | STAT_SECONDARYLOAD | STAT_SHIELDS | STAT_ENERGY | STAT_AFTERBURN;
     const auto viewport = PreparedHUDViewport();
     const bool is_small_hud = float(Game_window_h)/Max_window_h <= .80f;
-    PrepareHUDItemCanvas(frame,SceneHUDItems,viewport,HUD_array,MAX_HUD_ITEMS,mask,is_small_hud ? 0 : -1,advance);
+    const bool deferred_score = PrepareHUDItemCanvas(frame,SceneHUDItems,viewport,HUD_array,MAX_HUD_ITEMS,mask,is_small_hud ? 0 : -1,advance);
     d3scene::PreparedForeground foreground; foreground.identity = SceneHUDItems;
     foreground.layer.display_views.push_back(MakeSceneCanvasView(SceneHUDItems,viewport,d3scene::ViewTarget::Display,true));
+    if ((mask & STAT_MESSAGES) && !is_small_hud) {
+        PrepareHUDMessageCanvas(frame,SceneHUDMessages,viewport,false,advance);
+        foreground.layer.display_views.push_back(MakeSceneCanvasView(SceneHUDMessages,viewport,d3scene::ViewTarget::Display,true));
+    }
     frame.foregrounds.push_back(std::move(foreground));
+    if (is_small_hud) {
+        const d3scene::Rect full = {0,0,Max_window_w,Max_window_h};
+        PrepareHUDItemCanvas(frame,SceneHUDAuxiliary,full,HUD_array,MAX_HUD_ITEMS,mask,1,advance,deferred_score);
+        d3scene::PreparedForeground auxiliary; auxiliary.identity = SceneHUDAuxiliary;
+        auxiliary.layer.display_views.push_back(MakeSceneCanvasView(SceneHUDAuxiliary,full,d3scene::ViewTarget::Display,true));
+        if (mask & STAT_MESSAGES) {
+            PrepareHUDMessageCanvas(frame,SceneHUDMessages,full,true,advance);
+            auxiliary.layer.display_views.push_back(MakeSceneCanvasView(SceneHUDMessages,full,d3scene::ViewTarget::Display,true));
+        }
+        frame.foregrounds.push_back(std::move(auxiliary));
+    }
     if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
         AutomatedCaptureLog("scene HUD items prepared mask=%u mode=%u small=%d",unsigned(mask),unsigned(GetHUDMode()),is_small_hud);
 }
@@ -2631,6 +2653,12 @@ void RenderPreparedHUD(const d3scene::Presentation& frame)
 {
     if (!SceneGeometryInspection()) Error("HUD publication has not passed gameplay acceptance");
     if (const auto* layer = frame.foreground(SceneHUDItems)) d3scene::renderForeground(frame,*layer);
+}
+
+void RenderPreparedHUDAuxiliary(const d3scene::Presentation& frame)
+{
+    if (!SceneGeometryInspection()) Error("HUD publication has not passed gameplay acceptance");
+    if (const auto* layer = frame.foreground(SceneHUDAuxiliary)) d3scene::renderForeground(frame,*layer);
 }
 
 void PrepareGameReticle(d3scene::FrameData& frame)

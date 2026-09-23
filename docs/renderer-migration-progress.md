@@ -1,5 +1,31 @@
 # Renderer migration checkpoint
 
+## Continuation: message lifecycle and auxiliary HUD canvases
+
+Scrolling, input and persistent-message text now use prepared glyph geometry.
+Message expiry, scroll position, fading and typewriter advancement are separate
+from drawing and run only on advancing preparation. Persistent-message metrics
+no longer change grtext state. Auxiliary HUD items and messages publish a second
+full-display canvas without temporarily replacing Game_window dimensions;
+deferred score placement is carried explicitly between primary and auxiliary
+layout. The old message drawing entry rejects execution instead of providing a
+fallback. Special HUD modes, consoles and module callbacks remain unfinished.
+
+Full build and 5,696 checks pass. All eight scene-hud-corpus captures complete;
+001 and 006 were visually inspected, but this is not full legacy HUD parity.
+scene-hud-messages-live verifies visible scrolling/blinking/typewriter text with
+cockpit/reticle. scene-hud-small verifies an actual reduced world viewport and
+separate full-display message canvas. Both were inspected. At frame 330,
+scene-hud-expired-clean logs one scrolling message remaining and the persistent
+message removed, consistent with the authored one-at-a-time message queue; the
+image was inspected. The earlier effects-profile expiry attempt exceeded its
+60-second harness deadline and is not a passing capture. Existing cockpit/text
+output scene-canvas-regression is pixel-identical to scene-planar-cockpit.
+
+The shared text layout also fixes tab positioning relative to the string origin;
+moving a string no longer changes its measured layout. Candidate installations,
+all seven migration gates and the shadow deferral remain unchanged.
+
 ## Continuation: owned foreground layout and default HUD publication
 
 Default HUD item layout now publishes text/quad geometry through an explicit

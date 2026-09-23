@@ -34,6 +34,10 @@ int runCanvasTests() {
         "Canvas text execution disagrees with its metrics");
     const auto held = d3scene::Presentation::freeze(data);
     data.meshes.clear(); order = 0;
+    PrepareSceneText(data,7,order,5,10,"A\tB",style);
+    check(data.meshes[0].vertices[4].x == 21 && data.meshes[0].vertices[6].x-5 == MeasureSceneText("A\tB",style).width,
+        "Moving a canvas string changed its tab layout relative to measurement");
+    data.meshes.clear(); order = 0;
     PrepareSceneText(data,7,order,0,0,"A\1\x10\x20\x30" "BZ",style);
     check(data.meshes.size() == 3 && data.meshes[1].surface.color_modulation.y == 32/255.f &&
         data.meshes[1].vertices[0].x == 7 && data.meshes[2].surface.bitmap == 1,
