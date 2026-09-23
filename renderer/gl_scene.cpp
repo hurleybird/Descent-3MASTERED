@@ -137,6 +137,9 @@ void main() {
 )GLSL";
 const std::string SceneFragmentShader = std::string(SceneLightingShader) + R"GLSL(
 uniform sampler2D colortexture, lightmaptexture;
+uniform sampler2D planar_texture;
+uniform mat4 planar_projection;
+uniform int planar_material, planar_image;
 uniform int use_lightmap, use_texture_alpha;
 uniform int use_texture;
 uniform int unlit;
@@ -337,9 +340,21 @@ void main() {
     }
     if (multiply_material != 0) color.rgb = mix(vec3(1),color.rgb,color.a);
     vec3 surface_radiance = unlit != 0 ? vec3(0) : color.rgb;
+    if (planar_material != 0) {
+        if (planar_image != 0) {
+            vec4 projected = planar_projection*vec4(world_position,1);
+            vec2 uv = projected.xy/projected.w*.5+.5;
+            vec3 reflected = texture(planar_texture,uv).rgb;
+            color.rgb = color.rgb*base.a+reflected*(1.0-base.a);
+            // Only the physical film receives this camera's surface AO. The
+            // reflected radiance is not illumination on the mirror polygon.
+            surface_radiance *= base.a;
+        }
+        color.a = 1.0;
+    }
     float transmission;
     color.rgb = applySceneFog(color.rgb,transmission);
-    ao_radiance = vec4(multiply_material != 0 ? color.rgb : surface_radiance*transmission,base.a);
+    ao_radiance = vec4(multiply_material != 0 ? color.rgb : surface_radiance*transmission,color.a);
     post_coverage = vec4(0,1.0-transmission,0,0);
     bool valid = motion_valid != 0 && current_clip.w > 1.e-6 && previous_clip.w > 1.e-6;
     surface_motion = valid ? vec4((current_clip.xy/current_clip.w-previous_clip.xy/previous_clip.w)*.5,1,0) : vec4(0);
@@ -791,6 +806,7 @@ void GL4Renderer::RenderViewImage(const d3scene::Presentation& presentation,cons
         image.buffer.ClearAll();
         const auto raster = d3scene::rasterViewport(request.view.viewport,image.buffer.Height(),request.scale);
         ExecuteSceneView(presentation,request.view,{image.buffer,raster,SceneOutputRole::Image,image.depth,image.history});
+        image.matrices = d3scene::viewMatrices(d3scene::prepareCamera(d3scene::resolveView(presentation,request.view)));
         image.sequence = sequence;
         if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
             AutomatedCaptureLog("scene view image key=%llu size=%ux%u samples=%u sequence=%llu",
@@ -823,7 +839,8 @@ void GL4Renderer::EnsureSceneLifetime(const d3scene::Presentation& presentation)
     }
 }
 d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::Presentation& presentation,
-    const d3scene::View& view,const SceneRasterTarget& target) {
+    const d3scene::View& request,const SceneRasterTarget& target) {
+    const auto view = d3scene::resolveView(presentation,request);
     if (!view.geometry_inspection)
         Error("Scene executor migration incomplete: only explicit geometry inspection is currently supported.");
     if (scene_asset_lifetime != presentation.data().scene_lifetime)
@@ -960,6 +977,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::Presentat
     glUniformMatrix4fv(scene_shader.FindUniform("previous_view_projection"),1,GL_FALSE,history.previous.view_projection.data());
     glUniform1i(scene_shader.FindUniform("lighting_per_pixel"),presentation.data().lighting_quality == d3scene::LightingQuality::Pixel);
     glUniform1i(scene_shader.FindUniform("colortexture"),0);
+    glUniform1i(scene_shader.FindUniform("planar_texture"),10);
     glUniform1i(scene_shader.FindUniform("lightmaptexture"),1);
     glUniform1i(scene_shader.FindUniform("scene_lights"),2);
     glUniform1i(scene_shader.FindUniform("scene_influences"),3);
@@ -1159,8 +1177,8 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::Presentat
             Error("Scene surface reached execution without prepared image assets");
         const auto& gpu = *mesh;
         if (surface.color_image) BindSceneImage(*surface.color_image,0,surface.texture_wrap,false);
-        if (surface.view_image_slot) {
-            const auto found = scene_view_images.find(d3scene::viewImageSource(view,surface.view_image_slot));
+        const auto bind_view_image = [&](uint64_t slot,int unit) -> const SceneViewImageGpu& {
+            const auto found = scene_view_images.find(d3scene::viewImageSource(view,slot));
             if (found == scene_view_images.end() || found->second.sequence != presentation.data().sequence)
                 throw std::logic_error("Surface requested a missing, stale or in-flight view image");
             if (found->second.buffer.Handle() == output.Handle())
@@ -1169,15 +1187,25 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::Presentat
             glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING,&draw); glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING,&read);
             const auto texture = found->second.buffer.ColorTextureForRead();
             glBindFramebuffer(GL_DRAW_FRAMEBUFFER,draw); glBindFramebuffer(GL_READ_FRAMEBUFFER,read);
-            glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D,texture);
+            glActiveTexture(GL_TEXTURE0+unit); glBindTexture(GL_TEXTURE_2D,texture);
             glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
             glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
             glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);
             glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
+            return found->second;
+        };
+        if (surface.view_image_slot) bind_view_image(surface.view_image_slot,0);
+        const bool planar_image = surface.material.planar_slot && view.reflections == d3scene::ReflectionPolicy::Images;
+        if (planar_image) {
+            const auto& image = bind_view_image(surface.material.planar_slot,10);
+            scene_shader.Use();
+            glUniformMatrix4fv(scene_shader.FindUniform("planar_projection"),1,GL_FALSE,image.matrices.view_projection.data());
         }
         if (surface.baked_image) BindSceneImage(*surface.baked_image,1,surface.lightmap_wrap,true);
         if (surface.specular_image) BindSceneImage(*surface.specular_image,8,surface.texture_wrap,false);
         scene_shader.Use();
+        glUniform1i(scene_shader.FindUniform("planar_material"),surface.material.planar_slot != 0);
+        glUniform1i(scene_shader.FindUniform("planar_image"),planar_image);
         const auto reflections = scene_reflection_ranges.at(binding);
         glUniform1i(scene_shader.FindUniform("reflection_offset"),reflections.offset);
         glUniform1i(scene_shader.FindUniform("reflection_count"),surface.specular_image ? reflections.count : 0);

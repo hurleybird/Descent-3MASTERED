@@ -176,6 +176,7 @@ View reflectedView(const Presentation& frame,View parent,Plane mirror,uint64_t h
     result.feedback = NoFeedback; result.room = room; result.exterior_origin = false;
     result.has_clip_plane = true; result.clip_plane = mirror;
     result.fog_path_origin = FogPathOrigin::ClipPlane;
+    result.reflections = ReflectionPolicy::SurfaceFilm;
     validateView(result);
     return result;
 }
@@ -279,6 +280,8 @@ bool sphereIntersects(const Camera& camera, Vec3 center, float radius) {
     return true;
 }
 View resolveView(const Presentation& frame, View view) {
+    validateView(view);
+    std::sort(view.image_inputs.begin(),view.image_inputs.end(),[](const ViewImageInput& a,const ViewImageInput& b) { return a.slot < b.slot; });
     for (const auto& selection : view.excluded_surfaces) {
         const auto room = std::find_if(frame.data().rooms.begin(),frame.data().rooms.end(),
             [&](const RoomState& candidate) { return candidate.asset->id() == selection.room; });
@@ -353,6 +356,44 @@ std::vector<size_t> orderViewImages(const std::vector<ViewImageRequest>& images)
 uint32_t selectModelVariant(const ModelInstance& object,const Camera& camera) {
     const auto depth = dot(camera.transform.forward,subtract(object.current.position,camera.transform.position));
     return object.lod_models[depth < object.lod_distances.x ? 0 : depth < object.lod_distances.y ? 1 : 2];
+}
+PlanarViewPlan planPlanarViews(const Presentation& frame,const View& parent,uint32_t samples) {
+    validateView(parent);
+    if (samples != 0 && samples != 2 && samples != 4 && samples != 8)
+        throw std::invalid_argument("Invalid planar image sample count");
+    PlanarViewPlan plan; plan.consumer = parent;
+    if (parent.reflections == ReflectionPolicy::SurfaceFilm || parent.collection) return plan;
+    if (parent.has_clip_plane || parent.kind == ViewKind::Mirror)
+        throw std::invalid_argument("Reflected producers must declare terminal surface-film policy");
+    const auto visible = queryView(frame,parent);
+    std::unordered_set<uint64_t> slots;
+    for (const auto& surface : visible.surfaces) {
+        const auto slot = visibleSurfaceBinding(frame,surface).material.planar_slot;
+        if (slot) slots.insert(slot);
+    }
+    std::unordered_set<uint64_t> identities;
+    identities.insert(parent.history_key);
+    for (const auto& room : frame.data().rooms) for (const auto& group : room.mirrors) {
+        const auto slot = room.surfaces[group.polygons.front()].material.planar_slot;
+        if (!slots.count(slot)) continue;
+        // Stable across camera movement and asset revision; revision-qualified
+        // child selection invalidates history when topology actually changes.
+        uint64_t identity = (parent.history_key^0x504c414e41520001ull)*1099511628211ull;
+        identity = (identity^slot)*1099511628211ull;
+        if (!identity || !identities.insert(identity).second)
+            throw std::invalid_argument("Planar image identity collision");
+        auto source = parent; source.exclude_camera_rig = false;
+        source.reflections = ReflectionPolicy::SurfaceFilm;
+        auto child = reflectedView(frame,source,group.plane,identity,room.number);
+        for (auto polygon : group.polygons) child.excluded_surfaces.push_back({room.asset->id(),polygon});
+        child.viewport.x = child.viewport.y = 0;
+        ViewImageRequest image; image.image = identity; image.view = std::move(child); image.samples = samples;
+        validateViewImage(image);
+        plan.images.push_back(std::move(image));
+        plan.consumer.image_inputs.push_back({slot,identity});
+    }
+    validateView(plan.consumer);
+    return plan;
 }
 ViewVisibility queryView(const Presentation& frame, const View& request) {
     const auto view = resolveView(frame,request);

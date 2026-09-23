@@ -6,7 +6,8 @@
 
 namespace d3scene {
 inline bool sameSurfaceSelection(const View& a,const View& b) {
-    return a.excluded_surfaces == b.excluded_surfaces && a.excluded_objects == b.excluded_objects;
+    return a.reflections == b.reflections && a.excluded_surfaces == b.excluded_surfaces &&
+        a.excluded_objects == b.excluded_objects && a.image_inputs == b.image_inputs;
 }
 inline bool sameClipVolume(const View& a,const View& b) {
     return a.fog_path_origin == b.fog_path_origin && a.has_clip_plane == b.has_clip_plane && (!a.has_clip_plane ||

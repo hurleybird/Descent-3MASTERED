@@ -570,7 +570,7 @@ d3scene::VisibilityReport RenderGameSceneView(const d3scene::Presentation& frame
             break;
         }
     }
-    if (FindArg("-scene-mirror-camera-probe") && view.kind == d3scene::ViewKind::Main) {
+    if ((FindArg("-scene-mirror-camera-probe") || FindArg("-scene-mirror-surface-probe")) && view.kind == d3scene::ViewKind::Main) {
         bool found = false;
         for (const auto& room : frame.data().rooms) {
             const auto& geometry = room.asset->geometry();
@@ -592,6 +592,13 @@ d3scene::VisibilityReport RenderGameSceneView(const d3scene::Presentation& frame
             view.camera.up = {basis.uvec.x,basis.uvec.y,basis.uvec.z};
             view.camera.forward = {basis.fvec.x,basis.fvec.y,basis.fvec.z};
             view.attached_camera = false; view.exclude_camera_rig = false;
+            view.room = room.number; view.exterior_origin = false;
+            if (FindArg("-scene-mirror-surface-probe")) {
+                view.history_key = 0x4d4952524f525002ull;
+                if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
+                    AutomatedCaptureLog("scene mirror surface camera room=%d polygon=%u",room.number,polygon);
+                found = true; break;
+            }
             view = d3scene::reflectedView(frame,view,mirror.plane,0x4d4952524f525001ull,room.number);
             for (const auto face : mirror.polygons) view.excluded_surfaces.push_back({room.asset->id(),face});
             // Inspect the reflected image with main-view image products. This
@@ -607,6 +614,8 @@ d3scene::VisibilityReport RenderGameSceneView(const d3scene::Presentation& frame
     // Diagnostic views do not mark rooms explored or tell AI it was observed.
     // The gameplay feedback compiler barrier remains until the normal executor
     // and its visibility policy have been migrated.
+    auto planar = d3scene::planPlanarViews(frame,view,Render_preferred_state.msaa_samples);
+    view = std::move(planar.consumer);
     if (FindArg("-scene-view-image-probe") && view.kind == d3scene::ViewKind::Main) {
         d3scene::ViewImageRequest image;
         image.image = SceneViewImageProbe; image.view = view;
@@ -620,8 +629,9 @@ d3scene::VisibilityReport RenderGameSceneView(const d3scene::Presentation& frame
         copy.view.image_inputs.push_back({1,image.image});
         // Deliberately reversed producer order: the graph, not caller order,
         // owns the dependency from this canvas image to the scene image.
-        d3scene::renderViewImages(frame,{copy,image});
+        planar.images.push_back(std::move(copy)); planar.images.push_back(std::move(image));
     }
+    d3scene::renderViewImages(frame,planar.images);
     auto observations = d3scene::renderView(frame, view);
     if (FindArg("-scene-observation-probe") &&
         (view.kind == d3scene::ViewKind::Main || view.kind == d3scene::ViewKind::Auxiliary)) {

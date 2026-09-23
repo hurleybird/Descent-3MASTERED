@@ -461,9 +461,21 @@ PresentationRef Presentation::freeze(const FrameData& data) {
         surface.material = compileMaterialPolicy(surface,MeshPolygon{});
     for (auto& patch : prepared->data_.terrain.patches) for (auto& surface : patch)
         surface.material = compileMaterialPolicy(surface,MeshPolygon{});
-    for (auto& room : prepared->data_.rooms)
+    for (auto& room : prepared->data_.rooms) {
         for (size_t face = 0; face < room.surfaces.size(); ++face)
             room.surfaces[face].material = compileMaterialPolicy(room.surfaces[face],room.asset->geometry().polygons[face]);
+        for (size_t group = 0; group < room.mirrors.size(); ++group) for (auto face : room.mirrors[group].polygons) {
+            auto& surface = room.surfaces[face];
+            require(surface.layer == RenderLayer::World && surface.soft_depth_range == 0 &&
+                surface.effect_depth_offset == 0 && surface.raster_stripe.x == 0 &&
+                (surface.blend == BlendMode::Solid || surface.blend == BlendMode::Alpha),
+                "Planar reflection requires a solid surface film, not an effect");
+            auto& policy = surface.material;
+            policy.planar_slot = (uint64_t(uint32_t(room.number)+1)<<32)|uint64_t(group+1);
+            policy.blend = BlendMode::Solid; policy.depth = DepthMode::ReadWrite;
+            policy.texture_alpha = TextureAlpha::Continuous; policy.alpha_cutoff = 0;
+        }
+    }
     for (auto& object : prepared->data_.model_instances) {
         object.has_render_bounds = false;
         const auto include = [](Bounds& bounds,bool& valid,Vec3 point) {
@@ -501,6 +513,8 @@ void Presentation::requireExecutable() const {
         throw std::logic_error("Renderer migration incomplete: presentation contains unprepared domains");
 }
 void validateView(const View& view) {
+    require(view.reflections == ReflectionPolicy::Images || view.reflections == ReflectionPolicy::SurfaceFilm,
+        "Invalid planar reflection policy");
     require(view.fog_path_origin == FogPathOrigin::Camera || view.fog_path_origin == FogPathOrigin::ClipPlane,
         "Invalid fog path origin");
     require(view.fog_path_origin != FogPathOrigin::ClipPlane || view.has_clip_plane,

@@ -165,6 +165,7 @@ class GL4Renderer : public IRenderer
 		Framebuffer buffer;
 		SceneDepthSnapshot depth;
 		d3scene::ViewHistory history;
+		d3scene::ViewMatrices matrices;
 		uint64_t sequence = 0;
 	};
 	std::unordered_map<uint64_t,SceneViewImageGpu> scene_view_images;

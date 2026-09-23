@@ -135,6 +135,10 @@ if ([bool]$referenceManifest.mirror_camera_probe -ne [bool]$actualManifest.mirro
 if ([bool]$referenceManifest.view_image_probe -ne [bool]$actualManifest.view_image_probe -and -not $DiagnosticComparison) {
     throw 'View image fixture mismatch requires DiagnosticComparison.'
 }
+if (([bool]$referenceManifest.mirror_surface_probe -ne [bool]$actualManifest.mirror_surface_probe -or
+     [int]$referenceManifest.planar_composition_revision -ne [int]$actualManifest.planar_composition_revision) -and -not $DiagnosticComparison) {
+    throw 'Planar surface composition changed; use DiagnosticComparison for intentional renderer changes.'
+}
 if ([int]$referenceManifest.inspection_banner_revision -ne [int]$actualManifest.inspection_banner_revision -and -not $DiagnosticComparison) {
     throw 'Inspection banner composition changed; use DiagnosticComparison for intentional fixture changes.'
 }

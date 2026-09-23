@@ -47,6 +47,46 @@ int runSceneViewTests() {
     {
         using namespace d3scene;
         SceneAssets assets; FrameData data; data.sequence = 1; data.scene_lifetime = assets.lifetime();
+        appendRoom(assets,data,triangle(0,3));
+        data.rooms[0].mirrors = compilePlanarSurfaces(data.rooms[0].asset->geometry(),{0});
+        data.rooms[0].surfaces[0].alpha = .3f;
+        const auto frame = Presentation::freeze(data);
+        const auto& material = frame->data().rooms[0].surfaces[0].material;
+        check(material.planar_slot && material.writesSolidDepth() && !material.allowsBehind() && material.alpha_cutoff == 0,
+            "Layered mirror film was compiled as a translucent hole");
+        auto parent = view(); parent.room = 0;
+        const auto plan = planPlanarViews(*frame,parent);
+        check(planPlanarViews(*frame,parent,4).images[0].samples == 4,
+            "Planar producer lost explicit antialiasing quality");
+        check(plan.images.size() == 1 && plan.consumer.image_inputs.size() == 1,
+            "Visible mirror group did not schedule one image");
+        const auto& child = plan.images[0];
+        check(child.view.reflections == ReflectionPolicy::SurfaceFilm && child.view.feedback == NoFeedback &&
+            child.view.excluded_surfaces.size() == 1 && queryView(*frame,child.view).surfaces.empty(),
+            "Reflected producer retained its own film or recursive policy");
+        check(viewImageSource(plan.consumer,material.planar_slot) == child.image &&
+            orderViewImages(plan.images) == std::vector<size_t>({0}),"Mirror consumer has no scheduled producer");
+        check(planPlanarViews(*frame,child.view).images.empty(),"Terminal reflection scheduled recursion");
+        auto moved = parent; moved.camera.position.x = .25f;
+        check(planPlanarViews(*frame,moved).images[0].image == child.image,"Mirror image identity changed with camera motion");
+        for (Vec3 point : {Vec3{0,0,3},Vec3{.5f,.2f,3}}) {
+            const auto original = project(prepareCamera(parent),point);
+            const auto reflected = project(prepareCamera(child.view),point);
+            check(near(original.x/original.w,reflected.x/reflected.w) && near(original.y/original.w,reflected.y/reflected.w),
+                "Mirror surface and source image projections disagree");
+        }
+        auto hidden = parent; hidden.excluded_surfaces = {{data.rooms[0].asset->id(),0}};
+        check(planPlanarViews(*frame,hidden).images.empty(),"Hidden mirror allocated a producer");
+        auto conflict = parent; conflict.image_inputs = {{material.planar_slot,1}};
+        bool rejected = false;
+        try { planPlanarViews(*frame,conflict); } catch (const std::invalid_argument&) { rejected = true; }
+        check(rejected,"Planar schedule accepted a conflicting consumer slot");
+        check(parent.image_inputs.empty() && data.rooms[0].surfaces[0].material.planar_slot == 0,
+            "Planar compilation mutated authoring inputs");
+    }
+    {
+        using namespace d3scene;
+        SceneAssets assets; FrameData data; data.sequence = 1; data.scene_lifetime = assets.lifetime();
         appendRoom(assets,data,triangle(-1,3)); appendRoom(assets,data,triangle(1,3));
         const auto frame = Presentation::freeze(data);
         auto parent = view(); parent.portal_visibility = false;

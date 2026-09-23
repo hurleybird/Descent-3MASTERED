@@ -214,6 +214,7 @@ enum class DepthMode : uint8_t { Automatic, ReadWrite, ReadOnly, Disabled };
 enum class TextureAlpha : uint8_t { Ignore, Cutout, Continuous };
 enum class OcclusionClass : uint8_t { Default, Terrain, Model, MineRock, Mine };
 struct MaterialPolicy {
+    uint64_t planar_slot = 0; // compiled layered reflection; alpha belongs to its surface film
     RenderLayer layer = RenderLayer::World;
     BlendMode blend = BlendMode::Solid;
     DepthMode depth = DepthMode::ReadWrite; // fully resolved; never Automatic
@@ -224,7 +225,7 @@ struct MaterialPolicy {
     bool writesDepth() const { return depth == DepthMode::ReadWrite; }
     bool writesSolidDepth() const { return writesDepth() && !blended(); }
     bool requiresLatePass() const { return !writesSolidDepth(); }
-    bool allowsBehind() const { return blended() || texture_alpha != TextureAlpha::Ignore; }
+    bool allowsBehind() const { return !planar_slot && (blended() || texture_alpha != TextureAlpha::Ignore); }
 };
 // These are authoring bindings, not alternate material implementations. The
 // material compiler must resolve them before execution is enabled.
@@ -468,9 +469,11 @@ enum class ViewTarget { Scene, Display };
 enum class ViewOrdering { Depth, Compositing };
 enum class ViewProjection { Perspective, Orthographic };
 enum class FogPathOrigin { Camera, ClipPlane };
+enum class ReflectionPolicy { Images, SurfaceFilm };
 struct Rect { int32_t x = 0, y = 0, width = 0, height = 0; };
 enum Feedback : uint8_t { NoFeedback = 0, Automap = 1, ObjectVisibility = 2, EffectEligibility = 4 };
 struct ViewImageInput { uint64_t slot = 0, image = 0; };
+inline bool operator==(const ViewImageInput& a,const ViewImageInput& b) { return a.slot == b.slot && a.image == b.image; }
 // A room number alone can silently select replacement topology. Selections are
 // qualified by the immutable asset revision and validated against the frame.
 struct RoomSurfaceId { AssetId room; uint32_t polygon = 0; };
@@ -492,6 +495,7 @@ struct View {
     bool has_clip_plane = false;
     Plane clip_plane; // world space; retain normal.point + constant >= 0
     FogPathOrigin fog_path_origin = FogPathOrigin::Camera;
+    ReflectionPolicy reflections = ReflectionPolicy::Images;
     uint32_t camera_owner = 0;
     uint32_t camera_variant = 0; // discontinuous source mode, e.g. forward/rear
     bool attached_camera = false;

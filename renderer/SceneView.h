@@ -40,6 +40,11 @@ bool excludesObject(const View&,uint32_t handle);
 bool excludesSurface(const View&,RoomSurfaceId);
 uint64_t viewImageSource(const View&,uint64_t slot);
 std::vector<size_t> orderViewImages(const std::vector<ViewImageRequest>&);
+struct PlanarViewPlan { View consumer; std::vector<ViewImageRequest> images; };
+// Single-bounce image schedule from the consumer's visible planar groups.
+// Child cameras include the camera rig, exclude their own film and render other
+// mirrors as opaque authored films. No simulation or shared material mutation.
+PlanarViewPlan planPlanarViews(const Presentation&,const View&,uint32_t samples = 0);
 Transform resolveMeshTransform(const PreparedMesh&,const Camera&);
 ClipPosition project(const Camera& camera, Vec3 world);
 Vec3 unproject(const Camera& camera, float ndc_x, float ndc_y, float depth);

@@ -1,5 +1,41 @@
 # Renderer migration checkpoint
 
+## Continuation: integrated planar image materials
+
+Visible published mirror groups now schedule independent reflected images.
+The material compiler resolves the authored texture into a surface film over
+projectively sampled reflected radiance, with solid depth/coverage. Only film
+radiance participates in the parent's AO; the reflected image is not relit or
+treated as local surface illumination. Image products own their source camera
+matrix. The existing image dependency scheduler orders mirrors before consumers,
+including the two-stage preview fixture. No room geometry or simulation pose is
+temporarily reflected. Child views omit their own planar group, include the
+camera rig unless explicitly excluded, and use opaque authored film for other
+mirrors: recursion termination is policy, not a missing-image fallback.
+
+Reflection images currently use logical scene extent (including overscan), not
+parent SSAA extent, and inherit the requested MSAA count explicitly. This quality/
+performance choice remains subject to qualification. Resolved view selections
+and image inputs now reach history canonically; content-policy changes cannot
+silently reuse a prior image exposure.
+
+Full build and 5,674 checks pass. scene-planar-integrated-normal matches the
+previous eight-save corpus exactly in seven saves; 006 intentionally changes
+because the previously missing mirror now reflects the ship and room. Both
+before/after images were inspected. The fixed physical mirror camera and its
+dependent preview were inspected in scene-planar-integrated, scene-planar-chain,
+and scene-planar-msaa. The final clean mirror is pixel-identical to the clean
+resource-transition capture (scene-planar-clean / scene-planar-resources).
+Capture metadata versions the new composition and distinguishes the physical
+surface fixture from the earlier reflected-camera-only fixture.
+
+This is integrated mirror rendering, not a cleared gameplay/renderer gate.
+Moving-camera/complex portal and fogged mirror qualification, reflected gameplay
+observations, and the broader migration remain unfinished. No installed Candidate
+was changed. Shadows remain deferred. The current AO approach is retained per
+user direction; its application resolution and bandwidth tradeoffs will be
+measured later, not redesigned during this continuation.
+
 ## Continuation: optical intervals and view-local surface selection
 
 Fog's optical origin is explicit and independent of geometry clipping. Reflected
