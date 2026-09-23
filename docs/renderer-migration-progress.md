@@ -1,5 +1,27 @@
 # Renderer migration checkpoint
 
+## Continuation: published planar surfaces
+
+Raw mirror-face metadata is removed from RoomState. Publication now compiles
+enabled authored mirror materials into owned, normalized planes and explicit
+polygon groups. Coplanar faces share a group; parallel displaced planes do not.
+Compilation is deterministic and rejects duplicate/missing/nonplanar geometry;
+frame freezing rejects stale planes and duplicate memberships. Held frames keep
+their original geometry and groups across replacement. Camera fixtures and
+observation coverage consume the same published description.
+
+Full build and 5,437 contract checks pass. All eight normal effects/observation
+captures in scene-planar-publication-normal are pixel-identical to
+scene-display-banner-normal. The reflected-camera/image-chain fixture was
+visually inspected and publishes one group each in rooms 3 and 56. Its camera
+uses the normalized published plane rather than a centroid-derived plane;
+mirror_camera_revision 2 explicitly distinguishes this diagnostic change.
+Comparison to scene-view-graph-mirror is not exact (mean RGB error .0134288194,
+max 58, .0363498264 percent pixels above two levels), and is not claimed as
+parity. This remains a camera diagnostic, not finished mirror composition.
+Corpora and reports are scene-planar-publication-* under the verification root.
+No gameplay gate was cleared, no installed Candidate changed, no shadows added.
+
 ## Continuation: owned view-image products and dependencies
 
 The executor now receives its framebuffer, raster rectangle, output role,

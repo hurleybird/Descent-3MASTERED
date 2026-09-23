@@ -126,6 +126,7 @@ $manifest = [ordered]@{
     reticle_reference = [bool]$ReticleReference
     observation_probe = [bool]$ObservationProbe
     mirror_camera_probe = [bool]$MirrorCameraProbe
+    mirror_camera_revision = $(if ($MirrorCameraProbe) { 2 } else { 0 })
     view_image_probe = [bool]$ViewImageProbe
     view_image_revision = $(if ($ViewImageProbe) { 2 } else { 0 })
     cockpit_probe_revision = $(if ($CockpitProbe) { 4 } else { 0 })

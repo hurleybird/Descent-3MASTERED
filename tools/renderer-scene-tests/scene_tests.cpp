@@ -1,5 +1,6 @@
 // Descent 3MASTERED - GPL-3.0-or-later
 #include "../../renderer/Scene.h"
+#include "../../renderer/SceneGeometry.h"
 #include "../../Descent3/SceneExtraction.h"
 #include "room.h"
 #include "object.h"
@@ -35,6 +36,42 @@ d3scene::MeshGeometry triangle() {
     return geometry;
 }
 void assetTests() {
+    // Plane membership is owned by the frozen scene, not recovered from mutable rooms.
+    {
+        using namespace d3scene;
+        auto mesh = unitQuadBatch(3);
+        mesh.polygons[1].normal = {0,0,7}; // opposite, non-unit authored normal
+        for (size_t i = 8; i < 12; ++i) mesh.vertices[i].z = 5;
+        const auto groups = compilePlanarSurfaces(mesh,{2,1,0});
+        const auto ordered = compilePlanarSurfaces(mesh,{0,1,2});
+        check(groups.size() == 2 && groups[0].polygons == std::vector<uint32_t>({0,1}) &&
+            groups[1].polygons == std::vector<uint32_t>({2}), "Planar grouping confused parallel and coplanar faces");
+        check(groups[0].polygons == ordered[0].polygons && groups[1].plane.constant == ordered[1].plane.constant &&
+            groups[0].plane.normal.z == ordered[0].plane.normal.z, "Planar grouping depends on publication order");
+        rejects([&] { compilePlanarSurfaces(mesh,{0,0}); }, "Repeated mirror face accepted");
+        rejects([&] { compilePlanarSurfaces(mesh,{3}); }, "Missing mirror face accepted");
+        auto bad = mesh; bad.polygons[0].normal = {};
+        rejects([&] { compilePlanarSurfaces(bad,{0}); }, "Zero mirror normal accepted");
+        bad = mesh; bad.vertices[0].z = 1;
+        rejects([&] { compilePlanarSurfaces(bad,{0}); }, "Nonplanar mirror accepted");
+        SceneAssets owner;
+        FrameData data; data.sequence = 1; data.scene_lifetime = owner.lifetime();
+        RoomState room; room.number = 0; room.asset = owner.publishRoom(0,mesh);
+        room.surfaces.resize(3); room.mirrors = groups; data.rooms.push_back(room);
+        const auto held = Presentation::freeze(data);
+        data.rooms[0].mirrors[1].polygons.push_back(0);
+        rejects([&] { Presentation::freeze(data); }, "Repeated mirror membership survived freeze");
+        data.rooms[0].mirrors = groups;
+        for (auto& vertex : mesh.vertices) vertex.z += 2;
+        data.rooms[0].asset = owner.publishRoom(0,mesh);
+        rejects([&] { Presentation::freeze(data); }, "Stale mirror plane survived geometry replacement");
+        data.rooms[0].mirrors = compilePlanarSurfaces(mesh,{0,1,2});
+        const auto updated = Presentation::freeze(data);
+        check(held->data().rooms[0].asset->geometry().vertices[0].z == 0 &&
+            held->data().rooms[0].mirrors[0].plane.constant == 0 &&
+            updated->data().rooms[0].mirrors[0].plane.constant == 2,
+            "New mirror publication mutated held frame");
+    }
     d3scene::SceneAssets assets;
     const auto a = assets.publishRoom(3, triangle());
     const auto unchanged = assets.publishRoom(3, triangle());

@@ -2,6 +2,7 @@
 #include "Scene.h"
 #include "SceneTerrain.h"
 #include "SceneFog.h"
+#include "SceneGeometry.h"
 #include <atomic>
 #include <cmath>
 #include <limits>
@@ -365,6 +366,7 @@ PresentationRef Presentation::freeze(const FrameData& data) {
         require(room.asset && room.asset->id().lifetime == data.scene_lifetime &&
             room.asset->id().slot == static_cast<uint32_t>(room.number), "Room asset identity mismatch");
         require(room.surfaces.size() == room.asset->geometry().polygons.size(), "Incomplete room surface bindings");
+        validatePlanarSurfaces(room.asset->geometry(),room.mirrors);
         for (const auto& surface : room.surfaces) validateSurface(surface);
         for (const auto& surface : room.surfaces) validateIndices(surface);
         for (size_t face = 0; face < room.surfaces.size(); ++face) {

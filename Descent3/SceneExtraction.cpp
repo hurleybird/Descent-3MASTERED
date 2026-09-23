@@ -109,7 +109,6 @@ d3scene::PresentationRef ExtractGamePresentation(double time, float delta, bool 
         state.fog_color = {source.fog_r, source.fog_g, source.fog_b};
         state.pulse_time = source.pulse_time;
         state.pulse_offset = source.pulse_offset;
-        state.mirror_polygon = source.mirror_face;
         state.surfaces.reserve(source.num_faces);
         for (int j = 0; j < source.num_faces; ++j) {
             const face& face = source.faces[j];

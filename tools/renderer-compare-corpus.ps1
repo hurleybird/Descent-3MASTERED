@@ -141,6 +141,9 @@ if ([int]$referenceManifest.inspection_banner_revision -ne [int]$actualManifest.
 if ([int]$referenceManifest.view_image_revision -ne [int]$actualManifest.view_image_revision -and -not $DiagnosticComparison) {
     throw 'View image graph fixture changed; use DiagnosticComparison for intentional fixture changes.'
 }
+if ([int]$referenceManifest.mirror_camera_revision -ne [int]$actualManifest.mirror_camera_revision -and -not $DiagnosticComparison) {
+    throw 'Mirror surface publication fixture changed; use DiagnosticComparison for intentional fixture changes.'
+}
 if ([bool]$referenceManifest.depth_policy_probe -ne [bool]$actualManifest.depth_policy_probe -and -not $DiagnosticComparison) {
     throw 'Depth policy fixtures differ; this is not a parity comparison.'
 }

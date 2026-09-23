@@ -30,7 +30,7 @@ SceneObservationInspection InspectSceneObservations(const d3scene::Presentation&
     for (size_t i = 0; i < windows.size(); ++i) if (windows[i].visible) {
         const auto& room = frame.data().rooms[i];
         result.exterior_pending = result.exterior_pending || room.exterior;
-        result.mirrors_pending = result.mirrors_pending || room.mirror_polygon >= 0;
+        result.mirrors_pending = result.mirrors_pending || !room.mirrors.empty();
         if (view.feedback & (Automap | EffectEligibility)) report.rooms.push_back(room.number);
     }
     if (!(view.feedback & ObjectVisibility)) return result;

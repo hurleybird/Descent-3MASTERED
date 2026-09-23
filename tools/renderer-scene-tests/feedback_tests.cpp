@@ -1,6 +1,7 @@
 // Descent 3MASTERED - GPL-3.0-or-later
 #include "../../Descent3/SceneFeedback.h"
 #include "../../renderer/SceneTerrain.h"
+#include "../../renderer/SceneGeometry.h"
 #include <stdexcept>
 int runFeedbackTests() {
     using namespace d3scene;
@@ -107,10 +108,10 @@ int runFeedbackTests() {
     portal_data.objects[0].observation_bounds.minimum.z = -.1f;
     portal_frame = Presentation::freeze(portal_data);
     check(InspectSceneObservations(*portal_frame,view).report.objects.size() == 2); // eye-crossing bounds
-    portal_data.rooms[1].mirror_polygon = 0;
     // A real mirror needs geometry; reuse the owned aperture for this coverage fixture.
     portal_data.rooms[1].asset = assets.publishRoom(9,aperture);
     portal_data.rooms[1].surfaces.resize(1);
+    portal_data.rooms[1].mirrors = compilePlanarSurfaces(aperture,{0});
     portal_frame = Presentation::freeze(portal_data);
     check(InspectSceneObservations(*portal_frame,view).mirrors_pending);
     auto rig_data = observed_frame->data();

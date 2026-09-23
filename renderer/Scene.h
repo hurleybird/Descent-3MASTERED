@@ -307,6 +307,10 @@ struct Portal {
     bool traversable = true;
     bool two_sided = false; // aperture policy, independent of surface winding
 };
+struct PlanarSurface {
+    Plane plane;
+    std::vector<uint32_t> polygons;
+};
 struct RoomState {
     int32_t number = -1;
     RoomAssetRef asset;
@@ -317,7 +321,7 @@ struct RoomState {
     float fog_depth = 0;
     Vec3 fog_color;
     uint8_t pulse_time = 0, pulse_offset = 0;
-    int32_t mirror_polygon = -1;
+    std::vector<PlanarSurface> mirrors;
     float light_scalar = 1;
     bool blocks_portals = false, exterior = false;
     bool observation_unclipped = false; // authored door-room admission
