@@ -2,6 +2,27 @@
 #pragma once
 #include "../renderer/Scene.h"
 
+enum class HUDViewMode { Hidden, Ship, Guided, Zoom, Rear, Letterbox, Observer };
+enum class HUDAimMode { Hidden, Ship, Guided, Zoom };
+struct HUDCanvasRequest {
+    d3scene::Rect world, display;
+    HUDViewMode mode = HUDViewMode::Hidden;
+    bool centered_four_three = true, show_ship_reticle = true;
+    uint16_t item_mask = 0;
+    bool aim_on_target = false;
+    float zoom_distance = 0;
+};
+struct HUDCanvasLayout {
+    d3scene::Rect primary, display;
+    HUDAimMode aim = HUDAimMode::Hidden;
+    uint16_t item_mask = 0;
+    bool auxiliary = false;
+    bool aim_on_target = false;
+    float zoom_distance = 0;
+};
+HUDCanvasLayout CompileHUDCanvasLayout(const HUDCanvasRequest&);
+HUDCanvasLayout CaptureGameHUDLayout();
+
 struct SceneTextStyle {
     int font = -1;
     float scale = 1, alpha = 1;

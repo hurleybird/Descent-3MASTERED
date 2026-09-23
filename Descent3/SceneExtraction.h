@@ -5,6 +5,7 @@
 
 struct object;
 struct ModelTransforms;
+struct HUDCanvasLayout;
 
 // One extraction per presentation, shared by main and auxiliary views. This
 // reads simulation state but does not draw, advance RNG, or mark visibility.
@@ -32,16 +33,12 @@ constexpr uint64_t SceneInspectionBanner = 0x5445535442414e01ull;
 constexpr float SceneCockpitZoom = .56f;
 void PrepareGameCockpitGauges(d3scene::FrameData&,const ModelTransforms&,const d3scene::Transform&,bool moving);
 void PrepareGameCockpit(d3scene::FrameData&, bool advance);
-void PrepareGameReticle(d3scene::FrameData&);
-void PrepareGameHUD(d3scene::FrameData&,bool advance);
-void RenderPreparedHUD(const d3scene::Presentation&);
-void RenderPreparedHUDAuxiliary(const d3scene::Presentation&);
+void PrepareGameReticle(d3scene::FrameData&,const HUDCanvasLayout&);
+void PrepareGameHUD(d3scene::FrameData&,const HUDCanvasLayout&,bool advance);
 void RenderPreparedReticle(const d3scene::Presentation&);
-void RenderPreparedViewImageProbe(const d3scene::Presentation&);
-void RenderPreparedInspectionBanner(const d3scene::Presentation&);
+void RenderGameForegrounds(const d3scene::Presentation&,d3scene::ForegroundPhase);
 void PrepareCockpitComposition(d3scene::FrameData&,d3scene::Rect viewport,float zoom);
-void RenderPreparedCockpit(const d3scene::Presentation&);
-d3scene::PresentationRef PrepareGamePresentation(bool advance_history = true);
+d3scene::PresentationRef PrepareGamePresentation();
 d3scene::VisibilityReport RenderGameSceneView(const d3scene::Presentation&, d3scene::View);
 bool SceneGeometryInspection();
 void RenderModuleSceneView(object*, vector*, int, matrix*, float, bool,

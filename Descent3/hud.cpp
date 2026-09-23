@@ -113,10 +113,8 @@ void FreeReticle();
 void RenderReticle();
 
 //	renders missile reticle
-void RenderMissileReticle();
 
 //	renders zoom reticle
-void RenderZoomReticle();
 
 //	hack!
 
@@ -1191,12 +1189,12 @@ void RenderHUDFrame(float zoom)
 			if (render_guided_reticle_after_world_post)
 			{
 				PERF_MARKER_SCOPE("HUD.RenderGuidedReticle.PostWorld");
-				RenderMissileReticle();
+				Error("Guided reticles require published HUD geometry");
 			}
 			else if (render_zoom_reticle_after_world_post)
 			{
 				PERF_MARKER_SCOPE("HUD.RenderZoomReticle.PostWorld");
-				RenderZoomReticle();
+				Error("Zoom reticles require published HUD geometry");
 			}
 
 			if (render_hud_items_after_world_post && render_hud_items_before_game_dll)
@@ -2601,19 +2599,55 @@ inline void draw_reticle_sub(int cx, int cy, int rw, int rh, ushort on_mask, ush
 
 
 //	renders the reticle
-static d3scene::Rect PreparedHUDViewport()
-{
-    const auto mode = GetHUDMode();
-    const int width = mode == HUD_FULLSCREEN || mode == HUD_COCKPIT ? Game_window_h*4/3 : Game_window_w;
-    return {Game_window_x+(Game_window_w-width)/2,Game_window_y,width,Game_window_h};
-}
-
-void PrepareGameHUD(d3scene::FrameData& frame,bool advance)
+HUDCanvasLayout CaptureGameHUDLayout()
 {
     extern bool HUD_disabled, Guided_missile_smallview;
-    if (HUD_disabled || Cinematic_inuse || Player_num < 0 || Player_num >= MAX_PLAYERS) return;
-    if ((Players[Player_num].guided_obj && !Guided_missile_smallview) ||
-        (Players[Player_num].flags & (PLAYER_FLAGS_ZOOMED | PLAYER_FLAGS_REARVIEW))) return;
+    HUDCanvasRequest request;
+    request.world = {Game_window_x,Game_window_y,Game_window_w,Game_window_h};
+    request.display = {0,0,Max_window_w,Max_window_h};
+    const auto mode = GetHUDMode();
+    request.centered_four_three = mode == HUD_FULLSCREEN || mode == HUD_COCKPIT;
+    request.show_ship_reticle = Game_toggles.show_reticle;
+    request.item_mask = Hud_stat_mask;
+    if (IsCleanGameplayScreenshotActive())
+        request.item_mask &= STAT_PRIMARYLOAD | STAT_SECONDARYLOAD | STAT_SHIELDS | STAT_ENERGY | STAT_AFTERBURN;
+    if (!HUD_disabled && !Cinematic_inuse && Player_num >= 0 && Player_num < MAX_PLAYERS) {
+        const auto& player = Players[Player_num];
+        request.aim_on_target = (player.flags & PLAYER_FLAGS_BULLSEYE) != 0;
+        request.zoom_distance = player.zoom_distance;
+        if (player.guided_obj && !Guided_missile_smallview) request.mode = HUDViewMode::Guided;
+        else if (player.flags & PLAYER_FLAGS_ZOOMED) request.mode = HUDViewMode::Zoom;
+        else if (player.flags & PLAYER_FLAGS_REARVIEW) request.mode = HUDViewMode::Rear;
+        else if (mode == HUD_LETTERBOX) request.mode = HUDViewMode::Letterbox;
+        else if (mode == HUD_OBSERVER) request.mode = HUDViewMode::Observer;
+        else if (request.centered_four_three) request.mode = HUDViewMode::Ship;
+        else Error("Unknown game HUD layout mode");
+    }
+    const int probe = FindArg("-scene-hud-view-probe");
+    if (SceneGeometryInspection() && probe) {
+        const char* mode = GetArg(probe+1);
+        if (!mode) Error("HUD view fixture requires a mode");
+        if (!stricmp(mode,"guided")) request.mode = HUDViewMode::Guided;
+        else if (!stricmp(mode,"zoom")) {
+            request.mode = HUDViewMode::Zoom; request.zoom_distance = 123.5f; request.aim_on_target = true;
+        } else if (!stricmp(mode,"rear")) request.mode = HUDViewMode::Rear;
+        else if (!stricmp(mode,"letterbox")) { request.mode = HUDViewMode::Letterbox; request.centered_four_three = false; }
+        else if (!stricmp(mode,"observer")) { request.mode = HUDViewMode::Observer; request.centered_four_three = false; }
+        else if (!stricmp(mode,"hidden")) request.mode = HUDViewMode::Hidden;
+        else Error("Unknown HUD view fixture mode");
+        if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
+            AutomatedCaptureLog("scene HUD view policy mode=%s",mode);
+    }
+    return CompileHUDCanvasLayout(request);
+}
+
+void PrepareGameHUD(d3scene::FrameData& frame,const HUDCanvasLayout& layout,bool advance)
+{
+    if (!layout.item_mask) {
+        if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
+            AutomatedCaptureLog("scene HUD items prepared mask=0 hidden=1");
+        return;
+    }
     if (advance && FindArg("-scene-hud-message-probe") && AutomatedCaptureFrameIndex() == 0) {
         ResetHUDMessages();
         AddColoredHUDMessage(GR_RGB(80,210,255),"Prepared scrolling message");
@@ -2621,13 +2655,11 @@ void PrepareGameHUD(d3scene::FrameData& frame,bool advance)
         AddPersistentHUDMessage(GR_RGB(255,210,80),300,180,2.f,HPF_FADEOUT | HPF_FREESPACE_DRAW,-1,
             "Prepared typewriter message");
     }
-    auto mask = Hud_stat_mask;
-    if (IsCleanGameplayScreenshotActive())
-        mask &= STAT_PRIMARYLOAD | STAT_SECONDARYLOAD | STAT_SHIELDS | STAT_ENERGY | STAT_AFTERBURN;
-    const auto viewport = PreparedHUDViewport();
-    const bool is_small_hud = float(Game_window_h)/Max_window_h <= .80f;
+    const auto mask = layout.item_mask;
+    const auto viewport = layout.primary;
+    const bool is_small_hud = layout.auxiliary;
     const bool deferred_score = PrepareHUDItemCanvas(frame,SceneHUDItems,viewport,HUD_array,MAX_HUD_ITEMS,mask,is_small_hud ? 0 : -1,advance);
-    d3scene::PreparedForeground foreground; foreground.identity = SceneHUDItems;
+    d3scene::PreparedForeground foreground; foreground.identity = SceneHUDItems; foreground.order = 20;
     foreground.layer.display_views.push_back(MakeSceneCanvasView(SceneHUDItems,viewport,d3scene::ViewTarget::Display,true));
     if ((mask & STAT_MESSAGES) && !is_small_hud) {
         PrepareHUDMessageCanvas(frame,SceneHUDMessages,viewport,false,advance);
@@ -2635,9 +2667,9 @@ void PrepareGameHUD(d3scene::FrameData& frame,bool advance)
     }
     frame.foregrounds.push_back(std::move(foreground));
     if (is_small_hud) {
-        const d3scene::Rect full = {0,0,Max_window_w,Max_window_h};
+        const auto full = layout.display;
         PrepareHUDItemCanvas(frame,SceneHUDAuxiliary,full,HUD_array,MAX_HUD_ITEMS,mask,1,advance,deferred_score);
-        d3scene::PreparedForeground auxiliary; auxiliary.identity = SceneHUDAuxiliary;
+        d3scene::PreparedForeground auxiliary; auxiliary.identity = SceneHUDAuxiliary; auxiliary.order = 50;
         auxiliary.layer.display_views.push_back(MakeSceneCanvasView(SceneHUDAuxiliary,full,d3scene::ViewTarget::Display,true));
         if (mask & STAT_MESSAGES) {
             PrepareHUDMessageCanvas(frame,SceneHUDMessages,full,true,advance);
@@ -2649,35 +2681,42 @@ void PrepareGameHUD(d3scene::FrameData& frame,bool advance)
         AutomatedCaptureLog("scene HUD items prepared mask=%u mode=%u small=%d",unsigned(mask),unsigned(GetHUDMode()),is_small_hud);
 }
 
-void RenderPreparedHUD(const d3scene::Presentation& frame)
+void PrepareGameReticle(d3scene::FrameData& frame,const HUDCanvasLayout& layout)
 {
-    if (!SceneGeometryInspection()) Error("HUD publication has not passed gameplay acceptance");
-    if (const auto* layer = frame.foreground(SceneHUDItems)) d3scene::renderForeground(frame,*layer);
-}
-
-void RenderPreparedHUDAuxiliary(const d3scene::Presentation& frame)
-{
-    if (!SceneGeometryInspection()) Error("HUD publication has not passed gameplay acceptance");
-    if (const auto* layer = frame.foreground(SceneHUDAuxiliary)) d3scene::renderForeground(frame,*layer);
-}
-
-void PrepareGameReticle(d3scene::FrameData& frame)
-{
-	extern bool HUD_disabled, Guided_missile_smallview;
-	if (Player_num < 0 || Player_num >= MAX_PLAYERS) return;
-	if (HUD_disabled || Cinematic_inuse || !Game_toggles.show_reticle ||
-		(Players[Player_num].guided_obj && !Guided_missile_smallview) ||
-		(Players[Player_num].flags & (PLAYER_FLAGS_ZOOMED | PLAYER_FLAGS_REARVIEW)))
-		return; // guided/zoom canvases are separate publication work, not a normal reticle fallback
-	const auto mode = GetHUDMode();
-	if (mode != HUD_FULLSCREEN && mode != HUD_COCKPIT) return;
+	if (layout.aim == HUDAimMode::Hidden) return;
+	const auto viewport = layout.primary;
+	if (layout.aim == HUDAimMode::Guided || layout.aim == HUDAimMode::Zoom) {
+		int32_t order = 0;
+		const int cx = viewport.width/2, cy = viewport.height/2;
+		const bool zoomed = layout.aim == HUDAimMode::Zoom;
+		auto text = MakeHUDTextStyle(viewport); text.color = {1,0,0}; text.alpha = HUD_ALPHA/255.f;
+		const auto centered = [&](int y,const char* value) {
+			PrepareSceneText(frame,SceneReticle,order,(viewport.width-MeasureSceneText(value,text).width)/2,y,value,text);
+		};
+		centered(cy-50,zoomed ? TXT_HUD_ZOOM : TXT_HUD_GUIDED);
+		if (zoomed) {
+			char value[255]; snprintf(value,sizeof(value),TXT_HUD_ZOOM_UNITS,layout.zoom_distance);
+			centered(cy-50+grfont_GetHeight(HUD_FONT),value);
+		}
+		SceneQuadStyle line;
+		line.color = zoomed && layout.aim_on_target ? d3scene::Vec3{1,0,0} : d3scene::Vec3{0,1,0};
+		const int radius = zoomed ? 8 : 6;
+		PrepareSceneQuad(frame,SceneReticle,order,{cx-radius,cy,radius*2+1,1},line);
+		PrepareSceneQuad(frame,SceneReticle,order,{cx,cy-radius,1,radius*2+1},line);
+		d3scene::PreparedForeground foreground; foreground.identity = SceneReticle; foreground.order = 10;
+		foreground.layer.display_views.push_back(MakeSceneCanvasView(SceneReticle,viewport,d3scene::ViewTarget::Display,true));
+		frame.foregrounds.push_back(std::move(foreground));
+		if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
+			AutomatedCaptureLog("scene reticle prepared mode=%s quads=%d",zoomed ? "zoom" : "guided",order);
+		return;
+	}
 	ushort primary_mask = 0, secondary_mask = 0;
 	if (!PrepareReticleMasks(primary_mask,secondary_mask)) return;
 	auto& player = Players[Player_num];
 	auto* object = &Objects[player.objnum];
 	auto& ship = Ships[player.ship_index];
 	const int primary = player.weapon[PW_PRIMARY].index, secondary = player.weapon[PW_SECONDARY].index;
-	const int width = Game_window_h*4/3, height = Game_window_h;
+	const int width = viewport.width, height = viewport.height;
 	const float scale_x = float(width)/DEFAULT_HUD_WIDTH, scale_y = float(height)/DEFAULT_HUD_HEIGHT;
 	const int cx = Ret_x_off+(FIXED_SCREEN_WIDTH>>1), cy = Ret_y_off+(FIXED_SCREEN_HEIGHT>>1)+6;
 	int32_t order = 0;
@@ -2701,9 +2740,9 @@ void PrepareGameReticle(d3scene::FrameData& frame)
 	battery(reticle_mask(object,&ship.static_wb[secondary],secondary),secondary_mask,Ret_sec_wb);
 	quad(cx-RET_IMAGE_WIDTH,cy-RET_IMAGE_HEIGHT/2,Reticle_elem_array[RET_LGUNSIGHT].bmp_off);
 	quad(cx,cy-RET_IMAGE_HEIGHT/2,Reticle_elem_array[RET_RGUNSIGHT].bmp_off);
-	d3scene::PreparedForeground foreground; foreground.identity = SceneReticle;
+	d3scene::PreparedForeground foreground; foreground.identity = SceneReticle; foreground.order = 10;
 	foreground.layer.display_views.push_back(MakeSceneCanvasView(SceneReticle,
-		{Game_window_x+(Game_window_w-width)/2,Game_window_y,width,height},d3scene::ViewTarget::Display,true));
+		viewport,d3scene::ViewTarget::Display,true));
 	frame.foregrounds.push_back(std::move(foreground));
 	if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
 		AutomatedCaptureLog("scene reticle prepared quads=%d",order);
@@ -2779,66 +2818,4 @@ void RenderReticle()
 
 	if (Reticle_elem_array[RET_RGUNSIGHT].bmp_off > -1)
 		RenderHUDQuad(cx, cy - rh / 2, rw, rh, 0, 0, 1, 1, Reticle_elem_array[RET_RGUNSIGHT].bmp_off, 192);
-}
-
-
-//	renders missile reticle
-static void SetReticleHUDTextFont()
-{
-	grtext_SetFont(HUD_FONT);
-	const float font_aspect_y = (float)Game_window_h / Max_window_h;
-	const float extra_scale = Max_window_h > D3M_FONT_SCALE_THRESHOLD ?
-		(float)Max_window_h / D3M_FONT_SCALE_THRESHOLD : 1.0f;
-	float font_scale = extra_scale * ConfigNormalizeHudTextScale(Hud_text_scale);
-	if (font_aspect_y <= 0.60f)
-		font_scale *= 0.60f;
-	else if (font_aspect_y <= 0.80f)
-		font_scale *= 0.80f;
-	grtext_SetFontScale(font_scale);
-}
-
-void RenderMissileReticle()
-{
-	//	Crosshair reticle
-	int cx = Game_window_w / 2;
-	int cy = Game_window_h / 2;
-
-	SetReticleHUDTextFont();
-	RenderHUDTextFlags(HUDTEXT_CENTERED, GR_RED, HUD_ALPHA, 0, 10, cy - 50, TXT_HUD_GUIDED);
-	grtext_Flush();
-
-	rend_SetZBufferState(0);
-	rend_SetFlatColor(GR_GREEN);
-
-	rend_DrawLine(cx - 6, cy, cx + 6, cy);
-	rend_DrawLine(cx, cy - 6, cx, cy + 6);
-	rend_SetZBufferState(1);
-}
-
-//	renders missile reticle
-void RenderZoomReticle()
-{
-	//	Crosshair reticle
-	int cx = Game_window_w / 2;
-	int cy = Game_window_h / 2;
-	int text_height = grfont_GetHeight(HUD_FONT);
-	char str[255];
-
-	SetReticleHUDTextFont();
-	RenderHUDTextFlags(HUDTEXT_CENTERED, GR_RED, HUD_ALPHA, 0, 10, cy - 50, TXT_HUD_ZOOM);
-
-	sprintf(str, TXT_HUD_ZOOM_UNITS, Players[Player_num].zoom_distance);
-
-	RenderHUDTextFlags(HUDTEXT_CENTERED, GR_RED, HUD_ALPHA, 0, 10, cy - 50 + text_height, str);
-	grtext_Flush();
-
-	rend_SetZBufferState(0);
-
-	if (Players[Player_num].flags & PLAYER_FLAGS_BULLSEYE)
-		rend_SetFlatColor(GR_RED);
-	else
-		rend_SetFlatColor(GR_GREEN);
-
-	rend_DrawLine(cx - 8, cy, cx + 8, cy);
-	rend_DrawLine(cx, cy - 8, cx, cy + 8);
 }

@@ -27,6 +27,7 @@ param(
     [switch]$HudProbe,
     [switch]$HudMessageProbe,
     [switch]$HudSmallProbe,
+    [ValidateSet('none','guided','zoom','rear','letterbox','observer','hidden')][string]$HudViewProbe = 'none',
     [switch]$ReticleReference,
     [switch]$ObservationProbe,
     [switch]$MirrorCameraProbe,
@@ -83,6 +84,9 @@ if ($ViewImageProbe -and -not $SceneInspection) { throw 'View image probe requir
 if ($HudProbe -and -not $SceneInspection) { throw 'HUD publication probe requires scene inspection.' }
 if ($HudMessageProbe -and -not $HudProbe) { throw 'HUD message probe requires HUD publication.' }
 if ($HudSmallProbe -and -not $HudProbe) { throw 'Small HUD probe requires HUD publication.' }
+if ($HudViewProbe -ne 'none' -and (-not $HudProbe -or -not $ReticleProbe -or $ReticleReference -or $CockpitProbe -or $HudMessageProbe)) {
+    throw 'HUD view policy probe requires HUD/reticle publication without cockpit, messages or legacy reference.'
+}
 if ($MirrorSurfaceProbe -and (-not $SceneInspection -or $MirrorCameraProbe)) { throw 'Mirror surface probe requires scene inspection and its own camera.' }
 if ($MirrorCameraProbe -and (-not $SceneInspection -or $ObservationProbe -or $TerrainProbe -or $SkyProbe -or $SatelliteProbe -or $HistoryProbe -or $ScorchViewProbe -or $ModelEffectsProbe -or $LodProbeTier -ge 0)) {
     throw 'Mirror camera probe requires isolated scene inspection without other camera/observation probes.'
@@ -141,6 +145,7 @@ $manifest = [ordered]@{
     hud_probe = [bool]$HudProbe
     hud_message_probe = [bool]$HudMessageProbe
     hud_small_probe = [bool]$HudSmallProbe
+    hud_view_probe = $HudViewProbe
     view_image_revision = $(if ($ViewImageProbe) { 2 } else { 0 })
     cockpit_probe_revision = $(if ($CockpitProbe) { 4 } else { 0 })
     scorch_probe = [bool]$ScorchProbe
@@ -202,6 +207,7 @@ try {
         if ($HudProbe) { $arguments += '-scene-hud-probe' }
         if ($HudMessageProbe) { $arguments += '-scene-hud-message-probe' }
         if ($HudSmallProbe) { $arguments += '-scene-hud-small-probe' }
+        if ($HudViewProbe -ne 'none') { $arguments += @('-scene-hud-view-probe',$HudViewProbe) }
         if ($MirrorSurfaceProbe) { $arguments += '-scene-mirror-surface-probe' }
         if ($RingProbe) { $arguments += '-scene-ring-probe' }
         if ($DepthPolicyProbe) { $arguments += '-scene-depth-policy-probe' }
@@ -233,7 +239,7 @@ try {
         if ($ModelCollectionProbe) { $resourceValidated = $resourceValidated -and $logText.Contains('scene model collection fixture world=0 preview=1') }
         if ($DisplayViewProbe) { $resourceValidated = $resourceValidated -and $logText.Contains('scene display view fixture target=display viewport=bottom_right') }
         if ($CockpitProbe) { $resourceValidated = $resourceValidated -and $logText.Contains('scene cockpit prepared ') -and $logText.Contains('scene cockpit composed ') }
-        if ($ReticleProbe) { $resourceValidated = $resourceValidated -and $logText.Contains('scene reticle prepared ') }
+        if ($ReticleProbe -and $HudViewProbe -notin @('rear','letterbox','observer','hidden')) { $resourceValidated = $resourceValidated -and $logText.Contains('scene reticle prepared ') }
         if ($ObservationProbe) { $resourceValidated = $resourceValidated -and $logText.Contains('scene observation candidate ') -and $logText.Contains('scene observations sealed ') }
         if ($RingProbe) { $resourceValidated = $resourceValidated -and $logText.Contains('scene ring fixture facing=1 planar_reverse=1 object=1 gravity=1') }
         if ($LodProbeTier -ge 0) {
@@ -256,6 +262,7 @@ try {
         $ok = -not $timedOut -and $resourceValidated -and (-not $MirrorCameraProbe -or $logText.Contains('scene mirror camera room=')) -and
             (-not $HudProbe -or $logText.Contains('scene HUD items prepared')) -and
             (-not $HudMessageProbe -or $logText.Contains('scene HUD messages prepared')) -and
+            ($HudViewProbe -eq 'none' -or $logText.IndexOf("scene HUD view policy mode=$HudViewProbe",[StringComparison]::OrdinalIgnoreCase) -ge 0) -and
             (-not $ViewImageProbe -or $logText.Contains('scene view image key=')) -and
             (-not $MirrorSurfaceProbe -or ($logText.Contains('scene mirror surface camera') -and $logText.Contains('scene view image key='))) -and $process.ExitCode -eq 1 -and
             (Test-Path -LiteralPath $png) -and $logText.Contains('capture saved') -and

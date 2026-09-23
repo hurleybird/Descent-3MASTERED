@@ -7,6 +7,29 @@
 #include <cstring>
 #include <stdexcept>
 
+HUDCanvasLayout CompileHUDCanvasLayout(const HUDCanvasRequest& request) {
+    if (request.world.width <= 0 || request.world.height <= 0 || request.display.width <= 0 || request.display.height <= 0)
+        throw std::invalid_argument("Invalid HUD canvas extent");
+    HUDCanvasLayout layout; layout.primary = request.world; layout.display = request.display;
+    if (!std::isfinite(request.zoom_distance)) throw std::invalid_argument("Invalid HUD range");
+    layout.aim_on_target = request.aim_on_target; layout.zoom_distance = request.zoom_distance;
+    if (request.centered_four_three) {
+        layout.primary.width = request.world.height*4/3;
+        layout.primary.x += (request.world.width-layout.primary.width)/2;
+    }
+    switch (request.mode) {
+    case HUDViewMode::Hidden: case HUDViewMode::Rear: return layout;
+    case HUDViewMode::Guided: layout.aim = HUDAimMode::Guided; return layout;
+    case HUDViewMode::Zoom: layout.aim = HUDAimMode::Zoom; return layout;
+    case HUDViewMode::Ship: layout.aim = request.show_ship_reticle ? HUDAimMode::Ship : HUDAimMode::Hidden; break;
+    case HUDViewMode::Letterbox: case HUDViewMode::Observer: break;
+    default: throw std::invalid_argument("Unknown HUD view mode");
+    }
+    layout.item_mask = request.item_mask;
+    layout.auxiliary = float(request.world.height)/request.display.height <= .8f;
+    return layout;
+}
+
 d3scene::View MakeSceneCanvasView(uint64_t collection,d3scene::Rect viewport,
     d3scene::ViewTarget target,bool inspection) {
     d3scene::View view;

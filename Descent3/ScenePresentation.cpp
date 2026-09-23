@@ -3,6 +3,7 @@
 #include "SceneMaterialBindings.h"
 #include "SceneReflectionBake.h"
 #include "SceneCanvas.h"
+#include "SceneModuleContext.h"
 #include "SceneFeedback.h"
 #include "../renderer/SceneGeometry.h"
 #include "../renderer/SceneView.h"
@@ -224,9 +225,9 @@ void resolveMaterial(d3scene::SurfaceBinding& surface, float time, bool model, b
 }
 }
 
-d3scene::PresentationRef PrepareGamePresentation(bool advance_history) {
+d3scene::PresentationRef PrepareGamePresentation() {
     const unsigned int simulation_random = ps_rand_get_state();
-    const auto source = ExtractGamePresentation(Gametime, Frametime, Game_paused, advance_history);
+    const auto source = ExtractGamePresentation(Gametime, Frametime, Game_paused);
     auto data = source->data();
     const auto control_delta = GetPlayerControlledTranslationDelta();
     data.player_control_delta = {control_delta.x,control_delta.y,control_delta.z};
@@ -331,11 +332,14 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance_history) {
     PrepareGameObjectEffects(data);
     PrepareGameScorches(data);
     if (SceneGeometryInspection() && FindArg("-scene-cockpit-probe")) {
-        PrepareGameCockpit(data,advance_history);
+        PrepareGameCockpit(data,true);
         PrepareCockpitComposition(data,{Game_window_x,Game_window_y,Game_window_w,Game_window_h},SceneCockpitZoom);
     }
-    if (SceneGeometryInspection() && FindArg("-scene-reticle-probe")) PrepareGameReticle(data);
-    if (SceneGeometryInspection() && FindArg("-scene-hud-probe")) PrepareGameHUD(data,advance_history);
+    if (SceneGeometryInspection() && (FindArg("-scene-reticle-probe") || FindArg("-scene-hud-probe"))) {
+        const auto layout = CaptureGameHUDLayout();
+        if (FindArg("-scene-reticle-probe")) PrepareGameReticle(data,layout);
+        if (FindArg("-scene-hud-probe")) PrepareGameHUD(data,layout,true);
+    }
     if (SceneGeometryInspection()) {
         SceneTextStyle style; style.font = HUD_FONT; style.color = {1,220/255.f,80/255.f}; style.additive = true;
         int order = 0;
@@ -344,6 +348,7 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance_history) {
         for (int pass = 0; pass < 2; ++pass) PrepareSceneText(data,SceneInspectionBanner,order,12,28,
             "Incomplete - not yet qualified for gameplay",style);
         d3scene::PreparedForeground foreground; foreground.identity = SceneInspectionBanner;
+        foreground.phase = d3scene::ForegroundPhase::FinalOverlay;
         foreground.layer.display_views.push_back(MakeSceneCanvasView(SceneInspectionBanner,{0,0,Max_window_w,Max_window_h},
             d3scene::ViewTarget::Display,true));
         data.foregrounds.push_back(std::move(foreground));
@@ -352,7 +357,7 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance_history) {
         int order = 0; SceneQuadStyle style; style.uv_min = {0,1}; style.uv_max = {1,0};
         PrepareSceneQuad(data,SceneViewImageProbe,order,{16,72,320,180},style);
         data.meshes.back().surface.view_image_slot = 1;
-        d3scene::PreparedForeground foreground; foreground.identity = SceneViewImageProbe;
+        d3scene::PreparedForeground foreground; foreground.identity = SceneViewImageProbe; foreground.order = 30;
         foreground.layer.display_views.push_back(MakeSceneCanvasView(SceneViewImageProbe,{0,0,Max_window_w,Max_window_h},
             d3scene::ViewTarget::Display,true));
         foreground.layer.display_views.back().image_inputs.push_back({1,SceneViewImageProbe+1});
@@ -409,7 +414,7 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance_history) {
     auto prepared = d3scene::Presentation::freeze(data);
     if (ps_rand_get_state() != simulation_random)
         Error("Presentation preparation consumed simulation randomness");
-    if (advance_history) previous_models = prepared;
+    previous_models = prepared;
     return prepared;
 }
 
@@ -602,11 +607,14 @@ d3scene::VisibilityReport RenderGameSceneView(const d3scene::Presentation& frame
     return observations;
 }
 
-void RenderPreparedViewImageProbe(const d3scene::Presentation& frame) {
-    if (const auto* layer = frame.foreground(SceneViewImageProbe)) d3scene::renderForeground(frame,*layer);
-}
-void RenderPreparedInspectionBanner(const d3scene::Presentation& frame) {
-    if (const auto* layer = frame.foreground(SceneInspectionBanner)) d3scene::renderForeground(frame,*layer);
+void RenderGameForegrounds(const d3scene::Presentation& frame,d3scene::ForegroundPhase phase) {
+    if (!SceneGeometryInspection()) Error("Foreground migration has not passed gameplay acceptance");
+    for (const auto& foreground : frame.data().foregrounds) if (foreground.phase == phase) {
+        // The retained comparison oracle is diagnostic-only, not a fallback.
+        if (foreground.identity == SceneReticle && FindArg("-scene-reticle-reference"))
+            RenderPreparedReticle(frame);
+        else d3scene::renderForeground(frame,foreground.layer);
+    }
 }
 void PrepareCockpitComposition(d3scene::FrameData& frame,d3scene::Rect viewport,float zoom) {
     if (!SceneGeometryInspection()) Error("Cockpit migration has not passed gameplay acceptance");
@@ -656,16 +664,9 @@ void PrepareCockpitComposition(d3scene::FrameData& frame,d3scene::Rect viewport,
         view.target = d3scene::ViewTarget::Display;
         layer.display_views.push_back(view);
     }
-    frame.foregrounds.push_back({SceneCockpitBase,std::move(layer)});
+    frame.foregrounds.push_back({SceneCockpitBase,std::move(layer),40});
     if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
         AutomatedCaptureLog("scene cockpit composed base=%d late=%d gauges=%d text=%d",base,late,gauges,text);
-}
-
-void RenderPreparedCockpit(const d3scene::Presentation& frame) {
-    if (!SceneGeometryInspection()) Error("Cockpit migration has not passed gameplay acceptance");
-    const auto* layer = frame.foreground(SceneCockpitBase);
-    if (!layer) Error("Cockpit fixture has no published composition");
-    d3scene::renderForeground(frame,*layer);
 }
 
 void RenderModuleSceneView(object* viewer, vector* eye, int room, matrix* orientation,
@@ -674,7 +675,7 @@ void RenderModuleSceneView(object* viewer, vector* eye, int room, matrix* orient
     int width, height;
     rend_GetProjectionParameters(&width, &height);
     if (w <= 0 || h <= 0) { x = y = 0; w = width; h = height; }
-    const auto frame = PrepareGamePresentation(false);
+    const auto frame = ModuleScenePresentation();
     const auto view = MakeGameSceneView(d3scene::ViewKind::Preview, 0x100000000ull,
         viewer, *eye, room, *orientation, zoom, rear, {0, 0, width, height}, {x, y, w, h});
     RenderGameSceneView(*frame, view);

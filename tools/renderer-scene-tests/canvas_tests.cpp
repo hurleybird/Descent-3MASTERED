@@ -21,6 +21,34 @@ int runCanvasTests() {
     int checks = 0;
     const auto check = [&](bool value,const char* message) { ++checks; if (!value) throw std::runtime_error(message); };
     SceneTextStyle style; style.font = 0;
+    HUDCanvasRequest hud; hud.world = {0,0,1280,720}; hud.display = hud.world;
+    hud.mode = HUDViewMode::Ship; hud.item_mask = 123;
+    auto hud_layout = CompileHUDCanvasLayout(hud);
+    check(hud_layout.primary.x == 160 && hud_layout.primary.width == 960 && !hud_layout.auxiliary &&
+        hud_layout.aim == HUDAimMode::Ship && hud_layout.item_mask == 123,"Ship HUD did not compile its centered authored canvas");
+    hud.world = {256,144,768,432}; hud_layout = CompileHUDCanvasLayout(hud);
+    check(hud_layout.primary.x == 352 && hud_layout.primary.width == 576 && hud_layout.auxiliary &&
+        hud_layout.display.width == 1280,"Reduced HUD changed the auxiliary display extent");
+    hud.show_ship_reticle = false;
+    check(CompileHUDCanvasLayout(hud).aim == HUDAimMode::Hidden,"Ship reticle toggle ignored");
+    for (auto mode : {HUDViewMode::Guided,HUDViewMode::Zoom,HUDViewMode::Rear,HUDViewMode::Hidden}) {
+        hud.mode = mode; hud_layout = CompileHUDCanvasLayout(hud);
+        check(!hud_layout.item_mask && !hud_layout.auxiliary,"Special view inherited normal HUD items");
+        const auto aim = mode == HUDViewMode::Guided ? HUDAimMode::Guided : mode == HUDViewMode::Zoom ? HUDAimMode::Zoom : HUDAimMode::Hidden;
+        check(hud_layout.aim == aim,"Special aim mode incorrectly followed the ship reticle toggle");
+    }
+    hud.centered_four_three = false;
+    for (auto mode : {HUDViewMode::Letterbox,HUDViewMode::Observer}) {
+        hud.mode = mode; hud_layout = CompileHUDCanvasLayout(hud);
+        check(hud_layout.primary.x == 256 && hud_layout.primary.width == 768 && hud_layout.item_mask == 123 &&
+            hud_layout.aim == HUDAimMode::Hidden,"Non-ship HUD inherited a ship aspect or reticle");
+    }
+    bool invalid_hud = false; hud.mode = static_cast<HUDViewMode>(99);
+    try { CompileHUDCanvasLayout(hud); } catch (const std::invalid_argument&) { invalid_hud = true; }
+    check(invalid_hud,"Unknown HUD mode accepted");
+    invalid_hud = false; hud.mode = HUDViewMode::Ship; hud.display.height = 0;
+    try { CompileHUDCanvasLayout(hud); } catch (const std::invalid_argument&) { invalid_hud = true; }
+    check(invalid_hud,"Zero-height HUD layout accepted");
     const auto extent = MeasureSceneText("AB",style);
     check(extent.width == 12 && extent.height == 9,"Canvas text metrics lost kerning or spacing");
     check(MeasureSceneText("AB\nA",style).height == 18 && MeasureSceneText("AB\nA",style).width == 12,
@@ -87,5 +115,19 @@ int runCanvasTests() {
     display.target = d3scene::ViewTarget::Scene; rejectForeground(); display.target = d3scene::ViewTarget::Display;
     display.feedback = d3scene::Automap; rejectForeground(); display.feedback = d3scene::NoFeedback;
     display.viewport.width = 0; rejectForeground();
+    display.viewport.width = 800;
+    display.kind = d3scene::ViewKind::Main; rejectForeground(); display.kind = d3scene::ViewKind::Preview;
+    data.foregrounds[0].phase = static_cast<d3scene::ForegroundPhase>(99); rejectForeground();
+    data.foregrounds[0].phase = d3scene::ForegroundPhase::WorldOverlay;
+    auto extra = data.foregrounds[0]; extra.identity = 8;
+    data.foregrounds.push_back(extra); rejectForeground();
+    data.foregrounds[0].order = 20;
+    data.foregrounds[1].order = 10;
+    extra.identity = 9; extra.order = -1; extra.phase = d3scene::ForegroundPhase::FinalOverlay;
+    data.foregrounds.push_back(extra);
+    const auto scheduled = d3scene::Presentation::freeze(data);
+    check(scheduled->data().foregrounds[0].identity == 8 && scheduled->data().foregrounds[1].identity == 7 &&
+        scheduled->data().foregrounds[2].identity == 9,"Foreground execution order depends on publication call order");
+    check(data.foregrounds[0].identity == 7,"Foreground compilation mutated the caller's plan");
     return checks;
 }

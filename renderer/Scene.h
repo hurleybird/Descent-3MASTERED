@@ -518,7 +518,13 @@ void renderForeground(const Presentation& frame, const ForegroundLayer& layer);
 
 // Game layout publishes camera, placement and ordering alongside geometry.
 // Execution selects a named layer; it never consults live window/HUD state.
-struct PreparedForeground { uint64_t identity = 0; ForegroundLayer layer; };
+enum class ForegroundPhase { WorldOverlay, FinalOverlay };
+struct PreparedForeground {
+    uint64_t identity = 0;
+    ForegroundLayer layer;
+    int32_t order = 0;
+    ForegroundPhase phase = ForegroundPhase::WorldOverlay;
+};
 struct FrameData {
     uint64_t sequence = 0, scene_lifetime = 0;
     double simulation_time = 0;

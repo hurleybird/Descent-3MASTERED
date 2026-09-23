@@ -1,5 +1,36 @@
 # Renderer migration checkpoint
 
+## Continuation: foreground schedule, shared HUD policy and module frame scope
+
+Foreground phase/order is now owned and compiled at publication. The game loop
+executes world overlays and final overlays without a draw-time feature list.
+Duplicate identities/order slots, invalid phases, empty layers and main-world
+views in a foreground are rejected using the existing composition validator.
+HUD/cockpit/reticle/banner/preview placement and ordering survive frame retention.
+
+The module scene-view entry no longer calls PrepareGamePresentation(false).
+It borrows the game loop's published frame through a bounded ABI scope; nested,
+empty or out-of-interval requests fail instead of extracting/reusing a stale
+implicit frame. Tests cover reuse, later frames and exception cleanup. This
+does not complete the module drawing translator or qualify its view composition.
+
+HUD items and reticles now share one explicit view-mode/layout decision. Guided
+and zoom labels/crosshairs publish text and solid quads, including range/target
+state; their old immediate draw implementations are removed. Normal ship,
+reduced viewport, letterbox/observer and suppressed HUD policies are tested.
+The diagnostic mode fixture changes UI policy only, not the physical camera or
+simulation; it is not a guided-missile/zoom gameplay test.
+
+Full build and 5,724 checks pass. scene-scheduled-hud and scene-scheduled-mirror
+are pixel-identical to their HUD/message and mirror/preview predecessors.
+All eight scene-hud-lifecycle-corpus comparisons differ only at the newly
+published "Game restored" text (bounds 556,3..723,16), with no other changes.
+All six scene-hud-policy-{guided,zoom,rear,letterbox,observer,hidden} captures
+complete and were visually inspected. scene-hud-policy-normal exactly matches
+scene-scheduled-hud. The first mode fixture failed on uppercased Windows args;
+case-insensitive parsing fixed it, and the failed corpus is retained as evidence.
+No acceptance gates, Candidate installs or shadows changed.
+
 ## Continuation: message lifecycle and auxiliary HUD canvases
 
 Scrolling, input and persistent-message text now use prepared glyph geometry.

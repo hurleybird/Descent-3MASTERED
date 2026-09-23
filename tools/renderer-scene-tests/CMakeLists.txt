@@ -13,7 +13,9 @@ add_executable(renderer_scene_tests
     fog_tests.cpp
     feedback_tests.cpp
     canvas_tests.cpp
+    module_context_tests.cpp
     ../../Descent3/SceneCanvas.cpp
+    ../../Descent3/SceneModuleContext.cpp
     ../../renderer/SceneLighting.cpp
     ../../renderer/SceneGeometry.cpp
     ../../renderer/ScenePortals.cpp

@@ -28,6 +28,7 @@
 #include <vector>
 #include "gameloop.h"
 #include "SceneExtraction.h"
+#include "SceneModuleContext.h"
 #include "SceneFeedback.h"
 #include "../renderer/SceneLighting.h"
 #include "../renderer/SceneAnimation.h"
@@ -3029,6 +3030,7 @@ void GameRenderFrame(void)
 		// Publish once. Every world view below sees this same owned scene, not
 		// a second traversal of mutable simulation state.
 		const auto presentation = PrepareGamePresentation();
+		const ModuleSceneScope module_scene(presentation);
 		SceneFeedbackTransaction feedback(*presentation);
 
 		// Draw the big 3d view
@@ -3075,16 +3077,7 @@ void GameRenderFrame(void)
 				AutomatedCaptureLog("scene layer fixture composed");
 		}
 
-		if (SceneGeometryInspection() && FindArg("-scene-reticle-probe"))
-			RenderPreparedReticle(*presentation);
-		if (SceneGeometryInspection() && FindArg("-scene-hud-probe"))
-			RenderPreparedHUD(*presentation);
-		if (SceneGeometryInspection() && FindArg("-scene-view-image-probe"))
-			RenderPreparedViewImageProbe(*presentation);
-		if (SceneGeometryInspection() && FindArg("-scene-cockpit-probe"))
-			RenderPreparedCockpit(*presentation);
-		if (SceneGeometryInspection() && FindArg("-scene-hud-probe"))
-			RenderPreparedHUDAuxiliary(*presentation);
+		if (SceneGeometryInspection()) RenderGameForegrounds(*presentation,d3scene::ForegroundPhase::WorldOverlay);
 
 		// Do Cockpit/Hud
 		// Cinematics own their presentation through Cinematic_RenderFrame below.
@@ -3142,7 +3135,7 @@ void GameRenderFrame(void)
 		}
 		if (SceneGeometryInspection())
 		{
-			RenderPreparedInspectionBanner(*presentation);
+			RenderGameForegrounds(*presentation,d3scene::ForegroundPhase::FinalOverlay);
 		}
 		rend_FlushTextLayer();
 		rend_PerfGpuSceneMark(RENDERER_GPU_SCENE_AFTER_DEBUG);
