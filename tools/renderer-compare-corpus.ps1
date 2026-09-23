@@ -108,6 +108,9 @@ if ([bool]$referenceManifest.reticle_probe -ne [bool]$actualManifest.reticle_pro
 if ([bool]$referenceManifest.reticle_reference -ne [bool]$actualManifest.reticle_reference -and -not $DiagnosticComparison) {
     throw 'Reticle executor differs; use DiagnosticComparison for the legacy reference check.'
 }
+if ([bool]$referenceManifest.observation_probe -ne [bool]$actualManifest.observation_probe -and -not $DiagnosticComparison) {
+    throw 'Observation inspection differs; use DiagnosticComparison for non-mutating query verification.'
+}
 if ([bool]$referenceManifest.motion_blur -ne [bool]$actualManifest.motion_blur -and -not $DiagnosticComparison) {
     throw 'Motion blur differs; use DiagnosticComparison for intentional processing changes.'
 }

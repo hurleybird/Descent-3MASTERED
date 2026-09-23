@@ -26,6 +26,7 @@
 #include "../renderer/SceneGeometry.h"
 #include "args.h"
 #include "config.h"
+#include "renderobject.h"
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
@@ -208,6 +209,16 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::FrameDat
             owner.visible = owner.visible && parent && !(parent->render_type == RT_NONE && parent->type != OBJ_POWERUP &&
                 (parent->type == OBJ_PLAYER || parent->movement_type != MT_NONE));
         }
+        owner.observation_bounds = {value(source->min_xyz),value(source->max_xyz)};
+        owner.observation_radius = source->size;
+        owner.observation_eligible = owner.visible && source->render_type != RT_NONE &&
+            (!OBJECT_OUTSIDE(source) || (!(source->flags & OF_DEAD) && source->type != OBJ_ROOM));
+        owner.observation_front_to_back = RenderObjectCanUseSeparatedPasses(source);
+        if (source->type == OBJ_WEAPON && source->id >= 0 && source->id < MAX_WEAPONS) {
+            const auto flags = Weapons[source->id].flags;
+            if (flags & WF_STREAMER) owner.observation_radius = Weapons[source->id].phys_info.velocity.z;
+            owner.observation_unbounded = (flags & WF_ELECTRICAL) != 0;
+        }
         if (!owner.visible) continue;
         if (source->render_type != RT_POLYOBJ && source->render_type != RT_WEAPON) continue;
         if (source->render_type == RT_WEAPON && (Weapons[source->id].flags &
@@ -347,4 +358,5 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::FrameDat
         }
         if (!instance.models.empty()) data.model_instances.push_back(std::move(instance));
     }
+    data.observation_inputs_prepared = true;
 }

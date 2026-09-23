@@ -52,7 +52,8 @@ void ResetSmallViews();
 
 //Draw all the active small views
 namespace d3scene { class Presentation; }
-void DrawSmallViews(const d3scene::Presentation& presentation);
+class SceneFeedbackTransaction;
+void DrawSmallViews(const d3scene::Presentation& presentation, SceneFeedbackTransaction& feedback);
 
 //Returns the viewer object for the specified small view.  
 //If the view isn't active, returns OBJECT_HANDLE_NONE.

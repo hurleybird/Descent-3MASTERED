@@ -257,6 +257,7 @@ int runSceneImageTests();
 int runProceduralTests();
 int runTerrainTests();
 int runFogTests();
+int runFeedbackTests();
 int main() {
     try {
         assetTests(); frameTests(); extractionTests();
@@ -268,6 +269,7 @@ int main() {
         Checks += runProceduralTests();
         Checks += runTerrainTests();
         Checks += runFogTests();
+        Checks += runFeedbackTests();
         std::printf("PASS: %d renderer scene checks\n", Checks);
         return 0;
     } catch (const std::exception& error) {

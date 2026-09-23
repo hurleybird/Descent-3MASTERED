@@ -31,7 +31,7 @@ void PrepareGameReticle(d3scene::FrameData&);
 void RenderPreparedReticle(const d3scene::Presentation&);
 void RenderPreparedCockpit(const d3scene::Presentation&, d3scene::Rect viewport, float zoom);
 d3scene::PresentationRef PrepareGamePresentation(bool advance_history = true);
-void RenderGameSceneView(const d3scene::Presentation&, d3scene::View);
+d3scene::VisibilityReport RenderGameSceneView(const d3scene::Presentation&, d3scene::View);
 bool SceneGeometryInspection();
 void RenderModuleSceneView(object*, vector*, int, matrix*, float, bool,
     int anchor_x = 0, int anchor_y = 0, int anchor_w = 0, int anchor_h = 0);

@@ -104,6 +104,7 @@ d3scene::PresentationRef ExtractGamePresentation(double time, float delta, bool 
         state.asset = std::move(asset);
         state.bounds = {value(source.min_xyz), value(source.max_xyz)};
         state.authored_flags = source.flags & ~RF_MIRROR_VISIBLE;
+        state.observation_unclipped = (source.flags & RF_DOOR) != 0;
         state.fog_depth = source.fog_depth;
         state.fog_color = {source.fog_r, source.fog_g, source.fog_b};
         state.pulse_time = source.pulse_time;

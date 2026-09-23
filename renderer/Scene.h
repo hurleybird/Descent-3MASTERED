@@ -310,6 +310,7 @@ struct RoomState {
     int32_t mirror_polygon = -1;
     float light_scalar = 1;
     bool blocks_portals = false, exterior = false;
+    bool observation_unclipped = false; // authored door-room admission
     bool fog_enabled = false;
 };
 struct FogTriangle { Vec3 a, b, c, inward; };
@@ -358,6 +359,12 @@ struct ObjectState {
     Transform current, previous;
     bool has_previous = false;
     float radius = 0;
+    // Simulation-observation volume, deliberately independent of posed model
+    // bounds, LOD, triangle visibility and renderer pass membership.
+    Bounds observation_bounds;
+    float observation_radius = 0;
+    bool observation_eligible = false, observation_unbounded = false;
+    bool observation_front_to_back = false;
 };
 // A renderable model is not a simulation object. Ownership is optional (e.g.
 // cockpit/preview), while identity and pose belong to this presentation domain.
@@ -410,6 +417,7 @@ struct FrameData {
     double simulation_time = 0;
     float delta_time = 0;
     bool paused = false;
+    bool observation_inputs_prepared = false;
     Vec3 player_control_delta; // realized player-controlled translation, not camera motion
     float afterburner_factor = 0;
     LightingQuality lighting_quality = LightingQuality::Pixel;

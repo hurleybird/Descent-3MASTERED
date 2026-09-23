@@ -11,6 +11,7 @@ add_executable(renderer_scene_tests
     procedural_tests.cpp
     terrain_tests.cpp
     fog_tests.cpp
+    feedback_tests.cpp
     ../../renderer/SceneLighting.cpp
     ../../renderer/SceneGeometry.cpp
     ../../renderer/ScenePortals.cpp
@@ -24,6 +25,7 @@ add_executable(renderer_scene_tests
     ../../renderer/Scene.cpp
     ../../renderer/SceneView.cpp
     ../../Descent3/SceneExtraction.cpp)
+target_sources(renderer_scene_tests PRIVATE ../../Descent3/SceneObservations.cpp)
 target_compile_features(renderer_scene_tests PRIVATE cxx_std_17)
 target_include_directories(renderer_scene_tests PRIVATE ../../lib ../../Descent3)
 if(MSVC)

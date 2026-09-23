@@ -387,6 +387,13 @@ PresentationRef Presentation::freeze(const FrameData& data) {
         require(objects.emplace(object.handle,&object).second, "Duplicate object lifetime in scene");
         require(finite(object.current) && finite(object.previous) && std::isfinite(object.radius) && object.radius >= 0,
             "Invalid object transform or radius");
+        if (data.observation_inputs_prepared && object.observation_eligible) {
+            const auto& b = object.observation_bounds;
+            require(finite(b.minimum) && finite(b.maximum) && b.minimum.x <= b.maximum.x &&
+                b.minimum.y <= b.maximum.y && b.minimum.z <= b.maximum.z &&
+                std::isfinite(object.observation_radius) && object.observation_radius >= 0,
+                "Invalid simulation observation volume");
+        }
     }
     std::unordered_map<uint64_t,const ModelInstance*> model_instances;
     for (const auto& object : data.model_instances) {

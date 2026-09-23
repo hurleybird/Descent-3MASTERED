@@ -28,6 +28,7 @@
 #include <vector>
 #include "gameloop.h"
 #include "SceneExtraction.h"
+#include "SceneFeedback.h"
 #include "../renderer/SceneLighting.h"
 #include "../renderer/SceneAnimation.h"
 #include "game.h"
@@ -2793,7 +2794,7 @@ static void GetMainViewOverscanFrame(int* x1, int* y1, int* x2, int* y2, int* an
 }
 
 //Render into the big window
-void GameDrawMainView(const d3scene::Presentation& presentation)
+void GameDrawMainView(const d3scene::Presentation& presentation, SceneFeedbackTransaction& feedback)
 {
 	PERF_MARKER_SCOPE("GameDrawMainView");
 	extern bool Guided_missile_smallview;					// smallviews.cpp
@@ -2831,7 +2832,7 @@ void GameDrawMainView(const d3scene::Presentation& presentation)
 			Viewer_object->pos, Viewer_object->roomnum, Viewer_object->orient, Render_zoom, rear_view,
 			{main_view_x1, main_view_y1, main_view_x2 - main_view_x1, main_view_y2 - main_view_y1},
 			{main_view_anchor_x, main_view_anchor_y, Game_window_w, Game_window_h});
-		RenderGameSceneView(presentation, view);
+		feedback.add(RenderGameSceneView(presentation, view));
 	}
 	rend_PerfGpuSceneMark(RENDERER_GPU_SCENE_AFTER_MAIN_WORLD);
 	Rendering_main_view = false;
@@ -3024,19 +3025,28 @@ void GameRenderFrame(void)
 		// Publish once. Every world view below sees this same owned scene, not
 		// a second traversal of mutable simulation state.
 		const auto presentation = PrepareGamePresentation();
+		SceneFeedbackTransaction feedback(*presentation);
 
 		// Draw the big 3d view
 		{
 			PERF_MARKER_SCOPE("GameDrawMainView.Total");
-			GameDrawMainView(*presentation);
+			GameDrawMainView(*presentation,feedback);
 		}
 		rend_PerfGpuSceneMark(RENDERER_GPU_SCENE_AFTER_MAIN_VIEW);
 
 		//Do the small views.  These should be before GameDrawHUD() for the small windows
 		{
 			PERF_MARKER_SCOPE("DrawSmallViews");
-			DrawSmallViews(*presentation);
+			DrawSmallViews(*presentation,feedback);
 		}
+		// One observation boundary after world views, before foreground canvases.
+		// Inspection reports remain NoFeedback; the commit barrier stays in place
+		// until the simulation-bounds/portal observation query is qualified.
+		const auto& observations = feedback.seal();
+		if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
+			AutomatedCaptureLog("scene observations sealed automap=%u effects=%u objects=%u terrain=%d",
+				(unsigned)observations.automap_rooms.size(),(unsigned)observations.effect_rooms.size(),
+				(unsigned)observations.objects.size(),observations.terrain);
 		rend_PerfGpuSceneMark(RENDERER_GPU_SCENE_AFTER_SMALL_VIEWS);
 		if (SceneGeometryInspection() && FindArg("-scene-layer-probe"))
 		{

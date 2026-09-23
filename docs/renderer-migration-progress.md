@@ -1,5 +1,29 @@
 # Renderer migration checkpoint
 
+## Continuation: game-owned observation transaction and simulation volumes
+
+Main/auxiliary views now contribute to an explicit game-owned frame transaction,
+sealed before foreground composition. It validates frame/scene/handle identity,
+rejects conflicting replays, deduplicates exact replays and retains first-seen
+object order. Automap and effect rooms are separate domains. Empty inspection
+reports do not allocate a catalog of every game object. Transactions cannot be
+copied. Gameplay writes remain behind the existing compile barrier.
+
+Published ObjectState observation volumes/eligibility/order are independent of
+posed render bounds, LOD and draw passes. The new pure inspection query uses
+simulation spheres, portal AABBs and door-room admission; unsupported spatial
+roots/contracts are rejected and exterior/mirror gaps are explicit. The source
+census, timing and remaining qualification are in renderer-observation-contract.md.
+This is not yet legacy observation parity or enabled AI/automap/effect feedback.
+
+Full build and 5,357 tests pass. ObservationProbe loaded/rendered all eight
+effects saves successfully, and every screenshot is pixel-identical to
+scene-depth-policy-normal. Final candidate room/object counts (000..007) are
+3/3, 2/0, 4/16, 3/8, 3/0, 3/2, 2/0, 3/4. Save 006 correctly exposes pending
+mirror coverage; none of these views exercises exterior coverage. These counts
+are diagnostics, not golden gameplay acceptance. Candidate and domain gates
+remain unchanged.
+
 ## Continuation: prepared native-resolution reticle canvas
 
 SceneCanvas now publishes textured/flat ordered quads and constructs explicit

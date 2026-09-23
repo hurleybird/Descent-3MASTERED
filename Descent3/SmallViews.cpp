@@ -18,6 +18,7 @@
 
 #include "SmallViews.h"
 #include "SceneExtraction.h"
+#include "SceneFeedback.h"
 
 #include "descent.h"
 #include "pserror.h"
@@ -206,7 +207,7 @@ static void DrawSmallViewScanlineOverlay(int width, int height, bool cockpit_emb
 }
 
 //Render into one of the small windows
-void RenderSmallWindow(const d3scene::Presentation& presentation, int view_slot, int left, int top, int right, int bot, object* viewer, vector* viewer_eye, int viewer_roomnum, matrix* viewer_orient, int flags, float zoom, ddgr_color outline_color, char* label, float timer, bool cockpit_embedded)
+void RenderSmallWindow(const d3scene::Presentation& presentation, SceneFeedbackTransaction& feedback, int view_slot, int left, int top, int right, int bot, object* viewer, vector* viewer_eye, int viewer_roomnum, matrix* viewer_orient, int flags, float zoom, ddgr_color outline_color, char* label, float timer, bool cockpit_embedded)
 {
 	int width = right - left, height = bot - top;
 
@@ -261,7 +262,7 @@ void RenderSmallWindow(const d3scene::Presentation& presentation, int view_slot,
 		const auto view = MakeGameSceneView(d3scene::ViewKind::Auxiliary,
 			static_cast<uint64_t>(view_slot) + 2, viewer, *viewer_eye, viewer_roomnum,
 			*viewer_orient, zoom, rear_view, {left, top, width, height}, {0, 0, width, height});
-		RenderGameSceneView(presentation, view);
+		feedback.add(RenderGameSceneView(presentation, view));
 	}
 
 	DrawSmallViewScanlineOverlay(width, height, cockpit_embedded);
@@ -329,7 +330,7 @@ int GetGunRoom(vector* p0, int roomnum, int objnum, vector* p1)
 extern int Point_visible_last_frame;
 
 //Draw all the active small views
-void DrawSmallViews(const d3scene::Presentation& presentation)
+void DrawSmallViews(const d3scene::Presentation& presentation, SceneFeedbackTransaction& feedback)
 {
 	int v;
 	small_view* svp;
@@ -452,7 +453,7 @@ void DrawSmallViews(const d3scene::Presentation& presentation)
 
 		//Let's render
 		Point_visible_last_frame = -1;
-		RenderSmallWindow(presentation, v, left, top, right, bot, viewer, viewer_eye, viewer_roomnum, viewer_orient, flags, svp->zoom, outline_color, svp->label, svp->timer, cockpit_embedded);
+		RenderSmallWindow(presentation, feedback, v, left, top, right, bot, viewer, viewer_eye, viewer_roomnum, viewer_orient, flags, svp->zoom, outline_color, svp->label, svp->timer, cockpit_embedded);
 		Point_visible_last_frame = -1;
 
 		//Update time for this view

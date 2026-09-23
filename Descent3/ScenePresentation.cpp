@@ -3,6 +3,7 @@
 #include "SceneMaterialBindings.h"
 #include "SceneReflectionBake.h"
 #include "SceneCanvas.h"
+#include "SceneFeedback.h"
 #include "../renderer/SceneGeometry.h"
 #include "grtext.h"
 #include "../renderer/SceneLighting.h"
@@ -445,7 +446,7 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance_history) {
     return prepared;
 }
 
-void RenderGameSceneView(const d3scene::Presentation& frame, d3scene::View view) {
+d3scene::VisibilityReport RenderGameSceneView(const d3scene::Presentation& frame, d3scene::View view) {
     if (!SceneGeometryInspection())
         Error("Renderer migration is incomplete. This test build requires -scene-inspection; use the preserved Candidate for gameplay.");
     view.geometry_inspection = true;
@@ -540,7 +541,18 @@ void RenderGameSceneView(const d3scene::Presentation& frame, d3scene::View view)
     // Diagnostic views do not mark rooms explored or tell AI it was observed.
     // The gameplay feedback compiler barrier remains until the normal executor
     // and its visibility policy have been migrated.
-    d3scene::renderView(frame, view);
+    auto observations = d3scene::renderView(frame, view);
+    if (FindArg("-scene-observation-probe") &&
+        (view.kind == d3scene::ViewKind::Main || view.kind == d3scene::ViewKind::Auxiliary)) {
+        auto inspection = view;
+        inspection.feedback = d3scene::Automap | d3scene::ObjectVisibility | d3scene::EffectEligibility;
+        const auto candidate = InspectSceneObservations(frame,inspection);
+        observations = candidate.report; // collected for inspection only; never committed
+        if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
+            AutomatedCaptureLog("scene observation candidate rooms=%u objects=%u exterior_pending=%d mirrors_pending=%d",
+                (unsigned)observations.rooms.size(),(unsigned)observations.objects.size(),
+                candidate.exterior_pending,candidate.mirrors_pending);
+    }
     if (view.kind == d3scene::ViewKind::Main && FindArg("-scene-model-collection-probe")) {
         // Exercise a second content collection in the same frozen frame. No
         // second preparation or temporary simulation model/object is involved.
@@ -561,6 +573,7 @@ void RenderGameSceneView(const d3scene::Presentation& frame, d3scene::View view)
         if (FindArg("-scene-display-view-probe") && (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0))
             AutomatedCaptureLog("scene display view fixture target=display viewport=bottom_right");
     }
+    return observations;
 }
 
 void RenderPreparedCockpit(const d3scene::Presentation& frame, d3scene::Rect viewport, float zoom) {
