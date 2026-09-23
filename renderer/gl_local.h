@@ -147,8 +147,12 @@ class GL4Renderer : public IRenderer
 	std::vector<uint64_t> scene_reflection_revisions;
 	GLuint scene_fog_buffer = 0, scene_fog_texture = 0;
 	d3scene::AssetId scene_fog_id;
-	GLuint scene_depth_snapshot = 0, scene_depth_framebuffer = 0;
-	int scene_depth_width = 0, scene_depth_height = 0;
+	struct SceneDepthSnapshot {
+		GLuint texture = 0, framebuffer = 0;
+		int width = 0, height = 0;
+		void Destroy();
+	};
+	std::map<std::pair<d3scene::ViewKind,uint64_t>,SceneDepthSnapshot> scene_depth_snapshots;
 	uint64_t scene_frame_sequence = 0;
 	std::unordered_map<const d3scene::SurfaceBinding*, ElementRange> scene_light_ranges;
 	std::unordered_map<const d3scene::SurfaceBinding*, ElementRange> scene_uv_ranges;
@@ -157,8 +161,25 @@ class GL4Renderer : public IRenderer
 	void UploadSceneFrame(const d3scene::Presentation&);
 	struct SceneImageGpu { d3scene::AssetId id; GLuint texture = 0; };
 	std::unordered_map<uint32_t,SceneImageGpu> scene_images;
+	struct SceneViewImageGpu {
+		Framebuffer buffer;
+		SceneDepthSnapshot depth;
+		d3scene::ViewHistory history;
+		uint64_t sequence = 0;
+	};
+	std::unordered_map<uint64_t,SceneViewImageGpu> scene_view_images;
 	void BindSceneImage(const d3scene::ImageAsset&,int unit,bool wrap,bool baked);
 	void DestroySceneResources();
+	void EnsureSceneLifetime(const d3scene::Presentation&);
+	enum class SceneOutputRole { MainWorld, SceneLayer, Display, Image };
+	struct SceneRasterTarget {
+		Framebuffer& framebuffer;
+		d3scene::Rect raster;
+		SceneOutputRole role;
+		SceneDepthSnapshot& depth;
+		d3scene::ViewHistory& history;
+	};
+	d3scene::VisibilityReport ExecuteSceneView(const d3scene::Presentation&,const d3scene::View&,const SceneRasterTarget&);
 	//MAIN
 	oeApplication* ParentApplication = nullptr;
 
@@ -683,6 +704,7 @@ public:
 	GL4Renderer();
 	d3scene::VisibilityReport RenderSceneView(const d3scene::Presentation&, const d3scene::View&) override;
 	void RenderForeground(const d3scene::Presentation&, const d3scene::ForegroundLayer&) override;
+	void RenderViewImage(const d3scene::Presentation&, const d3scene::ViewImageRequest&) override;
 
 	//INITIALIZATION
 

@@ -132,6 +132,15 @@ if ([bool]$referenceManifest.ring_probe -ne [bool]$actualManifest.ring_probe -an
 if ([bool]$referenceManifest.mirror_camera_probe -ne [bool]$actualManifest.mirror_camera_probe -and -not $DiagnosticComparison) {
     throw 'Mirror camera fixture mismatch requires DiagnosticComparison.'
 }
+if ([bool]$referenceManifest.view_image_probe -ne [bool]$actualManifest.view_image_probe -and -not $DiagnosticComparison) {
+    throw 'View image fixture mismatch requires DiagnosticComparison.'
+}
+if ([int]$referenceManifest.inspection_banner_revision -ne [int]$actualManifest.inspection_banner_revision -and -not $DiagnosticComparison) {
+    throw 'Inspection banner composition changed; use DiagnosticComparison for intentional fixture changes.'
+}
+if ([int]$referenceManifest.view_image_revision -ne [int]$actualManifest.view_image_revision -and -not $DiagnosticComparison) {
+    throw 'View image graph fixture changed; use DiagnosticComparison for intentional fixture changes.'
+}
 if ([bool]$referenceManifest.depth_policy_probe -ne [bool]$actualManifest.depth_policy_probe -and -not $DiagnosticComparison) {
     throw 'Depth policy fixtures differ; this is not a parity comparison.'
 }

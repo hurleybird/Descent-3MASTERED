@@ -261,6 +261,7 @@ struct SurfaceBinding {
     Vec3 color_modulation{1,1,1};
     int32_t bitmap = -1, lightmap_bitmap = -1;
     ImageAssetRef color_image, baked_image;
+    uint64_t view_image_slot = 0; // view-local input slot, never a global bitmap/target
     bool lightmap_wrap = false;
     float lightmap_u_scale = 1, lightmap_v_scale = 1;
     float u_offset = 0, v_offset = 0, alpha = 1;
@@ -464,6 +465,7 @@ enum class ViewOrdering { Depth, Compositing };
 enum class ViewProjection { Perspective, Orthographic };
 struct Rect { int32_t x = 0, y = 0, width = 0, height = 0; };
 enum Feedback : uint8_t { NoFeedback = 0, Automap = 1, ObjectVisibility = 2, EffectEligibility = 4 };
+struct ViewImageInput { uint64_t slot = 0, image = 0; };
 struct View {
     // Explicit diagnostic execution, never a fallback selected by capability.
     bool geometry_inspection = false;
@@ -484,6 +486,7 @@ struct View {
     int32_t room = -1;
     bool exclude_camera_rig = false;
     std::vector<uint32_t> excluded_objects;
+    std::vector<ViewImageInput> image_inputs;
     Rect viewport, projection_anchor;
     float zoom = 1;
     bool dynamic_lighting = true;
@@ -493,6 +496,17 @@ struct View {
     bool camera_cut = false;
 };
 void validateView(const View& view);
+struct ViewImageRequest {
+    uint64_t image = 0;
+    View view;
+    uint32_t scale = 1, samples = 0;
+};
+void validateViewImage(const ViewImageRequest&);
+// Produces an independently owned color/depth image. It cannot publish the
+// main presentation's AO/motion/protection products or gameplay observations.
+// All declared dependencies are checked and scheduled before executing any
+// producer. Inputs cannot silently reuse a previous presentation's image.
+void renderViewImages(const Presentation&,const std::vector<ViewImageRequest>&);
 
 // A result of visibility, not a side effect of drawing a depth/color pass.
 // Commit policy remains game-owned; replay does not mutate the simulation.

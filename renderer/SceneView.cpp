@@ -9,6 +9,7 @@
 #include <cmath>
 #include <stdexcept>
 #include <limits>
+#include <set>
 
 namespace d3scene {
 Rect rasterViewport(Rect logical, int32_t raster_height, int32_t scale, int32_t offset_x, int32_t offset_y) {
@@ -299,6 +300,39 @@ View resolveView(const Presentation& frame, View view) {
 bool excludesObject(const View& view,uint32_t handle) {
     return std::find(view.excluded_objects.begin(),view.excluded_objects.end(),handle) != view.excluded_objects.end();
 }
+uint64_t viewImageSource(const View& view,uint64_t slot) {
+    for (const auto& input : view.image_inputs) if (input.slot == slot) return input.image;
+    throw std::invalid_argument("View has no source for its surface image slot");
+}
+std::vector<size_t> orderViewImages(const std::vector<ViewImageRequest>& images) {
+    std::unordered_map<uint64_t,size_t> producers;
+    for (size_t i = 0; i < images.size(); ++i) {
+        validateViewImage(images[i]);
+        if (!producers.emplace(images[i].image,i).second)
+            throw std::invalid_argument("View image graph has duplicate producers");
+    }
+    std::vector<std::vector<size_t>> consumers(images.size());
+    std::vector<size_t> remaining(images.size());
+    std::set<size_t> ready;
+    for (size_t i = 0; i < images.size(); ++i) {
+        std::unordered_set<size_t> dependencies;
+        for (const auto& input : images[i].view.image_inputs) {
+            const auto source = producers.find(input.image);
+            if (source == producers.end()) throw std::invalid_argument("View image graph has a missing producer");
+            dependencies.insert(source->second);
+        }
+        remaining[i] = dependencies.size();
+        for (const auto source : dependencies) consumers[source].push_back(i);
+        if (dependencies.empty()) ready.insert(i);
+    }
+    std::vector<size_t> order;
+    while (!ready.empty()) {
+        const auto source = *ready.begin(); ready.erase(ready.begin()); order.push_back(source);
+        for (const auto consumer : consumers[source]) if (!--remaining[consumer]) ready.insert(consumer);
+    }
+    if (order.size() != images.size()) throw std::invalid_argument("View image graph contains a dependency cycle");
+    return order;
+}
 uint32_t selectModelVariant(const ModelInstance& object,const Camera& camera) {
     const auto depth = dot(camera.transform.forward,subtract(object.current.position,camera.transform.position));
     return object.lod_models[depth < object.lod_distances.x ? 0 : depth < object.lod_distances.y ? 1 : 2];
@@ -330,7 +364,7 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
         return PortalWindow{-1,-1,1,1,true};
     };
     auto consider = [&](MeshView geometry, const SurfaceBinding& surface, VisibleSurface item,PortalWindow window) {
-        if (!surface.draw_surface || (!item.model && surface.bitmap < 0)) return;
+        if (!surface.draw_surface) return;
         ++result.stats.surfaces_considered;
         const auto& polygon = geometry.topology.polygons[item.polygon_index];
         const auto point = transformPoint(item.world,geometry.positions[polygon.corners[0].vertex]);

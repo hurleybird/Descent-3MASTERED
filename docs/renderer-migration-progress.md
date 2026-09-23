@@ -1,5 +1,55 @@
 # Renderer migration checkpoint
 
+## Continuation: owned view-image products and dependencies
+
+The executor now receives its framebuffer, raster rectangle, output role,
+depth snapshot and history explicitly. Independent view images own storage and
+history; they cannot publish the main world's AO/motion/protection products.
+Soft-particle snapshots are per view/output, removing the single allocation
+that would repeatedly resize between a small preview and the main scene.
+Storage changes reset image history, and scene teardown releases all products.
+
+Materials name view-local input slots. Each view binds those slots to named
+images from this presentation, so the same immutable surface can consume
+different cameras' images. Asset/view-image source ambiguity, missing/stale or
+in-flight images and duplicate producers are rejected. Declared image graphs
+are validated/topologically ordered before any producer runs; missing producers,
+self-reads and dependency cycles have no previous-frame fallback. The diagnostic
+chain deliberately lists its dependent canvas image before its source scene.
+
+Geometry no longer decides room-surface eligibility from a legacy bitmap
+sentinel. The game publisher suppresses authored missing-texture faces explicitly;
+flat/view-image room materials can use the same geometry path.
+
+Full builds and 5,428 contract checks pass. Before the diagnostic-banner change,
+seven normal saves match scene-reflected-view-normal exactly. Save 000 has the
+known alternate Buddybot pose (hash 3974575097751422449), and its entire image
+matches scene-cockpit-normal exactly. Cockpit/reticle 003 remains exact.
+Normal and reflected independent-image insets were visually inspected. The
+two-stage graph is pixel-identical to the direct single-stage image (003);
+the final eligibility change is also exact against that graph capture.
+
+The inspection warning previously entered world bloom when no foreground was
+present, but drew after post-processing with a foreground. It is now always a
+prepared native-resolution display canvas, with explicit incomplete/gameplay
+warning text. Corpus metadata versions this intentional diagnostic change;
+cross-version comparisons require DiagnosticComparison. With this corrected,
+003's measured region outside the inset (336,0,944,720) is pixel-identical with
+and without producing/consuming the independent image.
+
+The image inset (16,72,320,180) remains exact through parent SSAA4 and resource
+transitions; its own allocation remains 320x180, 4x MSAA. Clean-profile complete
+frames are exact before/after resource transitions. Effects-profile transition
+frames differ by at most two channel levels outside the inset; these runs reset
+AO history at frame 50 and are not equal-history pixel-parity tests. No blanket
+tolerance is adopted. Corpora/reports: scene-view-inputs*, scene-view-graph*,
+scene-view-products; scene-display-banner-normal is the new full warning-version
+corpus. Image graph revision 2 includes the dependent single-sample canvas copy.
+
+Mirror-surface masking/material composition, reflected fog and gameplay
+observations remain unfinished. No pending domain was cleared. Neither installed
+Candidate was changed, and no shadow work has begun.
+
 ## Continuation: independent reflected cameras and world clipping
 
 View now owns an optional unit world clip plane. CPU sphere/bounds/polygon

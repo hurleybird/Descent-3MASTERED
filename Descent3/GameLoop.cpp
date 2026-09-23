@@ -3073,6 +3073,8 @@ void GameRenderFrame(void)
 
 		if (SceneGeometryInspection() && FindArg("-scene-reticle-probe"))
 			RenderPreparedReticle(*presentation);
+		if (SceneGeometryInspection() && FindArg("-scene-view-image-probe"))
+			RenderPreparedViewImageProbe(*presentation);
 		if (SceneGeometryInspection() && FindArg("-scene-cockpit-probe"))
 			RenderPreparedCockpit(*presentation,{Game_window_x,Game_window_y,Game_window_w,Game_window_h},HUD_RENDER_ZOOM);
 
@@ -3132,14 +3134,7 @@ void GameRenderFrame(void)
 		}
 		if (SceneGeometryInspection())
 		{
-			StartFrame(0, 0, Max_window_w, Max_window_h, false);
-			grtext_SetFont(HUD_FONT);
-			RenderHUDText(GR_RGB(255, 220, 80), 255, 1, 12, 12,
-				"RENDERER TEST: rooms + posed model geometry / base materials");
-			RenderHUDText(GR_RGB(255, 220, 80), 255, 1, 12, 28,
-				"Incomplete: lighting, terrain, effects, fog, cockpit, special models");
-			grtext_Flush();
-			EndFrame();
+			RenderPreparedInspectionBanner(*presentation);
 		}
 		rend_FlushTextLayer();
 		rend_PerfGpuSceneMark(RENDERER_GPU_SCENE_AFTER_DEBUG);

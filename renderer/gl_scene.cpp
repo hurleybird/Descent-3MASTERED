@@ -341,7 +341,14 @@ void main() {
 )GLSL";
 }
 
+void GL4Renderer::SceneDepthSnapshot::Destroy() {
+    if (texture) glDeleteTextures(1,&texture);
+    if (framebuffer) glDeleteFramebuffers(1,&framebuffer);
+    texture = framebuffer = 0; width = height = 0;
+}
 void GL4Renderer::DestroySceneResources() {
+    for (auto& image : scene_view_images) { image.second.buffer.Destroy(); image.second.depth.Destroy(); }
+    scene_view_images.clear();
     scene_view_history.clear();
     scene_motion = {}; completed_scene_motion = {};
     scene_temporal_reset = true;
@@ -382,10 +389,8 @@ void GL4Renderer::DestroySceneResources() {
     if (scene_fog_texture) glDeleteTextures(1,&scene_fog_texture);
     scene_fog_buffer = scene_fog_texture = 0;
     scene_fog_id = {};
-    if (scene_depth_snapshot) glDeleteTextures(1,&scene_depth_snapshot);
-    if (scene_depth_framebuffer) glDeleteFramebuffers(1,&scene_depth_framebuffer);
-    scene_depth_snapshot = scene_depth_framebuffer = 0;
-    scene_depth_width = scene_depth_height = 0;
+    for (auto& depth : scene_depth_snapshots) depth.second.Destroy();
+    scene_depth_snapshots.clear();
     if (scene_light_buffer) glDeleteBuffers(1,&scene_light_buffer);
     if (scene_influence_buffer) glDeleteBuffers(1,&scene_influence_buffer);
     if (scene_light_texture) glDeleteTextures(1,&scene_light_texture);
@@ -749,15 +754,46 @@ void GL4Renderer::CompositeSceneRadiance(bool paused) {
     UseSceneDrawBuffers();
 }
 
+void GL4Renderer::RenderViewImage(const d3scene::Presentation& presentation,const d3scene::ViewImageRequest& request) {
+    d3scene::validateViewImage(request);
+    if (!framebuffer_ok) Error("Independent view image requires an initialized scene context");
+    FlushFontBatch(); // drain the caller's canvas before any target allocation
+    EnsureSceneLifetime(presentation);
+    const auto sequence = presentation.data().sequence;
+    for (auto it = scene_view_images.begin(); it != scene_view_images.end();) {
+        if (it->second.sequence < sequence && sequence-it->second.sequence > 1) {
+            it->second.buffer.Destroy(); it->second.depth.Destroy(); it = scene_view_images.erase(it);
+        } else ++it;
+    }
+    auto& image = scene_view_images[request.image];
+    if (image.sequence == sequence) throw std::logic_error("View image has more than one producer in a presentation");
+    image.sequence = 0; // failed/in-flight products are never readable
+    GLint draw, read, viewport[4];
+    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING,&draw); glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING,&read);
+    glGetIntegerv(GL_VIEWPORT,viewport);
+    const auto restore = [&] {
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER,draw); glBindFramebuffer(GL_READ_FRAMEBUFFER,read);
+        glViewport(viewport[0],viewport[1],viewport[2],viewport[3]);
+    };
+    try {
+        if (image.buffer.Width() != uint32_t(request.view.viewport.width)*request.scale ||
+            image.buffer.Height() != uint32_t(request.view.viewport.height)*request.scale ||
+            image.buffer.RequestedSamples() != request.samples) image.history.clear();
+        image.buffer.Update(request.view.viewport.width*request.scale,request.view.viewport.height*request.scale,request.samples);
+        image.buffer.ClearAll();
+        const auto raster = d3scene::rasterViewport(request.view.viewport,image.buffer.Height(),request.scale);
+        ExecuteSceneView(presentation,request.view,{image.buffer,raster,SceneOutputRole::Image,image.depth,image.history});
+        image.sequence = sequence;
+        if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
+            AutomatedCaptureLog("scene view image key=%llu size=%ux%u samples=%u sequence=%llu",
+                static_cast<unsigned long long>(request.image),image.buffer.Width(),image.buffer.Height(),image.buffer.Samples(),
+                static_cast<unsigned long long>(sequence));
+    } catch (...) { restore(); throw; }
+    restore();
+}
 d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentation& presentation,
     const d3scene::View& view) {
-    if (!view.geometry_inspection)
-        Error("Scene executor migration incomplete: only explicit geometry inspection is currently supported.");
-    const auto visibility = d3scene::queryView(presentation,view);
-    if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
-        AutomatedCaptureLog("scene view collection=%llu target=%u projection=%u surfaces=%u",
-            static_cast<unsigned long long>(view.collection),static_cast<unsigned>(view.target),
-            static_cast<unsigned>(view.projection),static_cast<unsigned>(visibility.surfaces.size()));
+    EnsureSceneLifetime(presentation);
     const bool display_target = view.target == d3scene::ViewTarget::Display;
     if (!framebuffer_ok || modal_ui_frame_active ||
         (display_target && (!post_present_pending_swap || cockpit_scene_frame_active)) ||
@@ -768,6 +804,32 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
     const auto raster = d3scene::rasterViewport(view.viewport,output.Height(),
         display_target ? 1 : SupersamplingFactor(),display_target ? 0 : framebuffer_logical_offset_x,
         display_target ? 0 : framebuffer_logical_offset_y);
+    return ExecuteSceneView(presentation,view,{output,raster,display_target ? SceneOutputRole::Display :
+        (view.kind == d3scene::ViewKind::Main ? SceneOutputRole::MainWorld : SceneOutputRole::SceneLayer),
+        scene_depth_snapshots[{view.kind,view.history_key}],scene_view_history});
+}
+void GL4Renderer::EnsureSceneLifetime(const d3scene::Presentation& presentation) {
+    if (scene_asset_lifetime != presentation.data().scene_lifetime) {
+        DestroySceneResources();
+        scene_asset_lifetime = presentation.data().scene_lifetime;
+    }
+}
+d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::Presentation& presentation,
+    const d3scene::View& view,const SceneRasterTarget& target) {
+    if (!view.geometry_inspection)
+        Error("Scene executor migration incomplete: only explicit geometry inspection is currently supported.");
+    if (scene_asset_lifetime != presentation.data().scene_lifetime)
+        Error("Scene target was selected before establishing its scene lifetime");
+    auto& output = target.framebuffer;
+    auto& depth = target.depth;
+    const auto raster = target.raster;
+    const bool owns_world_products = target.role == SceneOutputRole::MainWorld;
+    const bool writes_protection = owns_world_products || target.role == SceneOutputRole::SceneLayer;
+    const auto visibility = d3scene::queryView(presentation,view);
+    if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
+        AutomatedCaptureLog("scene view collection=%llu target=%u projection=%u surfaces=%u",
+            static_cast<unsigned long long>(view.collection),static_cast<unsigned>(view.target),
+            static_cast<unsigned>(view.projection),static_cast<unsigned>(visibility.surfaces.size()));
     if (FindArg("-scene-lod-probe") && (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)) {
         std::vector<unsigned> polygons(presentation.data().model_instances.size(),0);
         for (const auto& item : visibility.surfaces) if (item.model) ++polygons[item.model_instance_index];
@@ -795,12 +857,8 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
         scene_sample_resolve_verified = true;
         check_scene_error("sample resolve self-test");
     }
-    if (scene_asset_lifetime != presentation.data().scene_lifetime) {
-        DestroySceneResources();
-        scene_asset_lifetime = presentation.data().scene_lifetime;
-    }
-    const auto history = scene_view_history.prepare(presentation.data(),view,visibility.camera);
-    if (view.kind == d3scene::ViewKind::Main) {
+    const auto history = target.history.prepare(presentation.data(),view,visibility.camera);
+    if (owns_world_products) {
         scene_motion = d3scene::prepareImageMotion(presentation.data(),history,completed_scene_motion);
         scene_temporal_reset = !history.previous_valid;
         have_previous_view_projection = history.previous_valid;
@@ -824,16 +882,16 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
     glDepthMask(GL_TRUE);
     glDepthFunc(GL_LEQUAL);
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-    if (!display_target) post_protection_mask.UseSceneDrawBuffers(output.Handle(),false,false);
-    const d3scene::ViewProducts products{view.kind == d3scene::ViewKind::Main,
-        view.kind == d3scene::ViewKind::Main && OpenGL_preferred_state.ao_enabled && framebuffer_ok};
+    if (writes_protection) post_protection_mask.UseSceneDrawBuffers(output.Handle(),false,false);
+    const d3scene::ViewProducts products{owns_world_products,
+        owns_world_products && OpenGL_preferred_state.ao_enabled && framebuffer_ok};
     if (products.occlusion_radiance) BeginSceneRadianceProduct();
     const bool writes_motion = products.opaque_scene && SceneSurfaceTargetEnabled();
     const auto bind_outputs = [&] {
         glBindFramebuffer(GL_DRAW_FRAMEBUFFER,output.Handle());
         const GLenum targets[5] = {GL_COLOR_ATTACHMENT0,
             static_cast<GLenum>(writes_motion ? GL_COLOR_ATTACHMENT1 : GL_NONE),
-            static_cast<GLenum>(!display_target && post_protection_mask.mask_texture ? GL_COLOR_ATTACHMENT2 : GL_NONE),
+            static_cast<GLenum>(writes_protection && post_protection_mask.mask_texture ? GL_COLOR_ATTACHMENT2 : GL_NONE),
             static_cast<GLenum>(products.occlusion_radiance ? GL_COLOR_ATTACHMENT3 : GL_NONE),
             static_cast<GLenum>(writes_motion ? GL_COLOR_ATTACHMENT4 : GL_NONE)};
         glDrawBuffers(5,targets);
@@ -854,11 +912,11 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
     if (writes_motion) {
         // This product belongs to the main scene, not StartFrame's legacy
         // canvas state. Clear background identity/velocity on every execution.
-        surface_records.ClearAttached(framebuffers[framebuffer_current_draw].Handle());
+        surface_records.ClearAttached(output.Handle());
         bind_outputs();
         surface_records.MarkDirty(); motion_vectors_dirty = true;
     }
-    if (!display_target) post_protection_mask.resolve_valid = false;
+    if (writes_protection) post_protection_mask.resolve_valid = false;
     if (visibility.exterior_visible && presentation.data().sky_enabled) {
         // Clear only this view's color attachment. Background geometry never
         // tests or writes world depth, including in auxiliary viewports.
@@ -963,7 +1021,7 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
             const size_t pixels = size_t(surface_records.width)*surface_records.height;
             std::vector<float> vectors(pixels*4);
             std::vector<GLuint> identities(pixels);
-            const auto source = framebuffers[framebuffer_current_draw].Handle();
+            const auto source = output.Handle();
             const auto velocity_texture = surface_records.TextureForRead(source);
             const auto identity_texture = surface_records.ObjectIdTextureForRead(source);
             GLint texture_binding; glGetIntegerv(GL_TEXTURE_BINDING_2D,&texture_binding);
@@ -997,7 +1055,7 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
         // explicitly, including buffer textures used by both shader stages.
         UploadSceneFrame(presentation);
         glActiveTexture(GL_TEXTURE6); glBindTexture(GL_TEXTURE_BUFFER,scene_fog_texture);
-        glActiveTexture(GL_TEXTURE7); glBindTexture(GL_TEXTURE_2D,scene_depth_snapshot);
+        glActiveTexture(GL_TEXTURE7); glBindTexture(GL_TEXTURE_2D,depth.texture);
         scene_shader.Use();
         glDepthFunc(GL_LEQUAL);
         continue;
@@ -1009,11 +1067,11 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
         glGetIntegerv(GL_VIEWPORT,viewport);
         glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING,&previous_read);
         glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING,&previous_draw);
-        if (!scene_depth_snapshot) glGenTextures(1,&scene_depth_snapshot);
-        if (!scene_depth_framebuffer) glGenFramebuffers(1,&scene_depth_framebuffer);
-        glActiveTexture(GL_TEXTURE7); glBindTexture(GL_TEXTURE_2D,scene_depth_snapshot);
-        if (scene_depth_width != viewport[2] || scene_depth_height != viewport[3]) {
-            scene_depth_width = viewport[2]; scene_depth_height = viewport[3];
+        if (!depth.texture) glGenTextures(1,&depth.texture);
+        if (!depth.framebuffer) glGenFramebuffers(1,&depth.framebuffer);
+        glActiveTexture(GL_TEXTURE7); glBindTexture(GL_TEXTURE_2D,depth.texture);
+        if (depth.width != viewport[2] || depth.height != viewport[3]) {
+            depth.width = viewport[2]; depth.height = viewport[3];
             // Scene render targets use 32-bit float depth, including MSAA. The
             // snapshot has identical pixel extent and resolves depth only.
             glTexImage2D(GL_TEXTURE_2D,0,GL_DEPTH_COMPONENT32F,viewport[2],viewport[3],0,GL_DEPTH_COMPONENT,GL_FLOAT,nullptr);
@@ -1022,14 +1080,14 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
             glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);
             glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
         }
-        glBindFramebuffer(GL_FRAMEBUFFER,scene_depth_framebuffer);
-        glFramebufferTexture2D(GL_FRAMEBUFFER,GL_DEPTH_ATTACHMENT,GL_TEXTURE_2D,scene_depth_snapshot,0);
+        glBindFramebuffer(GL_FRAMEBUFFER,depth.framebuffer);
+        glFramebufferTexture2D(GL_FRAMEBUFFER,GL_DEPTH_ATTACHMENT,GL_TEXTURE_2D,depth.texture,0);
         glDrawBuffer(GL_NONE); glReadBuffer(GL_NONE);
         if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) Error("Scene opaque-depth snapshot is incomplete");
         // All depth consumers share nearest-surface sample selection. A raw
         // MSAA depth blit can choose a different sample from motion/identity.
         output.DepthTextureForRead();
-        glBindFramebuffer(GL_DRAW_FRAMEBUFFER,scene_depth_framebuffer);
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER,depth.framebuffer);
         const GLboolean scissor = glIsEnabled(GL_SCISSOR_TEST);
         glDisable(GL_SCISSOR_TEST);
         glBlitFramebuffer(viewport[0],viewport[1],viewport[0]+viewport[2],viewport[1]+viewport[3],0,0,viewport[2],viewport[3],GL_DEPTH_BUFFER_BIT,GL_NEAREST);
@@ -1091,6 +1149,22 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
             Error("Scene surface reached execution without prepared image assets");
         const auto& gpu = *mesh;
         if (surface.color_image) BindSceneImage(*surface.color_image,0,surface.texture_wrap,false);
+        if (surface.view_image_slot) {
+            const auto found = scene_view_images.find(d3scene::viewImageSource(view,surface.view_image_slot));
+            if (found == scene_view_images.end() || found->second.sequence != presentation.data().sequence)
+                throw std::logic_error("Surface requested a missing, stale or in-flight view image");
+            if (found->second.buffer.Handle() == output.Handle())
+                throw std::logic_error("View image cannot sample its own render target");
+            GLint draw, read;
+            glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING,&draw); glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING,&read);
+            const auto texture = found->second.buffer.ColorTextureForRead();
+            glBindFramebuffer(GL_DRAW_FRAMEBUFFER,draw); glBindFramebuffer(GL_READ_FRAMEBUFFER,read);
+            glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D,texture);
+            glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
+        }
         if (surface.baked_image) BindSceneImage(*surface.baked_image,1,surface.lightmap_wrap,true);
         if (surface.specular_image) BindSceneImage(*surface.specular_image,8,surface.texture_wrap,false);
         scene_shader.Use();
@@ -1124,7 +1198,7 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
         vec("ambient_color",surface.ambient_color); vec("ambient_direction",surface.ambient_direction);
         glUniform1i(scene_shader.FindUniform("directional_ambient"),surface.directional_ambient);
         glUniform1f(scene_shader.FindUniform("lighting_modulation"),surface.lighting_modulation);
-        glUniform1i(scene_shader.FindUniform("use_texture"),surface.color_image != nullptr);
+        glUniform1i(scene_shader.FindUniform("use_texture"),surface.color_image != nullptr || surface.view_image_slot != 0);
         glUniform1i(scene_shader.FindUniform("use_lightmap"),surface.baked_image != nullptr);
         glUniform1i(scene_shader.FindUniform("use_texture_alpha"),surface.material.texture_alpha != d3scene::TextureAlpha::Ignore);
         glUniform1f(scene_shader.FindUniform("alpha_cutoff"),surface.material.alpha_cutoff);
@@ -1193,7 +1267,7 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
     glFrontFace(GL_CCW);
     if (inherited_scissor) glEnable(GL_SCISSOR_TEST);
     output.MarkAllDirty();
-    if (!display_target) {
+    if (writes_protection) {
         post_protection_mask_dirty = true;
         post_protection_mask.resolve_valid = false;
     }
@@ -1203,8 +1277,8 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
     ClearBoundTextures();
     glActiveTexture(GL_TEXTURE0); Last_texel_unit_set = 0;
     rendTEMP_UnbindVertexBuffer();
-    rend_NotifyDepthBufferWrite();
-    scene_view_history.commit(history);
+    if (target.role != SceneOutputRole::Image) rend_NotifyDepthBufferWrite();
+    target.history.commit(history);
     // Broad-phase geometry inspection is NOT gameplay visibility. Do not mark
     // every submitted room explored merely because it was depth-tested.
     d3scene::VisibilityReport result;

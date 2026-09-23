@@ -24,6 +24,8 @@ void require(bool condition, const char* message) {
     if (!condition) throw std::invalid_argument(message);
 }
 void validateSurface(const SurfaceBinding& surface) {
+    require(!surface.view_image_slot || (!surface.color_image && surface.bitmap < 0),
+        "A surface cannot sample both an asset and a view image");
     require(finite(surface.raster_stripe) && (surface.raster_stripe.x == 0 || surface.raster_stripe.x >= 1) &&
         surface.raster_stripe.z >= 0 && surface.raster_stripe.z <= 1,"Invalid raster stripe coverage");
     require(std::isfinite(surface.specular_strength) && surface.specular_strength >= 0 &&
@@ -264,7 +266,7 @@ MaterialPolicy compileMaterialPolicy(const SurfaceBinding& surface, const MeshPo
     MaterialPolicy result;
     result.layer = surface.layer;
     if (surface.texture_alpha || surface.blend == BlendMode::Additive || surface.blend == BlendMode::Multiply) {
-        result.texture_alpha = surface.color_image && surface.color_image->format() != ImageFormat::ARGB1555 ?
+        result.texture_alpha = surface.view_image_slot || (surface.color_image && surface.color_image->format() != ImageFormat::ARGB1555) ?
             TextureAlpha::Continuous : TextureAlpha::Cutout;
     }
     bool fractional = surface.alpha < 1 || result.texture_alpha == TextureAlpha::Continuous || surface.soft_depth_range > 0;
@@ -511,6 +513,9 @@ void validateView(const View& view) {
     require(view.target != ViewTarget::Display || (view.kind != ViewKind::Main && view.feedback == NoFeedback),
         "Display views cannot own main-world products or gameplay feedback");
     require(view.history_key != 0, "View has no history identity");
+    std::unordered_set<uint64_t> image_slots;
+    for (const auto& input : view.image_inputs)
+        require(input.slot && input.image && image_slots.insert(input.slot).second,"Invalid or duplicate view image input");
     require(finite(view.camera) && std::isfinite(view.zoom) && view.zoom > 0, "Invalid view camera");
     if (view.has_clip_plane) {
         const auto n = view.clip_plane.normal;
@@ -526,6 +531,19 @@ void validateView(const View& view) {
     require((view.feedback & ~(Automap | ObjectVisibility | EffectEligibility)) == 0, "Invalid feedback policy");
     require(view.collection == 0 || (view.kind != ViewKind::Main && view.feedback == NoFeedback),
         "Non-world collections cannot own main-world products or gameplay feedback");
+}
+void validateViewImage(const ViewImageRequest& request) {
+    validateView(request.view);
+    const auto& view = request.view;
+    require(request.image && view.kind != ViewKind::Main && view.target == ViewTarget::Scene &&
+        view.feedback == NoFeedback && view.viewport.x == 0 && view.viewport.y == 0,
+        "Independent view image requires a named, local, observation-free camera");
+    require(request.scale == 1 || request.scale == 2 || request.scale == 4,"Invalid view image scale");
+    require(request.samples == 0 || request.samples == 2 || request.samples == 4 || request.samples == 8,
+        "Invalid view image samples");
+    require(uint64_t(view.viewport.width)*request.scale <= uint64_t((std::numeric_limits<int32_t>::max)()) &&
+        uint64_t(view.viewport.height)*request.scale <= uint64_t((std::numeric_limits<int32_t>::max)()),
+        "View image extent overflow");
 }
 // Constructed before main, destroyed after the game's atexit room cleanup.
 // A function-local static first constructed during play would die BEFORE that

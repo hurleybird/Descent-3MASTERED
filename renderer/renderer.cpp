@@ -36,6 +36,12 @@ d3scene::VisibilityReport d3scene::renderView(const Presentation& frame, const V
 	return renderer_inst->RenderSceneView(frame, view);
 }
 static oeApplication* Renderer_app;
+void d3scene::renderViewImages(const Presentation& frame,const std::vector<ViewImageRequest>& images)
+{
+	const auto order = orderViewImages(images);
+	for (const auto& image : images) if (!image.view.geometry_inspection) frame.requireExecutable();
+	for (const auto index : order) renderer_inst->RenderViewImage(frame,images[index]);
+}
 void d3scene::renderForeground(const Presentation& frame, const ForegroundLayer& layer)
 {
 	validateForeground(layer);

@@ -27,6 +27,7 @@ param(
     [switch]$ReticleReference,
     [switch]$ObservationProbe,
     [switch]$MirrorCameraProbe,
+    [switch]$ViewImageProbe,
     [switch]$ScorchProbe,
     [switch]$ScorchViewProbe,
     [switch]$MotionBlur,
@@ -74,6 +75,7 @@ if ($ModelEffectsProbe -and (-not $SceneInspection -or $TerrainProbe -or $SkyPro
 }
 if ($DeformationProbe -and -not $SceneInspection) { throw 'Deformation probe requires the explicit scene inspection executor.' }
 if ($TerrainProbe -and -not $SceneInspection) { throw 'Terrain probe requires the explicit scene inspection executor.' }
+if ($ViewImageProbe -and -not $SceneInspection) { throw 'View image probe requires scene inspection.' }
 if ($MirrorCameraProbe -and (-not $SceneInspection -or $ObservationProbe -or $TerrainProbe -or $SkyProbe -or $SatelliteProbe -or $HistoryProbe -or $ScorchViewProbe -or $ModelEffectsProbe -or $LodProbeTier -ge 0)) {
     throw 'Mirror camera probe requires isolated scene inspection without other camera/observation probes.'
 }
@@ -103,6 +105,7 @@ $settings | Set-Content -LiteralPath (Join-Path $outputPath 'settings.json') -En
 $manifest = [ordered]@{
     runtime = $runtimePath; profile = $Profile; frame = $Frame; seed = $Seed; scene_inspection = [bool]$SceneInspection
     supersampling = $sampleScale
+    inspection_banner_revision = $(if ($SceneInspection) { 2 } else { 0 })
     msaa_samples = $msaaCount
     deformation_probe = [bool]$DeformationProbe
     vertex_lighting = [bool]$VertexLighting
@@ -123,6 +126,8 @@ $manifest = [ordered]@{
     reticle_reference = [bool]$ReticleReference
     observation_probe = [bool]$ObservationProbe
     mirror_camera_probe = [bool]$MirrorCameraProbe
+    view_image_probe = [bool]$ViewImageProbe
+    view_image_revision = $(if ($ViewImageProbe) { 2 } else { 0 })
     cockpit_probe_revision = $(if ($CockpitProbe) { 4 } else { 0 })
     scorch_probe = [bool]$ScorchProbe
     scorch_view_probe = [bool]$ScorchViewProbe
@@ -179,6 +184,7 @@ try {
         if ($ReticleReference) { $arguments += '-scene-reticle-reference' }
         if ($ObservationProbe) { $arguments += '-scene-observation-probe' }
         if ($MirrorCameraProbe) { $arguments += '-scene-mirror-camera-probe' }
+        if ($ViewImageProbe) { $arguments += '-scene-view-image-probe' }
         if ($RingProbe) { $arguments += '-scene-ring-probe' }
         if ($DepthPolicyProbe) { $arguments += '-scene-depth-policy-probe' }
         if ($ModelEffectsProbe) { $arguments += '-scene-model-effects-probe' }
@@ -229,7 +235,8 @@ try {
             }
         }
         # HandledWinMain returns 1 after a normal run, not conventional exit 0.
-        $ok = -not $timedOut -and $resourceValidated -and (-not $MirrorCameraProbe -or $logText.Contains('scene mirror camera room=')) -and $process.ExitCode -eq 1 -and
+        $ok = -not $timedOut -and $resourceValidated -and (-not $MirrorCameraProbe -or $logText.Contains('scene mirror camera room=')) -and
+            (-not $ViewImageProbe -or $logText.Contains('scene view image key=')) -and $process.ExitCode -eq 1 -and
             (Test-Path -LiteralPath $png) -and $logText.Contains('capture saved') -and
             $logText.Contains('capture headlight enabled') -and
             $logText.Contains("capture rng seed=$Seed") -and

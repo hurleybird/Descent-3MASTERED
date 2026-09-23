@@ -46,6 +46,64 @@ void appendRoom(d3scene::SceneAssets& assets,d3scene::FrameData& data,d3scene::M
 int runSceneViewTests() {
     {
         using namespace d3scene;
+        ViewImageRequest image; image.image = 17; image.view = view();
+        image.view.kind = ViewKind::Preview; image.samples = 4;
+        validateViewImage(image);
+        for (int invalid = 0; invalid < 8; ++invalid) {
+            auto bad = image;
+            if (invalid == 0) bad.image = 0;
+            if (invalid == 1) bad.view.kind = ViewKind::Main;
+            if (invalid == 2) bad.view.target = ViewTarget::Display;
+            if (invalid == 3) bad.view.feedback = Automap;
+            if (invalid == 4) bad.view.viewport.x = 1;
+            if (invalid == 5) bad.scale = 3;
+            if (invalid == 6) bad.samples = 1;
+            if (invalid == 7) { bad.scale = 4; bad.view.viewport.width = (std::numeric_limits<int32_t>::max)(); }
+            bool rejected = false;
+            try { validateViewImage(bad); } catch (const std::invalid_argument&) { rejected = true; }
+            check(rejected,"Invalid independent view image request accepted");
+        }
+        SceneAssets assets; FrameData data; data.sequence = 1; data.scene_lifetime = assets.lifetime();
+        appendRoom(assets,data,triangle(0,3));
+        auto& surface = data.rooms[0].surfaces[0]; surface.bitmap = -1; surface.view_image_slot = 1;
+        surface.texture_alpha = true;
+        check(queryView(*Presentation::freeze(data),view()).surfaces.size() == 1,
+            "Room view-image surface was discarded by a bitmap sentinel");
+        check(Presentation::freeze(data)->data().rooms[0].surfaces[0].material.texture_alpha == TextureAlpha::Continuous,
+            "View image lost continuous alpha semantics");
+        surface.bitmap = 1;
+        bool rejected = false;
+        try { Presentation::freeze(data); } catch (const std::invalid_argument&) { rejected = true; }
+        check(rejected,"Surface accepted ambiguous asset and view image sources");
+        auto consumer = view(); consumer.image_inputs.push_back({1,image.image});
+        check(viewImageSource(consumer,1) == image.image,"View image input did not resolve");
+        auto other = consumer; other.image_inputs[0].image = 18;
+        check(viewImageSource(other,1) == 18 && viewImageSource(consumer,1) == 17,"View image sources leaked between cameras");
+        rejected = false;
+        try { viewImageSource(consumer,2); } catch (const std::invalid_argument&) { rejected = true; }
+        check(rejected,"Missing view image input fell back to a global image");
+        consumer.image_inputs.push_back({1,18}); rejected = false;
+        try { validateView(consumer); } catch (const std::invalid_argument&) { rejected = true; }
+        check(rejected,"Duplicate view image slots accepted");
+        auto dependent = image; dependent.image = 19;
+        dependent.view.image_inputs = {{1,17},{2,17}};
+        auto independent = image; independent.image = 20;
+        check(orderViewImages({dependent,image,independent}) == std::vector<size_t>({1,0,2}),
+            "View image graph lost dependency order or duplicated a producer");
+        check(orderViewImages({}).empty(),"Empty view image graph produced work");
+        for (int invalid = 0; invalid < 4; ++invalid) {
+            auto a = image, b = dependent;
+            if (invalid == 0) b.image = a.image;
+            if (invalid == 1) b.view.image_inputs = {{1,99}};
+            if (invalid == 2) a.view.image_inputs = {{1,19}};
+            if (invalid == 3) a.view.image_inputs = {{1,17}};
+            rejected = false;
+            try { orderViewImages({a,b}); } catch (const std::invalid_argument&) { rejected = true; }
+            check(rejected,"Invalid view image dependency graph accepted");
+        }
+    }
+    {
+        using namespace d3scene;
         SceneAssets assets; FrameData data; data.sequence = 1; data.scene_lifetime = assets.lifetime();
         appendRoom(assets,data,triangle(0,3,false));
         appendRoom(assets,data,triangle(0,7,false));

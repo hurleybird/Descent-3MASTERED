@@ -7,6 +7,7 @@
 #include "../renderer/SceneGeometry.h"
 #include "../renderer/SceneView.h"
 #include "grtext.h"
+#include "gamefont.h"
 #include "../renderer/SceneLighting.h"
 #include "../renderer/SceneImages.h"
 #include "../renderer/SceneTerrain.h"
@@ -381,7 +382,10 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance_history) {
         resolveMaterial(surface,static_cast<float>(data.simulation_time),false,room.exterior);
         if (room.exterior && surface.specular_strength > 0) surface.reflection = exterior_reflection;
         surface.lighting_modulation = room.light_scalar;
-        surface.draw_surface = !(surface.authored_flags & FF_FLOATING_TRIG);
+        // Authored missing textures suppress game room faces at publication.
+        // The geometry executor also supports flat and view-image surfaces;
+        // it must not infer eligibility from a legacy bitmap sentinel.
+        surface.draw_surface = !(surface.authored_flags & FF_FLOATING_TRIG) && surface.bitmap >= 0;
         if (surface.portal >= 0 && surface.portal < static_cast<int>(room.portals.size()))
             surface.draw_surface = surface.draw_surface && (room.portals[surface.portal].flags & PF_RENDER_FACES);
       }
@@ -394,6 +398,21 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance_history) {
     PrepareGameScorches(data);
     if (SceneGeometryInspection() && FindArg("-scene-cockpit-probe")) PrepareGameCockpit(data,advance_history);
     if (SceneGeometryInspection() && FindArg("-scene-reticle-probe")) PrepareGameReticle(data);
+    if (SceneGeometryInspection()) {
+        SceneTextStyle style; style.font = HUD_FONT; style.color = {1,220/255.f,80/255.f}; style.additive = true;
+        int order = 0;
+        for (int pass = 0; pass < 2; ++pass) PrepareSceneText(data,SceneInspectionBanner,order,12,12,
+            "RENDERER MIGRATION TEST",style);
+        for (int pass = 0; pass < 2; ++pass) PrepareSceneText(data,SceneInspectionBanner,order,12,28,
+            "Incomplete - not yet qualified for gameplay",style);
+    }
+    if (SceneGeometryInspection() && FindArg("-scene-view-image-probe")) {
+        int order = 0; SceneQuadStyle style; style.uv_min = {0,1}; style.uv_max = {1,0};
+        PrepareSceneQuad(data,SceneViewImageProbe,order,{16,72,320,180},style);
+        data.meshes.back().surface.view_image_slot = 1;
+        PrepareSceneQuad(data,SceneViewImageProbe+1,order,{0,0,320,180},style);
+        data.meshes.back().surface.view_image_slot = 1;
+    }
     if (SceneGeometryInspection() && FindArg("-scene-standalone-model-probe") && Player_object) {
         const auto owner = uint32_t(Player_object->handle);
         unsigned detached = 0;
@@ -434,7 +453,7 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance_history) {
         data.model_instances.erase(std::remove_if(data.model_instances.begin(),data.model_instances.end(),
             [&](const d3scene::ModelInstance& instance) { return !instance.has_owner || instance.owner != owner; }),data.model_instances.end());
         data.meshes.erase(std::remove_if(data.meshes.begin(),data.meshes.end(),
-            [&](const d3scene::PreparedMesh& mesh) { return !mesh.has_owner || mesh.owner != owner; }),data.meshes.end());
+            [&](const d3scene::PreparedMesh& mesh) { return mesh.collection == 0 && (!mesh.has_owner || mesh.owner != owner); }),data.meshes.end());
         data.rooms.clear(); data.terrain = {}; data.fog.reset(); data.exterior_fog = {};
         data.sky_enabled = false;
     }
@@ -574,6 +593,21 @@ d3scene::VisibilityReport RenderGameSceneView(const d3scene::Presentation& frame
     // Diagnostic views do not mark rooms explored or tell AI it was observed.
     // The gameplay feedback compiler barrier remains until the normal executor
     // and its visibility policy have been migrated.
+    if (FindArg("-scene-view-image-probe") && view.kind == d3scene::ViewKind::Main) {
+        d3scene::ViewImageRequest image;
+        image.image = SceneViewImageProbe; image.view = view;
+        image.view.kind = d3scene::ViewKind::Preview; image.view.feedback = d3scene::NoFeedback;
+        image.view.history_key = SceneViewImageProbe;
+        image.view.viewport = image.view.projection_anchor = {0,0,320,180};
+        image.samples = 4;
+        d3scene::ViewImageRequest copy;
+        copy.image = SceneViewImageProbe+1;
+        copy.view = MakeSceneCanvasView(SceneViewImageProbe+1,{0,0,320,180},d3scene::ViewTarget::Scene,true);
+        copy.view.image_inputs.push_back({1,image.image});
+        // Deliberately reversed producer order: the graph, not caller order,
+        // owns the dependency from this canvas image to the scene image.
+        d3scene::renderViewImages(frame,{copy,image});
+    }
     auto observations = d3scene::renderView(frame, view);
     if (FindArg("-scene-observation-probe") &&
         (view.kind == d3scene::ViewKind::Main || view.kind == d3scene::ViewKind::Auxiliary)) {
@@ -609,6 +643,19 @@ d3scene::VisibilityReport RenderGameSceneView(const d3scene::Presentation& frame
     return observations;
 }
 
+void RenderPreparedViewImageProbe(const d3scene::Presentation& frame) {
+    d3scene::ForegroundLayer layer;
+    layer.display_views.push_back(MakeSceneCanvasView(SceneViewImageProbe,{0,0,Max_window_w,Max_window_h},
+        d3scene::ViewTarget::Display,true));
+    layer.display_views.back().image_inputs.push_back({1,SceneViewImageProbe+1});
+    d3scene::renderForeground(frame,layer);
+}
+void RenderPreparedInspectionBanner(const d3scene::Presentation& frame) {
+    d3scene::ForegroundLayer layer;
+    layer.display_views.push_back(MakeSceneCanvasView(SceneInspectionBanner,{0,0,Max_window_w,Max_window_h},
+        d3scene::ViewTarget::Display,true));
+    d3scene::renderForeground(frame,layer);
+}
 void RenderPreparedCockpit(const d3scene::Presentation& frame, d3scene::Rect viewport, float zoom) {
     if (!SceneGeometryInspection()) Error("Cockpit migration has not passed gameplay acceptance");
     bool base = false, layered = false, late = false, gauges = false, monitors = false, text = false;
