@@ -501,6 +501,10 @@ void Presentation::requireExecutable() const {
         throw std::logic_error("Renderer migration incomplete: presentation contains unprepared domains");
 }
 void validateView(const View& view) {
+    require(view.fog_path_origin == FogPathOrigin::Camera || view.fog_path_origin == FogPathOrigin::ClipPlane,
+        "Invalid fog path origin");
+    require(view.fog_path_origin != FogPathOrigin::ClipPlane || view.has_clip_plane,
+        "Fog path starting at a clip plane requires an explicit plane");
     require(view.projection == ViewProjection::Perspective || view.projection == ViewProjection::Orthographic,"Invalid view projection");
     require(view.projection != ViewProjection::Orthographic ||
         (view.kind != ViewKind::Main && view.feedback == NoFeedback &&
@@ -515,6 +519,8 @@ void validateView(const View& view) {
     require(view.target != ViewTarget::Display || (view.kind != ViewKind::Main && view.feedback == NoFeedback),
         "Display views cannot own main-world products or gameplay feedback");
     require(view.history_key != 0, "View has no history identity");
+    require(view.excluded_surfaces.empty() || view.feedback == NoFeedback,
+        "Selected geometry requires separately qualified gameplay feedback");
     std::unordered_set<uint64_t> image_slots;
     for (const auto& input : view.image_inputs)
         require(input.slot && input.image && image_slots.insert(input.slot).second,"Invalid or duplicate view image input");

@@ -5,8 +5,11 @@
 #include <stdexcept>
 
 namespace d3scene {
+inline bool sameSurfaceSelection(const View& a,const View& b) {
+    return a.excluded_surfaces == b.excluded_surfaces && a.excluded_objects == b.excluded_objects;
+}
 inline bool sameClipVolume(const View& a,const View& b) {
-    return a.has_clip_plane == b.has_clip_plane && (!a.has_clip_plane ||
+    return a.fog_path_origin == b.fog_path_origin && a.has_clip_plane == b.has_clip_plane && (!a.has_clip_plane ||
         (a.clip_plane.normal.x == b.clip_plane.normal.x && a.clip_plane.normal.y == b.clip_plane.normal.y &&
          a.clip_plane.normal.z == b.clip_plane.normal.z && a.clip_plane.constant == b.clip_plane.constant));
 }
@@ -47,6 +50,7 @@ inline ImageMotion prepareImageMotion(const FrameData& frame,const ViewHistorySa
         prior.view.camera_owner == camera.view.camera_owner &&
         prior.view.camera_variant == camera.view.camera_variant &&
         sameClipVolume(prior.view,camera.view) &&
+        sameSurfaceSelection(prior.view,camera.view) &&
         prior.view.viewport.x == camera.view.viewport.x && prior.view.viewport.y == camera.view.viewport.y &&
         prior.view.viewport.width == camera.view.viewport.width && prior.view.viewport.height == camera.view.viewport.height &&
         prior.view.projection_anchor.x == camera.view.projection_anchor.x && prior.view.projection_anchor.y == camera.view.projection_anchor.y &&
@@ -75,6 +79,7 @@ class ViewHistory {
             a.view.ordering == b.view.ordering &&
             a.view.camera_variant == b.view.camera_variant &&
             sameClipVolume(a.view,b.view) &&
+            sameSurfaceSelection(a.view,b.view) &&
             sameRect(a.view.viewport,b.view.viewport) && sameRect(a.view.projection_anchor,b.view.projection_anchor) &&
             a.current.projection == b.current.projection;
     }

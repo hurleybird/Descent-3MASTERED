@@ -593,6 +593,7 @@ d3scene::VisibilityReport RenderGameSceneView(const d3scene::Presentation& frame
             view.camera.forward = {basis.fvec.x,basis.fvec.y,basis.fvec.z};
             view.attached_camera = false; view.exclude_camera_rig = false;
             view = d3scene::reflectedView(frame,view,mirror.plane,0x4d4952524f525001ull,room.number);
+            for (const auto face : mirror.polygons) view.excluded_surfaces.push_back({room.asset->id(),face});
             // Inspect the reflected image with main-view image products. This
             // fixture is NOT mirror-surface composition or gameplay feedback.
             view.kind = d3scene::ViewKind::Main;

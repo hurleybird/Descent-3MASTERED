@@ -1,5 +1,30 @@
 # Renderer migration checkpoint
 
+## Continuation: optical intervals and view-local surface selection
+
+Fog's optical origin is explicit and independent of geometry clipping. Reflected
+views start fog at the retained plane, not at the virtual camera. CPU and GPU
+integration trim the interval while retaining earlier boundary crossings to
+establish winding at its start. Ordinary cameras retain the authored fog law.
+Optical-policy changes invalidate history. This is not final qualification of
+fog composition across a mirror, particularly the authored linear exterior law.
+
+Views also own revision-qualified room-surface exclusions. Resolution rejects
+stale assets and missing polygons, canonicalizes selections, and never changes
+shared surface eligibility. Selection changes invalidate temporal history;
+selected geometry cannot generate gameplay feedback until separately qualified.
+The mirror-camera fixture excludes its own published planar group explicitly.
+
+Full build and 5,662 checks pass. All eight scene-fog-interval-normal captures
+match scene-planar-publication-normal exactly. Reflected-camera/image-chain
+captures scene-fog-interval-mirror and scene-surface-selection-mirror each match
+their predecessor exactly. Save 006 has no fog: it verifies camera/image-chain
+non-regression, NOT the new clipped fog branch. Analytic tests cover optical
+starts before/inside/between/after disconnected fog intervals, reversed and
+oblique rays, containment, and invalid policies. Mirror fixture revisions 3/4
+record the optical/selection changes. Gameplay gates and installed Candidates
+remain unchanged; mirror composition and its full visual qualification continue.
+
 ## Continuation: published planar surfaces
 
 Raw mirror-face metadata is removed from RoomState. Publication now compiles

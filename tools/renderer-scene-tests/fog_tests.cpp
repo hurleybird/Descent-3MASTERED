@@ -47,6 +47,36 @@ int runFogTests() {
         "Non-convex fog containment filled a clear interval");
     check(near(d3scene::fogSegmentLength(separated,{0,0,0},{0,0,10},false),4),"Separated fog intervals lost an exit or entry");
     check(near(d3scene::fogSegmentLength(separated,{0,0,3},{0,0,7},true),2),"Clear space between fog intervals was integrated");
+    // The excluded prefix still determines winding at the optical start. Test
+    // starts before, inside, between and after disconnected fog intervals.
+    for (int i = 0; i <= 100; ++i) {
+        const float start = i*.1f;
+        const float expected = (std::max)(0.f,4.f-(std::max)(2.f,start)) +
+            (std::max)(0.f,8.f-(std::max)(6.f,start));
+        check(near(d3scene::fogSegmentLength(separated,{0,0,0},{0,0,10},false,start),expected),
+            "Trimmed fog interval lost pre-start containment");
+        check(near(d3scene::fogSegmentLength(separated,{0,0,10},{0,0,0},false,start),expected),
+            "Trimmed fog interval depends on ray orientation");
+    }
+    check(near(d3scene::fogSegmentLength(separated,{0,0,3},{0,0,9},true,4),1),
+        "Trimmed fog ray from inside retained an excluded interval");
+    check(near(d3scene::fogSegmentLength(volume,{0,0,3},{0,0,3.5f},true,1),0),
+        "Fog start beyond endpoint produced a negative interval");
+    d3scene::View clipped; clipped.history_key = 1;
+    clipped.viewport = clipped.projection_anchor = {0,0,800,600};
+    clipped.has_clip_plane = true; clipped.clip_plane = {{0,0,1},-3};
+    check(near(d3scene::fogRayStart(clipped,{0,0,10}),0),"Geometry clipping implicitly changed optical policy");
+    clipped.fog_path_origin = d3scene::FogPathOrigin::ClipPlane;
+    check(near(d3scene::fogRayStart(clipped,{0,0,10}),3),"Fog ray did not start on physical plane");
+    check(near(d3scene::fogRayStart(clipped,{4,0,3}),5),"Oblique fog start used axial distance");
+    check(near(d3scene::fogRayStart(clipped,{0,0,2}),2),"Behind-plane fragment integrated fog");
+    check(near(d3scene::fogRayStart(clipped,{4,0,0}),4),"Parallel excluded ray integrated fog");
+    clipped.camera.position.z = 4;
+    check(near(d3scene::fogRayStart(clipped,{0,0,10}),0),"Retained camera ray lost its prefix");
+    clipped.has_clip_plane = false;
+    bool missing_plane = false;
+    try { d3scene::validateView(clipped); } catch (const std::invalid_argument&) { missing_plane = true; }
+    check(missing_plane,"Optical plane policy accepted missing plane");
     auto trigger_geometry = frame.rooms[0].asset->geometry();
     auto trigger = trigger_geometry.polygons[0]; trigger.bounds_volume = false;
     trigger_geometry.polygons.push_back(trigger);

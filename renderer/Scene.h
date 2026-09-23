@@ -467,9 +467,16 @@ enum class ViewKind { Main, Auxiliary, Mirror, SaveThumbnail, Automap, Preview }
 enum class ViewTarget { Scene, Display };
 enum class ViewOrdering { Depth, Compositing };
 enum class ViewProjection { Perspective, Orthographic };
+enum class FogPathOrigin { Camera, ClipPlane };
 struct Rect { int32_t x = 0, y = 0, width = 0, height = 0; };
 enum Feedback : uint8_t { NoFeedback = 0, Automap = 1, ObjectVisibility = 2, EffectEligibility = 4 };
 struct ViewImageInput { uint64_t slot = 0, image = 0; };
+// A room number alone can silently select replacement topology. Selections are
+// qualified by the immutable asset revision and validated against the frame.
+struct RoomSurfaceId { AssetId room; uint32_t polygon = 0; };
+inline bool operator==(const RoomSurfaceId& a,const RoomSurfaceId& b) {
+    return a.room == b.room && a.polygon == b.polygon;
+}
 struct View {
     // Explicit diagnostic execution, never a fallback selected by capability.
     bool geometry_inspection = false;
@@ -484,12 +491,14 @@ struct View {
     Transform camera;
     bool has_clip_plane = false;
     Plane clip_plane; // world space; retain normal.point + constant >= 0
+    FogPathOrigin fog_path_origin = FogPathOrigin::Camera;
     uint32_t camera_owner = 0;
     uint32_t camera_variant = 0; // discontinuous source mode, e.g. forward/rear
     bool attached_camera = false;
     int32_t room = -1;
     bool exclude_camera_rig = false;
     std::vector<uint32_t> excluded_objects;
+    std::vector<RoomSurfaceId> excluded_surfaces;
     std::vector<ViewImageInput> image_inputs;
     Rect viewport, projection_anchor;
     float zoom = 1;

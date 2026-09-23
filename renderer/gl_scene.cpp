@@ -148,6 +148,7 @@ layout(location=1) out vec4 surface_motion; // XY displacement, Z history validi
 layout(location=4) out uint surface_identity;
 uniform samplerBuffer scene_fog;
 uniform int fog_volume_count, fog_enabled, fog_additive, fog_exterior;
+uniform vec4 fog_path_plane; // zero: camera origin; otherwise retained optical half-space
 uniform int multiply_material;
 uniform sampler2D opaque_depth;
 uniform float soft_depth_range, near_distance, orthographic_depth_scale;
@@ -223,9 +224,16 @@ vec3 applySceneFog(vec3 radiance,out float transmission) {
     float distance = length(delta);
     if (distance < 1.e-6) return radiance;
     vec3 direction = delta/distance;
+    float start = 0.0;
+    float origin_side = dot(vec4(eye,1),fog_path_plane);
+    if (origin_side < 0.0) {
+        float advance = dot(direction,fog_path_plane.xyz);
+        start = advance > 0.0 ? min(distance,-origin_side/advance) : distance;
+    }
+    float interval = distance-start;
     float forward_scale = max(0.0,dot(direction,camera_forward));
     if (fog_exterior != 0) {
-        float amount = clamp((distance*forward_scale-exterior_fog_range.x)/(exterior_fog_range.y-exterior_fog_range.x),0.0,1.0);
+        float amount = clamp((interval*forward_scale-exterior_fog_range.x)/(exterior_fog_range.y-exterior_fog_range.x),0.0,1.0);
         transmission *= 1.0-amount;
         radiance = mix(radiance,multiply_material != 0 ? vec3(1) : (fog_additive != 0 ? vec3(0) : exterior_fog_color),amount);
     }
@@ -236,7 +244,7 @@ vec3 applySceneFog(vec3 radiance,out float transmission) {
         vec4 low = texelFetch(scene_fog,volume*4+1), high = texelFetch(scene_fog,volume*4+2);
         if (!fogBounds(low.xyz,high.xyz,direction,distance)) continue;
         vec4 state = texelFetch(scene_fog,volume*4+3);
-        float path = state.x*distance;
+        float path = state.x*interval;
         int node = 0;
         while (node < int(state.y)) {
             int record = int(low.w)+node*3;
@@ -248,13 +256,13 @@ vec3 applySceneFog(vec3 radiance,out float transmission) {
                 float crossing;
                 if (fogHit(texelFetch(scene_fog,offset).xyz,texelFetch(scene_fog,offset+1).xyz,texelFetch(scene_fog,offset+2).xyz,direction,crossing) &&
                     crossing > 1.e-5 && crossing < distance)
-                    path += (distance-crossing)*(dot(texelFetch(scene_fog,offset+3).xyz,direction) > 0.0 ? 1.0 : -1.0);
+                    path += (distance-max(start,crossing))*(dot(texelFetch(scene_fog,offset+3).xyz,direction) > 0.0 ? 1.0 : -1.0);
             }
             ++node;
         }
         // Preserve the authored linear camera-forward depth law, while measuring
         // only the part of the ray actually inside connected fog space.
-        float amount = clamp(path,0.0,distance)*forward_scale/appearance.w;
+        float amount = clamp(path,0.0,interval)*forward_scale/appearance.w;
         optical_depth += amount; weighted_color += appearance.rgb*amount;
     }
     if (optical_depth > 0.0) {
@@ -941,6 +949,8 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::Presentat
     vec("camera_up",camera.up); vec("camera_forward",camera.forward);
     const auto clip = view.has_clip_plane ? view.clip_plane : d3scene::Plane{};
     glUniform4f(scene_shader.FindUniform("world_clip_plane"),clip.normal.x,clip.normal.y,clip.normal.z,clip.constant);
+    const auto fog_clip = view.fog_path_origin == d3scene::FogPathOrigin::ClipPlane ? clip : d3scene::Plane{};
+    glUniform4f(scene_shader.FindUniform("fog_path_plane"),fog_clip.normal.x,fog_clip.normal.y,fog_clip.normal.z,fog_clip.constant);
     const auto& projection = visibility.camera.projection;
     glUniform4f(scene_shader.FindUniform("projection"),projection.x_scale,projection.y_scale,
         projection.x_offset,projection.y_offset);

@@ -185,14 +185,29 @@ bool fogContains(const FogVolume& volume,Vec3 position) {
     });
     return winding > 0;
 }
-float fogSegmentLength(const FogVolume& volume,Vec3 eye,Vec3 endpoint,bool eye_inside) {
-    const auto delta = sub(endpoint,eye); const double length = std::sqrt(dot(delta,delta));
+float fogRayStart(const View& view,Vec3 endpoint) {
+    validateView(view);
+    if (view.fog_path_origin == FogPathOrigin::Camera) return 0;
+    const auto delta = sub(endpoint,view.camera.position);
+    const double length = std::sqrt(dot(delta,delta));
     if (!(length > 0)) return 0;
+    const auto plane = view.clip_plane;
+    const double at_eye = dot(plane.normal,view.camera.position)+plane.constant;
+    if (at_eye >= 0) return 0;
+    const double advance = dot(plane.normal,delta);
+    if (!(advance > 0)) return static_cast<float>(length);
+    return static_cast<float>(length*(std::min)(1.0,-at_eye/advance));
+}
+float fogSegmentLength(const FogVolume& volume,Vec3 eye,Vec3 endpoint,bool eye_inside,float start_distance) {
+    if (!std::isfinite(start_distance) || start_distance < 0) throw std::invalid_argument("Invalid fog interval start");
+    const auto delta = sub(endpoint,eye); const double length = std::sqrt(dot(delta,delta));
+    if (!(length > start_distance)) return 0;
     const Vec3 direction{float(delta.x/length),float(delta.y/length),float(delta.z/length)};
-    double accumulated = eye_inside ? length : 0;
+    const double interval = length-start_distance;
+    double accumulated = eye_inside ? interval : 0;
     visitCrossings(volume,eye,direction,length,[&](const FogTriangle& triangle,double distance) {
-        accumulated += (length-distance)*(dot(triangle.inward,direction) > 0 ? 1 : -1);
+        accumulated += (length-(std::max)(double(start_distance),distance))*(dot(triangle.inward,direction) > 0 ? 1 : -1);
     });
-    return static_cast<float>(std::max(0.0,std::min(length,accumulated)));
+    return static_cast<float>(std::max(0.0,std::min(interval,accumulated)));
 }
 }

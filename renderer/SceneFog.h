@@ -27,5 +27,8 @@ private:
 const std::vector<FogVolume>& fogVolumes(const FrameData&);
 void buildFogAcceleration(FogVolume&);
 bool fogContains(const FogVolume&,Vec3);
-float fogSegmentLength(const FogVolume&,Vec3 eye,Vec3 endpoint,bool eye_inside);
+// Start distance trims the optical interval, but crossings before that distance
+// still establish containment. No per-fragment containment query is necessary.
+float fogSegmentLength(const FogVolume&,Vec3 eye,Vec3 endpoint,bool eye_inside,float start_distance = 0);
+float fogRayStart(const View&,Vec3 endpoint);
 }

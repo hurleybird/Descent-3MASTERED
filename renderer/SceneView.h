@@ -37,6 +37,7 @@ View resolveView(const Presentation&, View);
 View reflectedView(const Presentation&,View parent,Plane mirror,uint64_t history_key,int32_t room);
 bool reversesWinding(const Transform& camera);
 bool excludesObject(const View&,uint32_t handle);
+bool excludesSurface(const View&,RoomSurfaceId);
 uint64_t viewImageSource(const View&,uint64_t slot);
 std::vector<size_t> orderViewImages(const std::vector<ViewImageRequest>&);
 Transform resolveMeshTransform(const PreparedMesh&,const Camera&);

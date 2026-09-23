@@ -175,6 +175,7 @@ View reflectedView(const Presentation& frame,View parent,Plane mirror,uint64_t h
     result.kind = ViewKind::Mirror; result.history_key = history_key;
     result.feedback = NoFeedback; result.room = room; result.exterior_origin = false;
     result.has_clip_plane = true; result.clip_plane = mirror;
+    result.fog_path_origin = FogPathOrigin::ClipPlane;
     validateView(result);
     return result;
 }
@@ -278,16 +279,29 @@ bool sphereIntersects(const Camera& camera, Vec3 center, float radius) {
     return true;
 }
 View resolveView(const Presentation& frame, View view) {
+    for (const auto& selection : view.excluded_surfaces) {
+        const auto room = std::find_if(frame.data().rooms.begin(),frame.data().rooms.end(),
+            [&](const RoomState& candidate) { return candidate.asset->id() == selection.room; });
+        if (room == frame.data().rooms.end() || selection.polygon >= room->asset->geometry().polygons.size())
+            throw std::invalid_argument("View surface selection has stale or missing geometry");
+    }
+    std::sort(view.excluded_surfaces.begin(),view.excluded_surfaces.end(),[](const RoomSurfaceId& a,const RoomSurfaceId& b) {
+        if (a.room.lifetime != b.room.lifetime) return a.room.lifetime < b.room.lifetime;
+        if (a.room.revision != b.room.revision) return a.room.revision < b.room.revision;
+        if (a.room.slot != b.room.slot) return a.room.slot < b.room.slot;
+        return a.polygon < b.polygon;
+    });
+    view.excluded_surfaces.erase(std::unique(view.excluded_surfaces.begin(),view.excluded_surfaces.end()),view.excluded_surfaces.end());
     if (view.exclude_camera_rig) {
         const auto owner = std::find_if(frame.data().objects.begin(),frame.data().objects.end(),
             [&](const ObjectState& object) { return object.handle == view.camera_owner; });
         if (owner == frame.data().objects.end()) throw std::invalid_argument("Camera rig owner is not in this presentation");
         view.excluded_objects.push_back(owner->handle);
         view.excluded_objects.insert(view.excluded_objects.end(),owner->camera_hidden_objects.begin(),owner->camera_hidden_objects.end());
-        std::sort(view.excluded_objects.begin(),view.excluded_objects.end());
-        view.excluded_objects.erase(std::unique(view.excluded_objects.begin(),view.excluded_objects.end()),view.excluded_objects.end());
         view.exclude_camera_rig = false;
     }
+    std::sort(view.excluded_objects.begin(),view.excluded_objects.end());
+    view.excluded_objects.erase(std::unique(view.excluded_objects.begin(),view.excluded_objects.end()),view.excluded_objects.end());
     if (view.attached_camera) for (const auto& effect : frame.data().camera_perturbations) {
         if (effect.owner != view.camera_owner) continue;
         view.camera.right = transformDirection(effect.rotation,view.camera.right);
@@ -299,6 +313,9 @@ View resolveView(const Presentation& frame, View view) {
 }
 bool excludesObject(const View& view,uint32_t handle) {
     return std::find(view.excluded_objects.begin(),view.excluded_objects.end(),handle) != view.excluded_objects.end();
+}
+bool excludesSurface(const View& view,RoomSurfaceId surface) {
+    return std::find(view.excluded_surfaces.begin(),view.excluded_surfaces.end(),surface) != view.excluded_surfaces.end();
 }
 uint64_t viewImageSource(const View& view,uint64_t slot) {
     for (const auto& input : view.image_inputs) if (input.slot == slot) return input.image;
@@ -390,6 +407,7 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
         const auto& room = rooms[r];
         const auto& geometry = room.asset->geometry();
         for (size_t f = 0; f < geometry.polygons.size(); ++f) {
+            if (excludesSurface(view,{room.asset->id(),static_cast<uint32_t>(f)})) continue;
             consider(MeshView(geometry),room.surfaces[f],{static_cast<uint32_t>(r),static_cast<uint32_t>(f)},windows[r]);
         }
     }

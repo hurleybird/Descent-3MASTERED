@@ -46,6 +46,47 @@ void appendRoom(d3scene::SceneAssets& assets,d3scene::FrameData& data,d3scene::M
 int runSceneViewTests() {
     {
         using namespace d3scene;
+        SceneAssets assets; FrameData data; data.sequence = 1; data.scene_lifetime = assets.lifetime();
+        appendRoom(assets,data,triangle(-1,3)); appendRoom(assets,data,triangle(1,3));
+        const auto frame = Presentation::freeze(data);
+        auto parent = view(); parent.portal_visibility = false;
+        const RoomSurfaceId first{data.rooms[0].asset->id(),0}, second{data.rooms[1].asset->id(),0};
+        auto selected = parent; selected.excluded_surfaces = {first,first};
+        const auto resolved = resolveView(*frame,selected);
+        check(resolved.excluded_surfaces.size() == 1,"Repeated surface exclusions were not canonicalized");
+        const auto visible = queryView(*frame,resolved);
+        check(visible.surfaces.size() == 1 && visible.surfaces[0].room_index == 1,
+            "Surface exclusion affected the wrong room");
+        check(queryView(*frame,parent).surfaces.size() == 2 && frame->data().rooms[0].surfaces[0].draw_surface,
+            "View exclusion mutated shared geometry");
+        auto reordered = selected; reordered.excluded_surfaces = {second,first,second};
+        auto ordered = selected; ordered.excluded_surfaces = {first,second};
+        check(resolveView(*frame,reordered).excluded_surfaces == resolveView(*frame,ordered).excluded_surfaces,
+            "Equivalent selections depend on caller order");
+        ViewHistory history; history.commit(history.prepare(data,resolved,prepareCamera(resolved)));
+        bool rejected = false;
+        try { history.prepare(data,parent,prepareCamera(parent)); } catch (const std::logic_error&) { rejected = true; }
+        check(rejected,"One history key accepted conflicting surface selections");
+        ++data.sequence;
+        check(!history.prepare(data,parent,prepareCamera(parent)).previous_valid,"Selection change retained image history");
+        for (int invalid = 0; invalid < 4; ++invalid) {
+            auto bad = selected;
+            if (invalid == 0) ++bad.excluded_surfaces[0].room.revision;
+            if (invalid == 1) ++bad.excluded_surfaces[0].room.lifetime;
+            if (invalid == 2) bad.excluded_surfaces[0].polygon = 1;
+            if (invalid == 3) bad.feedback = Automap;
+            rejected = false;
+            try { queryView(*frame,bad); } catch (const std::invalid_argument&) { rejected = true; }
+            check(rejected,"Stale or unqualified surface selection accepted");
+        }
+        data.rooms[0].asset = assets.publishRoom(0,triangle(-1,4));
+        rejected = false;
+        try { queryView(*Presentation::freeze(data),selected); } catch (const std::invalid_argument&) { rejected = true; }
+        check(rejected && queryView(*frame,selected).surfaces.size() == 1,
+            "Replacement geometry aliased a held surface selection");
+    }
+    {
+        using namespace d3scene;
         ViewImageRequest image; image.image = 17; image.view = view();
         image.view.kind = ViewKind::Preview; image.samples = 4;
         validateViewImage(image);
@@ -113,6 +154,8 @@ int runSceneViewTests() {
         auto reflected = reflectedView(*frame,parent,{{0,0,2},-10},2,0);
         check(near(reflected.camera.position.z,10) && near(reflected.camera.forward.z,-1),"Mirror camera reflection failed");
         check(reversesWinding(reflected.camera) && !reversesWinding(parent.camera),"Reflection lost orientation parity");
+        check(reflected.fog_path_origin == FogPathOrigin::ClipPlane && parent.fog_path_origin == FogPathOrigin::Camera,
+            "Reflection did not declare its physical optical interval");
         check(reflected.kind == ViewKind::Mirror && reflected.feedback == NoFeedback && reflected.excluded_objects == parent.excluded_objects,
             "Reflected view lost explicit policy");
         const auto camera = prepareCamera(reflected);
@@ -141,7 +184,13 @@ int runSceneViewTests() {
         bool rejected = false;
         try { history.prepare(data,moved_clip,prepareCamera(moved_clip)); } catch (const std::logic_error&) { rejected = true; }
         check(rejected,"History accepted conflicting clip volumes for one view");
+        auto changed_optics = reflected; changed_optics.fog_path_origin = FogPathOrigin::Camera;
+        rejected = false;
+        try { history.prepare(data,changed_optics,prepareCamera(changed_optics)); } catch (const std::logic_error&) { rejected = true; }
+        check(rejected,"History accepted conflicting fog paths for one view");
         ++data.sequence;
+        check(!history.prepare(data,changed_optics,prepareCamera(changed_optics)).previous_valid,
+            "Optical interval change reused temporal history");
         check(!history.prepare(data,moved_clip,prepareCamera(moved_clip)).previous_valid,"Clip change reused temporal history");
         for (int invalid = 0; invalid < 4; ++invalid) {
             rejected = false;
