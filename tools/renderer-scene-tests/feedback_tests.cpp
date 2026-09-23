@@ -1,5 +1,6 @@
 // Descent 3MASTERED - GPL-3.0-or-later
 #include "../../Descent3/SceneFeedback.h"
+#include "../../renderer/SceneTerrain.h"
 #include <stdexcept>
 int runFeedbackTests() {
     using namespace d3scene;
@@ -119,5 +120,27 @@ int runFeedbackTests() {
     check(InspectSceneObservations(*rig_frame,view).report.objects.empty());
     view.exclude_camera_rig = false; view.excluded_objects.clear();
     check(InspectSceneObservations(*rig_frame,view).report.objects.size() == 2);
+    FrameData exterior; exterior.sequence = 40; exterior.scene_lifetime = assets.lifetime();
+    exterior.observation_inputs_prepared = true; exterior.terrain.observation_distance = 30;
+    ObjectState outside; outside.handle = 300; outside.room = -2; outside.observation_eligible = true;
+    outside.current.position = {1,0,11}; outside.observation_bounds = {outside.current.position,outside.current.position};
+    exterior.objects.push_back(outside);
+    View outdoor; outdoor.history_key = 4; outdoor.viewport = outdoor.projection_anchor = {0,0,800,600};
+    outdoor.camera.position = {1,0,1}; outdoor.exterior_origin = true; outdoor.feedback = ObjectVisibility | EffectEligibility;
+    TerrainOcclusionData table; table.width = table.depth = 2; table.sector_size = 10;
+    table.visibility = {0,0,0,0}; exterior.terrain.occlusion = assets.publishTerrainOcclusion(table);
+    auto outside_frame = Presentation::freeze(exterior);
+    auto outside_report = InspectSceneObservations(*outside_frame,outdoor);
+    check(outside_report.report.objects.empty() && outside_report.report.terrain && outside_report.exterior_pending);
+    table.visibility[0] = 4; exterior.terrain.occlusion = assets.publishTerrainOcclusion(table);
+    outside_frame = Presentation::freeze(exterior);
+    check(InspectSceneObservations(*outside_frame,outdoor).report.objects == std::vector<uint32_t>{300});
+    exterior.terrain.observation_distance = 5; outside_frame = Presentation::freeze(exterior);
+    check(InspectSceneObservations(*outside_frame,outdoor).report.objects.empty());
+    exterior.objects[0].observation_unbounded = true; outside_frame = Presentation::freeze(exterior);
+    check(InspectSceneObservations(*outside_frame,outdoor).report.objects.size() == 1);
+    table.visibility[0] = 0; exterior.terrain.occlusion = assets.publishTerrainOcclusion(table);
+    outside_frame = Presentation::freeze(exterior);
+    check(InspectSceneObservations(*outside_frame,outdoor).report.objects.empty()); // electrical admission still honors occlusion
     return checks;
 }

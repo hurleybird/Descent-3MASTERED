@@ -135,6 +135,7 @@ void SceneAssets::reset() {
     images_.clear();
     reflections_.clear();
     terrain_.reset();
+    terrain_occlusion_.reset();
     meshes_.clear();
     fog_.reset();
     lifetime_ = lifetime;
@@ -342,6 +343,10 @@ PresentationRef Presentation::freeze(const FrameData& data) {
             mesh.alignment == MeshAlignment::Axis,"Invalid mesh alignment");
         validateSurface(mesh.surface); validateIndices(mesh.surface);
     }
+    require(!data.terrain.occlusion || data.terrain.occlusion->id().lifetime == data.scene_lifetime,
+        "Stale terrain occlusion asset");
+    require(std::isfinite(data.terrain.observation_distance) && data.terrain.observation_distance >= 0,
+        "Invalid exterior observation distance");
     if (data.terrain.asset) {
         require(data.terrain.asset->id().lifetime == data.scene_lifetime,"Stale terrain asset");
         require(data.terrain.materials.size() == data.terrain.asset->grid().materials.size(),"Incomplete terrain materials");

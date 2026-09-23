@@ -78,10 +78,9 @@ const SurfaceBinding& visibleSurfaceBinding(const Presentation&,const VisibleSur
 uint32_t selectModelVariant(const ModelInstance&,const Camera&);
 std::vector<ViewPass> buildViewPasses(const Presentation&,const ViewVisibility&,ViewProducts products = {});
 
-// Pure conservative frustum query over the complete published scene. Results
-// are view-local indices, never marks written into shared faces/objects.
-// This does not claim portal/occlusion visibility or gameplay observations.
-// Portal traversal can refine this reference query once independently tested.
+// Pure geometry query over published scene data, frusta and portal apertures.
+// Results are view-local indices, never marks written into shared objects.
+// Gameplay observations use a separate simulation-volume contract.
 ViewVisibility queryView(const Presentation& frame, const View& view);
 
 } // namespace d3scene

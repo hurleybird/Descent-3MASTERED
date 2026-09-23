@@ -10,7 +10,7 @@ struct SceneObservationInspection {
     bool exterior_pending = false, mirrors_pending = false;
 };
 // Candidate compatibility query, not a permission to commit gameplay state.
-// Exterior occlusion and reflected observations remain explicit coverage gaps.
+// Full exterior qualification and reflected observations remain coverage gaps.
 SceneObservationInspection InspectSceneObservations(const d3scene::Presentation&,d3scene::View);
 
 // Game-owned observation transaction. It deliberately does not interpret GPU

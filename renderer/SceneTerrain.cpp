@@ -6,6 +6,45 @@
 #include <algorithm>
 #include <map>
 namespace d3scene {
+TerrainOcclusionRef SceneAssets::publishTerrainOcclusion(const TerrainOcclusionData& data) {
+    const uint64_t sectors = uint64_t(data.width)*data.depth;
+    if (!sectors || sectors > 65536 || !std::isfinite(data.sector_size) || data.sector_size <= 0 ||
+        !std::isfinite(data.height_ceiling) || data.height_ceiling < 0 ||
+        data.visibility.size() != sectors*((sectors+7)/8))
+        throw std::invalid_argument("Invalid terrain occlusion table");
+    if (terrain_occlusion_) {
+        const auto& old = terrain_occlusion_->data();
+        if (old.width == data.width && old.depth == data.depth && old.sector_size == data.sector_size &&
+            old.height_ceiling == data.height_ceiling && old.visibility == data.visibility) return terrain_occlusion_;
+    }
+    if (revision_ == std::numeric_limits<uint64_t>::max()) throw std::overflow_error("Scene revision exhausted");
+    TerrainOcclusionRef replacement(new TerrainOcclusionAsset({lifetime_,revision_+1,0},data));
+    terrain_occlusion_ = replacement; ++revision_;
+    return replacement;
+}
+namespace {
+bool finitePosition(Vec3 point) {
+    return std::isfinite(point.x) && std::isfinite(point.y) && std::isfinite(point.z);
+}
+int64_t occlusionSector(const TerrainOcclusionData& data,Vec3 point) {
+    if (!finitePosition(point)) throw std::invalid_argument("Invalid terrain visibility point");
+    const double x = double(point.x)/data.sector_size, z = double(point.z)/data.sector_size;
+    if (x < 0 || z < 0 || x >= data.width || z >= data.depth) return -1;
+    return uint64_t(z)*data.width+uint64_t(x);
+}
+bool sectorMaySee(const TerrainOcclusionData& data,uint64_t source,uint64_t destination) {
+    const uint64_t stride = (uint64_t(data.width)*data.depth+7)/8;
+    return (data.visibility[source*stride+destination/8] & (1u<<(destination%8))) != 0;
+}
+}
+bool terrainMaySeeSphere(const TerrainOcclusionAsset& asset,Vec3 eye,Vec3 center,float radius) {
+    if (!std::isfinite(radius) || radius < 0 || !finitePosition(center))
+        throw std::invalid_argument("Invalid terrain visibility sphere");
+    const auto& data = asset.data();
+    const auto source = occlusionSector(data,eye), destination = occlusionSector(data,center);
+    if (source < 0 || destination < 0 || double(center.y)+radius >= data.height_ceiling) return true;
+    return sectorMaySee(data,uint64_t(source),uint64_t(destination));
+}
 float sampleTerrainExposure(TerrainExposureView grid,Vec3 position,int32_t cell) {
     if (!grid.values || !grid.width || !grid.depth || grid.spacing <= 0 || grid.height_step <= 0) return 1;
     const float x = position.x/grid.spacing, z = position.z/grid.spacing;

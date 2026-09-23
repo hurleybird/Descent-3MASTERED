@@ -331,7 +331,9 @@ int runSceneViewTests() {
     portals.rooms[2].portals.push_back({0,1}); // cycle must converge without a depth cutoff
     auto portal_view = view(); portal_view.room = 0;
     auto portal_frame = d3scene::Presentation::freeze(portals);
-    auto windows = d3scene::queryPortalWindows(*portal_frame,portal_view,d3scene::prepareCamera(portal_view));
+    check(!d3scene::queryPortalVisibility(*portal_frame,portal_view,d3scene::prepareCamera(portal_view)).exterior.visible,
+        "Enclosed portal graph admitted exterior observations");
+    auto windows = d3scene::queryPortalVisibility(*portal_frame,portal_view,d3scene::prepareCamera(portal_view)).rooms;
     check(windows[0].visible && windows[1].visible && windows[2].visible && !windows[3].visible,"Portal reachability or cycle handling failed");
     check(d3scene::queryView(*portal_frame,portal_view).room_indices.size() == 3,"View query ignored portal traversal");
     portals.rooms[1].blocks_portals = true;
@@ -360,43 +362,46 @@ int runSceneViewTests() {
     portals.rooms[0].asset = assets.publishRoom(0,openings); portals.rooms[0].surfaces.resize(2);
     portals.rooms[0].portals = {{0,1},{1,1}};
     portal_view.portal_visibility = true;
-    windows = d3scene::queryPortalWindows(*d3scene::Presentation::freeze(portals),portal_view,d3scene::prepareCamera(portal_view));
+    windows = d3scene::queryPortalVisibility(*d3scene::Presentation::freeze(portals),portal_view,d3scene::prepareCamera(portal_view)).rooms;
     check(windows[1].visible && windows[1].left < -.79 && windows[1].right > .79,"Multiple portal windows were not unioned");
     check(portal_frame->data().rooms[0].asset->geometry().vertices[0].z == 2,"Portal query changed held scene assets");
     auto exterior_data = portals;
     exterior_data.rooms[0].exterior = true;
     auto exterior_view = view(); exterior_view.exterior_origin = true;
     auto exterior_frame = d3scene::Presentation::freeze(exterior_data);
-    auto exterior_windows = d3scene::queryPortalWindows(*exterior_frame,exterior_view,d3scene::prepareCamera(exterior_view));
+    const auto exterior_aperture = d3scene::queryPortalVisibility(*exterior_frame,exterior_view,d3scene::prepareCamera(exterior_view)).exterior;
+    check(exterior_aperture.visible && exterior_aperture.left == -1 && exterior_aperture.right == 1 &&
+        exterior_aperture.bottom == -1 && exterior_aperture.top == 1,"Exterior camera lost full terrain aperture");
+    auto exterior_windows = d3scene::queryPortalVisibility(*exterior_frame,exterior_view,d3scene::prepareCamera(exterior_view)).rooms;
     check(exterior_windows[0].visible && exterior_windows[1].visible && exterior_windows[2].visible && !exterior_windows[3].visible,
         "Exterior origin exposed disconnected interiors");
     exterior_data.rooms[1].blocks_portals = true;
-    exterior_windows = d3scene::queryPortalWindows(*d3scene::Presentation::freeze(exterior_data),exterior_view,d3scene::prepareCamera(exterior_view));
+    exterior_windows = d3scene::queryPortalVisibility(*d3scene::Presentation::freeze(exterior_data),exterior_view,d3scene::prepareCamera(exterior_view)).rooms;
     check(exterior_windows[1].visible && !exterior_windows[2].visible,"Exterior seed bypassed a closed door");
     auto reversed_apertures = exterior_data.rooms[0].asset->geometry();
     for (auto& face : reversed_apertures.polygons) face.normal = {0,0,1};
     exterior_data.rooms[0].asset = assets.publishRoom(0,reversed_apertures);
-    exterior_windows = d3scene::queryPortalWindows(*d3scene::Presentation::freeze(exterior_data),exterior_view,d3scene::prepareCamera(exterior_view));
+    exterior_windows = d3scene::queryPortalVisibility(*d3scene::Presentation::freeze(exterior_data),exterior_view,d3scene::prepareCamera(exterior_view)).rooms;
     check(!exterior_windows[1].visible,"One-sided backfacing aperture was traversed");
     for (auto& portal : exterior_data.rooms[0].portals) portal.two_sided = true;
-    exterior_windows = d3scene::queryPortalWindows(*d3scene::Presentation::freeze(exterior_data),exterior_view,d3scene::prepareCamera(exterior_view));
+    exterior_windows = d3scene::queryPortalVisibility(*d3scene::Presentation::freeze(exterior_data),exterior_view,d3scene::prepareCamera(exterior_view)).rooms;
     check(exterior_windows[1].visible && !exterior_windows[2].visible,"Two-sided door aperture lost visibility or bypassed door closure");
     exterior_data.rooms[0].exterior = false;
-    exterior_windows = d3scene::queryPortalWindows(*d3scene::Presentation::freeze(exterior_data),exterior_view,d3scene::prepareCamera(exterior_view));
+    exterior_windows = d3scene::queryPortalVisibility(*d3scene::Presentation::freeze(exterior_data),exterior_view,d3scene::prepareCamera(exterior_view)).rooms;
     check(!exterior_windows[0].visible && !exterior_windows[3].visible,"No exterior shells fell back to all interiors");
     exterior_data.rooms[3].exterior = true;
     exterior_data.rooms[3].asset = assets.publishRoom(3,triangle(100,5));
-    exterior_windows = d3scene::queryPortalWindows(*d3scene::Presentation::freeze(exterior_data),exterior_view,d3scene::prepareCamera(exterior_view));
+    exterior_windows = d3scene::queryPortalVisibility(*d3scene::Presentation::freeze(exterior_data),exterior_view,d3scene::prepareCamera(exterior_view)).rooms;
     check(!exterior_windows[3].visible,"Offscreen exterior shell seeded traversal");
     exterior_data.rooms[3].asset = assets.publishRoom(3,triangle(0,.5f));
-    exterior_windows = d3scene::queryPortalWindows(*d3scene::Presentation::freeze(exterior_data),exterior_view,d3scene::prepareCamera(exterior_view));
+    exterior_windows = d3scene::queryPortalVisibility(*d3scene::Presentation::freeze(exterior_data),exterior_view,d3scene::prepareCamera(exterior_view)).rooms;
     check(exterior_windows[3].visible,"Near-plane exterior shell lost aperture eligibility");
     exterior_data.rooms[3].asset = assets.publishRoom(3,triangle(0,-5));
-    exterior_windows = d3scene::queryPortalWindows(*d3scene::Presentation::freeze(exterior_data),exterior_view,d3scene::prepareCamera(exterior_view));
+    exterior_windows = d3scene::queryPortalVisibility(*d3scene::Presentation::freeze(exterior_data),exterior_view,d3scene::prepareCamera(exterior_view)).rooms;
     check(!exterior_windows[3].visible,"Exterior shell behind camera seeded traversal");
     auto enclosing = triangle(0,5); enclosing.vertices[0] = {-100,-100,-5}; enclosing.vertices[1] = {100,100,5};
     exterior_data.rooms[3].asset = assets.publishRoom(3,enclosing);
-    exterior_windows = d3scene::queryPortalWindows(*d3scene::Presentation::freeze(exterior_data),exterior_view,d3scene::prepareCamera(exterior_view));
+    exterior_windows = d3scene::queryPortalVisibility(*d3scene::Presentation::freeze(exterior_data),exterior_view,d3scene::prepareCamera(exterior_view)).rooms;
     check(exterior_windows[3].visible,"Eye-straddling exterior shell was culled by projected corners");
     d3scene::FrameData shaken; shaken.sequence = 3; shaken.scene_lifetime = assets.lifetime();
     d3scene::Transform rotation; rotation.right = {0,0,-1}; rotation.forward = {1,0,0};

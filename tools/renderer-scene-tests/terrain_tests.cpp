@@ -70,6 +70,15 @@ int runTerrainTests() {
     const auto visible = queryView(*frozen,view);
     check(!visible.surfaces.empty() && visible.surfaces.size() < changed->patches().size());
     for (const auto& item : visible.surfaces) check(item.terrain);
+    {
+        TerrainOcclusionData blocked; blocked.width = blocked.depth = 16;
+        blocked.visibility.resize(256*32,0);
+        frame.terrain.occlusion = assets.publishTerrainOcclusion(blocked);
+        // Gameplay's authored table must not erase rendered geometry.
+        check(queryView(*Presentation::freeze(frame),view).surfaces.size() == visible.surfaces.size());
+        check(!queryView(*frozen,view).surfaces.empty()); // retained pre-occlusion frame is unchanged
+        frame.terrain.occlusion.reset();
+    }
     MeshGeometry wall; wall.vertices = {{0,0,0},{1,0,0},{0,1,0}};
     MeshPolygon face; face.normal = {0,0,1}; face.corners = {{0},{1},{2}}; wall.polygons.push_back(face);
     RoomState room; room.number = 0; room.asset = assets.publishRoom(0,wall); room.surfaces.resize(1);
@@ -119,6 +128,39 @@ int runTerrainTests() {
             expected += value*(dx ? fx : 1-fx)*(dz ? fz : 1-fz)*(dy ? fy : 1-fy);
         }
         check(std::abs(sampleTerrainExposure(grid,p,z*256+x)-expected) < .000001f);
+    }
+    {
+        SceneAssets catalog;
+        TerrainOcclusionData table; table.width = table.depth = 2;
+        table.sector_size = 10; table.height_ceiling = 100; table.visibility = {2,0,0,0};
+        const auto original = catalog.publishTerrainOcclusion(table);
+        check(catalog.publishTerrainOcclusion(table) == original);
+        check(terrainMaySeeSphere(*original,{1,0,1},{11,0,1},0));
+        check(!terrainMaySeeSphere(*original,{11,0,1},{1,0,1},0)); // directed, not symmetrized
+        check(!terrainMaySeeSphere(*original,{1,0,1},{1,0,11},0));
+        check(terrainMaySeeSphere(*original,{1,0,1},{1,100,11},0));
+        check(terrainMaySeeSphere(*original,{1,0,1},{1,99,11},1));
+        check(terrainMaySeeSphere(*original,{-.1f,0,1},{1,0,11},0)); // no negative sector alias
+        check(terrainMaySeeSphere(*original,{1,0,1},{20,0,11},0));
+        table.visibility[0] = 0;
+        const auto replacement = catalog.publishTerrainOcclusion(table);
+        check(replacement != original && terrainMaySeeSphere(*original,{1,0,1},{11,0,1},0));
+        check(!terrainMaySeeSphere(*replacement,{1,0,1},{11,0,1},0));
+        bool invalid = false;
+        table.visibility.pop_back();
+        try { catalog.publishTerrainOcclusion(table); } catch (const std::invalid_argument&) { invalid = true; }
+        check(invalid);
+        FrameData held; held.sequence = 1; held.scene_lifetime = catalog.lifetime(); held.terrain.occlusion = original;
+        const auto owned = Presentation::freeze(held);
+        catalog.reset();
+        check(!catalog.terrainOcclusion() && owned->data().terrain.occlusion == original);
+        held.scene_lifetime = catalog.lifetime(); invalid = false;
+        try { Presentation::freeze(held); } catch (const std::invalid_argument&) { invalid = true; }
+        check(invalid);
+        table.width = 9; table.depth = 1; table.visibility.assign(18,0); table.visibility[1] = 1;
+        const auto byte_boundary = catalog.publishTerrainOcclusion(table);
+        check(terrainMaySeeSphere(*byte_boundary,{1,0,1},{81,0,1},0));
+        check(!terrainMaySeeSphere(*byte_boundary,{1,0,1},{71,0,1},0));
     }
     return checks;
 }

@@ -67,8 +67,27 @@ fallback. ObservationProbe collects/logs candidates without committing them.
   view-local camera planes. This is not asserted bitwise equivalent.
 - Observer/piggyback exclusions are now published and shared with the render
   query; actual observer-mode gameplay still needs qualification.
-- Publish terrain occlusion/distance and mirror
-  policies; account for legacy postrender capacity/order ties explicitly.
+- Terrain occlusion/distance are published as owned frame inputs. Qualify
+  exterior building admission, portal transitions and mirror policies; account
+  for legacy postrender capacity/order ties explicitly.
 - Verify room/effect timestamps and next-iteration AI notification behavior,
   pause, reload and allocation reuse before removing CommitGameVisibility's
   compile barrier. No pending renderer domain has been cleared by this work.
+
+## Exterior input ownership
+
+Portal traversal now returns room apertures and a single exterior aperture for
+both geometry and observations. Explicit exterior cameras retain a full aperture
+even when no external room shell is visible. The game producer publishes the
+checksum-qualified directed terrain table as an immutable, independently revised
+asset, plus the terrain observation distance. Invalidated tables are absent,
+not silently replaced with an older revision. Exterior object candidates use
+the authored center-sector rule, physical-radius height exception, streamer
+observation radius, distance and portal bounds. Electrical objects bypass sphere
+and aperture tests but not the authored table, matching the old order.
+
+This table is a gameplay compatibility input, not a conservative rendering
+occluder. An attempted multi-sector render-bounds filter removed visibly present
+distant terrain in saves 000/002; that filter and API were removed. Geometry
+must not inherit this legacy visibility approximation. Exterior coverage remains
+pending, and candidates still cannot be committed.

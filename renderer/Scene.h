@@ -163,6 +163,9 @@ using ReflectionAssetRef = std::shared_ptr<const ReflectionAsset>;
 struct TerrainGrid;
 class TerrainAsset;
 using TerrainAssetRef = std::shared_ptr<const TerrainAsset>;
+struct TerrainOcclusionData;
+class TerrainOcclusionAsset;
+using TerrainOcclusionRef = std::shared_ptr<const TerrainOcclusionAsset>;
 class FogAsset;
 struct RoomState;
 using FogAssetRef = std::shared_ptr<const FogAsset>;
@@ -184,6 +187,8 @@ public:
     ReflectionAssetRef publishReflection(uint32_t slot,ReflectionData);
     TerrainAssetRef terrain() const { return terrain_; }
     TerrainAssetRef publishTerrain(const TerrainGrid&);
+    TerrainOcclusionRef terrainOcclusion() const { return terrain_occlusion_; }
+    TerrainOcclusionRef publishTerrainOcclusion(const TerrainOcclusionData&);
     MeshAssetRef publishMesh(uint32_t,MeshGeometry);
     FogAssetRef publishFog(const std::vector<RoomState>&);
     uint64_t lifetime() const { return lifetime_; }
@@ -197,6 +202,7 @@ private:
     // environment sources. Storage must scale with live assets, not max ID.
     std::unordered_map<uint32_t,ReflectionAssetRef> reflections_;
     TerrainAssetRef terrain_;
+    TerrainOcclusionRef terrain_occlusion_;
     std::vector<MeshAssetRef> meshes_;
     FogAssetRef fog_;
 };
@@ -266,6 +272,8 @@ struct SurfaceBinding {
 MaterialPolicy compileMaterialPolicy(const SurfaceBinding&, const MeshPolygon&);
 struct TerrainState {
     TerrainAssetRef asset;
+    TerrainOcclusionRef occlusion; // null means authored table is unavailable/invalidated
+    float observation_distance = 0; // world units; zero means not published
     std::vector<SurfaceBinding> materials;
     std::vector<std::vector<SurfaceBinding>> patches;
 };

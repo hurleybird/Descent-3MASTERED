@@ -3,6 +3,25 @@
 #include "Scene.h"
 #include <array>
 namespace d3scene {
+struct TerrainOcclusionData {
+    uint32_t width = 0, depth = 0;
+    float sector_size = 256, height_ceiling = 350;
+    // One packed destination-sector bit row per source sector.
+    std::vector<uint8_t> visibility;
+};
+class TerrainOcclusionAsset final {
+public:
+    AssetId id() const { return id_; }
+    const TerrainOcclusionData& data() const { return data_; }
+private:
+    friend class SceneAssets;
+    TerrainOcclusionAsset(AssetId id,const TerrainOcclusionData& data) : id_(id), data_(data) {}
+    AssetId id_;
+    TerrainOcclusionData data_;
+};
+// Legacy center-sector admission for simulation observations. The authored
+// table is not a conservative visibility proof for rendered geometry.
+bool terrainMaySeeSphere(const TerrainOcclusionAsset&,Vec3 eye,Vec3 center,float radius);
 struct TerrainMaterial {
     int32_t texture = -1, lightmap = -1;
 };

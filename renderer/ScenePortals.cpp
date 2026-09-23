@@ -67,15 +67,17 @@ PortalWindow intersect(PortalWindow a,PortalWindow b) {
     return result;
 }
 }
-std::vector<PortalWindow> queryPortalWindows(const Presentation& frame,const View& view,const Camera& camera) {
+PortalVisibility queryPortalVisibility(const Presentation& frame,const View& view,const Camera& camera) {
     const auto& rooms = frame.data().rooms;
-    std::vector<PortalWindow> windows(rooms.size());
+    PortalVisibility result; result.rooms.resize(rooms.size());
+    auto& windows = result.rooms;
     std::unordered_map<int32_t,size_t> indices;
     for (size_t i = 0; i < rooms.size(); ++i) indices.emplace(rooms[i].number,i);
     const auto root = indices.find(view.room);
     if (!view.portal_visibility || (root == indices.end() && !view.exterior_origin)) {
         for (auto& window : windows) window.visible = true;
-        return windows;
+        result.exterior = {-1,-1,1,1,true};
+        return result;
     }
     std::deque<size_t> queue;
     std::vector<bool> queued(rooms.size(),false);
@@ -120,6 +122,13 @@ std::vector<PortalWindow> queryPortalWindows(const Presentation& frame,const Vie
             widen(destination->second,intersect(window,aperture));
         }
     }
-    return windows;
+    if (view.exterior_origin) result.exterior = {-1,-1,1,1,true};
+    else for (size_t i = 0; i < rooms.size(); ++i) if (rooms[i].exterior && windows[i].visible) {
+        const auto& window = windows[i];
+        if (!result.exterior.visible) result.exterior = window;
+        else result.exterior = {std::min(result.exterior.left,window.left),std::min(result.exterior.bottom,window.bottom),
+            std::max(result.exterior.right,window.right),std::max(result.exterior.top,window.top),true};
+    }
+    return result;
 }
 }

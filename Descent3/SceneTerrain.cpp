@@ -50,6 +50,25 @@ bool matches(const d3scene::TerrainGrid& grid) {
 }
 void PrepareGameTerrain(d3scene::FrameData& frame) {
     auto& assets = d3scene::assets();
+    if (int64_t(Terrain_checksum)+1 == Terrain_occlusion_checksum) {
+        auto occlusion = assets.terrainOcclusion();
+        const auto* bytes = reinterpret_cast<const uint8_t*>(Terrain_occlusion_map);
+        if (!occlusion || occlusion->data().width != OCCLUSION_SIZE || occlusion->data().depth != OCCLUSION_SIZE ||
+            occlusion->data().sector_size != TERRAIN_SIZE*OCCLUSION_SIZE ||
+            occlusion->data().height_ceiling != MAX_TERRAIN_HEIGHT ||
+            occlusion->data().visibility.size() != sizeof(Terrain_occlusion_map) ||
+            !std::equal(occlusion->data().visibility.begin(),occlusion->data().visibility.end(),bytes)) {
+            d3scene::TerrainOcclusionData source;
+            source.width = source.depth = OCCLUSION_SIZE;
+            source.sector_size = TERRAIN_SIZE*OCCLUSION_SIZE; source.height_ceiling = MAX_TERRAIN_HEIGHT;
+            source.visibility.assign(bytes,bytes+sizeof(Terrain_occlusion_map));
+            occlusion = assets.publishTerrainOcclusion(source);
+        }
+        frame.terrain.occlusion = occlusion;
+    } else frame.terrain.occlusion.reset();
+    frame.terrain.observation_distance = Detail_settings.Terrain_render_distance*(Render_extended_draw_distance ? 1.5f : 1.f);
+    if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
+        AutomatedCaptureLog("scene terrain visibility table=%d distance=%g",bool(frame.terrain.occlusion),frame.terrain.observation_distance);
     auto asset = assets.terrain();
     if (!asset || !matches(asset->grid())) {
         d3scene::TerrainGrid grid;

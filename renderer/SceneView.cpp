@@ -271,17 +271,12 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
     result.history_key = view.history_key;
     const auto& rooms = frame.data().rooms;
     const bool world_content = view.collection == 0;
-    const auto windows = world_content ? queryPortalWindows(frame,view,result.camera) : std::vector<PortalWindow>(rooms.size());
+    PortalVisibility spatial; spatial.rooms.resize(rooms.size());
+    if (world_content) spatial = queryPortalVisibility(frame,view,result.camera);
+    const auto& windows = spatial.rooms;
     std::unordered_map<int32_t,size_t> room_indices;
     if (world_content) for (size_t i = 0; i < rooms.size(); ++i) room_indices.emplace(rooms[i].number,i);
-    PortalWindow exterior_window{};
-    if (world_content && (!view.portal_visibility || view.exterior_origin || !room_indices.count(view.room))) exterior_window = {-1,-1,1,1,true};
-    else for (size_t room = 0; room < rooms.size(); ++room) if (rooms[room].exterior && windows[room].visible) {
-        const auto& window = windows[room];
-        if (!exterior_window.visible) exterior_window = window;
-        else exterior_window = {std::min(exterior_window.left,window.left),std::min(exterior_window.bottom,window.bottom),
-            std::max(exterior_window.right,window.right),std::max(exterior_window.top,window.top),true};
-    }
+    const auto& exterior_window = spatial.exterior;
     result.exterior_visible = exterior_window.visible;
     const auto spatialWindow = [&](int32_t room) {
         if (!world_content) return PortalWindow{-1,-1,1,1,true};

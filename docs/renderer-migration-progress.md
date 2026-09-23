@@ -1,5 +1,27 @@
 # Renderer migration checkpoint
 
+## Continuation: owned exterior observation inputs
+
+The terrain visibility table is now a checksum-qualified immutable asset with
+independent revision/lifetime ownership. Observation distance is published with
+the frame. Room traversal returns a shared exterior aperture instead of geometry
+and gameplay independently inferring one. Exterior candidate observations now
+apply the authored sector/distance/electrical/portal rules; external-building
+and full gameplay qualification remain pending, with no observation writes.
+
+A render-bounds use of that table was rejected: it removed visibly present
+distant terrain in exterior fixtures 000/002. The geometry-culling use and API
+were deleted, not concealed behind a tolerance or enabled as a fallback. The
+legacy gameplay rule is not a conservative rendering visibility proof.
+
+Full build and 5,389 checks pass. All eight normal effects/observation captures
+are pixel-identical to scene-camera-rig. Exterior scene-terrain-contract 000/003
+are exact against scene-terrain-visibility-before. Exterior 002 retains a small
+sky-strip difference (77 pixels differ, 49 above two levels, max 91; bounds
+564,3..1132,11), not claimed as parity or accepted by a blanket threshold.
+Exterior images were inspected; the combined exterior/observation probe reports
+terrain=1 and exterior_pending=1 as intended. Candidate and all gates unchanged.
+
 ## Continuation: shared camera-rig exclusions
 
 Replaced the single excluded-object field with explicit object exclusions and
