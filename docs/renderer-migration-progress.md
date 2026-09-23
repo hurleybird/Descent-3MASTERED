@@ -1,5 +1,34 @@
 # Renderer migration checkpoint
 
+## Continuation: independent reflected cameras and world clipping
+
+View now owns an optional unit world clip plane. CPU sphere/bounds/polygon
+queries and GPU clipping consume that plane; geometry passes scope clip-distance
+state so image-space passes cannot inherit it. Camera/model orientation parity
+controls GPU winding, with the ordinary winding restored on exit. Reflected
+cameras resolve attachment once and reflect the eye/basis, never world vertices,
+object poses, lights or simulation state. Exclusions remain explicit. Reflection
+requests require an independent identity and published spatial root; recursive
+reflection is rejected. Clip changes invalidate/reject incompatible history.
+
+Full build and 5,407 checks pass, including oblique reflection, orientation,
+crossing polygons/spheres, projection round trips, immutable parents and history.
+All eight effects/observation images match scene-terrain-contract-normal exactly;
+cockpit/gauges/text/reticle 003 matches scene-camera-rig-cockpit exactly. The
+authored mirror-camera fixture (006, room 3, polygon 58, 69 surfaces) runs in
+effects and clean profiles, and both images were visually inspected. This
+diagnostic promotes the reflected camera to main-view image products only to
+inspect its image full-screen. It is NOT mirror-surface composition, reflected
+fog qualification, recursion, or enabled reflected gameplay observations.
+
+Next upstream boundary is independently owned view images and their consumers,
+not temporarily swapping the main framebuffer or mutating game geometry.
+All renderer gates remain pending; Candidate/Previous Candidate untouched.
+
+The repeated unchanged terrain binary also varies in 002's sky strip (54 changed
+pixels, 38 above two levels, max 87; bounds 414,3..1132,11). That confirms capture
+variability exists there, but does not diagnose its cause or grant a tolerance.
+
 ## Continuation: owned exterior observation inputs
 
 The terrain visibility table is now a checksum-qualified immutable asset with

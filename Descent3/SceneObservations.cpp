@@ -13,7 +13,7 @@ SceneObservationInspection InspectSceneObservations(const d3scene::Presentation&
     report.frame_sequence = frame.data().sequence; report.scene_lifetime = frame.data().scene_lifetime;
     report.view_history_key = view.history_key; report.feedback = view.feedback;
     if (!view.feedback) return result;
-    if (!frame.data().observation_inputs_prepared || view.collection != 0 ||
+    if (!frame.data().observation_inputs_prepared || view.collection != 0 || view.has_clip_plane ||
         view.target != ViewTarget::Scene || view.ordering != ViewOrdering::Depth ||
         view.projection != ViewProjection::Perspective ||
         (view.kind != ViewKind::Main && view.kind != ViewKind::Auxiliary) || !view.portal_visibility)

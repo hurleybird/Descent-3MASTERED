@@ -45,6 +45,62 @@ void appendRoom(d3scene::SceneAssets& assets,d3scene::FrameData& data,d3scene::M
 
 int runSceneViewTests() {
     {
+        using namespace d3scene;
+        SceneAssets assets; FrameData data; data.sequence = 1; data.scene_lifetime = assets.lifetime();
+        appendRoom(assets,data,triangle(0,3,false));
+        appendRoom(assets,data,triangle(0,7,false));
+        const auto frame = Presentation::freeze(data);
+        auto parent = view(); parent.room = 0; parent.portal_visibility = false;
+        parent.excluded_objects = {42};
+        auto reflected = reflectedView(*frame,parent,{{0,0,2},-10},2,0);
+        check(near(reflected.camera.position.z,10) && near(reflected.camera.forward.z,-1),"Mirror camera reflection failed");
+        check(reversesWinding(reflected.camera) && !reversesWinding(parent.camera),"Reflection lost orientation parity");
+        check(reflected.kind == ViewKind::Mirror && reflected.feedback == NoFeedback && reflected.excluded_objects == parent.excluded_objects,
+            "Reflected view lost explicit policy");
+        const auto camera = prepareCamera(reflected);
+        check(sphereIntersects(camera,{0,0,3},0) && !sphereIntersects(camera,{0,0,7},0),"Mirror half-space admitted behind-plane geometry");
+        check(sphereIntersects(camera,{0,0,5.5f},1),"Mirror plane rejected a crossing sphere");
+        const auto visible = queryView(*frame,reflected);
+        check(visible.surfaces.size() == 1 && visible.surfaces[0].room_index == 0,"Geometry query ignored mirror clipping");
+        const auto opposite = reflectedView(*frame,parent,{{0,0,-1},5},3,0);
+        check(opposite.clip_plane.normal.z == reflected.clip_plane.normal.z && opposite.clip_plane.constant == reflected.clip_plane.constant,
+            "Mirror plane orientation changed retained physical half-space");
+        const auto clip = project(camera,{1,0,3});
+        const auto point = unproject(camera,float(clip.x/clip.w),float(clip.y/clip.w),float((clip.z/clip.w+1)*.5));
+        check(near(point.x,1) && near(point.z,3),"Reflected camera projection did not round trip");
+        check(parent.camera.position.z == 0 && frame->data().rooms[0].asset->geometry().vertices[0].z == 3,
+            "Mirror view mutated its parent or scene");
+        const auto oblique = reflectedView(*frame,parent,{{1,0,1},-10},4,0);
+        check(near(oblique.camera.position.x,10) && near(oblique.camera.position.z,10) &&
+            near(oblique.camera.forward.x,-1) && near(oblique.camera.forward.z,0),"Oblique reflection failed");
+        auto clipped = parent; clipped.has_clip_plane = true; clipped.clip_plane = {{1,0,0},0};
+        auto crossing = data; crossing.rooms.resize(1);
+        crossing.rooms[0].asset = assets.publishRoom(0,triangle(0,3));
+        check(queryView(*Presentation::freeze(crossing),clipped).surfaces.size() == 1,
+            "Clip query rejected a polygon crossing the plane");
+        ViewHistory history; const auto first = history.prepare(data,reflected,camera); history.commit(first);
+        auto moved_clip = reflected; moved_clip.clip_plane.constant += 1;
+        bool rejected = false;
+        try { history.prepare(data,moved_clip,prepareCamera(moved_clip)); } catch (const std::logic_error&) { rejected = true; }
+        check(rejected,"History accepted conflicting clip volumes for one view");
+        ++data.sequence;
+        check(!history.prepare(data,moved_clip,prepareCamera(moved_clip)).previous_valid,"Clip change reused temporal history");
+        for (int invalid = 0; invalid < 4; ++invalid) {
+            rejected = false;
+            try {
+                if (invalid == 0) reflectedView(*frame,parent,{},2,0);
+                if (invalid == 1) reflectedView(*frame,parent,{{0,0,1},-5},1,0);
+                if (invalid == 2) reflectedView(*frame,parent,{{0,0,1},-5},2,99);
+                if (invalid == 3) reflectedView(*frame,reflected,{{0,0,1},-5},3,0);
+            } catch (const std::invalid_argument&) { rejected = true; }
+            check(rejected,"Invalid reflected view request accepted");
+        }
+        auto bad = reflected; bad.clip_plane.normal = {};
+        rejected = false;
+        try { validateView(bad); } catch (const std::invalid_argument&) { rejected = true; }
+        check(rejected,"Degenerate world clip plane accepted");
+    }
+    {
         d3scene::SceneAssets batch_assets;
         d3scene::FrameData data; data.sequence = 1; data.scene_lifetime = batch_assets.lifetime();
         d3scene::PreparedMesh batch;

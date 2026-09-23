@@ -512,6 +512,15 @@ void validateView(const View& view) {
         "Display views cannot own main-world products or gameplay feedback");
     require(view.history_key != 0, "View has no history identity");
     require(finite(view.camera) && std::isfinite(view.zoom) && view.zoom > 0, "Invalid view camera");
+    if (view.has_clip_plane) {
+        const auto n = view.clip_plane.normal;
+        const double length2 = double(n.x)*n.x+double(n.y)*n.y+double(n.z)*n.z;
+        require(finite(n) && std::isfinite(view.clip_plane.constant) && std::abs(length2-1) < .0001,
+            "World clip plane must have a finite unit normal");
+        require(view.projection == ViewProjection::Perspective && view.ordering == ViewOrdering::Depth &&
+            view.target == ViewTarget::Scene && view.feedback == NoFeedback,
+            "Clipped views require scene geometry and separately qualified feedback");
+    }
     require(view.viewport.width > 0 && view.viewport.height > 0 &&
         view.projection_anchor.width > 0 && view.projection_anchor.height > 0, "Invalid view extent");
     require((view.feedback & ~(Automap | ObjectVisibility | EffectEligibility)) == 0, "Invalid feedback policy");

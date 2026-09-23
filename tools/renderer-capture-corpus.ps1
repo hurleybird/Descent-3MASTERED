@@ -26,6 +26,7 @@ param(
     [switch]$ReticleProbe,
     [switch]$ReticleReference,
     [switch]$ObservationProbe,
+    [switch]$MirrorCameraProbe,
     [switch]$ScorchProbe,
     [switch]$ScorchViewProbe,
     [switch]$MotionBlur,
@@ -73,6 +74,9 @@ if ($ModelEffectsProbe -and (-not $SceneInspection -or $TerrainProbe -or $SkyPro
 }
 if ($DeformationProbe -and -not $SceneInspection) { throw 'Deformation probe requires the explicit scene inspection executor.' }
 if ($TerrainProbe -and -not $SceneInspection) { throw 'Terrain probe requires the explicit scene inspection executor.' }
+if ($MirrorCameraProbe -and (-not $SceneInspection -or $ObservationProbe -or $TerrainProbe -or $SkyProbe -or $SatelliteProbe -or $HistoryProbe -or $ScorchViewProbe -or $ModelEffectsProbe -or $LodProbeTier -ge 0)) {
+    throw 'Mirror camera probe requires isolated scene inspection without other camera/observation probes.'
+}
 if ($SkyProbe -and -not $SceneInspection) { throw 'Sky probe requires the explicit scene inspection executor.' }
 if ($SatelliteProbe -and -not $SceneInspection) { throw 'Satellite probe requires the explicit scene inspection executor.' }
 if ($HistoryProbe -and -not $SceneInspection) { throw 'History probe requires the explicit scene inspection executor.' }
@@ -118,6 +122,7 @@ $manifest = [ordered]@{
     reticle_probe = [bool]$ReticleProbe
     reticle_reference = [bool]$ReticleReference
     observation_probe = [bool]$ObservationProbe
+    mirror_camera_probe = [bool]$MirrorCameraProbe
     cockpit_probe_revision = $(if ($CockpitProbe) { 4 } else { 0 })
     scorch_probe = [bool]$ScorchProbe
     scorch_view_probe = [bool]$ScorchViewProbe
@@ -173,6 +178,7 @@ try {
         if ($ReticleProbe) { $arguments += '-scene-reticle-probe' }
         if ($ReticleReference) { $arguments += '-scene-reticle-reference' }
         if ($ObservationProbe) { $arguments += '-scene-observation-probe' }
+        if ($MirrorCameraProbe) { $arguments += '-scene-mirror-camera-probe' }
         if ($RingProbe) { $arguments += '-scene-ring-probe' }
         if ($DepthPolicyProbe) { $arguments += '-scene-depth-policy-probe' }
         if ($ModelEffectsProbe) { $arguments += '-scene-model-effects-probe' }
@@ -223,7 +229,7 @@ try {
             }
         }
         # HandledWinMain returns 1 after a normal run, not conventional exit 0.
-        $ok = -not $timedOut -and $resourceValidated -and $process.ExitCode -eq 1 -and
+        $ok = -not $timedOut -and $resourceValidated -and (-not $MirrorCameraProbe -or $logText.Contains('scene mirror camera room=')) -and $process.ExitCode -eq 1 -and
             (Test-Path -LiteralPath $png) -and $logText.Contains('capture saved') -and
             $logText.Contains('capture headlight enabled') -and
             $logText.Contains("capture rng seed=$Seed") -and

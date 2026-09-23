@@ -19,11 +19,10 @@ struct Projection {
     float orthographic_depth_scale = 0; // zero: perspective; otherwise 2/(far-near)
 };
 struct ClipPosition { double x, y, z, w; };
-struct Plane { Vec3 normal; float constant = 0; };
 struct Camera {
     Transform transform;
     Projection projection;
-    std::array<Plane, 5> planes; // left, right, bottom, top, near; world space
+    std::array<Plane, 6> planes; // left, right, bottom, top, near, optional world clip
 };
 Camera prepareCamera(const View& view);
 // Column-major matrices for downstream image-space consumers. They describe
@@ -33,6 +32,10 @@ struct ViewMatrices {
 };
 ViewMatrices viewMatrices(const Camera&);
 View resolveView(const Presentation&, View);
+// Independent reflected camera, with the parent's physical half-space retained.
+// Does not reflect/mutate scene vertices, poses, lights or simulation identity.
+View reflectedView(const Presentation&,View parent,Plane mirror,uint64_t history_key,int32_t room);
+bool reversesWinding(const Transform& camera);
 bool excludesObject(const View&,uint32_t handle);
 Transform resolveMeshTransform(const PreparedMesh&,const Camera&);
 ClipPosition project(const Camera& camera, Vec3 world);

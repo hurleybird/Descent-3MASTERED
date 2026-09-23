@@ -133,7 +133,49 @@ Camera prepareCamera(const View& view) {
         plane(combine(t.up,-p.y_scale,t.forward,1-p.y_offset),t.position),
         plane(t.forward,t.position,-p.near_distance)
     }};
+    if (view.has_clip_plane) camera.planes[5] = view.clip_plane;
     return camera;
+}
+bool reversesWinding(const Transform& camera) {
+    const Vec3 cross{camera.right.y*camera.up.z-camera.right.z*camera.up.y,
+        camera.right.z*camera.up.x-camera.right.x*camera.up.z,
+        camera.right.x*camera.up.y-camera.right.y*camera.up.x};
+    return dot(cross,camera.forward) < 0;
+}
+View reflectedView(const Presentation& frame,View parent,Plane mirror,uint64_t history_key,int32_t room) {
+    validateView(parent);
+    if (parent.collection || parent.target != ViewTarget::Scene || parent.ordering != ViewOrdering::Depth ||
+        parent.projection != ViewProjection::Perspective || parent.has_clip_plane || parent.kind == ViewKind::Mirror ||
+        !history_key || history_key == parent.history_key)
+        throw std::invalid_argument("Unsupported reflected view parent or identity");
+    bool found = false;
+    for (const auto& candidate : frame.data().rooms) found = found || candidate.number == room;
+    if (!found) throw std::invalid_argument("Reflected view has no published spatial root");
+    const double length = std::sqrt(dot(mirror.normal,mirror.normal));
+    if (!(length > 0) || !std::isfinite(length) || !std::isfinite(mirror.constant))
+        throw std::invalid_argument("Invalid mirror plane");
+    mirror.normal = combine(mirror.normal,static_cast<float>(1/length),{},0);
+    mirror.constant = static_cast<float>(mirror.constant/length);
+    // Resolve attachment/perturbation before reflecting, exactly once.
+    // Exclusion policy remains explicit; a mirror producer can include the
+    // camera rig by clearing exclude_camera_rig on its unresolved request.
+    auto result = resolveView(frame,parent);
+    if (distance(mirror,result.camera.position) < 0) {
+        mirror.normal = combine(mirror.normal,-1,{},0); mirror.constant = -mirror.constant;
+    }
+    const auto reflect_direction = [&](Vec3 direction) {
+        return combine(direction,1,mirror.normal,static_cast<float>(-2*dot(mirror.normal,direction)));
+    };
+    result.camera.position = combine(result.camera.position,1,mirror.normal,
+        static_cast<float>(-2*distance(mirror,result.camera.position)));
+    result.camera.right = reflect_direction(result.camera.right);
+    result.camera.up = reflect_direction(result.camera.up);
+    result.camera.forward = reflect_direction(result.camera.forward);
+    result.kind = ViewKind::Mirror; result.history_key = history_key;
+    result.feedback = NoFeedback; result.room = room; result.exterior_origin = false;
+    result.has_clip_plane = true; result.clip_plane = mirror;
+    validateView(result);
+    return result;
 }
 ViewMatrices viewMatrices(const Camera& camera) {
     ViewMatrices result;

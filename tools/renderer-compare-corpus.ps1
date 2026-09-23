@@ -129,6 +129,9 @@ if ([bool]$referenceManifest.axis_probe -ne [bool]$actualManifest.axis_probe -an
 if ([bool]$referenceManifest.ring_probe -ne [bool]$actualManifest.ring_probe -and -not $DiagnosticComparison) {
     throw 'Ring fixture differs; use DiagnosticComparison for intentional fixture changes.'
 }
+if ([bool]$referenceManifest.mirror_camera_probe -ne [bool]$actualManifest.mirror_camera_probe -and -not $DiagnosticComparison) {
+    throw 'Mirror camera fixture mismatch requires DiagnosticComparison.'
+}
 if ([bool]$referenceManifest.depth_policy_probe -ne [bool]$actualManifest.depth_policy_probe -and -not $DiagnosticComparison) {
     throw 'Depth policy fixtures differ; this is not a parity comparison.'
 }

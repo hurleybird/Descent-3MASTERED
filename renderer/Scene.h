@@ -14,6 +14,7 @@ namespace d3scene {
 
 struct Vec2 { float x = 0, y = 0; };
 struct Vec3 { float x = 0, y = 0, z = 0; };
+struct Plane { Vec3 normal; float constant = 0; };
 struct Transform {
     Vec3 position;
     Vec3 right{1, 0, 0}, up{0, 1, 0}, forward{0, 0, 1};
@@ -475,6 +476,8 @@ struct View {
     uint64_t collection = 0; // selects content, independently of camera/history/target
     uint64_t history_key = 0;
     Transform camera;
+    bool has_clip_plane = false;
+    Plane clip_plane; // world space; retain normal.point + constant >= 0
     uint32_t camera_owner = 0;
     uint32_t camera_variant = 0; // discontinuous source mode, e.g. forward/rear
     bool attached_camera = false;

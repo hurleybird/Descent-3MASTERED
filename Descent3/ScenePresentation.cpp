@@ -5,6 +5,7 @@
 #include "SceneCanvas.h"
 #include "SceneFeedback.h"
 #include "../renderer/SceneGeometry.h"
+#include "../renderer/SceneView.h"
 #include "grtext.h"
 #include "../renderer/SceneLighting.h"
 #include "../renderer/SceneImages.h"
@@ -537,6 +538,38 @@ d3scene::VisibilityReport RenderGameSceneView(const d3scene::Presentation& frame
             }
             break;
         }
+    }
+    if (FindArg("-scene-mirror-camera-probe") && view.kind == d3scene::ViewKind::Main) {
+        bool found = false;
+        for (const auto& room : frame.data().rooms) {
+            const auto& geometry = room.asset->geometry();
+            if (room.mirror_polygon < 0 || size_t(room.mirror_polygon) >= geometry.polygons.size()) continue;
+            const auto& face = geometry.polygons[room.mirror_polygon];
+            if (face.corners.empty()) continue;
+            d3scene::Vec3 center;
+            for (const auto& corner : face.corners) {
+                const auto& p = geometry.vertices[corner.vertex];
+                center.x += p.x/face.corners.size(); center.y += p.y/face.corners.size(); center.z += p.z/face.corners.size();
+            }
+            const auto n = face.normal;
+            vector forward{-n.x,-n.y,-n.z}; matrix basis;
+            vm_VectorToMatrix(&basis,&forward,nullptr,nullptr);
+            view.camera.position = {center.x+n.x*20,center.y+n.y*20,center.z+n.z*20};
+            view.camera.right = {basis.rvec.x,basis.rvec.y,basis.rvec.z};
+            view.camera.up = {basis.uvec.x,basis.uvec.y,basis.uvec.z};
+            view.camera.forward = {basis.fvec.x,basis.fvec.y,basis.fvec.z};
+            view.attached_camera = false; view.exclude_camera_rig = false;
+            const float constant = -(n.x*center.x+n.y*center.y+n.z*center.z);
+            view = d3scene::reflectedView(frame,view,{n,constant},0x4d4952524f525001ull,room.number);
+            // Inspect the reflected image with main-view image products. This
+            // fixture is NOT mirror-surface composition or gameplay feedback.
+            view.kind = d3scene::ViewKind::Main;
+            if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
+                AutomatedCaptureLog("scene mirror camera room=%d polygon=%d reversed=%d clip=1",
+                    room.number,room.mirror_polygon,d3scene::reversesWinding(view.camera));
+            found = true; break;
+        }
+        if (!found) Error("Mirror camera fixture requires an authored mirror");
     }
     // Diagnostic views do not mark rooms explored or tell AI it was observed.
     // The gameplay feedback compiler barrier remains until the normal executor

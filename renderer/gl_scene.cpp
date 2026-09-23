@@ -78,6 +78,7 @@ out vec3 field_modulation;
 uniform vec3 ambient_color, ambient_direction;
 uniform int directional_ambient;
 uniform vec3 eye, camera_right, camera_up, camera_forward;
+uniform vec4 world_clip_plane;
 uniform vec3 model_position, model_right, model_up, model_forward;
 uniform vec3 previous_position, previous_right, previous_up, previous_forward;
 uniform mat4 previous_view_projection;
@@ -98,6 +99,7 @@ void main() {
     vec3 world = model_position + model_right*prepared.x + model_up*prepared.y + model_forward*prepared.z;
     vec3 relative = world-eye;
     world_position = world;
+    gl_ClipDistance[0] = dot(vec4(world,1),world_clip_plane);
     authored_color = vertex_color;
     vertex_dynamic = lighting_per_pixel != 0 ? vec3(0) : sceneDynamicLighting(world);
     float z = dot(relative,camera_forward);
@@ -879,6 +881,8 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
     const auto& camera = visibility.camera.transform;
     vec("eye",camera.position); vec("camera_right",camera.right);
     vec("camera_up",camera.up); vec("camera_forward",camera.forward);
+    const auto clip = view.has_clip_plane ? view.clip_plane : d3scene::Plane{};
+    glUniform4f(scene_shader.FindUniform("world_clip_plane"),clip.normal.x,clip.normal.y,clip.normal.z,clip.constant);
     const auto& projection = visibility.camera.projection;
     glUniform4f(scene_shader.FindUniform("projection"),projection.x_scale,projection.y_scale,
         projection.x_offset,projection.y_offset);
@@ -1038,6 +1042,9 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
         glUniform2i(scene_shader.FindUniform("depth_snapshot_origin"),viewport[0],viewport[1]);
         continue;
       }
+      // Image consumers do not write clip distances; never leak this state.
+      if (view.has_clip_plane) glEnable(GL_CLIP_DISTANCE0);
+      else glDisable(GL_CLIP_DISTANCE0);
       for (uint32_t item_index = pass.begin; item_index < pass.end; ++item_index) {
         const auto& item = visibility.surfaces[item_index];
         const d3scene::SurfaceBinding* binding;
@@ -1171,13 +1178,19 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
         glUniform1i(scene_shader.FindUniform("texture_uv_offset"),static_cast<int>(texture_uv_range.offset)-static_cast<int>(range.offset));
         glUniform1i(scene_shader.FindUniform("use_instance_positions"),prepared_positions.count != 0);
         glUniform1i(scene_shader.FindUniform("instance_position_offset"),prepared_positions.offset);
-        if (item.terrain || (item.mesh && !surface.two_sided)) { glEnable(GL_CULL_FACE); glFrontFace(GL_CCW); glCullFace(GL_BACK); }
+        if (item.terrain || (item.mesh && !surface.two_sided)) {
+            glEnable(GL_CULL_FACE);
+            glFrontFace(d3scene::reversesWinding(camera) != d3scene::reversesWinding(item.world) ? GL_CW : GL_CCW);
+            glCullFace(GL_BACK);
+        }
         else glDisable(GL_CULL_FACE);
         glDrawArrays(GL_TRIANGLES,range.offset,range.count);
         rend_RecordDrawCall(RENDERER_DRAW_CALL_3D);
       }
+      glDisable(GL_CLIP_DISTANCE0);
     }
     glDepthMask(GL_TRUE); glEnable(GL_DEPTH_TEST); glDisable(GL_BLEND); glDisable(GL_CULL_FACE);
+    glFrontFace(GL_CCW);
     if (inherited_scissor) glEnable(GL_SCISSOR_TEST);
     output.MarkAllDirty();
     if (!display_target) {
