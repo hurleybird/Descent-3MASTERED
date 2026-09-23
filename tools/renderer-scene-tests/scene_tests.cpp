@@ -217,7 +217,7 @@ void extractionTests() {
     const auto view = MakeGameSceneView(d3scene::ViewKind::Auxiliary, 2, &Objects[0], Objects[0].pos,
         0, Objects[0].orient, 1, true, {0, 0, 320, 180}, {0, 0, 320, 180});
     check(view.camera.forward.z == -1 && Objects[0].orient.fvec.z == 1, "rear view changed simulation pose");
-    check(!view.dynamic_lighting && view.excluded_object == 2048, "auxiliary view lost explicit policy");
+    check(!view.dynamic_lighting && view.exclude_camera_rig && view.camera_owner == 2048, "auxiliary view lost explicit policy");
     check(b->data().sequence == a->data().sequence + 1, "view request advanced presentation history");
     Objects[0].pos.x = 77;
     const auto thumbnail = ExtractGamePresentation(2.5, 0, false, false);

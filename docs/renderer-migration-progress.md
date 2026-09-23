@@ -1,5 +1,22 @@
 # Renderer migration checkpoint
 
+## Continuation: shared camera-rig exclusions
+
+Replaced the single excluded-object field with explicit object exclusions and
+an optional published camera rig. Observer/followed-object relationships are
+captured by the game producer, not inferred inside model/effect draw code.
+View resolution canonicalizes the owner and additional exclusions once;
+geometry/effects and observation queries consume the same result. Missing
+allocation identities are rejected; resolved requests are idempotent and do
+not contaminate other views.
+
+Full build and 5,365 tests pass, including owned effects, followed-object
+observations, stale identities and replay. All eight observation captures are
+pixel-identical to scene-observations; cockpit/gauges/text/reticle 003 is also
+pixel-identical to scene-reticle. These saves are not an actual observer-mode
+qualification; that remains in broader gameplay acceptance. No gates were
+cleared and Candidate remains untouched.
+
 ## Continuation: game-owned observation transaction and simulation volumes
 
 Main/auxiliary views now contribute to an explicit game-owned frame transaction,

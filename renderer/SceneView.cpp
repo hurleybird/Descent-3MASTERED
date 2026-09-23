@@ -235,6 +235,16 @@ bool sphereIntersects(const Camera& camera, Vec3 center, float radius) {
     return true;
 }
 View resolveView(const Presentation& frame, View view) {
+    if (view.exclude_camera_rig) {
+        const auto owner = std::find_if(frame.data().objects.begin(),frame.data().objects.end(),
+            [&](const ObjectState& object) { return object.handle == view.camera_owner; });
+        if (owner == frame.data().objects.end()) throw std::invalid_argument("Camera rig owner is not in this presentation");
+        view.excluded_objects.push_back(owner->handle);
+        view.excluded_objects.insert(view.excluded_objects.end(),owner->camera_hidden_objects.begin(),owner->camera_hidden_objects.end());
+        std::sort(view.excluded_objects.begin(),view.excluded_objects.end());
+        view.excluded_objects.erase(std::unique(view.excluded_objects.begin(),view.excluded_objects.end()),view.excluded_objects.end());
+        view.exclude_camera_rig = false;
+    }
     if (view.attached_camera) for (const auto& effect : frame.data().camera_perturbations) {
         if (effect.owner != view.camera_owner) continue;
         view.camera.right = transformDirection(effect.rotation,view.camera.right);
@@ -243,6 +253,9 @@ View resolveView(const Presentation& frame, View view) {
     }
     view.attached_camera = false; // resolved views cannot apply an effect twice
     return view;
+}
+bool excludesObject(const View& view,uint32_t handle) {
+    return std::find(view.excluded_objects.begin(),view.excluded_objects.end(),handle) != view.excluded_objects.end();
 }
 uint32_t selectModelVariant(const ModelInstance& object,const Camera& camera) {
     const auto depth = dot(camera.transform.forward,subtract(object.current.position,camera.transform.position));
@@ -323,14 +336,14 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
     }
     const auto eligible = [&](const ModelInstance& instance) {
         return instance.collection == view.collection && instance.visible && (!instance.has_owner || (owners.at(instance.owner)->visible &&
-            !(view.exclude_object && instance.owner == view.excluded_object)));
+            !excludesObject(view,instance.owner)));
     };
     for (size_t i = 0; i < frame.data().objects.size(); ++i) {
         const auto& object = frame.data().objects[i];
         if (!world_content) break;
         if (model_owners.count(object.handle)) continue;
         if (!object.visible) continue;
-        if (view.exclude_object && object.handle == view.excluded_object) continue;
+        if (excludesObject(view,object.handle)) continue;
         const auto window = spatialWindow(object.room);
         if (!window.visible) continue;
         if (sphereIntersects(result.camera,object.current.position,object.radius))
@@ -391,7 +404,7 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
         if (instance.collection != view.collection) continue;
         if (instance.receiver_polygon >= 0 && !visible_receivers.count(
             (uint64_t(room_indices.at(instance.room))<<32)|uint32_t(instance.receiver_polygon))) continue;
-        if (instance.has_owner && ((view.exclude_object && instance.owner == view.excluded_object) ||
+        if (instance.has_owner && (excludesObject(view,instance.owner) ||
             !owners.at(instance.owner)->visible)) continue;
         if (instance.model_instance) {
             const auto& model = *instances.at(instance.model_instance);

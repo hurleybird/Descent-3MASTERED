@@ -120,11 +120,11 @@ int runModelSceneTests() {
     check(result.surfaces.size() == 2, "Prepared model surfaces missing");
     check(result.surfaces[0].model && result.surfaces[0].world.position.z == 10, "Instance transform not composed");
     check(result.surfaces[1].blended && result.surfaces[1].world.position.z == 18, "Instance material leaked between objects");
-    view.exclude_object = true; view.excluded_object = 42;
+    view.excluded_objects = {42};
     auto excluded = queryView(*frame,view);
     check(excluded.surfaces.size() == 1 && excluded.surfaces[0].model_instance_index == 1, "Excluded viewer mesh was rendered");
     check(result.surfaces.size() == 2, "Auxiliary query changed prior surface list");
-    view.exclude_object = false; view.camera.position.x = 100;
+    view.excluded_objects.clear(); view.camera.position.x = 100;
     check(queryView(*frame,view).surfaces.empty(), "Offscreen posed geometry not rejected");
     // A pose can extend outside an obsolete source sphere. Both geometry and
     // the candidate object list must use the published rendering bounds.
@@ -312,7 +312,7 @@ int runModelSceneTests() {
         const auto standalone_query = queryView(*standalone_frame,view);
         check(standalone_query.surfaces.size() == 2 && standalone_query.object_indices.empty(),
             "Standalone models required or invented gameplay objects");
-        auto excluded_view = view; excluded_view.exclude_object = true; excluded_view.excluded_object = 42;
+        auto excluded_view = view; excluded_view.excluded_objects = {42};
         check(queryView(*standalone_frame,excluded_view).surfaces.size() == 2,"Object exclusion hid an unrelated standalone model");
         VisibleSurface standalone_surface; standalone_surface.model = true;
         check(!surfaceMotion(*standalone_frame,standalone_surface,true).valid &&

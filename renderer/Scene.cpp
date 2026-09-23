@@ -396,6 +396,9 @@ PresentationRef Presentation::freeze(const FrameData& data) {
         }
     }
     std::unordered_map<uint64_t,const ModelInstance*> model_instances;
+    for (const auto& object : data.objects)
+        for (const auto hidden : object.camera_hidden_objects)
+            require(objects.count(hidden) != 0,"Camera rig references a missing object allocation");
     for (const auto& object : data.model_instances) {
         require(object.identity && model_instances.emplace(object.identity,&object).second,"Duplicate or absent model instance identity");
         require(!object.has_owner || objects.count(object.owner),"Model owner is not part of this presentation");

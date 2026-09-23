@@ -365,6 +365,7 @@ struct ObjectState {
     float observation_radius = 0;
     bool observation_eligible = false, observation_unbounded = false;
     bool observation_front_to_back = false;
+    std::vector<uint32_t> camera_hidden_objects; // additional allocation-generation identities in this camera rig
 };
 // A renderable model is not a simulation object. Ownership is optional (e.g.
 // cockpit/preview), while identity and pose belong to this presentation domain.
@@ -470,8 +471,8 @@ struct View {
     uint32_t camera_variant = 0; // discontinuous source mode, e.g. forward/rear
     bool attached_camera = false;
     int32_t room = -1;
-    uint32_t excluded_object = 0;
-    bool exclude_object = false;
+    bool exclude_camera_rig = false;
+    std::vector<uint32_t> excluded_objects;
     Rect viewport, projection_anchor;
     float zoom = 1;
     bool dynamic_lighting = true;

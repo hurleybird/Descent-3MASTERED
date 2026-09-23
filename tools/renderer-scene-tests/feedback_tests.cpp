@@ -66,9 +66,9 @@ int runFeedbackTests() {
     check(candidate.report.rooms == std::vector<int32_t>{7}); // disconnected room not explored
     check(candidate.report.objects == std::vector<uint32_t>({200,100})); // includes before near plane
     check(!candidate.exterior_pending && !candidate.mirrors_pending && !candidate.report.terrain);
-    view.exclude_object = true; view.excluded_object = 200;
+    view.excluded_objects = {200};
     check(InspectSceneObservations(*observed_frame,view).report.objects == std::vector<uint32_t>{100});
-    view.exclude_object = false;
+    view.excluded_objects.clear();
     data.objects[0].current.position.x = 100;
     data.objects[0].observation_bounds = {data.objects[0].current.position,data.objects[0].current.position};
     observed_frame = Presentation::freeze(data);
@@ -112,5 +112,12 @@ int runFeedbackTests() {
     portal_data.rooms[1].surfaces.resize(1);
     portal_frame = Presentation::freeze(portal_data);
     check(InspectSceneObservations(*portal_frame,view).mirrors_pending);
+    auto rig_data = observed_frame->data();
+    rig_data.objects[0].camera_hidden_objects = {200};
+    const auto rig_frame = Presentation::freeze(rig_data);
+    view.camera_owner = 100; view.exclude_camera_rig = true; view.excluded_objects = {200};
+    check(InspectSceneObservations(*rig_frame,view).report.objects.empty());
+    view.exclude_camera_rig = false; view.excluded_objects.clear();
+    check(InspectSceneObservations(*rig_frame,view).report.objects.size() == 2);
     return checks;
 }

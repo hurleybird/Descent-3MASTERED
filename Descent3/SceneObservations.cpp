@@ -34,7 +34,7 @@ SceneObservationInspection InspectSceneObservations(const d3scene::Presentation&
     struct Observed { uint32_t handle; float depth; bool front_to_back; };
     std::vector<Observed> observed;
     for (const auto& object : frame.data().objects) {
-        if (!object.observation_eligible || (view.exclude_object && object.handle == view.excluded_object)) continue;
+        if (!object.observation_eligible || excludesObject(view,object.handle)) continue;
         const auto found = rooms.find(object.room);
         if (found == rooms.end()) continue;
         const size_t room_index = found->second;

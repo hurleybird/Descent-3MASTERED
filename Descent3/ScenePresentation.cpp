@@ -516,7 +516,7 @@ d3scene::VisibilityReport RenderGameSceneView(const d3scene::Presentation& frame
             view.camera.right = {facing.rvec.x,facing.rvec.y,facing.rvec.z};
             view.camera.up = {facing.uvec.x,facing.uvec.y,facing.uvec.z};
             view.camera.forward = {facing.fvec.x,facing.fvec.y,facing.fvec.z};
-            view.room = object.room; view.attached_camera = false; view.exclude_object = false;
+            view.room = object.room; view.attached_camera = false; view.exclude_camera_rig = false; view.excluded_objects.clear();
             view.exterior_origin = object.room != -1 && ROOMNUM_OUTSIDE(object.room);
             break;
         }

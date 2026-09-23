@@ -313,7 +313,7 @@ int runSceneViewTests() {
     check(a.surfaces[0].room_index==6&&a.surfaces[1].room_index==7,"Opaque near-to-far ordering changed");
     check(a.surfaces[4].room_index==8&&a.surfaces[5].room_index==9,"Transparent far-to-near ordering changed");
     check(a.object_indices.size()==1&&a.object_indices[0]==0,"Object sphere query incorrect");
-    v=view(); v.exclude_object=true; v.excluded_object=31;
+    v=view(); v.excluded_objects={31};
     check(d3scene::queryView(*frame,v).object_indices.empty(),"Explicit viewer exclusion ignored");
     v=view(); v.history_key=2; v.camera.forward={0,0,-1}; v.camera.right={-1,0,0};
     const auto rear=d3scene::queryView(*frame,v);
@@ -614,10 +614,31 @@ int runSceneViewTests() {
     marker_data.objects.push_back(marker_owner);
     const auto owned_marker = d3scene::Presentation::freeze(marker_data);
     check(d3scene::queryView(*owned_marker,view()).surfaces.size() == 1,"Eligible owned effect disappeared");
-    auto excluded_view = view(); excluded_view.exclude_object = true; excluded_view.excluded_object = 91;
+    auto excluded_view = view(); excluded_view.excluded_objects = {91};
     check(d3scene::queryView(*owned_marker,excluded_view).surfaces.empty(),"Camera did not exclude its owner's effect geometry");
-    excluded_view.excluded_object = 92;
+    excluded_view.excluded_objects = {92};
     check(d3scene::queryView(*owned_marker,excluded_view).surfaces.size() == 1,"Camera excluded another object's effect");
+    {
+        auto rig_data = marker_data;
+        d3scene::ObjectState camera_owner; camera_owner.handle = 92; camera_owner.camera_hidden_objects = {91};
+        rig_data.objects.push_back(camera_owner);
+        const auto rig_frame = d3scene::Presentation::freeze(rig_data);
+        auto rig_view = view(); rig_view.camera_owner = 92; rig_view.exclude_camera_rig = true;
+        rig_view.excluded_objects = {91};
+        const auto resolved = d3scene::resolveView(*rig_frame,rig_view);
+        check(resolved.excluded_objects == std::vector<uint32_t>({91,92}),"Camera rig exclusions were not canonicalized");
+        check(d3scene::resolveView(*rig_frame,resolved).excluded_objects == resolved.excluded_objects,
+            "Resolving a camera rig twice changed exclusions");
+        check(d3scene::queryView(*rig_frame,rig_view).surfaces.empty(),"Camera rig left its followed object's effects visible");
+        check(d3scene::queryView(*rig_frame,view()).surfaces.size() == 1,"Camera rig exclusions leaked into another view");
+        rig_data.objects.back().camera_hidden_objects = {93};
+        bool invalid_rig = false;
+        try { d3scene::Presentation::freeze(rig_data); } catch (const std::invalid_argument&) { invalid_rig = true; }
+        check(invalid_rig,"Camera rig accepted a stale followed-object allocation");
+        rig_view.camera_owner = 93; invalid_rig = false;
+        try { d3scene::resolveView(*rig_frame,rig_view); } catch (const std::invalid_argument&) { invalid_rig = true; }
+        check(invalid_rig,"Camera rig accepted a stale camera allocation");
+    }
     marker_data.objects[0].visible = false;
     check(d3scene::queryView(*d3scene::Presentation::freeze(marker_data),view()).surfaces.empty(),"Ineligible owner left visible effect geometry");
     check(d3scene::queryView(*owned_marker,view()).surfaces.size() == 1,"Visibility edit mutated retained presentation");

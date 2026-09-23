@@ -33,6 +33,7 @@ struct ViewMatrices {
 };
 ViewMatrices viewMatrices(const Camera&);
 View resolveView(const Presentation&, View);
+bool excludesObject(const View&,uint32_t handle);
 Transform resolveMeshTransform(const PreparedMesh&,const Camera&);
 ClipPosition project(const Camera& camera, Vec3 world);
 Vec3 unproject(const Camera& camera, float ndc_x, float ndc_y, float depth);

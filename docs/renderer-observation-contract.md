@@ -65,7 +65,9 @@ fallback. ObservationProbe collects/logs candidates without committing them.
 - Qualify boundary differences from legacy IsPointVisible (its approximate FOV
   normals, cached camera state and far clip); the candidate uses explicit
   view-local camera planes. This is not asserted bitwise equivalent.
-- Publish observer/piggyback exclusions, terrain occlusion/distance and mirror
+- Observer/piggyback exclusions are now published and shared with the render
+  query; actual observer-mode gameplay still needs qualification.
+- Publish terrain occlusion/distance and mirror
   policies; account for legacy postrender capacity/order ties explicitly.
 - Verify room/effect timestamps and next-iteration AI notification behavior,
   pause, reload and allocation reuse before removing CommitGameVisibility's

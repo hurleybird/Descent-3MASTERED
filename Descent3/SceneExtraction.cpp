@@ -176,8 +176,7 @@ d3scene::View MakeGameSceneView(d3scene::ViewKind kind, uint64_t history_key,
     // Rear-view requests never temporarily rewrite a simulation object's pose.
     view.room = room;
     view.exterior_origin = room != -1 && ROOMNUM_OUTSIDE(room);
-    view.exclude_object = viewer != nullptr;
-    if (viewer) view.excluded_object = static_cast<uint32_t>(viewer->handle);
+    view.exclude_camera_rig = viewer != nullptr;
     view.zoom = zoom;
     view.viewport = viewport;
     view.projection_anchor = anchor;
