@@ -77,8 +77,12 @@ October 15 repaired images exactly. Save002 differs only in a 69x67 Guidebot
 region: its prepared pose hash differs at frame 60 (same initial pose/position),
 while other model pose hashes match. Repeated current captures match each other.
 Reverting the pose-timing instrumentation did not remove the difference. The
-source of this simulation/pose discrepancy is unresolved; do not call all eight
-captures pixel-identical or dismiss it as random noise.
+source of this simulation/pose discrepancy is unresolved. Crucially, rerunning
+the unchanged October 15 reference executable on October 17 produces the same
+new Guidebot pose hash as the current executable. Evidence:
+`gpu-repair-20261017-reference-pose`. This rules out the current source changes
+as necessary for the discrepancy; capture simulation is not fully reproducible
+across these sessions. Do not call all eight historical captures pixel-identical.
 
 Contract suite: 5,761 checks pass. Current binary identity is recorded in the
 latest capture/profile manifests. The inspection launcher remains
