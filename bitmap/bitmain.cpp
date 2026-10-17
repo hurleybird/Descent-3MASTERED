@@ -40,6 +40,18 @@
 
 int Num_of_bitmaps = 0;
 bms_bitmap GameBitmaps[MAX_BITMAPS];
+static uint64_t Bitmap_content_revisions[MAX_BITMAPS] = {};
+void bm_MarkChanged(int handle) {
+	ASSERT(handle >= 0 && handle < MAX_BITMAPS);
+	if (++Bitmap_content_revisions[handle] == 0) Error("Bitmap content revision exhausted");
+	GameBitmaps[handle].flags |= BF_CHANGED;
+}
+uint64_t bm_ContentRevision(int handle) {
+	// Paging can replace both pixels and their format; finish it before reading
+	// the producer revision. This does not consume the GPU's dirty flag.
+	(void)bm_w(handle,0);
+	return Bitmap_content_revisions[handle];
+}
 ulong Bitmap_memory_used = 0;
 ubyte Bitmaps_initted = 0;
 static ubyte *Bitmap_truecolor_data[MAX_BITMAPS] = {};
@@ -319,6 +331,7 @@ int bm_AllocateMemoryForIndex(int n, int w, int h, int add_mem)
 	GameBitmaps[n].width = w;
 	GameBitmaps[n].height = h;
 	GameBitmaps[n].flags = BF_CHANGED | BF_BRAND_NEW;
+	bm_MarkChanged(n);
 
 #ifdef USE_OPENGL
 	for (int tmp = w; tmp > 0; tmp = tmp >> 1)
@@ -404,6 +417,7 @@ int bm_AllocNoMemBitmap(int w, int h)
 	GameBitmaps[n].used = 1;
 	GameBitmaps[n].format = BITMAP_FORMAT_STANDARD;
 	GameBitmaps[n].flags = BF_NOT_RESIDENT | BF_CHANGED | BF_BRAND_NEW;
+	bm_MarkChanged(n);
 	GameBitmaps[n].cache_slot = -1;
 
 	Num_of_bitmaps++;
@@ -778,6 +792,7 @@ int bm_AllocLoadFileBitmapTrueColor(const char *filename, int mipped)
 	Bitmap_truecolor_size[handle] = (size_t)width * (size_t)height * 4;
 	Bitmap_memory_used += (ulong)Bitmap_truecolor_size[handle];
 	GameBitmaps[handle].flags |= BF_CHANGED | BF_BRAND_NEW;
+	bm_MarkChanged(handle);
 	return handle;
 }
 
@@ -1027,6 +1042,7 @@ int bm_MakeBitmapResident(int handle)
 		{
 			GameBitmaps[handle].flags &= ~BF_NOT_RESIDENT;
 			GameBitmaps[handle].flags |= BF_CHANGED | BF_BRAND_NEW;
+			bm_MarkChanged(handle);
 		}
 		else
 		{
@@ -1180,6 +1196,7 @@ ushort* bm_data(int handle, int miplevel)
 // Given a source bitmap, generates mipmaps for it
 void bm_GenerateMipMaps(int handle)
 {
+	bm_MarkChanged(handle);
 	int width = bm_w(handle, 0);
 	int height = bm_h(handle, 0);
 	int jump = 2;	// how many pixels to jump in x and y on source
@@ -1344,6 +1361,7 @@ void bm_ScaleBitmapToBitmap(int dest, int src)
 		}
 	}
 	GameBitmaps[dest].flags |= BF_CHANGED;
+	bm_MarkChanged(dest);
 }
 
 // Returns whether or not this bitmap is in use
@@ -1765,6 +1783,7 @@ int bm_SaveBitmapPNG(const char* filename, int handle)
 // clears bitmap
 void bm_ClearBitmap(int handle)
 {
+	bm_MarkChanged(handle);
 	int dx, dy;
 	ushort* bmpdata = bm_data(handle, 0);
 	int w = bm_w(handle, 0);
@@ -1905,6 +1924,7 @@ void bm_DestroyChunkedBitmap(chunked_bitmap* chunk)
 // Changes the size of a bitmap to a new size
 void bm_ChangeSize(int handle, int new_w, int new_h)
 {
+	bm_MarkChanged(handle);
 	bm_FreeTrueColorData(handle);
 	int mipped = bm_mipped(handle);
 	int n;

@@ -19,6 +19,7 @@
 #ifndef PSBITMAP_H
 #define PSBITMAP_H
 #include "pstypes.h"
+#include <cstdint>
 #include "CFILE.H"
 #ifdef __LINUX__
 #include "linux/linux_fix.h" //needed for stricmp's throughout bitmap lib
@@ -76,6 +77,10 @@ struct chunked_bitmap
 };
 
 extern bms_bitmap GameBitmaps[MAX_BITMAPS];
+// Content changes are producer-owned; GPU dirty flags may be consumed by any
+// renderer and are not an image identity. Revisions survive slot recycling.
+void bm_MarkChanged(int handle);
+uint64_t bm_ContentRevision(int handle);
 extern ulong Bitmap_memory_used;
 extern ubyte Memory_map[];
 

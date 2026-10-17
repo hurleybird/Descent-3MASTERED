@@ -179,6 +179,7 @@ void SceneAssets::reset() {
     rooms_.clear();
     models_.clear();
     images_.clear();
+    image_source_revisions_.clear();
     reflections_.clear();
     terrain_.reset();
     terrain_occlusion_.reset();

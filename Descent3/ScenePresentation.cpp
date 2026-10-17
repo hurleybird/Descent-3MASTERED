@@ -153,7 +153,15 @@ void prepareImages(d3scene::FrameData& data) {
         const int slot = handle+(baked ? MAX_BITMAPS : 0);
         const auto found = images.find(slot);
         if (found != images.end()) return found->second;
+        const auto revision = baked ? lm_ContentRevision(handle) : bm_ContentRevision(handle);
+        const auto resident = d3scene::assets().image(slot,revision);
+        if (resident && !FindArg("-scene-image-revision-audit")) {
+            const auto& asset = resident;
+            images.emplace(slot,asset);
+            return asset;
+        }
         d3scene::ImageSource source;
+        source.content_revision = revision;
         if (baked) {
             const auto& lightmap = GameLightmaps[handle];
             source.padded_extent = lightmap.square_res;
@@ -178,6 +186,8 @@ void prepareImages(d3scene::FrameData& data) {
             }
         }
         auto asset = d3scene::assets().publishImage(slot,source);
+        if (resident && asset != resident)
+            Error("Image content changed without a producer revision: slot %d",slot);
         images.emplace(slot,asset);
         return asset;
     };
@@ -386,7 +396,7 @@ d3scene::PresentationRef PrepareGamePresentation() {
     if (!retain_rooms) ResetSplitSpecularTexturePairCache();
     const unsigned int simulation_random = ps_rand_get_state();
     auto data = [&] { PERF_MARKER_SCOPE("Scene.Extract"); return ExtractGameFrame(Gametime, Frametime, Game_paused,true,
-        retain_rooms && previous_models ? &previous_models->data() : nullptr); }();
+        retain_rooms && previous_models ? &previous_models->data() : nullptr,FindArg("-scene-geometry-revision-audit") != 0); }();
     const auto control_delta = GetPlayerControlledTranslationDelta();
     data.player_control_delta = {control_delta.x,control_delta.y,control_delta.z};
     data.afterburner_factor = (std::max)(0.f,(std::min)(1.f,Render_afterburner_visual_factor));

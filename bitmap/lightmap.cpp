@@ -28,6 +28,16 @@
 int Num_of_lightmaps=0;
 static ushort Free_lightmap_list[MAX_LIGHTMAPS];
 bms_lightmap GameLightmaps[MAX_LIGHTMAPS];
+static uint64_t Lightmap_content_revisions[MAX_LIGHTMAPS] = {};
+void lm_MarkChanged(int handle) {
+	ASSERT(handle >= 0 && handle < MAX_LIGHTMAPS);
+	if (++Lightmap_content_revisions[handle] == 0) Error("Lightmap content revision exhausted");
+	GameLightmaps[handle].flags |= LF_CHANGED;
+}
+uint64_t lm_ContentRevision(int handle) {
+	ASSERT(handle >= 0 && handle < MAX_LIGHTMAPS);
+	return Lightmap_content_revisions[handle];
+}
 int Lightmap_mem_used=0;
 
 // Sets all the lightmaps to unused
@@ -83,6 +93,7 @@ int lm_AllocLightmap (int w,int h)
 	GameLightmaps[n].used=1;
 	GameLightmaps[n].cache_slot=-1;
 	GameLightmaps[n].flags=LF_CHANGED;
+	lm_MarkChanged(n);
 	// Figure out square size
 	// Find power of 2 number
 	int res=std::max(w,h);

@@ -212,7 +212,9 @@ static bool VisEffectCreateEnhancedSnowTextures()
 		}
 	}
 	GameBitmaps[Enhanced_snow_atlas_handle].flags |= BF_CHANGED;
+	bm_MarkChanged(Enhanced_snow_atlas_handle);
 	GameBitmaps[Enhanced_snow_fallback_handle].flags |= BF_CHANGED;
+	bm_MarkChanged(Enhanced_snow_fallback_handle);
 	return true;
 }
 
@@ -2011,6 +2013,7 @@ static bool VisEffectBuildSharedAtlas(int source_width, int source_height, int b
 		return false;
 
 	GameBitmaps[atlas_handle].flags |= BF_TRANSPARENT | BF_CHANGED;
+	bm_MarkChanged(atlas_handle);
 	GameBitmaps[atlas_handle].format = bitmap_format;
 	snprintf(GameBitmaps[atlas_handle].name, BITMAP_NAME_LEN, "vfx%dx%d_%d",
 		source_width, source_height, bitmap_format);
@@ -2081,6 +2084,7 @@ static bool VisEffectAddSharedAtlasFrame(int source_handle, int* bitmap_handle,
 	const int cell_y = (slot / atlas->columns) * padded_height;
 	VisEffectCopyAtlasFrame(atlas->atlas_handle, cell_x, cell_y, source_handle);
 	GameBitmaps[atlas->atlas_handle].flags |= BF_CHANGED;
+	bm_MarkChanged(atlas->atlas_handle);
 	rend_UpdateBitmapTextureRegion(atlas->atlas_handle, cell_x, cell_y,
 		padded_width, padded_height);
 

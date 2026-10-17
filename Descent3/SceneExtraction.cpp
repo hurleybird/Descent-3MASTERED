@@ -13,6 +13,8 @@ uint64_t Sequence = 0;
 std::vector<d3scene::ObjectState> PreviousObjects;
 uint64_t PreviousLifetime = 0;
 double PreviousTime = 0;
+uint64_t GeometryEpoch = 1;
+std::array<uint64_t,MAX_ROOMS> PublishedGeometryEpoch{};
 d3scene::Vec3 value(const vector& v) { return {v.x, v.y, v.z}; }
 d3scene::Transform transform(const vector& p, const matrix& m) {
     return {value(p), value(m.rvec), value(m.uvec), value(m.fvec)};
@@ -36,10 +38,8 @@ d3scene::VolumeGrid extractVolume(const room& source) {
     return grid;
 }
 
-// The legacy simulation has no geometry revision counter. Compare owned source
-// fields (never addresses, padding, transient face marks, or hashes) at extraction
-// and publish an explicit asset revision only when they change. This scan is a
-// measurable migration cost; it does not clone level geometry every frame.
+// Compare only after a producer invalidation (or in the explicit audit). Normal
+// frames do not rediscover immutable level geometry by walking every corner.
 bool matches(const d3scene::MeshGeometry& geometry, const room& source) {
     if (geometry.vertices.size() != static_cast<size_t>(source.num_verts) ||
         geometry.polygons.size() != static_cast<size_t>(source.num_faces)) return false;
@@ -82,9 +82,12 @@ void ResetGamePresentationScene() {
     PreviousObjects.clear(); PreviousLifetime = 0;
     d3scene::assets().reset();
 }
+void InvalidateGameSceneGeometry() {
+    if (++GeometryEpoch == 0) throw std::overflow_error("Room geometry epoch exhausted");
+}
 
 d3scene::FrameData ExtractGameFrame(double time, float delta, bool paused, bool advance_history,
-    const d3scene::FrameData* retained_rooms) {
+    const d3scene::FrameData* retained_rooms,bool audit_geometry) {
     if (Sequence == std::numeric_limits<uint64_t>::max())
         throw std::overflow_error("Presentation sequence exhausted");
     auto& assets = d3scene::assets();
@@ -104,8 +107,14 @@ d3scene::FrameData ExtractGameFrame(double time, float delta, bool paused, bool 
         if (!Rooms[i].used) { assets.removeRoom(i); continue; }
         const room& source = Rooms[i];
         auto asset = assets.room(i);
-        if (!asset || !matches(asset->geometry(), source) || !matchesVolume(asset->volume(),source))
-            asset = assets.publishRoom(i, extractGeometry(source),extractVolume(source));
+        if (asset && PublishedGeometryEpoch[i] == GeometryEpoch) {
+            if (audit_geometry && (!matches(asset->geometry(),source) || !matchesVolume(asset->volume(),source)))
+                throw std::logic_error("Room geometry changed without producer invalidation");
+        } else {
+            if (!asset || !matches(asset->geometry(),source) || !matchesVolume(asset->volume(),source))
+                asset = assets.publishRoom(i,extractGeometry(source),extractVolume(source));
+            PublishedGeometryEpoch[i] = GeometryEpoch;
+        }
         d3scene::RoomState state;
         state.number = i;
         state.asset = std::move(asset);

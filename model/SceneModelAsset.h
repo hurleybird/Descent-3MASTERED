@@ -12,3 +12,5 @@ std::vector<SceneModelPartRole> ResolveSceneModelRoles(const d3scene::ModelGeome
 d3scene::ModelGeometry CompileSceneModelAsset(const poly_model&, size_t* repaired_normals = nullptr);
 // Compare source semantics without rebuilding/allocating a candidate model.
 bool MatchesSceneModelAsset(const d3scene::ModelGeometry&,const poly_model&);
+uint64_t SceneModelSourceEpoch();
+void InvalidateSceneModelSources();

@@ -4,7 +4,12 @@
 #include <cmath>
 #include <stdexcept>
 namespace {
+uint64_t SourceEpoch = 1;
 d3scene::Vec3 value(const vector& v) { return {v.x,v.y,v.z}; }
+}
+uint64_t SceneModelSourceEpoch() { return SourceEpoch; }
+void InvalidateSceneModelSources() {
+    if (++SourceEpoch == 0) throw std::overflow_error("Model source epoch exhausted");
 }
 SceneModelPartRole ResolveSceneModelPartRole(uint32_t flags,uint32_t mask,size_t part,bool has_custom_texture) {
     if (part >= 32 || !(mask&(uint32_t(1)<<part)) || ((flags&SOF_CUSTOM) && !has_custom_texture))

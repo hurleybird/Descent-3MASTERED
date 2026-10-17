@@ -163,6 +163,7 @@ void RoomMemFree(void* buf)
 //					nportals - how many portals this room will have
 void InitRoom(room* rp, int nverts, int nfaces, int nportals)
 {
+	InvalidateGameSceneGeometry();
 	//initialize room fields
 	rp->flags = 0;
 	rp->objects = -1;
@@ -237,6 +238,7 @@ void InitRoom(room* rp, int nverts, int nfaces, int nportals)
 //Initialize a room face structure.
 void InitRoomFace(face* fp, int nverts)
 {
+	InvalidateGameSceneGeometry();
 	fp->flags = 0;
 	fp->num_verts = nverts;
 	fp->portal_num = -1;
@@ -282,6 +284,7 @@ int FindPointRoom(vector* pnt)
 //Frees a room, deallocating its memory and marking it as unused
 void FreeRoom(room* rp)
 {
+	InvalidateGameSceneGeometry();
 	int i;
 	int old_hri = Highest_room_index;
 
@@ -378,6 +381,7 @@ void FreePaletteRooms()
 //Free the memory used by a room face structure
 void FreeRoomFace(face* fp)
 {
+	InvalidateGameSceneGeometry();
 	if (fp->lmi_handle != BAD_LMI_INDEX)
 	{
 		FreeLightmapInfo(fp->lmi_handle);
@@ -436,6 +440,7 @@ void ComputeCenterPointOnFace(vector* vp, room* rp, int facenum)
 //					false if the normal has a very small (pre-normalization) magnitude
 bool ComputeFaceNormal(room* rp, int facenum)
 {
+	InvalidateGameSceneGeometry();
 	face* fp = &rp->faces[facenum];
 	bool ok;
 

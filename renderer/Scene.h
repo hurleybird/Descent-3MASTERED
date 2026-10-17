@@ -189,6 +189,7 @@ public:
     ModelAssetRef publishModel(uint32_t slot, ModelGeometry geometry);
     void removeModel(uint32_t slot);
     ImageAssetRef image(uint32_t slot) const;
+    ImageAssetRef image(uint32_t slot,uint64_t content_revision) const;
     ImageAssetRef publishImage(uint32_t slot,const ImageSource&);
     ReflectionAssetRef publishReflection(uint32_t slot,ReflectionData);
     TerrainAssetRef terrain() const { return terrain_; }
@@ -207,6 +208,7 @@ private:
     std::vector<RoomAssetRef> rooms_;
     std::vector<ModelAssetRef> models_;
     std::vector<ImageAssetRef> images_;
+    std::vector<uint64_t> image_source_revisions_;
     // Reflection identities span authored faces, compiled fields and shared
     // environment sources. Storage must scale with live assets, not max ID.
     std::unordered_map<uint32_t,ReflectionAssetRef> reflections_;

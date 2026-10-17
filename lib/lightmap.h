@@ -19,6 +19,7 @@
 #define LIGHTMAP_H
 
 #include "pstypes.h"
+#include <cstdint>
 
 #define MAX_LIGHTMAPS (65534)
 #define BAD_LM_INDEX	65535
@@ -42,6 +43,8 @@ struct bms_lightmap
 };
 
 extern bms_lightmap GameLightmaps[MAX_LIGHTMAPS];
+void lm_MarkChanged(int handle);
+uint64_t lm_ContentRevision(int handle);
 
 // Sets all the lightmaps to unused
 void lm_InitLightmaps();

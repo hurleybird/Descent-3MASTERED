@@ -2,6 +2,11 @@
 
 ## October 17 continuation (supersedes the performance status below)
 
+Latest CPU work: see [renderer-cpu-ownership-repair.md](renderer-cpu-ownership-repair.md).
+Producer-owned image/geometry revisions and visibility-driven transient uploads
+are implemented. Dense preparation remains roughly 9–10 ms: not fixed overall.
+5,766 contract checks pass. No shadows or cancelled cockpit art work resumed.
+
 See [renderer-gpu-repair.md](renderer-gpu-repair.md). GPU schedule repair built,
 eight-save visual comparisons inspected, nine paired settings benchmarks run,
 AO debug and no-AO motion/resource transitions checked. CPU preparation remains

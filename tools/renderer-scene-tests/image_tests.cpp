@@ -27,7 +27,16 @@ int runSceneImageTests() {
     ImageSource source; source.mips = {{2,2,reinterpret_cast<const uint8_t*>(pixels),sizeof(pixels)}};
     auto image = assets.publishImage(42,source);
     check(assets.publishImage(42,source) == image,"Unchanged pixels created new image revision");
+    check(!assets.image(42,1),"Unversioned image satisfied a producer revision");
+    source.content_revision = 1;
+    check(assets.publishImage(42,source) == image && assets.image(42,1) == image,
+        "Producer revision did not retain unchanged immutable pixels");
+    check(!assets.image(42,2) && !assets.image(42,0),"Mismatched producer revision reused an image");
+    source.content_revision = 2;
+    check(assets.publishImage(42,source) == image && assets.image(42,2) == image && !assets.image(42,1),
+        "Unchanged content did not advance producer revision independently of asset revision");
     pixels[0] = 0xffff;
+    source.content_revision = 3;
     auto changed = assets.publishImage(42,source);
     check(changed->id() != image->id() && image->mips()[0].pixels[0] == 0,"Held image changed with mutable source");
     uint16_t mip = 0xffff;

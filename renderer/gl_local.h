@@ -162,7 +162,7 @@ class GL4Renderer : public IRenderer
 	std::map<std::pair<d3scene::ViewKind,uint64_t>,SceneDepthSnapshot> scene_depth_snapshots;
 	uint64_t scene_frame_sequence = 0;
 	std::unordered_map<const void*, ElementRange> scene_position_ranges;
-	void UploadSceneFrame(const d3scene::Presentation&);
+	void UploadSceneFrame(const d3scene::Presentation&, const d3scene::ViewVisibility* demand = nullptr);
 	struct SceneImageGpu { d3scene::AssetId id; GLuint texture = 0; int sampling = -1; float anisotropy = -1; };
 	std::unordered_map<uint32_t,SceneImageGpu> scene_images;
 	struct SceneViewImageGpu {

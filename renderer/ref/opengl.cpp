@@ -2824,6 +2824,7 @@ void opengl_ChangeChunkedBitmap(int bm_handle, chunked_bitmap *chunk)
 			//get the pointers pointing to the right spot
 			ddata = bm_data(chunk->bm_array[hindex*how_many_across+windex],0);
 			GameBitmaps[chunk->bm_array[hindex*how_many_across+windex]].flags|=BF_CHANGED;
+			bm_MarkChanged(chunk->bm_array[hindex*how_many_across+windex]);
 			sdata = &src_data[s_y * bw + s_x];
 
 			//copy the data

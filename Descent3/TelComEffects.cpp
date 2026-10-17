@@ -1256,5 +1256,6 @@ void UploadChunk(chunked_bitmap* bmp)
 	{
 		int bm = bmp->bm_array[index];
 		GameBitmaps[bm].flags |= BF_CHANGED;
+		bm_MarkChanged(bm);
 	}
 }

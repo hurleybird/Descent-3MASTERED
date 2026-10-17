@@ -21,6 +21,7 @@
 #include "objinfo.h"
 #include "polymodel.h"
 #include "ModelPose.h"
+#include "SceneModelAsset.h"
 #include "pserror.h"
 #include "3d.h"
 #include "mono.h"
@@ -512,6 +513,7 @@ int AllocPolyModel ()
 // Frees all the polymodel data, but doesn't free the actual polymodel itself
 void FreePolymodelData (int i)
 {
+	InvalidateSceneModelSources();
 	int t;
 	RetainedPolymodelInvalidateModel(i);
 	
@@ -708,6 +710,7 @@ void ReadModelStringLen (char *ptr,int len,CFILE *infile)
 // models textures with the bitmaps with have in memory
 int ReloadModelTextures (int modelnum)
 {
+	InvalidateSceneModelSources();
 	CFILE *infile;
 	int done=0,id,len;
 	poly_model *pm=&Poly_models[modelnum];
@@ -796,6 +799,7 @@ int ReloadModelTextures (int modelnum)
 
 void SetPolymodelProperties (bsp_info *subobj,char *props)
 {
+	InvalidateSceneModelSources();
 	// first, extract the command
 
 	int len,i;
@@ -1099,6 +1103,7 @@ void FindMinMaxForModel (poly_model *pm)
 
 int ReadNewModelFile (int polynum,CFILE *infile)
 {
+	InvalidateSceneModelSources();
 	int version,done=0,i,t,version_major;
 	int id, len;	
 	poly_model *pm=&Poly_models[polynum];

@@ -408,6 +408,7 @@ int GetTextureBitmapAtTime(int handle, int framenum, float presentation_time, bo
 			GameTextures[handle].procedural->last_evaluation_time = visual_tick / 60.0f;
 			src_bitmap = GameTextures[handle].procedural->procedural_bitmap;
 			GameBitmaps[src_bitmap].flags |= BF_CHANGED;
+			bm_MarkChanged(src_bitmap);
 		}
 		else
 			src_bitmap = GameTextures[handle].procedural->procedural_bitmap;

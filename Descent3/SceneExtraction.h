@@ -7,13 +7,16 @@ struct object;
 struct ModelTransforms;
 struct HUDCanvasLayout;
 d3scene::FrameData ExtractGameFrame(double time,float delta,bool paused,bool advance_history = true,
-    const d3scene::FrameData* retained_rooms = nullptr);
+    const d3scene::FrameData* retained_rooms = nullptr,bool audit_geometry = false);
 
 // One extraction per presentation, shared by main and auxiliary views. This
 // reads simulation state but does not draw, advance RNG, or mark visibility.
 d3scene::PresentationRef ExtractGamePresentation(double time, float delta, bool paused, bool advance_history = true,
     const d3scene::FrameData* retained_rooms = nullptr);
 void ResetGamePresentationScene();
+// Geometry/volume writers invalidate at their mutation boundary. Material,
+// light intensity and visibility changes are not geometry mutations.
+void InvalidateGameSceneGeometry();
 void PrepareGameModelInstances(d3scene::FrameData&, const d3scene::FrameData* previous,bool retain_materials = false);
 void PrepareGameStaticModel(d3scene::FrameData&,int model,const d3scene::Transform&,uint64_t identity,uint64_t collection = 0);
 void PrepareGameSceneResources(d3scene::FrameData&);

@@ -1185,6 +1185,7 @@ void UpdateSingleTerrainLightmap(int which)
 	int i, t;
 
 	GameLightmaps[TerrainLightmaps[which]].flags |= LF_CHANGED;
+	lm_MarkChanged(TerrainLightmaps[which]);
 
 	int sx = (which % 2) * 128;
 	int sz = (which / 2) * 128;
@@ -1286,6 +1287,7 @@ void UpdateTerrainLightmaps()
 	for (i = 0; i < 4; i++)
 	{
 		GameLightmaps[TerrainLightmaps[i]].flags |= LF_CHANGED;
+		lm_MarkChanged(TerrainLightmaps[i]);
 		GameLightmaps[TerrainLightmaps[i]].flags &= ~LF_LIMITS;
 	}
 

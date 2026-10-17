@@ -1617,6 +1617,7 @@ void Cinematic_DoEndTransition(void)
 					data[i] = GR_RGB16(grey, grey, grey) | OPAQUE_FLAG;
 
 				GameBitmaps[gc_temp_bmp_handle].flags |= BF_CHANGED;
+				bm_MarkChanged(gc_temp_bmp_handle);
 
 				rend_DrawScaledBitmap(0, 0, Max_window_w, Max_window_h, gc_temp_bmp_handle, 0, 0, 1, 1);
 			}

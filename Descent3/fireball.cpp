@@ -165,6 +165,7 @@ void InitFireballs()
 		}
 	}
 	GameBitmaps[Fireballs[GRAY_SPARK_INDEX].bm_handle].flags |= BF_CHANGED;
+	bm_MarkChanged(Fireballs[GRAY_SPARK_INDEX].bm_handle);
 }
 void DrawSmolderingObject(object* obj);
 // Given an object, renders the representation of this fireball

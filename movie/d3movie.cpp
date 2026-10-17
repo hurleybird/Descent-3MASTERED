@@ -282,6 +282,7 @@ void BlitToMovieBitmap(unsigned char* buf, unsigned int bufw, unsigned int bufh,
 
 	unsigned short* pPixelData = (ushort *)bm_data( Movie_bm_handle, 0 );
 	GameBitmaps[Movie_bm_handle].flags |= BF_CHANGED;
+	bm_MarkChanged(Movie_bm_handle);
 	if( hicolor )
 	{
 		unsigned short* wBuf = (unsigned short*)buf;

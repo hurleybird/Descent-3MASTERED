@@ -24,6 +24,9 @@ ImageAsset::ImageAsset(AssetId id,const ImageSource& source)
     }
 }
 ImageAssetRef SceneAssets::image(uint32_t slot) const { return slot < images_.size() ? images_[slot] : nullptr; }
+ImageAssetRef SceneAssets::image(uint32_t slot,uint64_t revision) const {
+    return revision && slot < image_source_revisions_.size() && image_source_revisions_[slot] == revision ? image(slot) : nullptr;
+}
 ImageAssetRef SceneAssets::publishImage(uint32_t slot,const ImageSource& source) {
     if (source.mips.empty() || source.mips.size() > 32 ||
         (source.format != ImageFormat::ARGB1555 && source.format != ImageFormat::ARGB4444 && source.format != ImageFormat::RGBA8))
@@ -53,11 +56,17 @@ ImageAssetRef SceneAssets::publishImage(uint32_t slot,const ImageSource& source)
         matches = a.width == b.width && a.height == b.height && a.pixels.size() == b.bytes &&
             std::memcmp(a.pixels.data(),b.pixels,b.bytes) == 0;
     }
-    if (matches) return previous;
+    if (matches) {
+        if (slot >= image_source_revisions_.size()) image_source_revisions_.resize(size_t(slot)+1);
+        image_source_revisions_[slot] = source.content_revision;
+        return previous;
+    }
     if (revision_ == std::numeric_limits<uint64_t>::max()) throw std::overflow_error("Scene revision exhausted");
     ImageAssetRef replacement(new ImageAsset({lifetime_,revision_+1,slot},source));
     if (slot >= images_.size()) images_.resize(size_t(slot)+1);
     images_[slot] = replacement; ++revision_;
+    if (slot >= image_source_revisions_.size()) image_source_revisions_.resize(size_t(slot)+1);
+    image_source_revisions_[slot] = source.content_revision;
     return replacement;
 }
 }

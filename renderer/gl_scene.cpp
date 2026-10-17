@@ -547,7 +547,7 @@ void GL4Renderer::BindSceneImage(const d3scene::ImageAsset& image,int unit,bool 
     gpu.sampling = sampling; gpu.anisotropy = anisotropy;
 }
 
-void GL4Renderer::UploadSceneFrame(const d3scene::Presentation& frame) {
+void GL4Renderer::UploadSceneFrame(const d3scene::Presentation& frame, const d3scene::ViewVisibility* demand) {
     PERF_MARKER_SCOPE("Scene.UploadFrame");
     if (!scene_light_buffer) {
         glGenBuffers(1,&scene_light_buffer); glGenTextures(1,&scene_light_texture);
@@ -556,9 +556,30 @@ void GL4Renderer::UploadSceneFrame(const d3scene::Presentation& frame) {
         glGenBuffers(1,&scene_position_buffer); glGenTextures(1,&scene_position_texture);
         glGenBuffers(1,&scene_reflection_buffer); glGenTextures(1,&scene_reflection_texture);
     }
-    if (scene_frame_sequence != frame.data().sequence) {
+    // Every view owns its submission tables. Binding restores below do not
+    // rebuild them; auxiliary views supply their own visibility, never the main view's.
+    if (demand) {
+        static thread_local std::vector<uint8_t> rooms, meshes, surfaces;
+        static thread_local std::vector<const d3scene::PreparedModelPart*> parts;
+        rooms.assign(frame.data().rooms.size(),0);
+        meshes.assign(frame.data().meshes.size(),0);
+        surfaces.assign(frame.data().compiled_surface_count,0);
+        parts.clear();
+        for (const auto& item : demand->surfaces) {
+            if (item.model) parts.push_back(&frame.data().model_instances[item.model_instance_index].models[item.model_variant].parts[item.part_index]);
+            else if (item.mesh) meshes[item.mesh_index] = 1;
+            else if (item.terrain) surfaces[frame.data().terrain.patches[item.terrain_patch][item.terrain_batch].compiled_index] = 1;
+            else rooms[item.room_index] = 1;
+        }
+        const std::less<const d3scene::PreparedModelPart*> pointer_order;
+        std::sort(parts.begin(),parts.end(),pointer_order);
+        parts.erase(std::unique(parts.begin(),parts.end()),parts.end());
+        const auto wantsPart = [&](const d3scene::PreparedModelPart& part) {
+            return std::binary_search(parts.begin(),parts.end(),&part,pointer_order);
+        };
         PerfMarkersBegin("Scene.Upload.Tables");
-        std::vector<float> lights;
+        static thread_local std::vector<float> lights;
+        lights.clear();
         for (const auto& light : frame.data().lights) {
             const float record[16] = {light.position.x,light.position.y,light.position.z,light.radius,
                 light.color.x,light.color.y,light.color.z,light.falloff,
@@ -567,10 +588,12 @@ void GL4Renderer::UploadSceneFrame(const d3scene::Presentation& frame) {
             lights.insert(lights.end(),record,record+16);
         }
         if (lights.empty()) lights.resize(16,0);
-        std::vector<int32_t> indices;
-        std::vector<d3scene::Vec2> uvs;
-        std::vector<d3scene::Vec3> reflections;
-        std::vector<uint64_t> reflection_revisions{0}; // also initializes the empty GPU buffer once
+        static thread_local std::vector<int32_t> indices;
+        static thread_local std::vector<d3scene::Vec2> uvs;
+        static thread_local std::vector<d3scene::Vec3> reflections;
+        static thread_local std::vector<uint64_t> reflection_revisions;
+        indices.clear(); uvs.clear(); reflections.clear();
+        reflection_revisions.assign(1,0); // also initializes the empty GPU buffer once
         const auto collect = [&](const d3scene::SurfaceBinding& surface) {
             if (surface.reflection && surface.specular_strength > 0) reflection_revisions.push_back(surface.reflection->id().revision);
         };
@@ -578,6 +601,7 @@ void GL4Renderer::UploadSceneFrame(const d3scene::Presentation& frame) {
             if (table.published()) reflection_revisions.insert(reflection_revisions.end(),table.reflections().begin(),table.reflections().end());
             else for (const auto& surface : table) collect(surface);
         };
+        if (scene_frame_sequence != frame.data().sequence) {
         for (const auto& room : frame.data().rooms) collectTable(room.surfaces);
         for (const auto& patch : frame.data().terrain.patches) for (const auto& surface : patch) collect(surface);
         for (const auto& mesh : frame.data().meshes) collect(mesh.surface);
@@ -585,11 +609,11 @@ void GL4Renderer::UploadSceneFrame(const d3scene::Presentation& frame) {
             collectTable(part.surfaces);
         std::sort(reflection_revisions.begin(),reflection_revisions.end());
         reflection_revisions.erase(std::unique(reflection_revisions.begin(),reflection_revisions.end()),reflection_revisions.end());
-        const bool rebuild_reflections = reflection_revisions != scene_reflection_revisions;
+        }
+        const bool rebuild_reflections = scene_frame_sequence != frame.data().sequence && reflection_revisions != scene_reflection_revisions;
         if (rebuild_reflections) { scene_reflection_assets.clear(); scene_room_bindings.clear(); }
         scene_surface_ranges.assign(frame.data().compiled_surface_count,SceneSurfaceRanges{});
-        const auto add = [&](const d3scene::SurfaceBinding& surface,uint32_t index,const std::vector<uint32_t>& lights) {
-            auto& ranges = scene_surface_ranges[index];
+        const auto reflection = [&](const d3scene::SurfaceBinding& surface) {
             SceneReflectionRanges reflection_ranges{};
             if (surface.reflection && surface.specular_strength > 0) {
             const auto revision = surface.reflection->id().revision;
@@ -620,6 +644,20 @@ void GL4Renderer::UploadSceneFrame(const d3scene::Presentation& frame) {
             scene_reflection_assets.emplace(revision,reflection_ranges);
             }
             }
+            return reflection_ranges;
+        };
+        // Reflection data is asset-owned, not view-owned. A HUD or mirror view
+        // must not evict the main view's immutable fields every frame.
+        if (rebuild_reflections) {
+            for (const auto& room : frame.data().rooms) for (const auto& surface : room.surfaces) reflection(surface);
+            for (const auto& patch : frame.data().terrain.patches) for (const auto& surface : patch) reflection(surface);
+            for (const auto& mesh : frame.data().meshes) reflection(mesh.surface);
+            for (const auto& object : frame.data().model_instances) for (const auto& model : object.models)
+                for (const auto& part : model.parts) for (const auto& surface : part.surfaces) reflection(surface);
+        }
+        const auto add = [&](const d3scene::SurfaceBinding& surface,uint32_t index,const std::vector<uint32_t>& lights) {
+            auto& ranges = scene_surface_ranges[index];
+            const auto reflection_ranges = reflection(surface);
             ranges.reflections = reflection_ranges.sources;
             ranges.normals = reflection_ranges.normals;
             ranges.field = reflection_ranges.field;
@@ -631,6 +669,7 @@ void GL4Renderer::UploadSceneFrame(const d3scene::Presentation& frame) {
         };
         const std::vector<uint32_t> no_lights;
         for (const auto& room : frame.data().rooms) {
+            if (!rooms[&room-frame.data().rooms.data()]) continue;
             if (scene_room_bindings.size() <= size_t(room.number)) scene_room_bindings.resize(size_t(room.number)+1);
             auto& cached = scene_room_bindings[room.number];
             const bool reuse = cached.reusable && &cached.surfaces.read() == &room.surfaces.read();
@@ -656,8 +695,9 @@ void GL4Renderer::UploadSceneFrame(const d3scene::Presentation& frame) {
                 for (auto light : lights) indices.push_back(int32_t(light));
             }
         }
-        for (const auto& patch : frame.data().terrain.patches) for (const auto& surface : patch) add(surface,surface.compiled_index,surface.light_indices);
+        for (const auto& patch : frame.data().terrain.patches) for (const auto& surface : patch) if (surfaces[surface.compiled_index]) add(surface,surface.compiled_index,surface.light_indices);
         for (const auto& mesh : frame.data().meshes) {
+            if (!meshes[&mesh-frame.data().meshes.data()]) continue;
             add(mesh.surface,mesh.surface.compiled_index,mesh.surface.light_indices);
             const auto coordinates = d3scene::preparedTextureCoordinates(mesh);
             if (coordinates.empty()) continue;
@@ -667,6 +707,7 @@ void GL4Renderer::UploadSceneFrame(const d3scene::Presentation& frame) {
         }
         scene_model_influences.clear();
         for (const auto& object : frame.data().model_instances) for (const auto& model : object.models) for (const auto& part : model.parts) {
+            if (!wantsPart(part)) continue;
             for (size_t surface = 0; surface < part.surfaces.size(); ++surface)
                 add(part.surfaces[surface],part.surface_base+uint32_t(surface),part.surfaces[surface].light_indices);
             if (!part.polygon_lights.empty()) {
@@ -679,9 +720,11 @@ void GL4Renderer::UploadSceneFrame(const d3scene::Presentation& frame) {
         }
         PerfMarkersEnd("Scene.Upload.Tables");
         PerfMarkersBegin("Scene.Upload.Positions");
-        std::vector<d3scene::PositionPair> positions;
+        static thread_local std::vector<d3scene::PositionPair> positions;
+        positions.clear();
         scene_position_ranges.clear();
         for (const auto& mesh : frame.data().meshes) {
+            if (!meshes[&mesh-frame.data().meshes.data()]) continue;
             // Transient meshes have no declared temporal identity yet. Publish
             // current/current positions without inventing valid object motion.
             const auto pairs = d3scene::preparedPositionPairs(mesh.asset->geometry(),mesh.vertices,mesh.vertices);
@@ -692,6 +735,7 @@ void GL4Renderer::UploadSceneFrame(const d3scene::Presentation& frame) {
         }
         for (const auto& object : frame.data().model_instances) for (const auto& model : object.models) for (size_t i = 0; i < model.parts.size(); ++i) {
             const auto& part = model.parts[i];
+            if (!wantsPart(part)) continue;
             const auto pairs = d3scene::modelPositionPairs(model.asset->geometry().parts[i].geometry,part);
             if (pairs.empty()) continue;
             const uint32_t start = static_cast<uint32_t>(positions.size());
@@ -705,7 +749,7 @@ void GL4Renderer::UploadSceneFrame(const d3scene::Presentation& frame) {
             if (reflections.empty()) reflections.push_back({});
             glBindBuffer(GL_TEXTURE_BUFFER,scene_reflection_buffer);
             glBufferData(GL_TEXTURE_BUFFER,reflections.size()*sizeof(d3scene::Vec3),reflections.data(),GL_STATIC_DRAW);
-            scene_reflection_revisions = std::move(reflection_revisions);
+            scene_reflection_revisions = reflection_revisions;
         }
         glBindBuffer(GL_TEXTURE_BUFFER,scene_position_buffer);
         glBufferData(GL_TEXTURE_BUFFER,positions.size()*sizeof(d3scene::PositionPair),positions.data(),GL_STREAM_DRAW);
@@ -882,7 +926,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::Presentat
         scene_shader.AttachSource(SceneVertexShader.c_str(), SceneFragmentShader.c_str());
         glUniformBlockBinding(scene_shader.Handle(),glGetUniformBlockIndex(scene_shader.Handle(),"SceneDrawBlock"),7);
     }
-    UploadSceneFrame(presentation);
+    UploadSceneFrame(presentation,&visibility);
     check_scene_error("frame upload");
 
     // The pass owns depth/blend/culling policy. No game draw-state capture and

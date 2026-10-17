@@ -316,6 +316,11 @@ void extractionTests() {
     check(after_thumbnail->data().objects[0].previous.position.x == 5, "thumbnail advanced gameplay presentation history");
     Objects[0].handle += HANDLE_COUNT_INCREMENT;
     vertices[0].x = 7; surface.tmap = 8;
+    bool missed_invalidation = false;
+    try { ExtractGameFrame(3,.016f,false,false,nullptr,true); }
+    catch (const std::logic_error&) { missed_invalidation = true; }
+    check(missed_invalidation,"Geometry audit missed an unannounced producer mutation");
+    InvalidateGameSceneGeometry();
     const auto c = ExtractGamePresentation(3, 0.016f, false);
     check(!c->data().objects[0].has_previous, "recycled object slot inherited prior occupant history");
     check(c->data().rooms[0].asset->id() != b->data().rooms[0].asset->id(), "geometry change missed");
