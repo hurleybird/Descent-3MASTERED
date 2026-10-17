@@ -10,3 +10,5 @@ std::vector<SceneModelPartRole> ResolveSceneModelRoles(const d3scene::ModelGeome
 
 // Asset compiler: owned topology and validated shading data, no game globals.
 d3scene::ModelGeometry CompileSceneModelAsset(const poly_model&, size_t* repaired_normals = nullptr);
+// Compare source semantics without rebuilding/allocating a candidate model.
+bool MatchesSceneModelAsset(const d3scene::ModelGeometry&,const poly_model&);

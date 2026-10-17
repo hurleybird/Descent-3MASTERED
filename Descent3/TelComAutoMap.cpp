@@ -17,6 +17,9 @@
 */
 
 #include "TelComAutoMap.h"
+#include "SceneAutomap.h"
+#include "SceneExtraction.h"
+#include "SceneCanvas.h"
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
@@ -47,6 +50,7 @@
 #include "player.h"
 #include "marker.h"
 #include "hlsoundlib.h"
+#include "args.h"
 
 // Variables needed for automap
 vector AM_view_pos = { 0,0,0 };
@@ -61,66 +65,13 @@ float AM_pitch;
 
 int AM_terrain = 0, AM_realign = 0, AM_center_on_player = 0, AM_current_marker;
 
-int Num_AM_rooms;
-ushort AM_room_list[MAX_ROOMS];
-ubyte AM_rooms_seen[MAX_ROOMS];
-g3Point* AM_rotated_points = NULL;//[MAX_VERTS_PER_ROOM];
-
 void TCAMCallback(void);
 
-static ubyte* Small_faces[MAX_ROOMS];
 
 // clears out the list of visible rooms that we've seen
 void AutomapClearVisMap()
 {
 	memset(AutomapVisMap, 0, MAX_ROOMS);
-}
-
-void ClassifyAMFaces()
-{
-	int i = 0;
-	for (i = 0; i <= Highest_room_index; i++)
-	{
-		if (Rooms[i].used)
-		{
-			Small_faces[i] = (ubyte*)mem_malloc(Rooms[i].num_faces);
-			ASSERT(Small_faces[i]);
-
-			memset(Small_faces[i], 0, Rooms[i].num_faces);
-
-			room* rp = &Rooms[i];
-
-			for (int t = 0; t < rp->num_faces; t++)
-			{
-				face* fp = &rp->faces[t];
-
-				vector verts[MAX_VERTS_PER_FACE];
-				vector center;
-				for (int k = 0; k < fp->num_verts; k++)
-					verts[k] = rp->verts[fp->face_verts[k]];
-
-				float size = vm_GetCentroidFast(&center, verts, fp->num_verts);
-
-				if (size < 120)
-					Small_faces[i][t] = 1;
-				if (size < 60)
-					Small_faces[i][t] = 2;
-
-			}
-		}
-	}
-}
-
-void FreeAMFaces()
-{
-	for (int i = 0; i <= Highest_room_index; i++)
-	{
-		if (Rooms[i].used)
-		{
-			mem_free(Small_faces[i]);
-			Small_faces[i] = NULL;
-		}
-	}
 }
 
 // Returns the camera position to the player
@@ -150,8 +101,6 @@ bool TelComAutoMap(tTelComInfo* tcs)
 {
 	bool done = false;
 
-	if (!AM_rotated_points)
-		AM_rotated_points = (g3Point*)mem_malloc(sizeof(g3Point) * MAX_VERTS_PER_ROOM);
 
 	AM_tcs = tcs;
 	AM_current_marker = -1;
@@ -170,8 +119,6 @@ bool TelComAutoMap(tTelComInfo* tcs)
 	TelComEnableSystemKey(TCSYS_ENTER, true);	//processing other keys is a waste of cpu
 	TelComEnableSystemKey(TCSYS_PRINTSCRN, true);
 
-	// Classify faces
-	ClassifyAMFaces();
 
 	// Load ship model
 	AM_ship_model_handle = LoadPolyModel("automapship.oof", 0);
@@ -267,217 +214,13 @@ bool TelComAutoMap(tTelComInfo* tcs)
 	TelcomRenderSetScreen(DUMMY_SCREEN);
 	TelcomRenderSetCallback(NULL);
 
-	FreeAMFaces();
 
 	if (AM_ship_model_handle != -1)
 		FreePolyModel(AM_ship_model_handle);
 
 	TelComEnableSystemKey(TCSYS_MAXKEYS, true);	//re-enable all telcom keys
 	TelComEnableSystemKey(TCSYS_F1, false);		//disable the T key, not needed outside of automap
-	if (AM_rotated_points)
-	{
-		mem_free(AM_rotated_points);
-		AM_rotated_points = NULL;
-	}
-
 	return true;
-}
-
-// Builds a list of rooms to draw for the automap
-void TCAMBuildRoomList(int startroom)
-{
-	memset(AM_rooms_seen, 0, MAX_ROOMS);
-	Num_AM_rooms = 0;
-
-	if (startroom > 0)
-	{
-		AM_room_list[Num_AM_rooms++] = startroom;
-		AM_rooms_seen[startroom] = 1;
-	}
-
-	for (int i = 0; i <= Highest_room_index; i++)
-	{
-		if (Rooms[i].used && !AM_rooms_seen[i] && (AutomapVisMap[i] == 1 || (Rooms[i].flags & RF_EXTERNAL)))
-		{
-			AM_room_list[Num_AM_rooms++] = i;
-			AM_rooms_seen[i] = 1;
-		}
-	}
-
-}
-
-// Takes a min,max vector and makes a surrounding cube from it
-void MakePointsFromMinMax(vector* corners, vector* minp, vector* maxp);
-// Returns true if the external room is in the view cone
-// Else returns false
-bool IsRoomVisible(room* rp, float* nearz)
-{
-	g3Point pnt;
-	ubyte ccode;
-
-	vector corners[8];
-
-	MakePointsFromMinMax(corners, &rp->min_xyz, &rp->max_xyz);
-
-	*nearz = 90000000;
-	ubyte andbyte = 0xff;
-	for (int t = 0; t < 8; t++)
-	{
-		g3_RotatePoint(&pnt, &corners[t]);
-
-		if (pnt.p3_z < *nearz)
-			*nearz = pnt.p3_z;
-
-		ccode = g3_CodePoint(&pnt);
-		if (!ccode)
-			return true;
-		andbyte &= ccode;
-	}
-
-	if (andbyte)
-		return false;
-
-	return true;
-}
-
-
-void TCAMRenderRoom(int roomnum)
-{
-	ASSERT(Rooms[roomnum].used);
-	room* rp = &Rooms[roomnum];
-	static int first = 1;
-	static float lm_red[32], lm_green[32], lm_blue[32];
-	float nearz;
-	int i;
-
-	if (first)
-	{
-		first = 0;
-		for (int i = 0; i < 32; i++)
-		{
-			lm_red[i] = ((float)i / 31.0);
-			lm_green[i] = ((float)i / 31.0);
-			lm_blue[i] = ((float)i / 31.0);
-		}
-	}
-
-	if ((rp->flags & RF_EXTERNAL) && !AM_terrain)
-		return;
-
-	if (!IsRoomVisible(rp, &nearz))
-		return;
-
-	// rotate all the points for this room
-	for (i = 0; i < rp->num_verts; i++)
-	{
-		g3_RotatePoint(&AM_rotated_points[i], &rp->verts[i]);
-		g3_ProjectPoint(&AM_rotated_points[i]);
-
-	}
-
-	for (i = 0; i < rp->num_faces; i++)
-	{
-		g3Point* pointlist[MAX_VERTS_PER_FACE];
-		g3Point  pointbuffer[MAX_VERTS_PER_FACE];
-
-		face* fp = &rp->faces[i];
-
-		// See if this face is backfaced
-		vector subvec = rp->verts[fp->face_verts[0]] - AM_view_pos;
-		if (subvec * fp->normal > 0)
-			continue;			// backfaced
-
-		int black_face = 0, wacky_face = 0;
-
-		if (fp->portal_num != -1)
-		{
-			if (!AutomapVisMap[rp->portals[fp->portal_num].croom])
-			{
-				// Don't give away secret rooms
-				if (Rooms[rp->portals[fp->portal_num].croom].flags & RF_SECRET)
-					black_face = 1;
-				else
-					wacky_face = 1;
-			}
-			else
-				continue;
-		}
-
-		if (nearz > 600)
-		{
-			if (Small_faces[roomnum][i] != 0)
-				continue;
-		}
-		else if (nearz > 300)
-		{
-			if (Small_faces[roomnum][i] == 2)
-				continue;
-		}
-
-		// Color this face from the lightmaps
-		if (!black_face && !wacky_face && (fp->flags & FF_LIGHTMAP))
-		{
-			int lm_handle = LightmapInfo[fp->lmi_handle].lm_handle;
-			ushort* data = (ushort*)lm_data(lm_handle);
-			int w = lm_w(lm_handle);
-			int h = lm_h(lm_handle);
-
-			for (int t = 0; t < fp->num_verts; t++)
-			{
-				pointbuffer[t] = AM_rotated_points[fp->face_verts[t]];
-				g3Point* p = &pointbuffer[t];
-				pointlist[t] = p;
-
-				float u = fp->face_uvls[t].u2 * w;
-				float v = fp->face_uvls[t].v2 * h;
-
-				int int_u = u;
-				int int_v = v;
-
-				ushort texel = data[int_v * w + int_u];
-
-				int r = (texel >> 10) & 0x1f;
-				int g = (texel >> 5) & 0x1f;
-				int b = (texel) & 0x1f;
-
-				p->p3_r = lm_red[r];
-				p->p3_g = lm_green[g];
-				p->p3_b = lm_blue[b];
-				p->p3_a = 1.0;
-				p->p3_flags |= PF_RGBA;
-			}
-
-			g3_DrawPoly(fp->num_verts, pointlist, 0);
-		}
-		else
-		{
-			for (int t = 0; t < fp->num_verts; t++)
-			{
-				pointbuffer[t] = AM_rotated_points[fp->face_verts[t]];
-				g3Point* p = &pointbuffer[t];
-				pointlist[t] = p;
-
-				p->p3_flags |= PF_RGBA;
-				p->p3_r = 0.0;
-				p->p3_g = 0.0;
-				p->p3_b = 0.0;
-				p->p3_a = 1.0;
-
-				if (wacky_face)
-				{
-					float curtime = timer_GetTime();
-					int val = curtime;
-					float fval = curtime - val;
-					p->p3_r = fval;
-					p->p3_g = fval;
-					p->p3_b = fval;
-					p->p3_a = 1.0;
-				}
-
-			}
-			g3_DrawPoly(fp->num_verts, pointlist, 0);
-		}
-	}
 }
 
 #define AM_TRANSLATION_SCALAR	200.0f
@@ -526,135 +269,6 @@ void TCAMReadControls()
 
 	vm_Orthogonalize(&AM_view_orient);
 	Game_interface_mode = save_mode;
-}
-
-// Renders the low-res terrain for the automap
-void TCAMRenderTerrain()
-{
-	int nt;
-	int render_width, render_height;
-	float w2, h2;
-
-	int save_check = Terrain_occlusion_checksum;
-	int save_pix = Detail_settings.Pixel_error;
-	float save_dist = Detail_settings.Terrain_render_distance;
-
-	Detail_settings.Pixel_error = 31;
-	Detail_settings.Terrain_render_distance = 300 * TERRAIN_SIZE;
-	Terrain_occlusion_checksum = -1;
-
-	//Get the size of the current render window
-	rend_GetProjectionParameters(&render_width, &render_height);
-	w2 = ((float)render_width - 1) / 2.0;
-	h2 = ((float)render_height - 1) / 2.0;
-
-	//Set up vars for (psuedo-)clipping window
-	Check_terrain_portal = 0;
-
-	Clip_scale_left = 0;
-	Clip_scale_right = render_width - 1;
-	Clip_scale_top = 0;
-	Clip_scale_bot = render_height - 1;
-
-	Terrain_from_mine = 0;
-
-	VisibleTerrainZ = (Detail_settings.Terrain_render_distance) * Matrix_scale.z;
-
-	// Set up our z wall
-	g3_SetFarClipZ(VisibleTerrainZ);
-
-	vector viewer_eye;
-	matrix viewer_orient;
-	// Get scaled matrix
-	g3_GetViewPosition(&viewer_eye);
-	g3_GetViewMatrix(&viewer_orient);
-
-	// Get all of the cells visible to us
-	nt = GetVisibleTerrain(&viewer_eye, &viewer_orient);
-
-	// And display!
-	if (nt > 0)
-		DisplayTerrainList(nt, 1);
-
-	Detail_settings.Pixel_error = save_pix;
-	Detail_settings.Terrain_render_distance = save_dist;
-	Terrain_occlusion_checksum = save_check;
-
-}
-
-#define AM_BLINK_TIME	.25f
-
-// Draws all the relevant objects for automap
-void TCAMDrawObjects()
-{
-	int i;
-	int drawit = (timer_GetTime() * 4);
-	drawit = (drawit % 2);
-
-	if (Game_mode & GM_MULTI)
-	{
-		for (i = 0; i < MAX_PLAYERS; i++)
-		{
-			if (i == Player_num)
-			{
-				object* obj = &Objects[Players[Player_num].objnum];
-				if (AM_ship_model_handle != -1 && drawit)
-					DrawPolygonModel(&obj->pos, &obj->orient, AM_ship_model_handle, NULL, 0, 1, 1, 1);
-			}
-			else if (NetPlayers[i].flags & NPF_CONNECTED)
-			{
-				object* obj = &Objects[Players[i].objnum];
-				if ((obj->type == OBJ_PLAYER && obj->render_type == RT_POLYOBJ) || obj->type == OBJ_OBSERVER)
-					DrawColoredDisk(&Objects[Players[i].objnum].pos, 1, 1, .5f, 1.0, .3f, 3.0);
-			}
-		}
-	}
-	else
-	{
-		object* obj = &Objects[Players[Player_num].objnum];
-
-		if (AM_ship_model_handle != -1 && drawit)
-			DrawPolygonModel(&obj->pos, &obj->orient, AM_ship_model_handle, NULL, 0, 1, 1, 1);
-	}
-
-
-	float norm = timer_GetTime();
-	int int_norm = norm;
-	norm -= int_norm;
-	for (i = 0; i <= Highest_object_index; i++)
-	{
-		object* obj = &Objects[i];
-
-		if (obj->type == OBJ_MARKER && obj->parent_handle == Player_object->handle)
-		{
-			float size = 2.5 + (norm * 2.5);
-			float r = 1.0;
-			float g = 0;
-			float b = 1.0;
-
-			if (AM_current_marker != -1)
-			{
-				int index = 0;
-
-				if (Game_mode & GM_MULTI)
-					index = obj->id - (Player_num * 2);
-				else
-					index = obj->id;
-
-				if (AM_current_marker == index)
-				{
-					size = 9.0 + (norm * 9.0);
-					r = 0;
-					g = 1.0;
-					b = 1.0;
-
-				}
-			}
-
-			DrawColoredDisk(&obj->pos, r, g, b, 1.0, .3f, size);
-		}
-	}
-
 }
 
 #include "hud.h"
@@ -725,56 +339,26 @@ void TCAMDrawMenu()
 // The callback function that the telcom calls every frame
 void TCAMCallback(void)
 {
-	StartFrame(Telcom_system.Monitor_coords[MONITOR_MAIN].left, Telcom_system.Monitor_coords[MONITOR_MAIN].top,
-		Telcom_system.Monitor_coords[MONITOR_MAIN].right, Telcom_system.Monitor_coords[MONITOR_MAIN].bottom);
-
-	// Start a 3d frame 
-	g3_StartFrame(&AM_view_pos, &AM_view_orient, Render_zoom);
-
-	if (AM_center_on_player)
-	{
-		TCAMCenterOnPlayer();
-		AM_center_on_player = 0;
-	}
-
-	if (AM_realign)
-	{
-		AM_pitch = 0;
-		AM_realign = 0;
-	}
-
-	rend_SetFiltering(1);
-	rend_SetAlphaType(AT_VERTEX);
-	rend_SetTextureType(TT_FLAT);
-	rend_SetLighting(LS_GOURAUD);
-	rend_SetColorModel(CM_RGB);
-	rend_SetOverlayType(OT_NONE);
-	rend_SetZBufferState(1);
-
-	if (AM_terrain)
-		rend_SetZValues(0, VisibleTerrainZ);
-
-	TCAMBuildRoomList(Viewer_object->roomnum);
-	// Render all rooms in view
-	for (int i = 0; i < Num_AM_rooms; i++)
-	{
-		TCAMRenderRoom(AM_room_list[i]);
-	}
-
-	// Render terrain
-	if (AM_terrain)
-		TCAMRenderTerrain();
-
-	g3_EndFrame();
-
-	rend_SetFiltering(1);
-
-	TCAMDrawObjects();
-	EndFrame();
-
-	rend_SetFiltering(0);
-
-	TCAMDrawMenu();
-
-	TCAMReadControls();
+    if (!SceneGeometryInspection()) Error("Automap migration requires renderer inspection");
+    if (AM_center_on_player) { TCAMCenterOnPlayer(); AM_center_on_player = 0; }
+    if (AM_realign) { AM_pitch = 0; AM_realign = 0; }
+    const auto& monitor = Telcom_system.Monitor_coords[MONITOR_MAIN];
+    StartFrame(monitor.left,monitor.top,monitor.right,monitor.bottom);
+    static uint64_t sequence = uint64_t(1)<<63;
+    const double display_time = FindArg("-scene-automap-telcom-probe") ? .375 : timer_GetTime();
+    const auto frame = PrepareGameAutomap(++sequence,display_time,AM_terrain != 0,AM_ship_model_handle,AM_current_marker);
+    const d3scene::Rect viewport{monitor.left,monitor.top,monitor.right-monitor.left,monitor.bottom-monitor.top};
+    auto view = MakeGameSceneView(d3scene::ViewKind::Automap,0x4155544f4d415001ull,nullptr,
+        AM_view_pos,-1,AM_view_orient,Render_zoom,false,viewport,{0,0,viewport.width,viewport.height});
+    view.geometry_inspection = true; view.portal_visibility = false; view.dynamic_lighting = false; view.clear_depth = true;
+    d3scene::renderView(*frame,view);
+    EndFrame();
+    rend_SetFiltering(0);
+    TCAMDrawMenu();
+    rend_FlushTextLayer();
+    // Keep the diagnostic warning inside the monitor, not behind its surround.
+    auto banner = MakeSceneCanvasView(SceneInspectionBanner,
+        {viewport.x,viewport.y+16,viewport.width,viewport.height-16},d3scene::ViewTarget::Scene,true);
+    d3scene::renderView(*frame,banner);
+    TCAMReadControls();
 }

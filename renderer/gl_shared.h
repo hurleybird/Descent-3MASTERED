@@ -134,15 +134,31 @@ public:
 	}
 };
 
+// Single-sample depth owned by effect consumers, independent of scene color.
+class DepthFramebuffer {
+	GLuint framebuffer = 0, texture = 0;
+	uint32_t width = 0, height = 0;
+public:
+	void Update(uint32_t w,uint32_t h);
+	void Destroy();
+	GLuint Handle() const { return framebuffer; }
+	GLuint DepthTextureRaw() const { return texture; }
+	GLuint DepthTextureForRead() const { return texture; }
+	uint32_t Width() const { return width; }
+	uint32_t Height() const { return height; }
+	void BlitDepthTo(GLuint target,unsigned x,unsigned y,unsigned w,unsigned h);
+};
+
 class Framebuffer
 {
-	// Scene/compositing radiance stays floating point until display output.
-	// Clamping here would invalidate deferred subtraction of eligible light.
+	// Storage precision follows the product: legacy-range world/display color
+	// uses RGBA8; filtering and motion intermediates retain floating point.
 	GLuint		m_name, m_subname;
 	GLuint		m_colorname, m_subcolorname, m_depthname, m_subdepthname;
 	uint32_t	m_width, m_height;
 	uint32_t	m_samples;
 	uint32_t	m_requested_samples;
+	GLint m_color_format = GL_RGBA16F;
 	ShaderProgram m_depth_resolve_shader;
 	//Track whether the MSAA->sub resolve is up to date. Each MSAA resolve blit
 	//costs W*H*samples of bandwidth, and multiple post-process stages can ask
@@ -151,7 +167,7 @@ class Framebuffer
 	bool		m_subcolor_dirty;
 	bool		m_subdepth_dirty;
 
-	bool Allocate(int width, int height, int msaa_samples);
+	bool Allocate(int width, int height, int msaa_samples, GLint color_format);
 	//Used when multisampling is enabled. Blits the requested buffers to the non-multisample sub framebuffer.
 	//Leaves the sub framebuffer bound for reading to finish the blit.
 	void SubFramebufferBlit(GLbitfield mask);
@@ -161,7 +177,7 @@ public:
 	// Transfer complete framebuffer storage between compositor roles without
 	// copying pixels. Resolve shaders are context-owned and storage-independent.
 	void SwapStorage(Framebuffer& other);
-	void Update(int width, int height, int msaa_samples);
+	void Update(int width, int height, int msaa_samples, GLint color_format = GL_RGBA16F);
 	void Destroy();
 	//Mark the resolved sub framebuffer as stale. Call after writing to the MSAA
 	//attachments so the next read triggers a fresh resolve.
@@ -264,20 +280,26 @@ struct SceneSurfaceResources
 	GLuint velocity_texture = 0;
 	GLuint resolved_texture = 0;
 	GLuint resolve_framebuffer = 0;
+	GLuint surface_framebuffer = 0;
 	GLuint object_id_texture = 0;
 	GLuint object_id_resolved_texture = 0;
 	uint32_t width = 0;
 	uint32_t height = 0;
 	uint32_t samples = 0;
+	uint32_t read_scale = 1;
+	uint32_t ReadWidth() const { return width/read_scale; }
+	uint32_t ReadHeight() const { return height/read_scale; }
+	bool NeedsResolve() const { return samples >= 2 || read_scale > 1; }
 	bool velocity_resolve_valid = false;
 	bool object_id_resolve_valid = false;
 
-	void Update(uint32_t width, uint32_t height, uint32_t msaa_samples);
+	void Update(uint32_t width, uint32_t height, uint32_t msaa_samples, uint32_t resolve_scale = 1);
 	void Destroy();
 	void AttachToFramebuffer(GLuint framebuffer);
 	void ClearAttached(GLuint framebuffer);
+	void PrepareSurfaceTarget(GLuint depth_texture);
 	void MarkDirty();
-	void Resolve(GLuint source_framebuffer);
+	void Resolve(GLuint source_framebuffer, GLuint output_depth = 0);
 	GLuint TextureForRead(GLuint source_framebuffer);
 	GLuint ObjectIdTextureForRead(GLuint source_framebuffer);
 };
@@ -358,7 +380,6 @@ struct BloomResources
 struct AOResult
 {
 	GLuint ao_texture = 0;
-	GLuint suppression_texture = 0;
 	bool debug_display = false;
 	int debug_channel = 0;
 };
@@ -366,7 +387,7 @@ struct AOResult
 // Explicit resolved opaque images and the surface records belonging to them.
 // No live canvas state or optional camera reconstruction fallback enters AO.
 struct AOInputs {
-	GLuint depth = 0, highlight_color = 0, surface_records = 0, object_ids = 0;
+	GLuint depth = 0, surface_records = 0, object_ids = 0;
 	int width = 0, height = 0, raster_width = 0, raster_height = 0, raster_scale = 1;
 	d3scene::Rect viewport; // logical coordinates, bottom-left origin
 	d3scene::ViewMatrices current, previous;
@@ -384,7 +405,6 @@ struct AOResources
 	ColorFramebuffer ao_framebuffer;
 	//Scratch used as ping-pong for the separable bilateral blur.
 	ColorFramebuffer ao_blur_framebuffer;
-	ColorFramebuffer suppression_framebuffer;
 	//Ping-pong history for temporal AO (RGBA16F: x=AO, y=depth, z=history weight).
 	ColorFramebuffer ao_history_framebuffers[2];
 	int ao_history_index = 0;
@@ -398,7 +418,6 @@ struct AOResources
 	ShaderProgram blur_x_shader;
 	ShaderProgram blur_y_shader;
 	ShaderProgram temporal_shader;
-	ShaderProgram suppression_shader;
 
 	//Depth downsample/resolve shader uniforms.
 	GLint depth_source = -1;
@@ -461,21 +480,6 @@ struct AOResources
 	GLint temporal_current_inverse_modelview = -1;
 	GLint temporal_previous_view_projection = -1;
 
-	//Suppression mask shader uniforms.
-	GLint suppression_existing_mask = -1;
-	GLint suppression_existing_mask_ms = -1;
-	GLint suppression_color = -1;
-	GLint suppression_color_ms = -1;
-	GLint suppression_has_mask = -1;
-	GLint suppression_use_bloom_mask = -1;
-	GLint suppression_source_samples = -1;
-	GLint suppression_input_screen_size = -1;
-	GLint suppression_ao_screen_size = -1;
-	GLint suppression_source_visible_origin = -1;
-	GLint suppression_source_visible_size = -1;
-	GLint suppression_use_source_visible_rect = -1;
-	GLint suppression_gamma = -1;
-	GLint suppression_bloom_threshold = -1;
 
 	//Apply (composite) shader uniforms.
 

@@ -408,8 +408,7 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
     PortalVisibility spatial; spatial.rooms.resize(rooms.size());
     if (world_content) spatial = queryPortalVisibility(frame,view,result.camera);
     const auto& windows = spatial.rooms;
-    std::unordered_map<int32_t,size_t> room_indices;
-    if (world_content) for (size_t i = 0; i < rooms.size(); ++i) room_indices.emplace(rooms[i].number,i);
+    const auto& room_indices = frame.roomIndices();
     const auto& exterior_window = spatial.exterior;
     result.exterior_visible = exterior_window.visible;
     const auto spatialWindow = [&](int32_t room) {
@@ -452,26 +451,20 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
             consider(MeshView(geometry),room.surfaces[f],{static_cast<uint32_t>(r),static_cast<uint32_t>(f)},windows[r]);
         }
     }
-    std::unordered_map<uint32_t,const ObjectState*> owners;
-    std::unordered_map<uint32_t,uint32_t> owner_indices;
-    std::unordered_map<uint64_t,const ModelInstance*> instances;
-    std::unordered_set<uint32_t> model_owners, visible_owners;
-    for (size_t i = 0; i < frame.data().objects.size(); ++i) {
-        const auto& owner = frame.data().objects[i];
-        owners.emplace(owner.handle,&owner); owner_indices.emplace(owner.handle,static_cast<uint32_t>(i));
-    }
+    const auto& owner_indices = frame.objectIndices();
+    const auto& instances = frame.modelIndices();
+    std::vector<bool> model_owners(frame.data().objects.size()), visible_owners(frame.data().objects.size());
     for (const auto& instance : frame.data().model_instances) {
-        instances.emplace(instance.identity,&instance);
-        if (instance.has_owner && instance.collection == view.collection) model_owners.insert(instance.owner);
+        if (instance.has_owner && instance.collection == view.collection) model_owners[owner_indices.at(instance.owner)] = true;
     }
     const auto eligible = [&](const ModelInstance& instance) {
-        return instance.collection == view.collection && instance.visible && (!instance.has_owner || (owners.at(instance.owner)->visible &&
+        return instance.collection == view.collection && instance.visible && (!instance.has_owner || (frame.data().objects[owner_indices.at(instance.owner)].visible &&
             !excludesObject(view,instance.owner)));
     };
     for (size_t i = 0; i < frame.data().objects.size(); ++i) {
         const auto& object = frame.data().objects[i];
         if (!world_content) break;
-        if (model_owners.count(object.handle)) continue;
+        if (model_owners[i]) continue;
         if (!object.visible) continue;
         if (excludesObject(view,object.handle)) continue;
         const auto window = spatialWindow(object.room);
@@ -484,7 +477,11 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
         if (!eligible(object)) continue;
         const auto window = spatialWindow(object.room);
         if (!window.visible || !object.has_render_bounds || boundsOutside(result.camera,object.render_bounds,window)) continue;
-        if (world_content && object.has_owner && visible_owners.insert(object.owner).second) result.object_indices.push_back(owner_indices.at(object.owner));
+        if (world_content && object.has_owner) {
+            const auto index = owner_indices.at(object.owner);
+            if (!visible_owners[index]) result.object_indices.push_back(uint32_t(index));
+            visible_owners[index] = true;
+        }
         const uint32_t variant = selectModelVariant(object,result.camera);
         const auto& model = object.models[variant];
         if (!model.has_render_bounds || boundsOutside(result.camera,model.render_bounds,window)) continue;
@@ -501,7 +498,7 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
                 item.model_variant = variant;
                 item.part_index = static_cast<uint32_t>(part); item.polygon_index = static_cast<uint32_t>(face);
                 item.world = world;
-                consider(MeshView(geometry,model.parts[part].vertices),model.parts[part].surfaces[face],item,window);
+                consider(MeshView(geometry,model.parts[part].vertices),model.parts[part].surface(model.asset->geometry().parts[part],face),item,window);
             }
         }
     }
@@ -535,9 +532,9 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
         if (instance.receiver_polygon >= 0 && !visible_receivers.count(
             (uint64_t(room_indices.at(instance.room))<<32)|uint32_t(instance.receiver_polygon))) continue;
         if (instance.has_owner && (excludesObject(view,instance.owner) ||
-            !owners.at(instance.owner)->visible)) continue;
+            !frame.data().objects[owner_indices.at(instance.owner)].visible)) continue;
         if (instance.model_instance) {
-            const auto& model = *instances.at(instance.model_instance);
+            const auto& model = frame.data().model_instances[instances.at(instance.model_instance)];
             if (!eligible(model) || uint32_t(instance.model_variant) != selectModelVariant(model,result.camera)) continue;
         }
         const auto& geometry = instance.asset->geometry();
@@ -545,6 +542,16 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
             (instance.surface.material.layer == RenderLayer::Background && !result.exterior_visible)) continue;
         VisibleSurface item; item.mesh = true; item.mesh_index = static_cast<uint32_t>(index);
         item.world = resolveMeshTransform(instance,result.camera);
+        if (instance.maximum_depth > 0) {
+            const auto& b = instance.depth_reference;
+            bool beyond = true;
+            for (unsigned corner = 0; corner < 8; ++corner) {
+                const auto p = transformPoint(item.world,{corner&1 ? b.maximum.x : b.minimum.x,
+                    corner&2 ? b.maximum.y : b.minimum.y,corner&4 ? b.maximum.z : b.minimum.z});
+                beyond = beyond && dot(view.camera.forward,subtract(p,view.camera.position)) > instance.maximum_depth;
+            }
+            if (beyond) continue;
+        }
         if (instance.size_fade_range.y > 0 && dot(item.world.right,item.world.right) == 0) continue;
         PortalWindow window{-1,-1,1,1,true};
         if (instance.surface.material.layer == RenderLayer::World && view.portal_visibility) {
@@ -579,12 +586,15 @@ const SurfaceBinding& visibleSurfaceBinding(const Presentation& frame,const Visi
     const auto& data = frame.data();
     if (item.mesh) return data.meshes[item.mesh_index].surface;
     if (item.terrain) return data.terrain.patches[item.terrain_patch][item.terrain_batch];
-    if (item.model) return data.model_instances[item.model_instance_index].models[item.model_variant].parts[item.part_index].surfaces[item.polygon_index];
+    if (item.model) {
+        const auto& model = data.model_instances[item.model_instance_index].models[item.model_variant];
+        return model.parts[item.part_index].surface(model.asset->geometry().parts[item.part_index],item.polygon_index);
+    }
     return data.rooms[item.room_index].surfaces[item.polygon_index];
 }
 std::vector<ViewPass> buildViewPasses(const Presentation& frame,const ViewVisibility& view,ViewProducts products) {
     if (view.ordering == ViewOrdering::Compositing) {
-        if (products.opaque_scene || products.occlusion_radiance)
+        if (products.opaque_scene || products.occlusion)
             throw std::invalid_argument("Compositing surfaces cannot export opaque world products");
         for (const auto& item : view.surfaces) {
             const auto& surface = visibleSurfaceBinding(frame,item);
@@ -594,7 +604,7 @@ std::vector<ViewPass> buildViewPasses(const Presentation& frame,const ViewVisibi
         if (view.surfaces.empty()) return {};
         return {{ViewPassKind::CompositeSurfaces,0,static_cast<uint32_t>(view.surfaces.size())}};
     }
-    if (products.occlusion_radiance && !products.opaque_scene)
+    if (products.occlusion && !products.opaque_scene)
         throw std::invalid_argument("World occlusion requires an opaque scene product");
     std::vector<ViewPass> passes;
     uint32_t index = 0;
@@ -602,14 +612,18 @@ std::vector<ViewPass> buildViewPasses(const Presentation& frame,const ViewVisibi
     if (index) passes.push_back({ViewPassKind::Background,0,index});
     const auto opaque = index;
     while (index < view.surfaces.size() && !view.surfaces[index].late) ++index;
+    if (products.occlusion) {
+        if (index > opaque) passes.push_back({ViewPassKind::DepthSurface,opaque,index});
+        passes.push_back({ViewPassKind::ExportOpaqueScene,index,index});
+        passes.push_back({ViewPassKind::EvaluateWorldOcclusion,index,index});
+    }
     if (index > opaque) passes.push_back({ViewPassKind::OpaqueWorld,opaque,index});
     bool depth_required = false;
     for (size_t i = index; i < view.surfaces.size(); ++i)
         depth_required = depth_required || visibleSurfaceBinding(frame,view.surfaces[i]).soft_depth_range > 0;
     if (depth_required) passes.push_back({ViewPassKind::SnapshotOpaqueDepth,index,index});
-    if (products.opaque_scene) passes.push_back({ViewPassKind::ExportOpaqueScene,index,index});
+    if (products.opaque_scene && !products.occlusion) passes.push_back({ViewPassKind::ExportOpaqueScene,index,index});
     if (index < view.surfaces.size()) passes.push_back({ViewPassKind::LateWorld,index,static_cast<uint32_t>(view.surfaces.size())});
-    if (products.occlusion_radiance) passes.push_back({ViewPassKind::CompositeWorldOcclusion,index,index});
     return passes;
 }
 } // namespace d3scene

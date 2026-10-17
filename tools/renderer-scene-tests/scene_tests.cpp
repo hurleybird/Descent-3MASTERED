@@ -4,6 +4,7 @@
 #include "../../Descent3/SceneExtraction.h"
 #include "room.h"
 #include "object.h"
+#include "gametexture.h"
 #include <cstdio>
 #include <limits>
 #include <stdexcept>
@@ -13,6 +14,7 @@
 // functions. No GL context, game runtime, or save files are required.
 room Rooms[MAX_ROOMS + MAX_PALETTE_ROOMS]{};
 object Objects[MAX_OBJECTS]{};
+texture GameTextures[MAX_TEXTURES]{};
 int Highest_object_index = -1;
 
 namespace {
@@ -74,6 +76,13 @@ void assetTests() {
     }
     d3scene::SceneAssets assets;
     const auto a = assets.publishRoom(3, triangle());
+    const auto quad = assets.quadMesh();
+    const auto batch = assets.quadMesh(128);
+    check(quad == assets.quadMesh() && batch == assets.quadMesh(128), "canonical primitive was republished");
+    check(quad->geometry().vertices.size() == 4 && batch->geometry().vertices.size() == 512,
+        "canonical primitive topology is wrong");
+    rejects([&] { assets.quadMesh(0); }, "empty canonical batch accepted");
+    rejects([&] { assets.quadMesh(129); }, "oversize canonical batch accepted");
     const auto unchanged = assets.publishRoom(3, triangle());
     check(a == unchanged, "unchanged geometry allocated a new revision");
     auto changed = triangle(); changed.vertices[0].x = 9;
@@ -88,6 +97,8 @@ void assetTests() {
     check(c->id() != a->id(), "recycled room reused revision identity");
     assets.reset();
     const auto d = assets.publishRoom(3, triangle());
+    check(assets.quadMesh()->id().lifetime != quad->id().lifetime && quad->geometry().vertices.size() == 4,
+        "canonical primitive reset lost lifetime isolation");
     check(d->id().lifetime != c->id().lifetime, "level reset reused scene lifetime");
     check(a->geometry().vertices.size() == 3, "level reset invalidated frozen asset");
     auto bad = triangle(); bad.polygons[0].corners[0].vertex = 99;
@@ -107,6 +118,47 @@ void frameTests() {
     data.rooms.push_back(room);
     data.rooms[0].surfaces[0].texture_scale = {-2,3};
     const auto tiled_material = d3scene::Presentation::freeze(data);
+    {
+        auto dependencies = data;
+        auto& surface = dependencies.rooms[0].surfaces[0];
+        surface.bitmap = surface.specular_bitmap = surface.lightmap_bitmap = 9;
+        const auto first = d3scene::Presentation::freeze(dependencies);
+        const auto& images = first->data().rooms[0].surfaces.images();
+        check(images.size() == 2 && images[0].handle == 9 && !images[0].baked && images[1].baked,
+            "Surface publication did not deduplicate image roles");
+        surface.bitmap = surface.specular_bitmap = 17;
+        const auto second = d3scene::Presentation::freeze(dependencies);
+        check(images[0].handle == 9 && second->data().rooms[0].surfaces.images().back().handle == 17,
+            "Publication scratch storage mutated a held dependency table");
+    }
+    {
+        auto retained = tiled_material->data();
+        const auto again = d3scene::Presentation::freeze(retained);
+        check(&again->data().rooms[0].surfaces.read() == &tiled_material->data().rooms[0].surfaces.read(),
+            "Unchanged publication copied retained surface storage");
+        retained.rooms[0].surfaces[0].alpha = .5f;
+        const auto edited = d3scene::Presentation::freeze(retained);
+        check(edited->data().rooms[0].surfaces[0].alpha == .5f && tiled_material->data().rooms[0].surfaces[0].alpha == 1,
+            "Editing retained appearance mutated a held frame");
+        auto fresh = data;
+        auto& escaped = fresh.rooms[0].surfaces[0];
+        const auto held = d3scene::Presentation::freeze(fresh);
+        escaped.alpha = .25f;
+        check(held->data().rooms[0].surfaces[0].alpha == 1,"Builder element reference could mutate a published table");
+        auto exclusive = data;
+        const auto* storage = exclusive.rooms[0].surfaces.read().data();
+        const auto transferred = d3scene::Presentation::publish(std::move(exclusive));
+        check(transferred->data().rooms[0].surfaces.read().data() == storage,
+            "Exclusive publication copied owned appearance storage");
+        check(transferred->roomIndices().at(0) == 0,"Publication did not retain validated room indices");
+    }
+    check(tiled_material->data().compiled_surface_count == 1 &&
+        tiled_material->data().rooms[0].surfaces[0].compiled_index == 0,"Publication did not assign dense surface indices");
+    data.compiled_surface_count = 900;
+    data.rooms[0].surfaces[0].compiled_index = 700;
+    const auto reindexed = d3scene::Presentation::freeze(data);
+    check(reindexed->data().compiled_surface_count == 1 && reindexed->data().rooms[0].surface_base == 0 &&
+        tiled_material->data().rooms[0].surfaces[0].compiled_index == 0,"Publication trusted source indices or mutated a held frame");
     check(tiled_material->data().rooms[0].surfaces[0].texture_scale.x == -2 &&
         tiled_material->data().rooms[0].surfaces[0].texture_scale.y == 3,"Material lost reflected/tiled UV scale");
     data.rooms[0].surfaces[0].texture_scale.x = std::numeric_limits<float>::infinity();
@@ -297,6 +349,7 @@ int runFogTests();
 int runFeedbackTests();
 int runCanvasTests();
 int runModuleContextTests();
+int runAutomapTests();
 int main() {
     try {
         assetTests(); frameTests(); extractionTests();
@@ -311,6 +364,7 @@ int main() {
         Checks += runFeedbackTests();
         Checks += runCanvasTests();
         Checks += runModuleContextTests();
+        Checks += runAutomapTests();
         std::printf("PASS: %d renderer scene checks\n", Checks);
         return 0;
     } catch (const std::exception& error) {

@@ -63,6 +63,12 @@ float lightAttenuation(const Light& light, Vec3 world) {
     return attenuation;
 }
 namespace {
+bool touchesBounds(const Light& light,const Bounds& b) {
+    const float x = std::max(b.minimum.x-light.position.x,std::max(0.f,light.position.x-b.maximum.x));
+    const float y = std::max(b.minimum.y-light.position.y,std::max(0.f,light.position.y-b.maximum.y));
+    const float z = std::max(b.minimum.z-light.position.z,std::max(0.f,light.position.z-b.maximum.z));
+    return x*x+y*y+z*z <= light.radius*light.radius;
+}
 bool touches(const Light& light, MeshView mesh, const MeshPolygon& polygon, const Transform& transform) {
     Vec3 low = transformPoint(transform,mesh.positions[polygon.corners[0].vertex]), high = low;
     if (light.directional) {
@@ -107,20 +113,37 @@ void prepareLightInfluences(FrameData& data) {
             }
         }
     }
-    auto assign = [&](int32_t room, MeshView geometry, const Transform& transform, std::vector<SurfaceBinding>& surfaces) {
-        for (size_t face = 0; face < surfaces.size(); ++face) {
-            auto& indices = surfaces[face].light_indices;
-            indices.clear();
-            for (size_t i = 0; i < data.lights.size(); ++i) {
-                if (room >= 0 && !reachable[i].count(room)) continue;
-                if (touches(data.lights[i],geometry,geometry.topology.polygons[face],transform)) indices.push_back(static_cast<uint32_t>(i));
-            }
-        }
-    };
-    for (auto& room : data.rooms) assign(room.number,MeshView(room.asset->geometry()),{},room.surfaces);
-    for (auto& object : data.model_instances) for (auto& model : object.models) for (size_t part = 0; part < model.parts.size(); ++part)
-        assign(object.room,MeshView(model.asset->geometry().parts[part].geometry,model.parts[part].vertices),compose(object.current,model.parts[part].current),
-            model.parts[part].surfaces);
+    for (auto& room : data.rooms) {
+        room.light_influences_prepared = true;
+        room.light_influences.clear();
+        std::vector<uint32_t> candidates;
+        for (size_t i = 0; i < data.lights.size(); ++i) if (reachable[i].count(room.number) &&
+            touchesBounds(data.lights[i],room.asset->bounds())) candidates.push_back(uint32_t(i));
+        if (candidates.empty()) continue;
+        const auto& geometry = room.asset->geometry();
+        room.light_influences.resize(geometry.polygons.size());
+        for (size_t face = 0; face < geometry.polygons.size(); ++face)
+            for (auto i : candidates) if (touches(data.lights[i],MeshView(geometry),geometry.polygons[face],{}))
+                room.light_influences[face].push_back(i);
+    }
+    for (auto& object : data.model_instances) for (auto& model : object.models) for (size_t part = 0; part < model.parts.size(); ++part) {
+        auto& pose = model.parts[part];
+        const auto& geometry = model.asset->geometry().parts[part].geometry;
+        pose.light_influences_prepared = true;
+        pose.polygon_lights.clear();
+        if (!pose.draw) continue;
+        std::vector<uint32_t> candidates;
+        const auto transform = compose(object.current,pose.current);
+        const auto bounds = transformBounds(transform,model.asset->geometry().parts[part].local_bounds);
+        for (size_t i = 0; i < data.lights.size(); ++i)
+            if ((object.room < 0 || reachable[i].count(object.room)) &&
+                (!pose.vertices.empty() || touchesBounds(data.lights[i],bounds))) candidates.push_back(uint32_t(i));
+        if (candidates.empty()) continue;
+        pose.polygon_lights.resize(geometry.polygons.size());
+        for (size_t face = 0; face < geometry.polygons.size(); ++face)
+            for (auto i : candidates) if (touches(data.lights[i],MeshView(geometry,pose.vertices),geometry.polygons[face],transform))
+                pose.polygon_lights[face].push_back(i);
+    }
     if (data.terrain.asset) for (size_t patch = 0; patch < data.terrain.patches.size(); ++patch) {
         const auto& bounds = data.terrain.asset->patches()[patch].bounds;
         std::vector<uint32_t> indices;

@@ -23,6 +23,7 @@ struct Bounds { Vec3 minimum, maximum; };
 Vec3 transformPoint(const Transform&, Vec3);
 Vec3 transformDirection(const Transform&, Vec3);
 Transform compose(const Transform& parent, const Transform& local);
+Bounds transformBounds(const Transform&,const Bounds&);
 
 struct AssetId {
     uint64_t lifetime = 0;
@@ -95,6 +96,10 @@ struct ModelPart {
     int32_t parent = -1;
     Vec3 offset;
     uint32_t authored_flags = 0;
+    // Compiled once with the model. Equivalent face appearances share one
+    // instance record; geometry and per-face lighting remain independent.
+    std::vector<uint32_t> surface_for_polygon, surface_polygons;
+    Bounds local_bounds;
 };
 struct ModelGeometry {
     std::vector<ModelPart> parts;
@@ -191,6 +196,9 @@ public:
     TerrainOcclusionRef terrainOcclusion() const { return terrain_occlusion_; }
     TerrainOcclusionRef publishTerrainOcclusion(const TerrainOcclusionData&);
     MeshAssetRef publishMesh(uint32_t,MeshGeometry);
+    // Canonical topology belongs to the scene lifetime, not to each sprite or
+    // text run. Slots 2 and 258..384 are reserved for these primitives.
+    MeshAssetRef quadMesh(uint32_t count = 1);
     FogAssetRef publishFog(const std::vector<RoomState>&);
     uint64_t lifetime() const { return lifetime_; }
 private:
@@ -205,6 +213,7 @@ private:
     TerrainAssetRef terrain_;
     TerrainOcclusionRef terrain_occlusion_;
     std::vector<MeshAssetRef> meshes_;
+    std::array<MeshAssetRef,128> quad_meshes_{};
     FogAssetRef fog_;
 };
 
@@ -230,6 +239,8 @@ struct MaterialPolicy {
 // These are authoring bindings, not alternate material implementations. The
 // material compiler must resolve them before execution is enabled.
 struct SurfaceBinding {
+    // Assigned at publication; stable within this immutable presentation.
+    uint32_t compiled_index = 0;
     MaterialPolicy material; // compiled by publication, shared by all consumers
     OcclusionClass occlusion_class = OcclusionClass::Default;
     ReflectionAssetRef reflection;
@@ -291,6 +302,10 @@ struct PreparedMesh {
     Vec3 camera_translation; // sky follows the eye with authored half-height parallax
     float eye_distance = 0; // positive projects the world anchor onto a view-centered shell
     Vec2 size_fade_range; // eye-depth start/end; zero disables view-local size fade
+    // Optional authored detail cutoff, tested against the nearest depth of an
+    // explicit local reference volume, not the current polygon/mesh center.
+    float maximum_depth = 0;
+    Bounds depth_reference;
     MeshAlignment alignment = MeshAlignment::World;
     // Axis alignment preserves world.up (half the segment, toward its start)
     // and uses the length of world.right as radius. Facing is view-local.
@@ -312,11 +327,74 @@ struct PlanarSurface {
     Plane plane;
     std::vector<uint32_t> polygons;
 };
+// Published room appearance is shared across frames. Mutable builders are
+// deep-copied at publication; editing a published table first detaches it.
+// This preserves held frames even when a builder retains element references.
+class RoomSurfaces {
+public:
+    struct ImageDependency { int handle; bool baked; ImageAssetRef image; bool wrap; };
+private:
+    using Storage = std::vector<SurfaceBinding>;
+    std::shared_ptr<Storage> values_;
+    AssetId publication_;
+    uint32_t publication_part_ = UINT32_MAX;
+    bool publication_palette_ = false;
+    std::shared_ptr<const std::vector<ImageDependency>> images_;
+    std::shared_ptr<const std::vector<uint64_t>> reflections_;
+    uint64_t required_light_count_ = 0;
+    void edit() {
+        if (!values_) values_ = std::make_shared<Storage>();
+        if (publication_.revision || values_.use_count() != 1) values_ = std::make_shared<Storage>(*values_);
+        publication_ = {};
+        images_.reset();
+        reflections_.reset(); required_light_count_ = 0;
+    }
+    void seal(AssetId asset,uint32_t part = UINT32_MAX,bool palette = false);
+    friend class Presentation;
+public:
+    RoomSurfaces() = default;
+    RoomSurfaces(const RoomSurfaces& other) : values_(!other.values_ || other.publication_.revision ? other.values_ :
+        std::make_shared<Storage>(*other.values_)), publication_(other.publication_), publication_part_(other.publication_part_),
+        publication_palette_(other.publication_palette_), images_(other.images_), reflections_(other.reflections_), required_light_count_(other.required_light_count_) {}
+    RoomSurfaces& operator=(const RoomSurfaces& other) {
+        if (this != &other) { RoomSurfaces copy(other); *this = std::move(copy); } return *this;
+    }
+    RoomSurfaces(RoomSurfaces&&) = default;
+    RoomSurfaces& operator=(RoomSurfaces&&) = default;
+    bool publishedFor(AssetId asset,uint32_t part = UINT32_MAX,bool palette = false) const {
+        return publication_.revision && publication_ == asset && publication_part_ == part && publication_palette_ == palette;
+    }
+    bool published() const { return publication_.revision != 0; }
+    const std::vector<ImageDependency>& images() const { static const std::vector<ImageDependency> empty; return images_ ? *images_ : empty; }
+    const std::vector<uint64_t>& reflections() const { static const std::vector<uint64_t> empty; return reflections_ ? *reflections_ : empty; }
+    uint64_t requiredLightCount() const { return required_light_count_; }
+    size_t size() const { return read().size(); }
+    bool empty() const { return read().empty(); }
+    const Storage& read() const { static const Storage empty; return values_ ? *values_ : empty; }
+    const SurfaceBinding& operator[](size_t i) const { return read()[i]; }
+    SurfaceBinding& operator[](size_t i) { edit(); return (*values_)[i]; }
+    const SurfaceBinding& at(size_t i) const { return read().at(i); }
+    SurfaceBinding& at(size_t i) { edit(); return values_->at(i); }
+    Storage::const_iterator begin() const { return read().begin(); }
+    Storage::const_iterator end() const { return read().end(); }
+    Storage::iterator begin() { edit(); return values_->begin(); }
+    Storage::iterator end() { edit(); return values_->end(); }
+    const SurfaceBinding* data() const { return read().data(); }
+    SurfaceBinding* data() { edit(); return values_->data(); }
+    void clear() { values_.reset(); images_.reset(); reflections_.reset(); required_light_count_ = 0; publication_ = {}; }
+    void reserve(size_t n) { edit(); values_->reserve(n); }
+    void resize(size_t n) { edit(); values_->resize(n); }
+    void push_back(const SurfaceBinding& value) { edit(); values_->push_back(value); }
+};
 struct RoomState {
     int32_t number = -1;
     RoomAssetRef asset;
     Bounds bounds;
-    std::vector<SurfaceBinding> surfaces;
+    RoomSurfaces surfaces;
+    uint32_t surface_base = 0;
+    bool uses_room_illumination = false;
+    bool light_influences_prepared = false;
+    std::vector<std::vector<uint32_t>> light_influences;
     std::vector<Portal> portals;
     uint32_t authored_flags = 0;
     float fog_depth = 0;
@@ -355,7 +433,15 @@ struct PreparedModelPart {
     Bounds render_bounds; // world-space, compiled from this pose during freeze
     bool has_render_bounds = false;
     std::vector<Vec3> vertices, previous_vertices; // empty means immutable authored positions
-    std::vector<SurfaceBinding> surfaces;
+    RoomSurfaces surfaces;
+    bool material_palette = false;
+    uint32_t surface_base = 0;
+    bool light_influences_prepared = false;
+    std::array<float,16> appearance_inputs{};
+    std::vector<std::vector<uint32_t>> polygon_lights;
+    const SurfaceBinding& surface(const ModelPart& asset,size_t polygon) const {
+        return surfaces[material_palette ? asset.surface_for_polygon[polygon] : polygon];
+    }
 };
 struct PreparedModel {
     ModelAssetRef asset;
@@ -526,6 +612,7 @@ struct PreparedForeground {
     ForegroundPhase phase = ForegroundPhase::WorldOverlay;
 };
 struct FrameData {
+    uint32_t compiled_surface_count = 0;
     uint64_t sequence = 0, scene_lifetime = 0;
     double simulation_time = 0;
     float delta_time = 0;
@@ -554,12 +641,22 @@ public:
     // Copies at the publication boundary so a caller retaining a mutable
     // reference cannot change an already-published frame.
     static PresentationRef freeze(const FrameData& data);
+    // Consumes an exclusively-owned builder. The caller relinquishes the data
+    // and all mutable element references; use freeze when aliases may remain.
+    static PresentationRef publish(FrameData&& data);
     const FrameData& data() const { return data_; }
     const ForegroundLayer* foreground(uint64_t identity) const;
+    const std::unordered_map<int32_t,size_t>& roomIndices() const { return room_indices_; }
+    const std::unordered_map<uint32_t,size_t>& objectIndices() const { return object_indices_; }
+    const std::unordered_map<uint64_t,size_t>& modelIndices() const { return model_indices_; }
     void requireExecutable() const;
 private:
-    explicit Presentation(const FrameData& data) : data_(data) {}
+    explicit Presentation(FrameData&& data) : data_(std::move(data)) {}
+    static PresentationRef complete(FrameData data);
     FrameData data_;
+    std::unordered_map<int32_t,size_t> room_indices_;
+    std::unordered_map<uint32_t,size_t> object_indices_;
+    std::unordered_map<uint64_t,size_t> model_indices_;
 };
 
 } // namespace d3scene

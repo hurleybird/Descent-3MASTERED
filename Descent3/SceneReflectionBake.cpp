@@ -214,6 +214,8 @@ struct SpecularSpatialField
 };
 
 std::vector<std::vector<PrecomputedSpecularFaceSources>> Precomputed_specular_sources;
+static uint64_t ReflectionBakeRevision = 0;
+uint64_t SceneReflectionBakeRevision() { return ReflectionBakeRevision; }
 int Precomputed_specular_highest_room = -1;
 
 static vector SpecularFaceCenter(room* rp, face* fp)
@@ -1327,6 +1329,7 @@ static void SpecularBuildResolvedNormalsForFace(PrecomputedSpecularFaceSources& 
 
 void PrecomputeMineSpecularSources()
 {
+    ++ReflectionBakeRevision;
 	ResetSplitSpecularTexturePairCache();
 	Precomputed_specular_sources.clear();
 	Precomputed_specular_highest_room = Highest_room_index;

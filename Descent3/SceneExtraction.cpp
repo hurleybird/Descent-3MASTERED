@@ -2,6 +2,7 @@
 #include "SceneExtraction.h"
 #include "object.h"
 #include "room.h"
+#include "gametexture.h"
 #include <algorithm>
 #include <limits>
 #include <stdexcept>
@@ -9,7 +10,9 @@
 
 namespace {
 uint64_t Sequence = 0;
-d3scene::PresentationRef Previous;
+std::vector<d3scene::ObjectState> PreviousObjects;
+uint64_t PreviousLifetime = 0;
+double PreviousTime = 0;
 d3scene::Vec3 value(const vector& v) { return {v.x, v.y, v.z}; }
 d3scene::Transform transform(const vector& p, const matrix& m) {
     return {value(p), value(m.rvec), value(m.uvec), value(m.fvec)};
@@ -76,11 +79,12 @@ d3scene::MeshGeometry extractGeometry(const room& source) {
 }
 
 void ResetGamePresentationScene() {
-    Previous.reset();
+    PreviousObjects.clear(); PreviousLifetime = 0;
     d3scene::assets().reset();
 }
 
-d3scene::PresentationRef ExtractGamePresentation(double time, float delta, bool paused, bool advance_history) {
+d3scene::FrameData ExtractGameFrame(double time, float delta, bool paused, bool advance_history,
+    const d3scene::FrameData* retained_rooms) {
     if (Sequence == std::numeric_limits<uint64_t>::max())
         throw std::overflow_error("Presentation sequence exhausted");
     auto& assets = d3scene::assets();
@@ -93,6 +97,9 @@ d3scene::PresentationRef ExtractGamePresentation(double time, float delta, bool 
     // No domain is marked executable until its complete preparation exists.
     // Capturing source object transforms is NOT equivalent to preparing models.
     data.pending_domains = d3scene::AllPendingDomains;
+    std::unordered_map<int,const d3scene::RoomState*> retained;
+    if (retained_rooms && retained_rooms->scene_lifetime == data.scene_lifetime)
+        for (const auto& room : retained_rooms->rooms) retained.emplace(room.number,&room);
     for (int i = 0; i < MAX_ROOMS; ++i) {
         if (!Rooms[i].used) { assets.removeRoom(i); continue; }
         const room& source = Rooms[i];
@@ -109,6 +116,33 @@ d3scene::PresentationRef ExtractGamePresentation(double time, float delta, bool 
         state.fog_color = {source.fog_r, source.fog_g, source.fog_b};
         state.pulse_time = source.pulse_time;
         state.pulse_offset = source.pulse_offset;
+        const auto previous_room = retained.find(i);
+        const d3scene::RoomState* cached = previous_room == retained.end() ? nullptr : previous_room->second;
+        bool reuse = cached && source.mirror_face < 0 && cached->asset->id() == state.asset->id() &&
+            cached->surfaces.publishedFor(state.asset->id()) && cached->authored_flags == state.authored_flags &&
+            cached->portals.size() == size_t(source.num_portals);
+        for (int p = 0; reuse && p < source.num_portals; ++p)
+            reuse = cached->portals[p].flags == uint32_t(source.portals[p].flags);
+        for (int j = 0; reuse && j < source.num_faces; ++j) {
+            const auto& face = source.faces[j]; const auto& binding = cached->surfaces[j];
+            if (face.tmap < 0 || face.tmap >= MAX_TEXTURES) { reuse = false; break; }
+            const auto& texture = GameTextures[face.tmap];
+            // Time-dependent materials remain on the rebuilding path until
+            // their compact update records are separated from static surfaces.
+            reuse = !(texture.flags & (TF_ANIMATED|TF_PROCEDURAL)) &&
+                !texture.slide_u && !texture.slide_v && binding.texture == face.tmap &&
+                binding.lightmap == ((face.flags & FF_LIGHTMAP) ? face.lmi_handle : -1) &&
+                binding.special == face.special_handle && binding.portal == face.portal_num &&
+                binding.authored_flags == (face.flags & ~(FF_VISIBLE|FF_NOT_FACING|FF_TOUCHED|FF_SPEC_INVISIBLE)) &&
+                binding.light_multiple == face.light_multiple;
+            if (reuse && (face.flags & FF_DESTROYED) && (texture.flags & TF_DESTROYABLE) &&
+                texture.destroy_handle >= 0 && texture.destroy_handle < MAX_TEXTURES)
+                reuse = !(GameTextures[texture.destroy_handle].flags & (TF_ANIMATED|TF_PROCEDURAL));
+        }
+        if (reuse) {
+            state.surfaces = cached->surfaces;
+            state.uses_room_illumination = cached->uses_room_illumination;
+        } else {
         state.surfaces.reserve(source.num_faces);
         for (int j = 0; j < source.num_faces; ++j) {
             const face& face = source.faces[j];
@@ -121,6 +155,7 @@ d3scene::PresentationRef ExtractGamePresentation(double time, float delta, bool 
             binding.light_multiple = face.light_multiple;
             state.surfaces.push_back(binding);
         }
+        }
         for (int j = 0; j < source.num_portals; ++j) {
             const portal& p = source.portals[j];
             state.portals.push_back({p.portal_face, p.croom, p.cportal, p.combine_master, static_cast<uint32_t>(p.flags)});
@@ -128,9 +163,8 @@ d3scene::PresentationRef ExtractGamePresentation(double time, float delta, bool 
         data.rooms.push_back(std::move(state));
     }
     std::unordered_map<uint32_t, const d3scene::ObjectState*> previous_objects;
-    if (Previous && Previous->data().scene_lifetime == data.scene_lifetime &&
-        Previous->data().simulation_time <= time)
-        for (const auto& object : Previous->data().objects) previous_objects.emplace(object.handle, &object);
+    if (PreviousLifetime == data.scene_lifetime && PreviousTime <= time)
+        for (const auto& object : PreviousObjects) previous_objects.emplace(object.handle, &object);
     for (int i = 0; i <= Highest_object_index; ++i) {
         const object& source = Objects[i];
         if (source.type == OBJ_NONE) continue;
@@ -151,11 +185,14 @@ d3scene::PresentationRef ExtractGamePresentation(double time, float delta, bool 
         }
         data.objects.push_back(state);
     }
-    auto frame = d3scene::Presentation::freeze(data);
     // Commit presentation history once, never when rendering a view/pass.
     ++Sequence;
-    if (advance_history) Previous = frame;
-    return frame;
+    if (advance_history) { PreviousObjects = data.objects; PreviousLifetime = data.scene_lifetime; PreviousTime = time; }
+    return data;
+}
+d3scene::PresentationRef ExtractGamePresentation(double time,float delta,bool paused,bool advance_history,
+    const d3scene::FrameData* retained_rooms) {
+    return d3scene::Presentation::freeze(ExtractGameFrame(time,delta,paused,advance_history,retained_rooms));
 }
 
 d3scene::View MakeGameSceneView(d3scene::ViewKind kind, uint64_t history_key,

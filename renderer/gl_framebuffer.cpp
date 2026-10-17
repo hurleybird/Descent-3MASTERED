@@ -253,6 +253,7 @@ void Framebuffer::SwapStorage(Framebuffer& other)
 	using std::swap;
 	swap(m_name,other.m_name); swap(m_subname,other.m_subname);
 	swap(m_colorname,other.m_colorname); swap(m_subcolorname,other.m_subcolorname);
+	swap(m_color_format,other.m_color_format);
 	swap(m_depthname,other.m_depthname); swap(m_subdepthname,other.m_subdepthname);
 	swap(m_width,other.m_width); swap(m_height,other.m_height);
 	swap(m_samples,other.m_samples); swap(m_requested_samples,other.m_requested_samples);
@@ -302,7 +303,7 @@ static void ClearFramebufferAllocationErrors()
 	}
 }
 
-void Framebuffer::Update(int width, int height, int msaa_samples)
+void Framebuffer::Update(int width, int height, int msaa_samples, GLint color_format)
 {
 	if (width <= 0 || height <= 0)
 	{
@@ -312,7 +313,7 @@ void Framebuffer::Update(int width, int height, int msaa_samples)
 
 	msaa_samples = GL_GetSupportedMsaaSamples(msaa_samples);
 
-	if (width == m_width && height == m_height && (uint32_t)msaa_samples == m_requested_samples && m_name != 0)
+	if (width == m_width && height == m_height && (uint32_t)msaa_samples == m_requested_samples && m_color_format == color_format && m_name != 0)
 		return;
 
 	int attempts[4] = { 0, 0, 0, 0 };
@@ -336,7 +337,7 @@ void Framebuffer::Update(int width, int height, int msaa_samples)
 		int samples = attempts[i];
 		glBindFramebuffer(GL_FRAMEBUFFER, 0);
 		Destroy();
-		if (Allocate(width, height, samples))
+		if (Allocate(width, height, samples,color_format))
 		{
 			m_requested_samples = msaa_samples;
 			if (samples != msaa_samples)
@@ -354,13 +355,46 @@ void Framebuffer::Update(int width, int height, int msaa_samples)
 	Error("Framebuffer::Update: Framebuffer object is incomplete!");
 }
 
-bool Framebuffer::Allocate(int width, int height, int msaa_samples)
+void DepthFramebuffer::Update(uint32_t w,uint32_t h) {
+    if (w == width && h == height && framebuffer) return;
+    Destroy();
+    if (!w || !h) return;
+    width = w; height = h;
+    glGenTextures(1,&texture);
+    glBindTexture(GL_TEXTURE_2D,texture);
+    glTexImage2D(GL_TEXTURE_2D,0,GL_DEPTH_COMPONENT32F,w,h,0,GL_DEPTH_COMPONENT,GL_FLOAT,nullptr);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
+    glGenFramebuffers(1,&framebuffer);
+    glBindFramebuffer(GL_FRAMEBUFFER,framebuffer);
+    glFramebufferTexture2D(GL_FRAMEBUFFER,GL_DEPTH_ATTACHMENT,GL_TEXTURE_2D,texture,0);
+    glDrawBuffer(GL_NONE); glReadBuffer(GL_NONE);
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+        Error("Depth-only product is incomplete");
+    rend_ClearBoundTextures();
+}
+
+void DepthFramebuffer::Destroy() {
+    glDeleteFramebuffers(1,&framebuffer); glDeleteTextures(1,&texture);
+    framebuffer = texture = width = height = 0;
+}
+
+void DepthFramebuffer::BlitDepthTo(GLuint target,unsigned x,unsigned y,unsigned w,unsigned h) {
+    glBindFramebuffer(GL_READ_FRAMEBUFFER,framebuffer);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER,target);
+    glBlitFramebuffer(0,0,width,height,x,y,x+w,y+h,GL_DEPTH_BUFFER_BIT,GL_NEAREST);
+}
+
+bool Framebuffer::Allocate(int width, int height, int msaa_samples, GLint color_format)
 {
 	bool msaa = msaa_samples > 1;
 
 	m_width = width;
 	m_height = height;
 	m_samples = msaa_samples;
+	m_color_format = color_format;
 
 	glGenFramebuffers(1, &m_name);
 
@@ -368,20 +402,20 @@ bool Framebuffer::Allocate(int width, int height, int msaa_samples)
 
 	if (msaa)
 	{
-		glGenTextures(1, &m_colorname);
+		glGenRenderbuffers(1, &m_colorname);
 		glGenTextures(1, &m_depthname);
 		glGenTextures(1, &m_subcolorname);
 		glGenTextures(1, &m_subdepthname);
 		glGenFramebuffers(1, &m_subname);
 
-		glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, m_colorname);
-		glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, msaa_samples, GL_RGBA16F, width, height, GL_TRUE);
+		glBindRenderbuffer(GL_RENDERBUFFER,m_colorname);
+		glRenderbufferStorageMultisample(GL_RENDERBUFFER,msaa_samples,color_format,width,height);
 
 		glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, m_depthname);
 		glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, msaa_samples, GL_DEPTH_COMPONENT32F, width, height, GL_TRUE);
 
 		glBindTexture(GL_TEXTURE_2D, m_subcolorname);
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0, GL_RGBA, GL_FLOAT, nullptr);
+		glTexImage2D(GL_TEXTURE_2D, 0, color_format, width, height, 0, GL_RGBA, GL_FLOAT, nullptr);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -412,7 +446,7 @@ bool Framebuffer::Allocate(int width, int height, int msaa_samples)
 		glGenTextures(1, &m_depthname);
 
 		glBindTexture(GL_TEXTURE_2D, m_colorname);
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0, GL_RGBA, GL_FLOAT, nullptr);
+		glTexImage2D(GL_TEXTURE_2D, 0, color_format, width, height, 0, GL_RGBA, GL_FLOAT, nullptr);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -428,7 +462,8 @@ bool Framebuffer::Allocate(int width, int height, int msaa_samples)
 	glBindRenderbuffer(GL_RENDERBUFFER, 0);
 
 	glBindFramebuffer(GL_FRAMEBUFFER, m_name);
-	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, textureType, m_colorname, 0);
+	if (msaa) glFramebufferRenderbuffer(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_RENDERBUFFER,m_colorname);
+	else glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, textureType, m_colorname, 0);
 	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, textureType, m_depthname, 0);
 	GLenum fbstatus = glCheckFramebufferStatus(GL_FRAMEBUFFER);
 	if (fbstatus != GL_FRAMEBUFFER_COMPLETE)
@@ -521,7 +556,8 @@ void Framebuffer::Destroy()
 	glDeleteFramebuffers(1, &m_name);
 	glDeleteFramebuffers(1, &m_subname);
 	m_depth_resolve_shader.Destroy();
-	glDeleteTextures(1, &m_colorname);
+	if (m_samples >= 2) glDeleteRenderbuffers(1,&m_colorname);
+	else glDeleteTextures(1, &m_colorname);
 	glDeleteTextures(1, &m_depthname);
 	glDeleteTextures(1, &m_subcolorname);
 	glDeleteTextures(1, &m_subdepthname);
@@ -538,7 +574,7 @@ namespace {
 // Resolve is a resource operation, not a legacy game draw. Restore the small
 // set of GL bindings it owns so all callers see the same pass state afterward.
 struct SampleResolveScope {
-    GLint read, draw, viewport[4], vao, active, textures[3], depth_function;
+    GLint read, draw, viewport[4], vao, active, textures[3], textures_2d[3], depth_function;
     GLboolean depth, depth_mask, cull, scissor, blend[2], color_mask[2][4];
     ShaderProgram* shader;
     SampleResolveScope() : shader(ShaderProgram::Current()) {
@@ -549,6 +585,7 @@ struct SampleResolveScope {
         glGetBooleanv(GL_DEPTH_WRITEMASK,&depth_mask);
         for (int i = 0; i < 3; ++i) {
             glActiveTexture(GL_TEXTURE0+i); glGetIntegerv(GL_TEXTURE_BINDING_2D_MULTISAMPLE,&textures[i]);
+            glGetIntegerv(GL_TEXTURE_BINDING_2D,&textures_2d[i]);
         }
         for (int i = 0; i < 2; ++i) {
             blend[i] = glIsEnabledi(GL_BLEND,i); glGetBooleani_v(GL_COLOR_WRITEMASK,i,color_mask[i]);
@@ -566,7 +603,10 @@ struct SampleResolveScope {
             if (blend[i]) glEnablei(GL_BLEND,i); else glDisablei(GL_BLEND,i);
             glColorMaski(i,color_mask[i][0],color_mask[i][1],color_mask[i][2],color_mask[i][3]);
         }
-        for (int i = 0; i < 3; ++i) { glActiveTexture(GL_TEXTURE0+i); glBindTexture(GL_TEXTURE_2D_MULTISAMPLE,textures[i]); }
+        for (int i = 0; i < 3; ++i) {
+            glActiveTexture(GL_TEXTURE0+i); glBindTexture(GL_TEXTURE_2D_MULTISAMPLE,textures[i]);
+            glBindTexture(GL_TEXTURE_2D,textures_2d[i]);
+        }
         glActiveTexture(active);
         if (shader) shader->Use(); else ShaderProgram::ClearBinding();
     }
@@ -623,7 +663,7 @@ void Framebuffer::SubFramebufferBlit(GLbitfield mask)
 		glBindFramebuffer(GL_READ_FRAMEBUFFER, m_name);
 		glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_subname);
 		if (to_resolve & GL_COLOR_BUFFER_BIT)
-			glBlitFramebuffer(0, 0, m_width, m_height, 0, 0,m_width, m_height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+			glBlitFramebuffer(0,0,m_width,m_height,0,0,m_width,m_height,GL_COLOR_BUFFER_BIT,GL_NEAREST);
 		if (to_resolve & GL_DEPTH_BUFFER_BIT) ResolveDepth();
 		if ((to_resolve & (GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)) == (GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT))
 			GLFramebufferPerfGpuDrain("GPU.Resolve.ColorDepth");
@@ -754,7 +794,11 @@ void Framebuffer::DownsampleTo(GLuint target, unsigned int x, unsigned int y, un
 	int output_origin_x, int output_origin_y)
 {
 	PERF_MARKER_SCOPE("Post.DownsampleTo");
+	const bool measure = AutomatedCapturePending();
+	GLuint timings[3] = {};
+	if (measure) { glGenQueries(3,timings); glQueryCounter(timings[0],GL_TIMESTAMP); }
 	SubFramebufferBlit(GL_COLOR_BUFFER_BIT);
+	if (measure) glQueryCounter(timings[1],GL_TIMESTAMP);
 
 #ifdef _DEBUG
 	GLenum err = glGetError();
@@ -813,6 +857,14 @@ void Framebuffer::DownsampleTo(GLuint target, unsigned int x, unsigned int y, un
 	rend_RecordDrawCall(RENDERER_DRAW_CALL_POSTPROCESS);
 	glDrawArrays(GL_TRIANGLES, 0, 3);
 	GLFramebufferPerfGpuDrain("GPU.FramebufferDownsampleTo");
+	if (measure) {
+		glQueryCounter(timings[2],GL_TIMESTAMP);
+		GLuint64 ticks[3];
+		for (int i = 0; i < 3; ++i) glGetQueryObjectui64v(timings[i],GL_QUERY_RESULT,&ticks[i]);
+		AutomatedCaptureLog("image reduction GPU input=%ux%u output=%ux%u samples=%u resolve_ms=%.6f filter_ms=%.6f",
+			m_width,m_height,w,h,m_samples,double(ticks[1]-ticks[0])*1.e-6,double(ticks[2]-ticks[1])*1.e-6);
+		glDeleteQueries(3,timings);
+	}
 
 	glViewport(oldviewport[0], oldviewport[1], oldviewport[2], oldviewport[3]);
 	GL_SetEnabledState(GL_BLEND, blend_enabled);
@@ -820,7 +872,7 @@ void Framebuffer::DownsampleTo(GLuint target, unsigned int x, unsigned int y, un
 	rend_RestoreLegacy();
 }
 
-void SceneSurfaceResources::Update(uint32_t new_width, uint32_t new_height, uint32_t msaa_samples)
+void SceneSurfaceResources::Update(uint32_t new_width, uint32_t new_height, uint32_t msaa_samples, uint32_t resolve_scale)
 {
 	if (new_width == 0 || new_height == 0)
 	{
@@ -829,7 +881,9 @@ void SceneSurfaceResources::Update(uint32_t new_width, uint32_t new_height, uint
 	}
 
 	msaa_samples = GL_GetSupportedMsaaSamples(msaa_samples);
-	if (width == new_width && height == new_height && samples == msaa_samples && velocity_texture != 0)
+	if (!resolve_scale || new_width%resolve_scale || new_height%resolve_scale)
+		Error("Surface export must have an integral raster-to-consumer scale");
+	if (width == new_width && height == new_height && samples == msaa_samples && read_scale == resolve_scale && velocity_texture != 0)
 		return;
 
 	Destroy();
@@ -837,6 +891,7 @@ void SceneSurfaceResources::Update(uint32_t new_width, uint32_t new_height, uint
 	width = new_width;
 	height = new_height;
 	samples = msaa_samples;
+	read_scale = resolve_scale;
 
 	glGenTextures(1, &velocity_texture);
 	if (samples >= 2)
@@ -847,10 +902,22 @@ void SceneSurfaceResources::Update(uint32_t new_width, uint32_t new_height, uint
 		glGenTextures(1, &object_id_texture);
 		glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, object_id_texture);
 		glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, samples, GL_R32UI, width, height, GL_TRUE);
-
+	}
+	else {
+		glBindTexture(GL_TEXTURE_2D,velocity_texture);
+		glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA16F,width,height,0,GL_RGBA,GL_FLOAT,nullptr);
+		glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);
+		glGenTextures(1,&object_id_texture);
+		glBindTexture(GL_TEXTURE_2D,object_id_texture);
+		glTexImage2D(GL_TEXTURE_2D,0,GL_R32UI,width,height,0,GL_RED_INTEGER,GL_UNSIGNED_INT,nullptr);
+		glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);
+	}
+	if (NeedsResolve()) {
 		glGenTextures(1, &resolved_texture);
 		glBindTexture(GL_TEXTURE_2D, resolved_texture);
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0, GL_RGBA, GL_FLOAT, nullptr);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, ReadWidth(), ReadHeight(), 0, GL_RGBA, GL_FLOAT, nullptr);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -862,7 +929,7 @@ void SceneSurfaceResources::Update(uint32_t new_width, uint32_t new_height, uint
 
 		glGenTextures(1, &object_id_resolved_texture);
 		glBindTexture(GL_TEXTURE_2D, object_id_resolved_texture);
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_R32UI, width, height, 0, GL_RED_INTEGER, GL_UNSIGNED_INT, nullptr);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_R32UI, ReadWidth(), ReadHeight(), 0, GL_RED_INTEGER, GL_UNSIGNED_INT, nullptr);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -874,26 +941,11 @@ void SceneSurfaceResources::Update(uint32_t new_width, uint32_t new_height, uint
 	}
 	else
 	{
-		glBindTexture(GL_TEXTURE_2D, velocity_texture);
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0, GL_RGBA, GL_FLOAT, nullptr);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
 		glGenFramebuffers(1, &resolve_framebuffer);
 		glBindFramebuffer(GL_FRAMEBUFFER, resolve_framebuffer);
 		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, velocity_texture, 0);
 		glDrawBuffer(GL_COLOR_ATTACHMENT0);
 		glReadBuffer(GL_COLOR_ATTACHMENT0);
-
-		glGenTextures(1, &object_id_texture);
-		glBindTexture(GL_TEXTURE_2D, object_id_texture);
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_R32UI, width, height, 0, GL_RED_INTEGER, GL_UNSIGNED_INT, nullptr);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
 		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, object_id_texture, 0);
 		glDrawBuffer(GL_COLOR_ATTACHMENT0);
@@ -908,6 +960,8 @@ void SceneSurfaceResources::Destroy()
 {
 	resolve_shader.Destroy();
 	glDeleteFramebuffers(1, &resolve_framebuffer);
+	glDeleteFramebuffers(1, &surface_framebuffer);
+	surface_framebuffer = 0;
 	glDeleteTextures(1, &velocity_texture);
 	glDeleteTextures(1, &resolved_texture);
 	glDeleteTextures(1, &object_id_texture);
@@ -918,6 +972,7 @@ void SceneSurfaceResources::Destroy()
 	object_id_texture = 0;
 	object_id_resolved_texture = 0;
 	width = height = samples = 0;
+	read_scale = 1;
 	velocity_resolve_valid = false;
 	object_id_resolve_valid = false;
 }
@@ -971,15 +1026,35 @@ void SceneSurfaceResources::ClearAttached(GLuint framebuffer)
 	MarkDirty();
 }
 
+void SceneSurfaceResources::PrepareSurfaceTarget(GLuint depth_texture)
+{
+    if (samples || !depth_texture) Error("Surface prepass requires single-sample owned depth");
+    if (!surface_framebuffer) glGenFramebuffers(1,&surface_framebuffer);
+    glBindFramebuffer(GL_FRAMEBUFFER,surface_framebuffer);
+    glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT1,GL_TEXTURE_2D,velocity_texture,0);
+    glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT4,GL_TEXTURE_2D,object_id_texture,0);
+    glFramebufferTexture2D(GL_FRAMEBUFFER,GL_DEPTH_ATTACHMENT,GL_TEXTURE_2D,depth_texture,0);
+    glDrawBuffer(GL_NONE); glReadBuffer(GL_NONE);
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+        Error("Surface prepass target is incomplete");
+    const auto scissor = glIsEnabled(GL_SCISSOR_TEST);
+    glDisable(GL_SCISSOR_TEST);
+    glDepthMask(GL_TRUE);
+    const GLfloat clear_depth = 1;
+    glClearBufferfv(GL_DEPTH,0,&clear_depth);
+    ClearAttached(surface_framebuffer);
+    if (scissor) glEnable(GL_SCISSOR_TEST);
+}
+
 void SceneSurfaceResources::MarkDirty()
 {
 	velocity_resolve_valid = false;
 	object_id_resolve_valid = false;
 }
 
-void SceneSurfaceResources::Resolve(GLuint source_framebuffer)
+void SceneSurfaceResources::Resolve(GLuint source_framebuffer, GLuint output_depth)
 {
-    if (samples < 2 || !velocity_texture || (velocity_resolve_valid && object_id_resolve_valid)) return;
+    if (!NeedsResolve() || !velocity_texture || (velocity_resolve_valid && object_id_resolve_valid)) return;
     SampleResolveScope scope;
     glBindFramebuffer(GL_READ_FRAMEBUFFER,source_framebuffer);
     GLint depth = 0, type = 0;
@@ -988,16 +1063,30 @@ void SceneSurfaceResources::Resolve(GLuint source_framebuffer)
     if (type != GL_TEXTURE || depth == 0) Error("Motion resolve requires the scene's multisample depth texture");
     if (!resolve_shader.Handle()) {
         extern const char* blitVertexSrc;
-        const auto fragment = std::string(d3scene::SampleResolveGlsl)+R"GLSL(
+        const auto fragment = std::string(d3scene::SampleResolveGlsl)+
+            (samples >= 2 ? "\n#define MULTISAMPLE\n" : "\n")+R"GLSL(
+#ifdef MULTISAMPLE
 uniform sampler2DMS source_depth, source_velocity;
 uniform usampler2DMS source_identity;
+#else
+uniform sampler2D source_depth, source_velocity;
+uniform usampler2D source_identity;
+#endif
+uniform int read_scale;
 layout(location=0) out vec4 velocity;
 layout(location=1) out uint identity;
 void main() {
-    ivec2 pixel = ivec2(gl_FragCoord.xy);
+    // Match a nearest logical-resolution depth blit: select the central raster
+    // texel, then select ONE nearest MSAA surface for all categorical fields.
+    ivec2 pixel = ivec2(gl_FragCoord.xy*float(read_scale));
+#ifdef MULTISAMPLE
     int selected = nearestDepthSample(source_depth,pixel);
+#else
+    int selected = 0;
+#endif
     velocity = texelFetch(source_velocity,pixel,selected);
     identity = texelFetch(source_identity,pixel,selected).r;
+    gl_FragDepth = texelFetch(source_depth,pixel,selected).r;
 }
 )GLSL";
         resolve_shader.AttachSource(blitVertexSrc,fragment.c_str());
@@ -1006,14 +1095,18 @@ void main() {
     glUniform1i(resolve_shader.FindUniform("source_depth"),0);
     glUniform1i(resolve_shader.FindUniform("source_velocity"),1);
     glUniform1i(resolve_shader.FindUniform("source_identity"),2);
-    glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D_MULTISAMPLE,depth);
-    glActiveTexture(GL_TEXTURE1); glBindTexture(GL_TEXTURE_2D_MULTISAMPLE,velocity_texture);
-    glActiveTexture(GL_TEXTURE2); glBindTexture(GL_TEXTURE_2D_MULTISAMPLE,object_id_texture);
+    glUniform1i(resolve_shader.FindUniform("read_scale"),read_scale);
+    const GLenum texture_type = samples >= 2 ? GL_TEXTURE_2D_MULTISAMPLE : GL_TEXTURE_2D;
+    glActiveTexture(GL_TEXTURE0); glBindTexture(texture_type,depth);
+    glActiveTexture(GL_TEXTURE1); glBindTexture(texture_type,velocity_texture);
+    glActiveTexture(GL_TEXTURE2); glBindTexture(texture_type,object_id_texture);
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER,resolve_framebuffer);
+    glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER,GL_DEPTH_ATTACHMENT,GL_TEXTURE_2D,output_depth,0);
+    if (output_depth) { glEnable(GL_DEPTH_TEST); glDepthFunc(GL_ALWAYS); glDepthMask(GL_TRUE); }
     const GLenum targets[2] = {GL_COLOR_ATTACHMENT0,GL_COLOR_ATTACHMENT1};
     glDrawBuffers(2,targets);
     if (glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) Error("Motion sample product is incomplete");
-    glViewport(0,0,width,height);
+    glViewport(0,0,ReadWidth(),ReadHeight());
     glDrawArrays(GL_TRIANGLES,0,3); rend_RecordDrawCall(RENDERER_DRAW_CALL_POSTPROCESS);
     velocity_resolve_valid = object_id_resolve_valid = true;
 }
@@ -1022,14 +1115,14 @@ GLuint SceneSurfaceResources::TextureForRead(GLuint source_framebuffer)
 {
     if (!velocity_texture) return 0;
     Resolve(source_framebuffer);
-    return samples >= 2 ? resolved_texture : velocity_texture;
+    return NeedsResolve() ? resolved_texture : velocity_texture;
 }
 
 GLuint SceneSurfaceResources::ObjectIdTextureForRead(GLuint source_framebuffer)
 {
     if (!object_id_texture) return 0;
     Resolve(source_framebuffer);
-    return samples >= 2 ? object_id_resolved_texture : object_id_texture;
+    return NeedsResolve() ? object_id_resolved_texture : object_id_texture;
 }
 
 void GL_VerifySceneSampleResolve()
@@ -1050,12 +1143,8 @@ void GL_VerifySceneSampleResolve()
     SceneSurfaceResources motion;
     motion.Update(1,1,target.Samples());
     motion.AttachToFramebuffer(target.Handle());
-    GLuint eligible;
-    glGenTextures(1,&eligible); glBindTexture(GL_TEXTURE_2D_MULTISAMPLE,eligible);
-    glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE,target.Samples(),GL_RGBA16F,1,1,GL_TRUE);
-    glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT3,GL_TEXTURE_2D_MULTISAMPLE,eligible,0);
     glDisablei(GL_BLEND,3); glColorMaski(3,GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);
-    const GLenum outputs[5] = {GL_COLOR_ATTACHMENT0,GL_COLOR_ATTACHMENT1,GL_NONE,GL_COLOR_ATTACHMENT3,GL_COLOR_ATTACHMENT4};
+    const GLenum outputs[5] = {GL_COLOR_ATTACHMENT0,GL_COLOR_ATTACHMENT1,GL_NONE,GL_NONE,GL_COLOR_ATTACHMENT4};
     glDrawBuffers(5,outputs);
     glViewport(0,0,1,1);
     glEnable(GL_MULTISAMPLE); glEnable(GL_SAMPLE_SHADING); glMinSampleShading(1);
@@ -1065,7 +1154,6 @@ void GL_VerifySceneSampleResolve()
     shader.AttachSource(blitVertexSrc,R"GLSL(#version 450 core
 layout(location=0) out vec4 color;
 layout(location=1) out vec4 velocity;
-layout(location=3) out vec4 eligible;
 layout(location=4) out uint identity;
 void main() {
     int sample_index = gl_SampleID;
@@ -1073,7 +1161,6 @@ void main() {
     color = vec4(2,.5,.125,1);
     velocity = vec4(sample_index,10+sample_index,sample_index == 1 ? 1 : 0,(sample_index+2)/255.0);
     identity = uint(100+sample_index);
-    eligible = vec4(sample_index+1,0,0,1);
 }
 )GLSL");
     shader.Use(); glBindVertexArray(GL_GetFramebufferVAO());
@@ -1100,38 +1187,24 @@ void main() {
     if (fabsf(resolved_depth-.2f) > .00001f || velocity[0] != 1 || velocity[1] != 11 || velocity[2] != 1 ||
         int(velocity[3]*255+.5f) != 3 || identity != 101)
         Error("Scene sample resolve mixed surfaces: depth=%g velocity=%g,%g identity=%u",resolved_depth,velocity[0],velocity[1],identity);
-    // Exercise the actual signed-light compositor, including distinct eligible
-    // values in every sample. No scene-color readback/copy feeds this draw.
-    extern const char* aoDeferredCompositeFragmentSrc;
-    ShaderProgram composite;
-    composite.AttachSource(blitVertexSrc,aoDeferredCompositeFragmentSrc);
-    composite.Use();
-    glUniform1i(composite.FindUniform("scene_source_ms"),0);
-    glUniform1i(composite.FindUniform("scene_source"),1);
-    glUniform1i(composite.FindUniform("ao_source"),2);
-    glUniform1i(composite.FindUniform("suppression_mask"),3);
-    glUniform1i(composite.FindUniform("source_samples"),target.Samples());
-    glUniform1f(composite.FindUniform("intensity"),1);
-    GLuint constant_ao;
-    glGenTextures(1,&constant_ao); glActiveTexture(GL_TEXTURE2); glBindTexture(GL_TEXTURE_2D,constant_ao);
-    const float half = .5f;
-    glTexImage2D(GL_TEXTURE_2D,0,GL_R16F,1,1,0,GL_RED,GL_FLOAT,&half);
-    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);
-    glBindFramebuffer(GL_DRAW_FRAMEBUFFER,target.Handle());
-    glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER,GL_COLOR_ATTACHMENT3,GL_TEXTURE_2D_MULTISAMPLE,0,0);
-    glDrawBuffer(GL_COLOR_ATTACHMENT0);
-    glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D_MULTISAMPLE,eligible);
-    glDisable(GL_DEPTH_TEST); glDepthMask(GL_FALSE);
-    glEnablei(GL_BLEND,0); glBlendEquationi(0,GL_FUNC_ADD); glBlendFuncSeparatei(0,GL_ONE,GL_ONE,GL_ZERO,GL_ONE);
-    glDrawArrays(GL_TRIANGLES,0,3);
-    glDisablei(GL_BLEND,0);
-    target.MarkColorDirty(); target.ColorTextureForRead();
-    glReadBuffer(GL_COLOR_ATTACHMENT0); glReadPixels(0,0,1,1,GL_RGBA,GL_FLOAT,radiance);
-    const float expected = 2-.25f*(target.Samples()+1);
-    if (fabsf(radiance[0]-expected) > .001f || radiance[1] != .5f || radiance[2] != .125f || radiance[3] != 1)
-        Error("Signed sample-light composition failed: %g,%g,%g,%g",radiance[0],radiance[1],radiance[2],radiance[3]);
-    glDeleteTextures(1,&eligible); glDeleteTextures(1,&constant_ao); composite.Destroy();
+    // The AO prepass has an independent logical-resolution target, not an
+    // attachment borrowed from the supersampled color framebuffer.
+    SceneSurfaceResources logical;
+    Framebuffer logical_depth;
+    logical.Update(2,2,0); logical_depth.Update(2,2,0);
+    logical.PrepareSurfaceTarget(logical_depth.DepthTextureRaw());
+    const GLenum logical_outputs[5] = {GL_NONE,GL_COLOR_ATTACHMENT1,GL_NONE,GL_NONE,GL_COLOR_ATTACHMENT4};
+    glDrawBuffers(5,logical_outputs);
+    glViewport(0,0,2,2); glDisable(GL_MULTISAMPLE);
+    glEnable(GL_DEPTH_TEST); glDepthFunc(GL_ALWAYS); glDepthMask(GL_TRUE);
+    shader.Use(); glDrawArrays(GL_TRIANGLES,0,3);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER,logical.surface_framebuffer);
+    glReadBuffer(GL_COLOR_ATTACHMENT1); glReadPixels(0,0,1,1,GL_RGBA,GL_FLOAT,velocity);
+    glReadBuffer(GL_COLOR_ATTACHMENT4); glReadPixels(0,0,1,1,GL_RED_INTEGER,GL_UNSIGNED_INT,&identity);
+    glReadPixels(0,0,1,1,GL_DEPTH_COMPONENT,GL_FLOAT,&resolved_depth);
+    if (fabsf(resolved_depth-.8f) > .00001f || velocity[1] != 10 || identity != 100 || logical.ReadWidth() != 2)
+        Error("Logical surface prepass lost its owned depth/motion/identity");
+    logical.Destroy(); logical_depth.Destroy();
     shader.Destroy(); motion.Destroy(); target.Destroy();
     Framebuffer storage_a,storage_b;
     storage_a.Update(1,1,0); storage_b.Update(2,1,0);
@@ -1158,7 +1231,7 @@ void main() {
     GL_SetEnabledState(GL_SAMPLE_SHADING,sample_shading); GL_SetEnabledState(GL_MULTISAMPLE,multisample);
     AutomatedCaptureLog("scene sample resolve verified: nearest sample=1 depth=0.2 velocity=1,11 validity=1 class=3 identity=101");
     AutomatedCaptureLog("scene radiance resolve verified: unclipped RGB=2,0.5,0.125");
-    AutomatedCaptureLog("scene signed-light composition verified: per-sample radiance and alpha preserved");
+    AutomatedCaptureLog("scene logical surface prepass verified: owned depth, motion and identity");
     AutomatedCaptureLog("scene compositor storage verified: identity, extent, radiance and independent destruction");
 }
 

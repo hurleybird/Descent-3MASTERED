@@ -79,8 +79,8 @@ struct ViewVisibility {
     ViewQueryStats stats;
     bool exterior_visible = false;
 };
-enum class ViewPassKind { Background, OpaqueWorld, SnapshotOpaqueDepth, ExportOpaqueScene, LateWorld, CompositeWorldOcclusion, CompositeSurfaces };
-struct ViewProducts { bool opaque_scene = false, occlusion_radiance = false; };
+enum class ViewPassKind { Background, OpaqueWorld, SnapshotOpaqueDepth, ExportOpaqueScene, LateWorld, EvaluateWorldOcclusion, CompositeSurfaces, DepthSurface };
+struct ViewProducts { bool opaque_scene = false, occlusion = false; };
 struct ViewPass {
     ViewPassKind kind;
     uint32_t begin = 0, end = 0; // half-open range in this view's visible surfaces

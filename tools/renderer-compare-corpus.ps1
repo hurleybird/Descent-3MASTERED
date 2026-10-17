@@ -145,6 +145,11 @@ if ([bool]$referenceManifest.hud_small_probe -ne [bool]$actualManifest.hud_small
     throw 'Small HUD fixture mismatch requires DiagnosticComparison.'
 }
 $referenceHudView = if ($referenceManifest.hud_view_probe) { $referenceManifest.hud_view_probe } else { 'none' }
+if (([bool]$referenceManifest.automap_telcom_probe -ne [bool]$actualManifest.automap_telcom_probe -or
+    [bool]$referenceManifest.automap_probe -ne [bool]$actualManifest.automap_probe -or
+    [bool]$referenceManifest.automap_terrain_probe -ne [bool]$actualManifest.automap_terrain_probe) -and -not $DiagnosticComparison) {
+    throw 'Automap fixture mismatch requires DiagnosticComparison.'
+}
 $actualHudView = if ($actualManifest.hud_view_probe) { $actualManifest.hud_view_probe } else { 'none' }
 if ($referenceHudView -ne $actualHudView -and -not $DiagnosticComparison) {
     throw 'HUD view policy fixture mismatch requires DiagnosticComparison.'

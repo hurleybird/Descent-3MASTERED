@@ -27,6 +27,9 @@ param(
     [switch]$HudProbe,
     [switch]$HudMessageProbe,
     [switch]$HudSmallProbe,
+    [switch]$AutomapProbe,
+    [switch]$AutomapTerrainProbe,
+    [switch]$AutomapTelcomProbe,
     [ValidateSet('none','guided','zoom','rear','letterbox','observer','hidden')][string]$HudViewProbe = 'none',
     [switch]$ReticleReference,
     [switch]$ObservationProbe,
@@ -46,6 +49,11 @@ param(
 # Run only copied installations and copied pilot/save data. Never point Runtime
 # at Candidate or the normal installation: the game may write local cache files.
 $ErrorActionPreference = 'Stop'
+if ($AutomapTerrainProbe) { $AutomapProbe = $true }
+if ($AutomapTelcomProbe -and (-not $SceneInspection -or $AutomapProbe)) { throw 'TelCom fixture requires scene inspection and the normal world presentation.' }
+if ($AutomapProbe -and (-not $SceneInspection -or $HudProbe -or $CockpitProbe -or $ReticleProbe -or $TerrainProbe -or $SkyProbe -or $HistoryProbe -or $MirrorSurfaceProbe -or $MirrorCameraProbe -or $ModelEffectsProbe -or $ObservationProbe -or $ViewImageProbe)) {
+    throw 'Automap inspection owns a separate presentation and cannot combine with world/HUD fixtures.'
+}
 if ($AtmosphereProbe) { $SatelliteProbe = $true }
 if ($DisplayViewProbe) { $ModelCollectionProbe = $true }
 if ($ReticleReference -and -not $ReticleProbe) { throw 'Reticle reference requires the reticle inspection fixture.' }
@@ -145,6 +153,9 @@ $manifest = [ordered]@{
     hud_probe = [bool]$HudProbe
     hud_message_probe = [bool]$HudMessageProbe
     hud_small_probe = [bool]$HudSmallProbe
+    automap_probe = [bool]$AutomapProbe
+    automap_terrain_probe = [bool]$AutomapTerrainProbe
+    automap_telcom_probe = [bool]$AutomapTelcomProbe
     hud_view_probe = $HudViewProbe
     view_image_revision = $(if ($ViewImageProbe) { 2 } else { 0 })
     cockpit_probe_revision = $(if ($CockpitProbe) { 4 } else { 0 })
@@ -207,6 +218,9 @@ try {
         if ($HudProbe) { $arguments += '-scene-hud-probe' }
         if ($HudMessageProbe) { $arguments += '-scene-hud-message-probe' }
         if ($HudSmallProbe) { $arguments += '-scene-hud-small-probe' }
+        if ($AutomapProbe) { $arguments += '-scene-automap-probe' }
+        if ($AutomapTerrainProbe) { $arguments += '-scene-automap-terrain-probe' }
+        if ($AutomapTelcomProbe) { $arguments += '-scene-automap-telcom-probe' }
         if ($HudViewProbe -ne 'none') { $arguments += @('-scene-hud-view-probe',$HudViewProbe) }
         if ($MirrorSurfaceProbe) { $arguments += '-scene-mirror-surface-probe' }
         if ($RingProbe) { $arguments += '-scene-ring-probe' }
@@ -234,6 +248,8 @@ try {
         $process.WaitForExit()
         $logText = if (Test-Path -LiteralPath $log) { Get-Content -LiteralPath $log -Raw } else { '' }
         $resourceValidated = $true
+        if ($AutomapProbe) { $resourceValidated = $logText.Contains('scene automap prepared rooms=') }
+        if ($AutomapTelcomProbe) { $resourceValidated = $resourceValidated -and $logText.Contains('scene automap TelCom composed') }
         if ($DepthPolicyProbe) { $resourceValidated = $logText.Contains('scene depth fixture columns=write,read,disabled,read_occluded') }
         if ($StandaloneModelProbe) { $resourceValidated = $logText.Contains('scene standalone model fixture instances=1') }
         if ($ModelCollectionProbe) { $resourceValidated = $resourceValidated -and $logText.Contains('scene model collection fixture world=0 preview=1') }

@@ -145,7 +145,7 @@ void PrepareGameCockpitGauges(d3scene::FrameData& frame,const ModelTransforms& t
     const d3scene::Transform& placement,bool moving)
 {
     using Quad = std::array<d3scene::Vec3,4>;
-    const auto asset = d3scene::assets().publishMesh(2,d3scene::unitBillboardQuad());
+    const auto asset = d3scene::assets().quadMesh();
     int order = 0;
     int32_t text_order = 0;
     d3scene::View gauge_view;

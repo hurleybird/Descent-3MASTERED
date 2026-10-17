@@ -49,7 +49,7 @@ void PrepareSceneQuad(d3scene::FrameData& frame,uint64_t collection,int32_t& nex
     d3scene::Rect rectangle,const SceneQuadStyle& style) {
     if (rectangle.width <= 0 || rectangle.height <= 0) return;
     d3scene::PreparedMesh quad;
-    quad.asset = d3scene::assets().publishMesh(2,d3scene::unitBillboardQuad());
+    quad.asset = d3scene::assets().quadMesh();
     quad.collection = collection;
     const float left = float(rectangle.x), top = float(rectangle.y);
     const float right = left+rectangle.width, bottom = top+rectangle.height;
@@ -109,7 +109,7 @@ void PrepareSceneText(d3scene::FrameData& frame,uint64_t collection,int32_t& nex
         const auto count = static_cast<uint32_t>(run.vertices.size()/4);
         // Game mesh slots 257..384 are canonical quad-count templates. UVs and
         // positions are frame attributes, never new assets for changing text.
-        run.asset = d3scene::assets().publishMesh(256+count,d3scene::unitQuadBatch(count));
+        run.asset = d3scene::assets().quadMesh(count);
         frame.meshes.push_back(std::move(run)); run = {};
     };
     layoutSceneText(text,style,x,y,[&](const tFontGlyph& glyph,int x,int y,d3scene::Vec3 color) {

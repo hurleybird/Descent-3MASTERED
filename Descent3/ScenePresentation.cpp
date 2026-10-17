@@ -22,6 +22,7 @@
 #include <stdexcept>
 #include <unordered_set>
 #include <unordered_map>
+#include <tuple>
 #include "game.h"
 #include "gameloop.h"
 #include "gametexture.h"
@@ -58,6 +59,94 @@ d3scene::OcclusionClass SceneRoomOcclusionClass(int texture, bool exterior) {
 }
 
 namespace {
+bool roomMaterialInputsUnchanged() {
+    static std::vector<texture> previous;
+    static std::vector<float> settings;
+    static uint64_t reflection_revision = 0;
+    static std::array<int,MAX_BITMAPS> bitmap_formats{};
+    const std::vector<float> current{float(Detail_settings.Specular_lighting),float(Detail_settings.Mirrored_surfaces),
+        float(Render_preferred_state.per_pixel_lighting),float(Render_split_specular_textures),float(Render_per_pixel_field_static_specular),
+        Render_per_pixel_specular_sharpness,Render_per_pixel_specular_strength,Render_per_pixel_static_specular_strength,
+        Render_per_pixel_specular_lightmap_mix,Render_per_pixel_specular_alpha_strength,float(UseHardware),float(Render_hires_textures),
+        Terrain_sky.satellite_vectors[0].x,Terrain_sky.satellite_vectors[0].y,Terrain_sky.satellite_vectors[0].z};
+    bool same = settings == current && previous.size() == MAX_TEXTURES;
+    const auto revision = SceneReflectionBakeRevision();
+    same = same && reflection_revision == revision;
+    reflection_revision = revision;
+    // Pixel revisions are resolved by prepareImages. A format change also
+    // changes alpha/specular material policy, so it must recompile appearance.
+    for (int i = 0; i < MAX_BITMAPS; ++i) {
+        const int format = GameBitmaps[i].used ? int(GameBitmaps[i].format)+1 : 0;
+        if (bitmap_formats[i] != format) { same = false; bitmap_formats[i] = format; }
+    }
+    if (previous.size() != MAX_TEXTURES) previous.resize(MAX_TEXTURES);
+    for (int i = 0; i < MAX_TEXTURES; ++i) {
+        const auto& a = GameTextures[i]; auto& b = previous[i];
+        const bool equal = a.used == b.used && (!a.used ||
+            (std::tie(a.flags,a.alpha,a.reflectivity,a.slide_u,a.slide_v,a.destroy_handle,a.bm_handle,a.speed) ==
+             std::tie(b.flags,b.alpha,b.reflectivity,b.slide_u,b.slide_v,b.destroy_handle,b.bm_handle,b.speed) &&
+             std::memcmp(a.name,b.name,sizeof(a.name)) == 0));
+        same = same && equal;
+        if (!equal) b = a;
+    }
+    settings = current;
+    struct ReflectionInput { unsigned flags=0,type=0,used=0; std::vector<specular_instance> sources; std::vector<vector> normals; };
+    static std::vector<ReflectionInput> reflection_inputs(MAX_SPECIAL_FACES);
+    static std::vector<int> lightmap_handles(MAX_LIGHTMAP_INFOS,-2);
+    for (int room = 0; room < MAX_ROOMS; ++room) if (Rooms[room].used) {
+        const auto& source_room = Rooms[room];
+        for (int face = 0; face < source_room.num_faces; ++face) {
+            const auto& source_face = source_room.faces[face];
+            if ((source_face.flags & FF_LIGHTMAP) && source_face.lmi_handle >= 0 && source_face.lmi_handle < MAX_LIGHTMAP_INFOS) {
+                auto& previous_handle = lightmap_handles[source_face.lmi_handle];
+                const int current_handle = LightmapInfo[source_face.lmi_handle].lm_handle;
+                if (previous_handle != current_handle) { same = false; previous_handle = current_handle; }
+            }
+            const int index = source_face.special_handle;
+            if (index < 0 || index >= MAX_SPECIAL_FACES) continue;
+            const auto& input = SpecialFaces[index]; auto& old = reflection_inputs[index];
+            const size_t count = input.used && input.spec_instance ? input.num : 0;
+            const size_t normals = input.used && (input.flags & SFF_SPEC_SMOOTH) && input.vertnorms ? source_face.num_verts : 0;
+            bool equal = old.flags == input.flags && old.type == input.type && old.used == input.used &&
+                old.sources.size() == count && old.normals.size() == normals;
+            for (size_t i = 0; equal && i < count; ++i) {
+                const auto& a = input.spec_instance[i]; const auto& b = old.sources[i];
+                equal = std::tie(a.bright_center.x,a.bright_center.y,a.bright_center.z,a.bright_color) ==
+                    std::tie(b.bright_center.x,b.bright_center.y,b.bright_center.z,b.bright_color);
+            }
+            for (size_t i = 0; equal && i < normals; ++i) {
+                const auto& a = input.vertnorms[i]; const auto& b = old.normals[i];
+                equal = a.x == b.x && a.y == b.y && a.z == b.z;
+            }
+            if (!equal) {
+                same = false; old.flags = input.flags; old.type = input.type; old.used = input.used;
+                old.sources.resize(count); old.normals.resize(normals);
+                for (size_t i = 0; i < count; ++i) old.sources[i] = input.spec_instance[i];
+                for (size_t i = 0; i < normals; ++i) old.normals[i] = input.vertnorms[i];
+            }
+        }
+    }
+    return same;
+}
+// Texture animation and procedural evaluation are presentation inputs, not
+// per-face work. Resolve once per texture for this preparation transaction.
+// Nothing survives the transaction, so edits/reloads/settings cannot go stale.
+struct MaterialResolution {
+    explicit MaterialResolution(float value) : time(value), bitmaps(MAX_TEXTURES,-2), occlusion(MAX_TEXTURES,-1) {}
+    float time;
+    std::vector<int> bitmaps, occlusion;
+    int bitmap(int texture) {
+        auto& result = bitmaps[texture];
+        if (result == -2) result = GetTextureBitmapAtTime(texture,0,time);
+        return result;
+    }
+    d3scene::OcclusionClass roomOcclusion(int texture,bool exterior) {
+        if (exterior || texture < 0 || texture >= MAX_TEXTURES) return SceneRoomOcclusionClass(texture,exterior);
+        auto& result = occlusion[texture];
+        if (result < 0) result = static_cast<int>(SceneRoomOcclusionClass(texture,false));
+        return static_cast<d3scene::OcclusionClass>(result);
+    }
+};
 void prepareImages(d3scene::FrameData& data) {
     std::unordered_map<int,d3scene::ImageAssetRef> images;
     const auto image = [&](int handle,bool baked) -> d3scene::ImageAssetRef {
@@ -100,8 +189,36 @@ void prepareImages(d3scene::FrameData& data) {
             surface.lightmap_wrap = (GameLightmaps[surface.lightmap_bitmap].flags & LF_WRAP) != 0;
         }
     };
-    for (auto& room : data.rooms) for (auto& surface : room.surfaces) prepare(surface);
-    for (auto& object : data.model_instances) for (auto& model : object.models) for (auto& part : model.parts) for (auto& surface : part.surfaces) prepare(surface);
+    const auto prepareTable = [&](d3scene::RoomSurfaces& table) {
+        if (table.published()) {
+            bool unchanged = true;
+            for (const auto& dependency : table.images()) {
+                const bool wrap = dependency.baked && (GameLightmaps[dependency.handle].flags & LF_WRAP);
+                if (image(dependency.handle,dependency.baked) != dependency.image || wrap != dependency.wrap) { unchanged = false; break; }
+            }
+            if (unchanged) return;
+        }
+        // Resolve each image once, but detach room storage only when an image
+        // revision actually changes (dynamic lightmaps included).
+        for (size_t face = 0; face < table.size(); ++face) {
+            const auto& surface = table.read()[face];
+            const auto color = surface.bitmap >= 0 ? image(surface.bitmap,false) : d3scene::ImageAssetRef{};
+            const auto specular = surface.specular_bitmap >= 0 ? image(surface.specular_bitmap,false) : d3scene::ImageAssetRef{};
+            const auto baked = surface.lightmap_bitmap >= 0 ? image(surface.lightmap_bitmap,true) : d3scene::ImageAssetRef{};
+            const bool wrap = surface.lightmap_bitmap >= 0 && (GameLightmaps[surface.lightmap_bitmap].flags & LF_WRAP);
+            if (surface.color_image != color || surface.specular_image != specular || surface.baked_image != baked || surface.lightmap_wrap != wrap) {
+                auto& changed = table[face]; changed.color_image = color; changed.specular_image = specular;
+                changed.baked_image = baked; changed.lightmap_wrap = wrap;
+                if (changed.lightmap_bitmap >= 0 && GameLightmaps[changed.lightmap_bitmap].square_res) {
+                    const auto& lightmap = GameLightmaps[changed.lightmap_bitmap];
+                    changed.lightmap_u_scale = float(lightmap.width)/lightmap.square_res;
+                    changed.lightmap_v_scale = float(lightmap.height)/lightmap.square_res;
+                }
+            }
+        }
+    };
+    for (auto& room : data.rooms) prepareTable(room.surfaces);
+    for (auto& object : data.model_instances) for (auto& model : object.models) for (auto& part : model.parts) prepareTable(part.surfaces);
     for (auto& surface : data.terrain.materials) prepare(surface);
     for (auto& mesh : data.meshes) prepare(mesh.surface);
 }
@@ -110,6 +227,14 @@ void prepareImages(d3scene::FrameData& data) {
 void logPreparedModels(const d3scene::FrameData& data) {
     if (!AutomatedCapturePending() && AutomatedCaptureFrameIndex() != 0) return;
     AutomatedCaptureLog("scene probe frame=%d time=%.9g",AutomatedCaptureFrameIndex(),data.simulation_time);
+    size_t room_surfaces = 0, model_surfaces = 0, terrain_surfaces = 0, retained_surfaces = 0;
+    for (const auto& room : data.rooms) { room_surfaces += room.surfaces.size();
+        if (room.surfaces.publishedFor(room.asset->id())) retained_surfaces += room.surfaces.size(); }
+    for (const auto& object : data.model_instances) for (const auto& model : object.models)
+        for (const auto& part : model.parts) model_surfaces += part.surfaces.size();
+    for (const auto& patch : data.terrain.patches) terrain_surfaces += patch.size();
+    AutomatedCaptureLog("scene inventory rooms=%u models=%u terrain=%u meshes=%u",unsigned(room_surfaces),unsigned(model_surfaces),unsigned(terrain_surfaces),unsigned(data.meshes.size()));
+    AutomatedCaptureLog("scene retained room surfaces=%u",unsigned(retained_surfaces));
     unsigned reflection_surfaces = 0, reflection_sources = 0, smooth_reflections = 0;
     for (const auto& room : data.rooms) for (const auto& surface : room.surfaces) if (surface.specular_strength > 0 && surface.reflection) {
         ++reflection_surfaces;
@@ -166,9 +291,10 @@ void logPreparedModels(const d3scene::FrameData& data) {
 }
 // One material resolver for all prepared mesh surfaces. Source-domain rules
 // are explicit authoring conventions, not state inferred from a draw call.
-void resolveMaterial(d3scene::SurfaceBinding& surface, float time, bool model, bool exterior = false) {
-    if (!(surface.texture < 0 && model)) { // flat polygons may still carry baked light
-    if (surface.texture < 0 || surface.texture >= MAX_TEXTURES || !GameTextures[surface.texture].used)
+void resolveMaterial(d3scene::SurfaceBinding& surface, MaterialResolution& resolution, bool model, bool exterior = false) {
+    const float time = resolution.time;
+    if (surface.texture >= 0) { // flat/baked-only surfaces are not tied to a source geometry domain
+    if (surface.texture >= MAX_TEXTURES || !GameTextures[surface.texture].used)
         Error("Scene material references missing texture %d", surface.texture);
     int base_texture = surface.texture;
     const auto& authored = GameTextures[surface.texture];
@@ -179,7 +305,7 @@ void resolveMaterial(d3scene::SurfaceBinding& surface, float time, bool model, b
     if (base_texture < 0 || base_texture >= MAX_TEXTURES || !GameTextures[base_texture].used)
         Error("Scene material references missing base texture %d", base_texture);
     const auto& texture = GameTextures[base_texture];
-    surface.bitmap = GetTextureBitmapAtTime(base_texture, 0, time);
+    surface.bitmap = resolution.bitmap(base_texture);
     surface.u_offset = authored.slide_u ? std::fmod(time / authored.slide_u, 1.f) : 0;
     surface.v_offset = authored.slide_v ? std::fmod(time / authored.slide_v, 1.f) : 0;
     surface.alpha *= texture.alpha;
@@ -196,7 +322,7 @@ void resolveMaterial(d3scene::SurfaceBinding& surface, float time, bool model, b
         else if (pair.valid) { specular_texture = pair.spec_tmap; specular_bitmap = pair.spec_bm; }
         if (specular_texture >= 0 && specular_texture < MAX_TEXTURES && GameTextures[specular_texture].used) {
             const auto& specular = GameTextures[specular_texture];
-            if (specular_bitmap < 0) specular_bitmap = GetTextureBitmapAtTime(specular_texture,0,time);
+            if (specular_bitmap < 0) specular_bitmap = resolution.bitmap(specular_texture);
             const bool opaque_mask = bm_format(specular_bitmap) == BITMAP_FORMAT_4444 && texture.alpha >= 1 &&
                 surface.blend == d3scene::BlendMode::Solid && surface.lightmap >= 0 && (surface.authored_flags & FF_LIGHTMAP);
             const bool authored_path = (authored.flags & TF_SPECULAR) && (surface.special >= 0 || exterior);
@@ -225,10 +351,42 @@ void resolveMaterial(d3scene::SurfaceBinding& surface, float time, bool model, b
 }
 }
 
+void PrepareGameSceneResources(d3scene::FrameData& data) {
+    PERF_MARKER_SCOPE("Scene.PrepareResources");
+    MaterialResolution resolution(static_cast<float>(data.simulation_time));
+    for (auto& surface : data.terrain.materials) resolveMaterial(surface,resolution,false,true);
+    for (auto& object : data.model_instances) for (auto& model : object.models) for (size_t p = 0; p < model.parts.size(); ++p) {
+        auto& part = model.parts[p];
+        if (part.surfaces.publishedFor(model.asset->id(),uint32_t(p),part.material_palette)) continue;
+        for (auto& surface : part.surfaces) resolveMaterial(surface,resolution,true);
+    }
+    prepareImages(data);
+    d3scene::prepareTerrainPatches(data.terrain);
+}
+
+void PrepareGameInspectionBanner(d3scene::FrameData& data) {
+    if (!SceneGeometryInspection()) return;
+    SceneTextStyle style; style.font = HUD_FONT; style.color = {1,220/255.f,80/255.f}; style.additive = true;
+    int order = 0;
+    for (int pass = 0; pass < 2; ++pass) PrepareSceneText(data,SceneInspectionBanner,order,12,12,
+        "RENDERER MIGRATION TEST",style);
+    for (int pass = 0; pass < 2; ++pass) PrepareSceneText(data,SceneInspectionBanner,order,12,28,
+        "Incomplete - not yet qualified for gameplay",style);
+    d3scene::PreparedForeground foreground; foreground.identity = SceneInspectionBanner;
+    foreground.phase = d3scene::ForegroundPhase::FinalOverlay;
+    foreground.layer.display_views.push_back(MakeSceneCanvasView(SceneInspectionBanner,{0,0,Max_window_w,Max_window_h},
+        d3scene::ViewTarget::Display,true));
+    data.foregrounds.push_back(std::move(foreground));
+}
+
 d3scene::PresentationRef PrepareGamePresentation() {
+    PERF_MARKER_SCOPE("Scene.PreparePresentation");
+    static d3scene::PresentationRef previous_models;
+    const bool retain_rooms = roomMaterialInputsUnchanged();
+    if (!retain_rooms) ResetSplitSpecularTexturePairCache();
     const unsigned int simulation_random = ps_rand_get_state();
-    const auto source = ExtractGamePresentation(Gametime, Frametime, Game_paused);
-    auto data = source->data();
+    auto data = [&] { PERF_MARKER_SCOPE("Scene.Extract"); return ExtractGameFrame(Gametime, Frametime, Game_paused,true,
+        retain_rooms && previous_models ? &previous_models->data() : nullptr); }();
     const auto control_delta = GetPlayerControlledTranslationDelta();
     data.player_control_delta = {control_delta.x,control_delta.y,control_delta.z};
     data.afterburner_factor = (std::max)(0.f,(std::min)(1.f,Render_afterburner_visual_factor));
@@ -240,7 +398,6 @@ d3scene::PresentationRef PrepareGamePresentation() {
         data.camera_perturbations.push_back({static_cast<uint32_t>(Player_object->handle),
             {{},vector(rotation.rvec),vector(rotation.uvec),vector(rotation.fvec)}});
     }
-    static d3scene::PresentationRef previous_models;
     static uint64_t material_lifetime = 0;
     if (material_lifetime != data.scene_lifetime) {
         ResetSplitSpecularTexturePairCache();
@@ -258,6 +415,8 @@ d3scene::PresentationRef PrepareGamePresentation() {
     exterior_reflection_data.sources.push_back({{primary_anchor.x,primary_anchor.y,primary_anchor.z},{1,1,1}});
     const auto exterior_reflection = d3scene::assets().publishReflection(UINT32_MAX,std::move(exterior_reflection_data));
     uint32_t reflection_slot = MAX_SPECIAL_FACES;
+    { PERF_MARKER_SCOPE("Scene.RoomMaterials");
+    MaterialResolution resolution(static_cast<float>(data.simulation_time));
     for (auto& room : data.rooms) {
       room.exterior = (room.authored_flags & RF_EXTERNAL) != 0;
       room.fog_enabled = Detail_settings.Fog_enabled && (room.authored_flags & RF_FOG) && GetFunctionMode() != EDITOR_MODE;
@@ -267,6 +426,12 @@ d3scene::PresentationRef PrepareGamePresentation() {
       room.light_scalar = d3scene::roomLightScalar(static_cast<float>(data.simulation_time),room.pulse_time,
           room.pulse_offset,room.number,(room.authored_flags & RF_STROBE) != 0,
           (room.authored_flags & RF_FLICKER) != 0,GetFunctionMode() == EDITOR_MODE);
+      const bool retained_appearance = room.uses_room_illumination && room.surfaces.publishedFor(room.asset->id());
+      room.uses_room_illumination = true;
+      if (retained_appearance) {
+          reflection_slot += uint32_t(room.surfaces.size());
+          continue;
+      }
       for (auto& surface : room.surfaces) {
         const uint32_t baked_reflection_slot = reflection_slot++;
         if (surface.special >= 0 && surface.special < MAX_SPECIAL_FACES) {
@@ -301,10 +466,10 @@ d3scene::PresentationRef PrepareGamePresentation() {
                 baked_reflection_slot,Render_per_pixel_field_static_specular,Render_split_specular_textures);
             if (baked) surface.reflection = baked;
         }
-        surface.occlusion_class = SceneRoomOcclusionClass(surface.texture,room.exterior);
-        resolveMaterial(surface,static_cast<float>(data.simulation_time),false,room.exterior);
+        surface.occlusion_class = resolution.roomOcclusion(surface.texture,room.exterior);
+        resolveMaterial(surface,resolution,false,room.exterior);
         if (room.exterior && surface.specular_strength > 0) surface.reflection = exterior_reflection;
-        surface.lighting_modulation = room.light_scalar;
+        surface.lighting_modulation = 1;
         // Authored missing textures suppress game room faces at publication.
         // The geometry executor also supports flat and view-image surfaces;
         // it must not infer eligibility from a legacy bitmap sentinel.
@@ -325,12 +490,13 @@ d3scene::PresentationRef PrepareGamePresentation() {
           }
       }
     }
-    PrepareGameTerrain(data);
-    PrepareGameSky(data);
-    PrepareGameEffects(data);
-    PrepareGameModelInstances(data, previous_models ? &previous_models->data() : nullptr);
-    PrepareGameObjectEffects(data);
-    PrepareGameScorches(data);
+    }
+    { PERF_MARKER_SCOPE("Scene.PrepareTerrain"); PrepareGameTerrain(data); }
+    { PERF_MARKER_SCOPE("Scene.PrepareSky"); PrepareGameSky(data); }
+    { PERF_MARKER_SCOPE("Scene.PrepareEffects"); PrepareGameEffects(data); }
+    { PERF_MARKER_SCOPE("Scene.PrepareModels"); PrepareGameModelInstances(data, previous_models ? &previous_models->data() : nullptr,retain_rooms); }
+    { PERF_MARKER_SCOPE("Scene.PrepareObjectEffects"); PrepareGameObjectEffects(data); }
+    { PERF_MARKER_SCOPE("Scene.PrepareScorches"); PrepareGameScorches(data); }
     if (SceneGeometryInspection() && FindArg("-scene-cockpit-probe")) {
         PrepareGameCockpit(data,true);
         PrepareCockpitComposition(data,{Game_window_x,Game_window_y,Game_window_w,Game_window_h},SceneCockpitZoom);
@@ -340,19 +506,7 @@ d3scene::PresentationRef PrepareGamePresentation() {
         if (FindArg("-scene-reticle-probe")) PrepareGameReticle(data,layout);
         if (FindArg("-scene-hud-probe")) PrepareGameHUD(data,layout,true);
     }
-    if (SceneGeometryInspection()) {
-        SceneTextStyle style; style.font = HUD_FONT; style.color = {1,220/255.f,80/255.f}; style.additive = true;
-        int order = 0;
-        for (int pass = 0; pass < 2; ++pass) PrepareSceneText(data,SceneInspectionBanner,order,12,12,
-            "RENDERER MIGRATION TEST",style);
-        for (int pass = 0; pass < 2; ++pass) PrepareSceneText(data,SceneInspectionBanner,order,12,28,
-            "Incomplete - not yet qualified for gameplay",style);
-        d3scene::PreparedForeground foreground; foreground.identity = SceneInspectionBanner;
-        foreground.phase = d3scene::ForegroundPhase::FinalOverlay;
-        foreground.layer.display_views.push_back(MakeSceneCanvasView(SceneInspectionBanner,{0,0,Max_window_w,Max_window_h},
-            d3scene::ViewTarget::Display,true));
-        data.foregrounds.push_back(std::move(foreground));
-    }
+    PrepareGameInspectionBanner(data);
     if (SceneGeometryInspection() && FindArg("-scene-view-image-probe")) {
         int order = 0; SceneQuadStyle style; style.uv_min = {0,1}; style.uv_max = {1,0};
         PrepareSceneQuad(data,SceneViewImageProbe,order,{16,72,320,180},style);
@@ -379,23 +533,19 @@ d3scene::PresentationRef PrepareGamePresentation() {
         if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
             AutomatedCaptureLog("scene standalone model fixture instances=%u",detached);
     }
-    for (auto& surface : data.terrain.materials) resolveMaterial(surface,static_cast<float>(data.simulation_time),false,true);
-    for (auto& object : data.model_instances) for (auto& model : object.models) for (auto& part : model.parts) for (auto& surface : part.surfaces)
-        resolveMaterial(surface,static_cast<float>(data.simulation_time),true);
-    prepareImages(data);
-    d3scene::prepareTerrainPatches(data.terrain);
-    PrepareGameSceneLights(data);
+    PrepareGameSceneResources(data);
+    { PERF_MARKER_SCOPE("Scene.PrepareLights"); PrepareGameSceneLights(data); }
     for (auto& room : data.rooms) for (auto& portal : room.portals) {
         // Exterior door apertures have authored winding conventions that are
         // not interior-facing portal planes. Compile this once, not in queries.
         portal.two_sided = room.exterior && portal.destination_room >= 0 &&
             portal.destination_room < MAX_ROOMS && (Rooms[portal.destination_room].flags & RF_DOOR);
-        const auto& surface = room.surfaces[portal.polygon];
+        const auto& surface = room.surfaces.read()[portal.polygon];
         const auto material = d3scene::compileMaterialPolicy(surface,room.asset->geometry().polygons[portal.polygon]);
         portal.traversable = !(portal.flags & PF_RENDER_FACES) || material.allowsBehind() ||
             (GameTextures[surface.texture].flags & TF_PROCEDURAL);
     }
-    data.fog = d3scene::assets().publishFog(data.rooms);
+    { PERF_MARKER_SCOPE("Scene.PublishFog"); data.fog = d3scene::assets().publishFog(data.rooms); }
     if (SceneGeometryInspection() && FindArg("-scene-lod-probe") && Player_object) {
         // Isolated authored-model inspection: keep every player variant and
         // its prepared attachments, but no room that could occlude a far camera.
@@ -411,7 +561,7 @@ d3scene::PresentationRef PrepareGamePresentation() {
     }
     logPreparedModels(data);
     // No domain is declared complete by a diagnostic subset of its consumers.
-    auto prepared = d3scene::Presentation::freeze(data);
+    auto prepared = [&] { PERF_MARKER_SCOPE("Scene.Freeze"); return d3scene::Presentation::publish(std::move(data)); }();
     if (ps_rand_get_state() != simulation_random)
         Error("Presentation preparation consumed simulation randomness");
     previous_models = prepared;
@@ -423,6 +573,28 @@ d3scene::VisibilityReport RenderGameSceneView(const d3scene::Presentation& frame
         Error("Renderer migration is incomplete. This test build requires -scene-inspection; use the preserved Candidate for gameplay.");
     view.geometry_inspection = true;
     view.feedback = d3scene::NoFeedback;
+    if (FindArg("-scene-automap-probe") && Player_object) {
+        const auto& p = Player_object->pos;
+        const auto& o = Player_object->orient;
+        view.camera.position = {p.x-o.fvec.x*70+o.uvec.x*30,
+            p.y-o.fvec.y*70+o.uvec.y*30,p.z-o.fvec.z*70+o.uvec.z*30};
+        vector toward{p.x-view.camera.position.x,p.y-view.camera.position.y,p.z-view.camera.position.z};
+        vector up = o.uvec;
+        matrix facing; vm_VectorToMatrix(&facing,&toward,&up,nullptr);
+        view.camera.right = {facing.rvec.x,facing.rvec.y,facing.rvec.z};
+        view.camera.up = {facing.uvec.x,facing.uvec.y,facing.uvec.z};
+        view.camera.forward = {facing.fvec.x,facing.fvec.y,facing.fvec.z};
+        view.attached_camera = false; view.exclude_camera_rig = false; view.excluded_objects.clear();
+        view.portal_visibility = false; view.dynamic_lighting = false; view.room = -1;
+        view.exterior_origin = false;
+        if (FindArg("-scene-automap-terrain-probe") && frame.data().terrain.asset) {
+            const auto& grid = frame.data().terrain.asset->grid();
+            const uint32_t x = grid.width/2,z = grid.depth/4;
+            view.camera.position = {x*grid.spacing,grid.heights[z*grid.width+x]+120,z*grid.spacing};
+            view.camera.right = {1,0,0}; view.camera.up = {0,.8f,.6f}; view.camera.forward = {0,-.6f,.8f};
+            view.exterior_origin = true;
+        }
+    }
     if (FindArg("-scene-history-probe")) {
         const int index = AutomatedCaptureFrameIndex();
         const float angle = .006f*index+(index >= 30 ? .35f : 0.f);

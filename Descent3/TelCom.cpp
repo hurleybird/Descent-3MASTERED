@@ -46,6 +46,9 @@
 #include "psrand.h"
 #include "controls.h"
 #include "d3music.h"
+#include "gameloop.h"
+#include "SceneExtraction.h"
+#include "args.h"
 
 #define FRAME_RATE	30.0f
 #define TCPE_TIME	0.5f
@@ -1032,7 +1035,7 @@ void TelcomInitPowerEffect(void);
 //	Frees the bitmaps, etc for power up/down effect
 void TelcomFreePowerEffect(void);
 //	Draws a frame of the power up/down effect
-void TelcomDoPowerEffect(bool power_down, float frametime);
+bool TelcomDoPowerEffect(bool power_down, float frametime);
 
 
 ///global variables ****************************************
@@ -1162,10 +1165,11 @@ void TelcomRenderScreen(bool poweron, bool powerup, ubyte power_effect)
 	grtext_Flush();
 	rend_FlushTextLayer();
 
+	bool power_effect_complete = power_effect == 0;
 	switch (power_effect)
 	{
 	case 1:
-		TelcomDoPowerEffect(false, frametime);
+		power_effect_complete = TelcomDoPowerEffect(false, frametime);
 		break;
 	case 2:
 		TelcomDoPowerEffect(true, frametime);
@@ -1178,6 +1182,12 @@ void TelcomRenderScreen(bool poweron, bool powerup, ubyte power_effect)
 	TelcomRenderMouse();
 
 	EndFrame();
+	if (power_effect_complete && TC_callback && Telcom_system.current_status == TS_MAP && AutomatedCapturePending() &&
+		SceneGeometryInspection() && FindArg("-scene-automap-telcom-probe")) {
+		AutomatedCaptureLog("scene automap TelCom composed");
+		CaptureAutomatedFrameIfRequested();
+		Telcom_system.state = TCS_POWEROFF;
+	}
 	rend_Flip();
 
 	Telcom_glitch_screen = false;
@@ -2023,8 +2033,10 @@ void TelcomFreePowerEffect(void)
 #define TCPE_END		1.0f
 
 //	Draws a frame of the power up/down effect
-void TelcomDoPowerEffect(bool power_down, float frametime)
+bool TelcomDoPowerEffect(bool power_down, float frametime)
 {
+	// Report the phase actually drawn, not the phase reached by advancing it.
+	const bool complete = !power_down && TC_effect_position >= TCPE_STAGE2;
 	int height = (Telcom_system.Monitor_coords[MONITOR_MAIN].bottom) - (Telcom_system.Monitor_coords[MONITOR_MAIN].top);
 	int width = (Telcom_system.Monitor_coords[MONITOR_MAIN].right) - (Telcom_system.Monitor_coords[MONITOR_MAIN].left);
 	int	xoff = Telcom_system.Monitor_coords[MONITOR_MAIN].left;
@@ -2123,6 +2135,7 @@ tcpe_adjust:
 
 	rend_SetFiltering(1);
 	rend_SetZBufferState(1);
+	return complete;
 }
 
 /***************************************************

@@ -69,9 +69,9 @@ int runLightTests() {
     }
     data.rooms[0].portals.push_back({0,1,0}); data.rooms[1].portals.push_back({0,0,0});
     prepareLightInfluences(data);
-    check(data.rooms[0].surfaces[0].light_indices == std::vector<uint32_t>{0},"Source room lost emitter reference");
-    check(data.rooms[1].surfaces[0].light_indices == std::vector<uint32_t>{0},"Connected room lost emitter reference");
-    check(data.rooms[2].surfaces[0].light_indices.empty(),"Light leaked into disconnected room");
+    check(data.rooms[0].light_influences[0] == std::vector<uint32_t>{0},"Source room lost emitter reference");
+    check(data.rooms[1].light_influences[0] == std::vector<uint32_t>{0},"Connected room lost emitter reference");
+    check(data.rooms[2].light_influences.empty(),"Light leaked into disconnected room");
     auto frame = Presentation::freeze(data);
     data.lights[0].color.x = 99;
     check(frame->data().lights[0].color.x == 1,"Published emitter was mutated");
@@ -88,6 +88,6 @@ int runLightTests() {
     rejects([&] { Presentation::freeze(data); });
     data = frame->data(); data.lights[0].position.x = 1000;
     prepareLightInfluences(data);
-    check(data.rooms[0].surfaces[0].light_indices.empty(),"Influence compiler ignored source radius");
+    check(data.rooms[0].light_influences.empty() || data.rooms[0].light_influences[0].empty(),"Influence compiler ignored source radius");
     return checks;
 }

@@ -68,7 +68,19 @@ int runModelSceneTests() {
     const auto compiled = CompileSceneModelAsset(source_model,&repaired);
     check(repaired == 2 && compiled.parts[0].geometry.vertex_normals[1].z == -1, "Invalid authored normals not repaired at asset boundary");
     check(std::isnan(normals[1].y), "Asset compiler rewrote source shading data");
+    check(MatchesSceneModelAsset(compiled,source_model), "Resident model did not recognize repaired source normals");
+    u[1] = .25f;
+    check(!MatchesSceneModelAsset(compiled,source_model), "Resident model missed changed UV");
+    u[1] = 0; alpha[1] = 1;
+    check(!MatchesSceneModelAsset(compiled,source_model), "Resident model missed changed vertex alpha");
+    alpha[1] = .5f; face.color = GR_RGB(1,2,3);
+    check(!MatchesSceneModelAsset(compiled,source_model), "Resident model missed changed flat color");
+    face.color = GR_RGB(128,64,32); normals[0].x = .1f;
+    check(!MatchesSceneModelAsset(compiled,source_model), "Resident model missed changed normal");
+    normals[0].x = 0;
+    check(MatchesSceneModelAsset(compiled,source_model), "Restored model no longer matches");
     vertices[0].x = 99;
+    check(!MatchesSceneModelAsset(compiled,source_model), "Resident model missed changed position");
     check(compiled.parts[0].geometry.vertices[0].x == -1, "Compiled geometry retained source pointers");
     check(compiled.parts[0].geometry.polygons[0].corners[1].alpha == 127, "Authored model alpha lost");
     check(compiled.parts[0].polygon_colors[0].x == 128/255.f, "Flat model color lost");
@@ -85,6 +97,18 @@ int runModelSceneTests() {
     forEachTriangleCorner(4,[&](size_t corner) { corners.push_back(corner); });
     check(corners == std::vector<size_t>{0,1,2,0,2,3},"UV and position stream topology differs");
     auto asset = assets.publishModel(3,authored);
+    {
+        auto palette_geometry = authored;
+        auto& p = palette_geometry.parts[0];
+        p.geometry.polygons.push_back(p.geometry.polygons[0]);
+        p.geometry.polygons.push_back(p.geometry.polygons[0]);
+        p.geometry.polygons[2].corners[0].alpha = 127;
+        p.polygon_materials = {-1,-1,-1}; p.polygon_colors = {{1,0,0},{1,0,0},{1,0,0}};
+        const auto palette_asset = assets.publishModel(4,palette_geometry);
+        const auto& palette = palette_asset->geometry().parts[0];
+        check(palette.surface_polygons.size() == 2 && palette.surface_for_polygon[0] == palette.surface_for_polygon[1] &&
+            palette.surface_for_polygon[0] != palette.surface_for_polygon[2],"Material palette merged distinct alpha policies or duplicated identical materials");
+    }
     check(assets.publishModel(3,authored) == asset, "Unchanged model lost identity");
     authored.parts[0].geometry.vertices[0].x = -2;
     auto revision = assets.publishModel(3,authored);
@@ -108,6 +132,15 @@ int runModelSceneTests() {
     data.model_instances[1].current.position.z = 20;
     data.model_instances[1].models[0].parts[0].surfaces[0].alpha = 0.5f;
     auto frame = Presentation::freeze(data);
+    {
+        auto retained = frame->data();
+        const auto again = Presentation::freeze(retained);
+        check(&again->data().model_instances[0].models[0].parts[0].surfaces.read() ==
+            &frame->data().model_instances[0].models[0].parts[0].surfaces.read(),"Unchanged model table was copied");
+        retained.model_instances[0].models[0].parts[0].material_palette = true;
+        rejects([&] { Presentation::freeze(retained); }); // one-entry palette must not hide baked per-face UVs
+        check(frame->objectIndices().at(42) == 0 && frame->modelIndices().at(43) == 1,"Compiled ownership indices are incorrect");
+    }
     check(frame->data().model_instances[0].has_render_bounds && frame->data().model_instances[0].render_bounds.minimum.z == 10 &&
         frame->data().model_instances[0].render_bounds.maximum.x == 1,"Publication did not compile world-space posed bounds");
     data.model_instances[0].models[0].parts[0].surfaces[0].baked_uvs[0].x = 99;
@@ -182,7 +215,7 @@ int runModelSceneTests() {
     Light light; light.id.owner = 1; light.radius = 15; light.position = {0,0,10}; light.color = {1,1,1};
     lit_shape.lights.push_back(light); lit_shape.model_instances[0].room = -1;
     prepareLightInfluences(lit_shape);
-    check(lit_shape.model_instances[0].models[0].parts[0].surfaces[0].light_indices.size() == 1,"Light query used undeformed geometry");
+    check(lit_shape.model_instances[0].models[0].parts[0].polygon_lights[0].size() == 1,"Light query used undeformed geometry");
     auto invalid = modelGeometry(); invalid.parts[0].parent = 0;
     rejects([&] { assets.publishModel(4,invalid); });
     invalid = modelGeometry(); invalid.parts[0].polygon_materials[0] = 0;

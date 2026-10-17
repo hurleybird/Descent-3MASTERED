@@ -71,8 +71,7 @@ PortalVisibility queryPortalVisibility(const Presentation& frame,const View& vie
     const auto& rooms = frame.data().rooms;
     PortalVisibility result; result.rooms.resize(rooms.size());
     auto& windows = result.rooms;
-    std::unordered_map<int32_t,size_t> indices;
-    for (size_t i = 0; i < rooms.size(); ++i) indices.emplace(rooms[i].number,i);
+    const auto& indices = frame.roomIndices();
     const auto root = indices.find(view.room);
     if (!view.portal_visibility || (root == indices.end() && !view.exterior_origin)) {
         for (auto& window : windows) window.visible = true;

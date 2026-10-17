@@ -200,7 +200,7 @@ bool prepareAxisEffect(d3scene::FrameData& frame,const vis_effect& effect,const 
 // Object effects share owned geometry with model attachments. Publication is
 // after object eligibility; per-view exclusion is applied by the scene query.
 void PrepareGameObjectEffects(d3scene::FrameData& frame) {
-    const auto quad = d3scene::assets().publishMesh(2,d3scene::unitBillboardQuad());
+    const auto quad = d3scene::assets().quadMesh();
     for (const auto& owner : frame.objects) {
         auto* source = ObjGet(owner.handle);
         if (!source || !owner.visible) continue;
@@ -303,7 +303,7 @@ void PrepareGameObjectEffects(d3scene::FrameData& frame) {
 }
 void PrepareGameEffects(d3scene::FrameData& frame) {
     if (!VisEffects) return;
-    const auto quad = d3scene::assets().publishMesh(2,d3scene::unitBillboardQuad());
+    const auto quad = d3scene::assets().quadMesh();
     unsigned prepared = 0, pending = 0;
     for (int slot = 0; slot <= Highest_vis_effect_index; ++slot) {
         const auto& effect = VisEffects[slot];

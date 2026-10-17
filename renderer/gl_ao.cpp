@@ -160,7 +160,6 @@ void AOResources::InitShaders()
 	extern const char* aoAOFragmentSrc;
 	extern const char* aoBlurFragmentSrc;
 	extern const char* aoTemporalFragmentSrc;
-	extern const char* aoSuppressionFragmentSrc;
 
 	depth_shader.AttachSource(blitVertexSrc, aoDepthFragmentSrc);
 	depth_shader.Use();
@@ -246,26 +245,6 @@ void AOResources::InitShaders()
 	temporal_current_inverse_modelview = temporal_shader.FindUniform("current_inverse_modelview");
 	temporal_previous_view_projection = temporal_shader.FindUniform("previous_view_projection");
 
-	suppression_shader.AttachSource(blitVertexSrc, aoSuppressionFragmentSrc);
-	suppression_shader.Use();
-	suppression_existing_mask = suppression_shader.FindUniform("existing_mask");
-	suppression_existing_mask_ms = suppression_shader.FindUniform("existing_mask_ms");
-	suppression_color = suppression_shader.FindUniform("color_tex");
-	suppression_color_ms = suppression_shader.FindUniform("color_ms_tex");
-	if (suppression_existing_mask != -1) glUniform1i(suppression_existing_mask, 0);
-	if (suppression_existing_mask_ms != -1) glUniform1i(suppression_existing_mask_ms, 2);
-	if (suppression_color != -1) glUniform1i(suppression_color, 1);
-	if (suppression_color_ms != -1) glUniform1i(suppression_color_ms, 3);
-	suppression_has_mask = suppression_shader.FindUniform("has_mask");
-	suppression_use_bloom_mask = suppression_shader.FindUniform("use_bloom_mask");
-	suppression_source_samples = suppression_shader.FindUniform("source_samples");
-	suppression_input_screen_size = suppression_shader.FindUniform("input_screen_size");
-	suppression_ao_screen_size = suppression_shader.FindUniform("ao_screen_size");
-	suppression_source_visible_origin = suppression_shader.FindUniform("source_visible_origin");
-	suppression_source_visible_size = suppression_shader.FindUniform("source_visible_size");
-	suppression_use_source_visible_rect = suppression_shader.FindUniform("use_source_visible_rect");
-	suppression_gamma = suppression_shader.FindUniform("gamma");
-	suppression_bloom_threshold = suppression_shader.FindUniform("bloom_threshold");
 
 
 	ShaderProgram::ClearBinding();
@@ -300,7 +279,6 @@ void AOResources::DestroyShaders()
 	blur_x_shader.Destroy();
 	blur_y_shader.Destroy();
 	temporal_shader.Destroy();
-	suppression_shader.Destroy();
 	if (noise_texture)
 	{
 		glDeleteTextures(1, &noise_texture);
@@ -313,7 +291,6 @@ bool AOResources::HasFramebuffers() const
 	return ao_depth_framebuffer.Handle() != 0 ||
 		ao_framebuffer.Handle() != 0 ||
 		ao_blur_framebuffer.Handle() != 0 ||
-		suppression_framebuffer.Handle() != 0 ||
 		ao_history_framebuffers[0].Handle() != 0 ||
 		ao_history_framebuffers[1].Handle() != 0;
 }
@@ -323,7 +300,6 @@ void AOResources::DestroyFramebuffers()
 	ao_depth_framebuffer.Destroy();
 	ao_framebuffer.Destroy();
 	ao_blur_framebuffer.Destroy();
-	suppression_framebuffer.Destroy();
 	ao_history_framebuffers[0].Destroy();
 	ao_history_framebuffers[1].Destroy();
 	ao_history_index = 0;
@@ -355,9 +331,6 @@ AOResult AOResources::Evaluate(const AOInputs& inputs, const renderer_preferred_
 		inputs.viewport.width <= 0 || inputs.viewport.height <= 0)
 		Error("AO requires resolved opaque depth, surface records and an explicit image extent");
 	const int source_width = inputs.width, source_height = inputs.height;
-	const int source_visible_x = 0, source_visible_y = 0;
-	const int source_visible_w = source_width, source_visible_h = source_height;
-	const bool use_source_visible_rect = false;
 	const int noise_origin_x = inputs.viewport.x, noise_origin_y = inputs.viewport.y;
 	const GLuint velocity_texture = inputs.surface_records, object_id_texture = inputs.object_ids;
 	const GLuint ao_weight_texture = inputs.surface_records;
@@ -383,8 +356,7 @@ AOResult AOResources::Evaluate(const AOInputs& inputs, const renderer_preferred_
 
 	if (FramebufferLargerThan(ao_depth_framebuffer, ao_width, ao_height) ||
 		FramebufferLargerThan(ao_framebuffer, ao_width, ao_height) ||
-		FramebufferLargerThan(ao_blur_framebuffer, ao_width, ao_height) ||
-		FramebufferLargerThan(suppression_framebuffer, ao_width, ao_height))
+		FramebufferLargerThan(ao_blur_framebuffer, ao_width, ao_height))
 	{
 		glFinish();
 		DestroyFramebuffers();
@@ -422,7 +394,6 @@ AOResult AOResources::Evaluate(const AOInputs& inputs, const renderer_preferred_
 	glGetBooleanv(GL_COLOR_WRITEMASK, color_mask);
 
 	const GLuint depth_texture = inputs.depth;
-	const GLuint scene_color_texture = inputs.highlight_color;
 	//AO reads resolved 2D inputs. Hardware resolves are much cheaper than
 	//doing source-block * sample-count loops in the AO/suppression shaders.
 	int input_samples = 0;
@@ -702,51 +673,11 @@ AOResult AOResources::Evaluate(const AOInputs& inputs, const renderer_preferred_
 	}
 
 	//-------------------------------------------------------------------------
-	// Pass 5: Build the final AO suppression mask.
+	// Publish the estimate; material lighting owns eligibility/highlights.
 	//-------------------------------------------------------------------------
-	GLuint final_suppression_mask = 0;
-	const GLuint ao_exclusion_mask_texture = 0; // eligibility belongs to surface radiance, not a canvas mask
-	bool bloom_mask_enabled = pref_state.bloom_enabled && scene_color_texture != 0;
-	if (suppression_shader.Handle() != 0 && (ao_exclusion_mask_texture != 0 || bloom_mask_enabled))
-	{
-		PERF_MARKER_SCOPE("AO.Suppression");
-
-		suppression_framebuffer.Update(ao_width, ao_height, GL_R8, GL_RED, GL_UNSIGNED_BYTE);
-		suppression_shader.Use();
-		if (suppression_has_mask != -1)
-			glUniform1i(suppression_has_mask, ao_exclusion_mask_texture != 0 ? 1 : 0);
-		if (suppression_use_bloom_mask != -1)
-			glUniform1i(suppression_use_bloom_mask, bloom_mask_enabled ? 1 : 0);
-		if (suppression_source_samples != -1)
-			glUniform1i(suppression_source_samples, input_samples);
-		if (suppression_input_screen_size != -1)
-			glUniform2f(suppression_input_screen_size, (float)source_width, (float)source_height);
-		if (suppression_ao_screen_size != -1)
-			glUniform2f(suppression_ao_screen_size, (float)ao_width, (float)ao_height);
-		if (suppression_source_visible_origin != -1)
-			glUniform2f(suppression_source_visible_origin, (float)source_visible_x, (float)source_visible_y);
-		if (suppression_source_visible_size != -1)
-			glUniform2f(suppression_source_visible_size, (float)source_visible_w, (float)source_visible_h);
-		if (suppression_use_source_visible_rect != -1)
-			glUniform1i(suppression_use_source_visible_rect, use_source_visible_rect ? 1 : 0);
-		float display_gamma = pref_state.gamma != 0.0f ? 1.0f / pref_state.gamma : 1.0f;
-		if (suppression_gamma != -1)
-			glUniform1f(suppression_gamma, display_gamma);
-		if (suppression_bloom_threshold != -1)
-			glUniform1f(suppression_bloom_threshold, Clamp01(pref_state.bloom_threshold));
-		rend_ClearBoundTextures();
-		if (ao_exclusion_mask_texture != 0)
-			GL_BindFramebufferTexture(ao_exclusion_mask_texture, 0, GL_NEAREST);
-		if (scene_color_texture != 0)
-			GL_BindFramebufferTexture(scene_color_texture, 1, GL_LINEAR);
-		AODrawFullscreen(suppression_framebuffer.Handle(), ao_width, ao_height);
-		GL4PerfGpuAOMark(GL4_GPU_AO_AFTER_SUPPRESSION);
-		final_suppression_mask = suppression_framebuffer.ColorTextureForRead();
-	}
 	const bool debug_display_ao_only =
 		(pref_state.ao_debug_preview || pref_state.ao_temporal_debug_preview);
 	result.ao_texture = apply_source->ColorTextureForRead();
-	result.suppression_texture = debug_display_ao_only ? 0 : final_suppression_mask;
 	result.debug_display = debug_display_ao_only;
 	result.debug_channel = pref_state.ao_temporal_debug_preview ? 2 : 0;
 

@@ -28,6 +28,8 @@
 #include <vector>
 #include "gameloop.h"
 #include "SceneExtraction.h"
+#include "SceneAutomap.h"
+#include "TelCom.h"
 #include "SceneModuleContext.h"
 #include "SceneFeedback.h"
 #include "../renderer/SceneLighting.h"
@@ -689,10 +691,21 @@ static void BeginAutomatedCaptureFrame()
 bool AutomatedCapturePending() { return Automated_capture.capture_pending; }
 int AutomatedCaptureFrameIndex() { return Automated_capture.gameplay_frame_active ? Automated_capture.gameplay_frame : -1; }
 
-static void CaptureAutomatedFrameIfRequested()
+void CaptureAutomatedFrameIfRequested()
 {
 	if (!Automated_capture.capture_pending)
 		return;
+	static bool capturing_ui = false;
+	if (!capturing_ui && SceneGeometryInspection() && FindArg("-scene-automap-telcom-probe")) {
+		// Complete the gameplay frame before entering the real modal presenter.
+		// TelCom captures its own fully composed frame before its swap.
+		rend_Flip();
+		capturing_ui = true;
+		TelComShow(TS_MAP,true,false);
+		capturing_ui = false;
+		if (Automated_capture.capture_pending) Error("Automap TelCom fixture did not capture its presentation");
+		return;
+	}
 
 	Automated_capture.capture_pending = false;
 	StopTime();
@@ -3029,7 +3042,8 @@ void GameRenderFrame(void)
 
 		// Publish once. Every world view below sees this same owned scene, not
 		// a second traversal of mutable simulation state.
-		const auto presentation = PrepareGamePresentation();
+		const auto presentation = SceneGeometryInspection() && FindArg("-scene-automap-probe") ?
+			PrepareAutomapInspection() : PrepareGamePresentation();
 		const ModuleSceneScope module_scene(presentation);
 		SceneFeedbackTransaction feedback(*presentation);
 

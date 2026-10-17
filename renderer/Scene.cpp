@@ -11,10 +11,41 @@
 #include <unordered_set>
 #include <utility>
 #include <set>
+#include <map>
 #include <tuple>
 #include <algorithm>
 
 namespace d3scene {
+void RoomSurfaces::seal(AssetId asset,uint32_t part,bool palette) {
+    // Publication is a bulk operation. Reuse contiguous scratch storage rather
+    // than allocating one tree node per image/reflection on the render thread.
+    // Published tables own copies; subsequent calls cannot mutate held frames.
+    thread_local std::vector<ImageDependency> unique;
+    thread_local std::vector<uint64_t> reflections;
+    unique.clear(); reflections.clear();
+    const auto image = [&](ImageDependency dependency) {
+        const auto key = std::make_pair(dependency.handle,dependency.baked);
+        const auto at = std::lower_bound(unique.begin(),unique.end(),key,
+            [](const ImageDependency& a,const std::pair<int,bool>& b) { return std::make_pair(a.handle,a.baked) < b; });
+        if (at == unique.end() || std::make_pair(at->handle,at->baked) != key) unique.insert(at,std::move(dependency));
+    };
+    required_light_count_ = 0;
+    for (const auto& surface : read()) {
+        for (auto light : surface.light_indices) required_light_count_ = (std::max)(required_light_count_,uint64_t(light)+1);
+        if (surface.reflection && surface.specular_strength > 0) reflections.push_back(surface.reflection->id().revision);
+        if (surface.bitmap >= 0) image({surface.bitmap,false,surface.color_image,false});
+        if (surface.specular_bitmap >= 0) image({surface.specular_bitmap,false,surface.specular_image,false});
+        if (surface.lightmap_bitmap >= 0) image({surface.lightmap_bitmap,true,surface.baked_image,surface.lightmap_wrap});
+    }
+    images_ = std::make_shared<const std::vector<ImageDependency>>(unique);
+    // Drop scratch references after copying so the scratch capacity does not
+    // extend the lifetime of image assets from an unloaded level.
+    unique.clear();
+    publication_ = asset; publication_part_ = part; publication_palette_ = palette;
+    std::sort(reflections.begin(),reflections.end());
+    reflections.erase(std::unique(reflections.begin(),reflections.end()),reflections.end());
+    reflections_ = std::make_shared<const std::vector<uint64_t>>(reflections.begin(),reflections.end());
+}
 namespace {
 std::atomic<uint64_t> NextLifetime{1};
 bool finite(Vec3 v) { return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z); }
@@ -91,6 +122,17 @@ Transform compose(const Transform& parent, const Transform& local) {
     return {transformPoint(parent,local.position),transformDirection(parent,local.right),
         transformDirection(parent,local.up),transformDirection(parent,local.forward)};
 }
+Bounds transformBounds(const Transform& transform,const Bounds& local) {
+    Bounds result;
+    result.minimum = result.maximum = transformPoint(transform,local.minimum);
+    for (unsigned corner = 1; corner < 8; ++corner) {
+        const auto point = transformPoint(transform,{corner&1 ? local.maximum.x : local.minimum.x,
+            corner&2 ? local.maximum.y : local.minimum.y,corner&4 ? local.maximum.z : local.minimum.z});
+        result.minimum = {std::min(result.minimum.x,point.x),std::min(result.minimum.y,point.y),std::min(result.minimum.z,point.z)};
+        result.maximum = {std::max(result.maximum.x,point.x),std::max(result.maximum.y,point.y),std::max(result.maximum.z,point.z)};
+    }
+    return result;
+}
 bool operator!=(AssetId a, AssetId b) { return !(a == b); }
 bool operator==(const MeshGeometry& a, const MeshGeometry& b) {
     if (a.raster_offsets.size() != b.raster_offsets.size()) return false;
@@ -141,6 +183,7 @@ void SceneAssets::reset() {
     terrain_.reset();
     terrain_occlusion_.reset();
     meshes_.clear();
+    quad_meshes_.fill({});
     fog_.reset();
     lifetime_ = lifetime;
     revision_ = 0;
@@ -215,7 +258,29 @@ bool operator==(const ModelGeometry& a, const ModelGeometry& b) {
     }
     return true;
 }
-ModelAsset::ModelAsset(AssetId id, ModelGeometry geometry) : id_(id), geometry_(std::move(geometry)) {}
+ModelAsset::ModelAsset(AssetId id, ModelGeometry geometry) : id_(id), geometry_(std::move(geometry)) {
+    for (auto& part : geometry_.parts) {
+        if (!part.geometry.vertices.empty()) {
+            part.local_bounds.minimum = part.local_bounds.maximum = part.geometry.vertices.front();
+            for (const auto p : part.geometry.vertices) {
+                auto& b = part.local_bounds;
+                b.minimum = {std::min(b.minimum.x,p.x),std::min(b.minimum.y,p.y),std::min(b.minimum.z,p.z)};
+                b.maximum = {std::max(b.maximum.x,p.x),std::max(b.maximum.y,p.y),std::max(b.maximum.z,p.z)};
+            }
+        }
+        std::map<std::tuple<int,float,float,float,bool>,uint32_t> palette;
+        part.surface_for_polygon.clear(); part.surface_polygons.clear();
+        for (size_t face = 0; face < part.geometry.polygons.size(); ++face) {
+            bool fractional = false;
+            for (const auto& corner : part.geometry.polygons[face].corners) fractional = fractional || corner.alpha < 255;
+            const auto color = part.polygon_colors[face];
+            const auto key = std::make_tuple(part.polygon_materials[face],color.x,color.y,color.z,fractional);
+            const auto inserted = palette.emplace(key,uint32_t(part.surface_polygons.size()));
+            if (inserted.second) part.surface_polygons.push_back(uint32_t(face));
+            part.surface_for_polygon.push_back(inserted.first->second);
+        }
+    }
+}
 ModelAssetRef SceneAssets::model(uint32_t slot) const {
     return slot < models_.size() ? models_[slot] : nullptr;
 }
@@ -255,6 +320,12 @@ void SceneAssets::removeModel(uint32_t slot) {
     if (slot < models_.size()) models_[slot].reset();
 }
 
+MeshAssetRef SceneAssets::quadMesh(uint32_t count) {
+    if (!count || count > quad_meshes_.size()) throw std::invalid_argument("Invalid canonical quad batch size");
+    auto& asset = quad_meshes_[count-1];
+    if (!asset) asset = publishMesh(count == 1 ? 2 : 256+count,unitQuadBatch(count));
+    return asset;
+}
 MeshAssetRef SceneAssets::publishMesh(uint32_t slot,MeshGeometry geometry) {
     validateGeometry(geometry);
     if (slot < meshes_.size() && meshes_[slot] && meshes_[slot]->geometry() == geometry) return meshes_[slot];
@@ -287,6 +358,12 @@ const ForegroundLayer* Presentation::foreground(uint64_t identity) const {
 }
 
 PresentationRef Presentation::freeze(const FrameData& data) {
+    return complete(data);
+}
+PresentationRef Presentation::publish(FrameData&& data) {
+    return complete(std::move(data));
+}
+PresentationRef Presentation::complete(FrameData data) {
     require(data.sequence != 0 && data.scene_lifetime != 0, "Unidentified presentation frame");
     require(std::isfinite(data.simulation_time) && std::isfinite(data.delta_time) && data.delta_time >= 0,
         "Invalid presentation clock");
@@ -355,6 +432,12 @@ PresentationRef Presentation::freeze(const FrameData& data) {
             "Raster markers require a background layer");
         require(finite(mesh.world) && finite(mesh.camera_translation),"Invalid generic mesh transform");
         require(std::isfinite(mesh.eye_distance) && mesh.eye_distance >= 0,"Invalid view-relative mesh distance");
+        require(std::isfinite(mesh.maximum_depth) && mesh.maximum_depth >= 0,"Invalid mesh detail depth");
+        if (mesh.maximum_depth > 0) {
+            const auto& b = mesh.depth_reference;
+            require(finite(b.minimum) && finite(b.maximum) && b.minimum.x <= b.maximum.x &&
+                b.minimum.y <= b.maximum.y && b.minimum.z <= b.maximum.z,"Invalid mesh detail reference volume");
+        }
         require(std::isfinite(mesh.size_fade_range.x) && std::isfinite(mesh.size_fade_range.y) &&
             ((mesh.size_fade_range.x == 0 && mesh.size_fade_range.y == 0) ||
                 (mesh.size_fade_range.x >= 0 && mesh.size_fade_range.y > mesh.size_fade_range.x)),"Invalid mesh size fade range");
@@ -377,13 +460,16 @@ PresentationRef Presentation::freeze(const FrameData& data) {
             for (const auto& surface : data.terrain.patches[patch]) { validateSurface(surface); validateIndices(surface); }
         }
     } else require(data.terrain.materials.empty() && data.terrain.patches.empty(),"Terrain materials have no grid");
-    std::unordered_map<int32_t,const RoomState*> rooms;
+    std::unordered_map<int32_t,size_t> rooms;
+    rooms.reserve(data.rooms.size());
     for (const auto& room : data.rooms) {
-        require(room.number >= 0 && rooms.emplace(room.number,&room).second, "Duplicate or invalid scene room");
+        require(room.number >= 0 && rooms.emplace(room.number,size_t(&room-data.rooms.data())).second, "Duplicate or invalid scene room");
         require(room.asset && room.asset->id().lifetime == data.scene_lifetime &&
             room.asset->id().slot == static_cast<uint32_t>(room.number), "Room asset identity mismatch");
         require(room.surfaces.size() == room.asset->geometry().polygons.size(), "Incomplete room surface bindings");
         validatePlanarSurfaces(room.asset->geometry(),room.mirrors);
+        const bool retained = room.surfaces.publishedFor(room.asset->id()) && room.mirrors.empty();
+        if (!retained) {
         for (const auto& surface : room.surfaces) validateSurface(surface);
         for (const auto& surface : room.surfaces) validateIndices(surface);
         for (size_t face = 0; face < room.surfaces.size(); ++face) {
@@ -395,6 +481,14 @@ PresentationRef Presentation::freeze(const FrameData& data) {
                 reflection->data().field_corners.size() == room.asset->geometry().polygons[face].corners.size(),
                 "Incomplete room reflection field");
         }
+        } else {
+            // Static asset ownership was validated when this table was sealed.
+            // Explicit authored emitter indices still belong to this frame.
+            require(room.surfaces.requiredLightCount() <= data.lights.size(),"Surface references missing emitter");
+        }
+        require(room.light_influences.empty() || room.light_influences.size() == room.surfaces.size(),"Incomplete room influences");
+        for (const auto& indices : room.light_influences) for (auto index : indices)
+            require(index < data.lights.size(),"Room references missing emitter");
         require(finite(room.fog_color) && std::isfinite(room.fog_depth), "Invalid room fog");
         require(std::isfinite(room.light_scalar) && room.light_scalar >= 0, "Invalid room illumination");
         for (const auto& portal : room.portals)
@@ -405,12 +499,13 @@ PresentationRef Presentation::freeze(const FrameData& data) {
         require(mesh.receiver_polygon >= -1,"Invalid mesh receiver polygon");
         if (mesh.receiver_polygon < 0) continue;
         const auto room = rooms.find(mesh.room);
-        require(room != rooms.end() && static_cast<size_t>(mesh.receiver_polygon) < room->second->surfaces.size() &&
+        require(room != rooms.end() && static_cast<size_t>(mesh.receiver_polygon) < data.rooms[room->second].surfaces.size() &&
             mesh.collection == 0 && mesh.surface.layer == RenderLayer::World,"Mesh receiver is not a world surface");
     }
-    std::unordered_map<uint32_t,const ObjectState*> objects;
+    std::unordered_map<uint32_t,size_t> objects;
+    objects.reserve(data.objects.size());
     for (const auto& object : data.objects) {
-        require(objects.emplace(object.handle,&object).second, "Duplicate object lifetime in scene");
+        require(objects.emplace(object.handle,size_t(&object-data.objects.data())).second, "Duplicate object lifetime in scene");
         require(finite(object.current) && finite(object.previous) && std::isfinite(object.radius) && object.radius >= 0,
             "Invalid object transform or radius");
         if (data.observation_inputs_prepared && object.observation_eligible) {
@@ -421,12 +516,13 @@ PresentationRef Presentation::freeze(const FrameData& data) {
                 "Invalid simulation observation volume");
         }
     }
-    std::unordered_map<uint64_t,const ModelInstance*> model_instances;
+    std::unordered_map<uint64_t,size_t> model_instances;
+    model_instances.reserve(data.model_instances.size());
     for (const auto& object : data.objects)
         for (const auto hidden : object.camera_hidden_objects)
             require(objects.count(hidden) != 0,"Camera rig references a missing object allocation");
     for (const auto& object : data.model_instances) {
-        require(object.identity && model_instances.emplace(object.identity,&object).second,"Duplicate or absent model instance identity");
+        require(object.identity && model_instances.emplace(object.identity,size_t(&object-data.model_instances.data())).second,"Duplicate or absent model instance identity");
         require(!object.has_owner || objects.count(object.owner),"Model owner is not part of this presentation");
         require(finite(object.current) && finite(object.previous),"Invalid model placement");
         require(!object.models.empty(),"Model instance has no variants");
@@ -445,16 +541,22 @@ PresentationRef Presentation::freeze(const FrameData& data) {
                     require(positions->empty() || positions->size() == vertex_count,"Incomplete prepared mesh positions");
                     for (const auto v : *positions) require(finite(v),"Non-finite prepared mesh position");
                 }
-                require(part.surfaces.size() == model.asset->geometry().parts[i].geometry.polygons.size(),
+                const auto& asset_part = model.asset->geometry().parts[i];
+                require(part.surfaces.size() == (part.material_palette ? asset_part.surface_polygons.size() : asset_part.geometry.polygons.size()),
                     "Incomplete model instance materials");
+                require(part.polygon_lights.empty() || part.polygon_lights.size() == asset_part.geometry.polygons.size(),"Incomplete model light assignment");
+                for (const auto& lights : part.polygon_lights) for (auto light : lights) require(light < data.lights.size(),"Missing model light");
+                if (!part.surfaces.publishedFor(model.asset->id(),uint32_t(i),part.material_palette)) {
                 for (const auto& surface : part.surfaces) validateSurface(surface);
                 for (const auto& surface : part.surfaces) validateIndices(surface);
                 for (size_t face = 0; face < part.surfaces.size(); ++face) {
                     const auto& uv = part.surfaces[face].baked_uvs;
-                    require(uv.empty() || uv.size() == model.asset->geometry().parts[i].geometry.polygons[face].corners.size(),
+                    const auto polygon = part.material_palette ? asset_part.surface_polygons[face] : uint32_t(face);
+                    require((!part.material_palette || uv.empty()) && (uv.empty() || uv.size() == asset_part.geometry.polygons[polygon].corners.size()),
                         "Incomplete instance lightmap UVs");
                     for (const auto& corner : uv) require(std::isfinite(corner.x) && std::isfinite(corner.y), "Invalid instance lightmap UVs");
                 }
+                } else require(part.surfaces.requiredLightCount() <= data.lights.size(),"Surface references missing emitter");
             }
         }
     }
@@ -462,11 +564,29 @@ PresentationRef Presentation::freeze(const FrameData& data) {
         require(!mesh.has_owner || objects.count(mesh.owner),"Mesh owner is not part of this presentation");
         require(mesh.model_variant >= -1 && (mesh.model_instance == 0 ? mesh.model_variant == -1 :
             (model_instances.count(mesh.model_instance) && mesh.model_variant >= 0 &&
-                size_t(mesh.model_variant) < model_instances.at(mesh.model_instance)->models.size() &&
-                mesh.collection == model_instances.at(mesh.model_instance)->collection)),
+                size_t(mesh.model_variant) < data.model_instances[model_instances.at(mesh.model_instance)].models.size() &&
+                mesh.collection == data.model_instances[model_instances.at(mesh.model_instance)].collection)),
             "Model attachment references an absent instance variant");
     }
-    std::shared_ptr<Presentation> prepared(new Presentation(data));
+    std::shared_ptr<Presentation> prepared(new Presentation(std::move(data)));
+    prepared->room_indices_ = std::move(rooms);
+    prepared->object_indices_ = std::move(objects);
+    prepared->model_indices_ = std::move(model_instances);
+    auto& surface_count = prepared->data_.compiled_surface_count;
+    surface_count = 0;
+    const auto index_surface = [&](SurfaceBinding& surface) { surface.compiled_index = surface_count++; };
+    for (auto& room : prepared->data_.rooms) {
+        room.surface_base = surface_count;
+        surface_count += static_cast<uint32_t>(room.surfaces.size());
+    }
+    for (auto& surface : prepared->data_.terrain.materials) index_surface(surface);
+    for (auto& patch : prepared->data_.terrain.patches) for (auto& surface : patch) index_surface(surface);
+    for (auto& mesh : prepared->data_.meshes) index_surface(mesh.surface);
+    for (auto& object : prepared->data_.model_instances) for (auto& model : object.models)
+        for (auto& part : model.parts) {
+            part.surface_base = surface_count;
+            surface_count += uint32_t(part.surfaces.size());
+        }
     std::sort(prepared->data_.foregrounds.begin(),prepared->data_.foregrounds.end(),
         [](const PreparedForeground& a,const PreparedForeground& b) {
             return a.phase != b.phase ? a.phase < b.phase : a.order < b.order;
@@ -483,6 +603,7 @@ PresentationRef Presentation::freeze(const FrameData& data) {
     for (auto& patch : prepared->data_.terrain.patches) for (auto& surface : patch)
         surface.material = compileMaterialPolicy(surface,MeshPolygon{});
     for (auto& room : prepared->data_.rooms) {
+        if (room.surfaces.publishedFor(room.asset->id()) && room.mirrors.empty()) continue;
         for (size_t face = 0; face < room.surfaces.size(); ++face)
             room.surfaces[face].material = compileMaterialPolicy(room.surfaces[face],room.asset->geometry().polygons[face]);
         for (size_t group = 0; group < room.mirrors.size(); ++group) for (auto face : room.mirrors[group].polygons) {
@@ -496,6 +617,7 @@ PresentationRef Presentation::freeze(const FrameData& data) {
             policy.blend = BlendMode::Solid; policy.depth = DepthMode::ReadWrite;
             policy.texture_alpha = TextureAlpha::Continuous; policy.alpha_cutoff = 0;
         }
+        room.surfaces.seal(room.asset->id());
     }
     for (auto& object : prepared->data_.model_instances) {
         object.has_render_bounds = false;
@@ -514,7 +636,10 @@ PresentationRef Presentation::freeze(const FrameData& data) {
                 const auto& positions = pose.vertices.empty() ? geometry.vertices : pose.vertices;
                 const auto world = compose(object.current,pose.current);
                 if (pose.draw && !geometry.polygons.empty()) {
-                    for (const auto vertex : positions) include(pose.render_bounds,pose.has_render_bounds,transformPoint(world,vertex));
+                    if (pose.vertices.empty()) {
+                        pose.render_bounds = transformBounds(world,model.asset->geometry().parts[part].local_bounds);
+                        pose.has_render_bounds = true;
+                    } else for (const auto vertex : positions) include(pose.render_bounds,pose.has_render_bounds,transformPoint(world,vertex));
                     if (pose.has_render_bounds) {
                         include(model.render_bounds,model.has_render_bounds,pose.render_bounds.minimum);
                         include(model.render_bounds,model.has_render_bounds,pose.render_bounds.maximum);
@@ -522,8 +647,13 @@ PresentationRef Presentation::freeze(const FrameData& data) {
                         include(object.render_bounds,object.has_render_bounds,pose.render_bounds.maximum);
                     }
                 }
-                for (size_t face = 0; face < pose.surfaces.size(); ++face)
-                    pose.surfaces[face].material = compileMaterialPolicy(pose.surfaces[face],geometry.polygons[face]);
+                if (!pose.surfaces.publishedFor(model.asset->id(),uint32_t(part),pose.material_palette)) {
+                for (size_t face = 0; face < pose.surfaces.size(); ++face) {
+                    const auto polygon = pose.material_palette ? model.asset->geometry().parts[part].surface_polygons[face] : uint32_t(face);
+                    pose.surfaces[face].material = compileMaterialPolicy(pose.surfaces[face],geometry.polygons[polygon]);
+                }
+                pose.surfaces.seal(model.asset->id(),uint32_t(part),pose.material_palette);
+                }
             }
         }
     }

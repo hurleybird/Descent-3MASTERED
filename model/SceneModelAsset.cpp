@@ -94,3 +94,53 @@ d3scene::ModelGeometry CompileSceneModelAsset(const poly_model& model, size_t* r
     }
     return geometry;
 }
+bool MatchesSceneModelAsset(const d3scene::ModelGeometry& geometry,const poly_model& model) {
+    if (model.n_models < 0 || model.n_textures < 0 || geometry.parts.size() != size_t(model.n_models) ||
+        geometry.textures.size() != size_t(model.n_textures) || (model.n_models && !model.submodel)) return false;
+    const auto same = [](d3scene::Vec3 a,const vector& b) { return a.x == b.x && a.y == b.y && a.z == b.z; };
+    for (int i = 0; i < model.n_textures; ++i) if (geometry.textures[i] != model.textures[i]) return false;
+    for (int i = 0; i < model.n_models; ++i) {
+        const auto& source = model.submodel[i]; const auto& part = geometry.parts[i]; const auto& mesh = part.geometry;
+        if (source.nverts < 0 || source.num_faces < 0 || mesh.vertices.size() != size_t(source.nverts) ||
+            mesh.polygons.size() != size_t(source.num_faces) || part.parent != source.parent ||
+            part.authored_flags != source.flags || !same(part.offset,source.offset) ||
+            (source.nverts && !source.verts) || (source.num_faces && !source.faces)) return false;
+        for (int v = 0; v < source.nverts; ++v) {
+            if (!same(mesh.vertices[v],source.verts[v])) return false;
+            auto normal = source.vertnorms ? value(source.vertnorms[v]) : d3scene::Vec3{};
+            const float length2 = normal.x*normal.x+normal.y*normal.y+normal.z*normal.z;
+            if (!std::isfinite(length2) || length2 <= 1.e-12f) {
+                normal = {};
+                for (int f = 0; f < source.num_faces; ++f) {
+                    const auto& face = source.faces[f];
+                    if (!face.vertnums) return false;
+                    for (int c = 0; c < face.nverts; ++c) if (face.vertnums[c] == v) {
+                        normal.x += face.normal.x; normal.y += face.normal.y; normal.z += face.normal.z; break;
+                    }
+                }
+                const float length = std::sqrt(normal.x*normal.x+normal.y*normal.y+normal.z*normal.z);
+                if (length > 1.e-6f && std::isfinite(length)) { normal.x /= length; normal.y /= length; normal.z /= length; }
+                else normal = {};
+            }
+            const auto stored = mesh.vertex_normals[v];
+            if (normal.x != stored.x || normal.y != stored.y || normal.z != stored.z) return false;
+        }
+        for (int f = 0; f < source.num_faces; ++f) {
+            const auto& face = source.faces[f]; const auto& polygon = mesh.polygons[f];
+            if (face.nverts < 3 || !face.vertnums || !face.u || !face.v || polygon.corners.size() != size_t(face.nverts) ||
+                !same(polygon.normal,face.normal) || part.polygon_materials[f] != face.texnum) return false;
+            const auto color = part.polygon_colors[f];
+            const d3scene::Vec3 expected = face.texnum < 0 ? d3scene::Vec3{GR_COLOR_RED(face.color)/255.f,
+                GR_COLOR_GREEN(face.color)/255.f,GR_COLOR_BLUE(face.color)/255.f} : d3scene::Vec3{1,1,1};
+            if (color.x != expected.x || color.y != expected.y || color.z != expected.z) return false;
+            for (int c = 0; c < face.nverts; ++c) {
+                const int vertex = face.vertnums[c]; const auto& corner = polygon.corners[c];
+                if (vertex < 0 || vertex >= source.nverts) return false;
+                const float alpha = source.alpha ? source.alpha[vertex] : 1.f;
+                if (!std::isfinite(alpha) || corner.vertex != uint32_t(vertex) || corner.u != face.u[c] || corner.v != face.v[c] ||
+                    corner.alpha != uint8_t(std::max(0.f,std::min(alpha,1.f))*255.f)) return false;
+            }
+        }
+    }
+    return true;
+}

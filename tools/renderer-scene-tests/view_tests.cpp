@@ -911,9 +911,15 @@ int runSceneViewTests() {
     try { d3scene::buildViewPasses(*scheduled_frame,scheduled_visibility,{false,true}); }
     catch (const std::invalid_argument&) { rejected_missing_depth = true; }
     check(rejected_missing_depth,"Occlusion pass accepted a missing opaque scene dependency");
-    check(radiance_passes.back().kind == d3scene::ViewPassKind::CompositeWorldOcclusion &&
-        radiance_passes[radiance_passes.size()-2].kind == d3scene::ViewPassKind::LateWorld,
-        "Eligible radiance was exported before translucency attenuated it");
+    const auto prepass = std::find_if(radiance_passes.begin(),radiance_passes.end(),[](const auto& pass) {
+        return pass.kind == d3scene::ViewPassKind::DepthSurface;
+    });
+    check(prepass != radiance_passes.end() && std::distance(prepass,radiance_passes.end()) >= 4 &&
+        (prepass+1)->kind == d3scene::ViewPassKind::ExportOpaqueScene &&
+        (prepass+2)->kind == d3scene::ViewPassKind::EvaluateWorldOcclusion &&
+        (prepass+3)->kind == d3scene::ViewPassKind::OpaqueWorld &&
+        radiance_passes.back().kind == d3scene::ViewPassKind::LateWorld,
+        "Occlusion must consume surface depth before lighting, not revisit completed translucent color");
     const d3scene::RadianceSample opaque{{.6f,.7f,.8f},{.3f,.2f,.1f}}; // the remainder is fog/emissive
     for (const auto blend : {d3scene::BlendMode::Alpha,d3scene::BlendMode::Additive,d3scene::BlendMode::Multiply}) {
         const d3scene::RadianceSample source{{.2f,.5f,.9f},{}};

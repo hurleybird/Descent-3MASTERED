@@ -260,7 +260,7 @@ static float ScorchFadeStartDistance()
 void PrepareGameScorches(d3scene::FrameData& frame)
 {
     if (!Detail_settings.Scorches_enabled || Scorch_start < 0 || Scorch_end < 0) return;
-    const auto quad = d3scene::assets().publishMesh(2,d3scene::unitBillboardQuad());
+    const auto quad = d3scene::assets().quadMesh();
     const size_t start = frame.meshes.size();
     for (int index = Scorch_start, visited = 0; visited < MAX_SCORCHES; ++visited, index = (index+1)%MAX_SCORCHES) {
         const auto& source = Scorches[index];

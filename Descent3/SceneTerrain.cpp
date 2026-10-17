@@ -204,7 +204,7 @@ void PrepareGameSky(d3scene::FrameData& frame) {
         frame.meshes.push_back(std::move(batch));
     }
     if (Terrain_sky.flags & TF_SATELLITES) {
-        const auto quad = d3scene::assets().publishMesh(2,d3scene::unitBillboardQuad());
+        const auto quad = d3scene::assets().quadMesh();
         for (unsigned index = 0; index < Terrain_sky.num_satellites && index < MAX_SATELLITES; ++index) {
             const int texture = Terrain_sky.satellite_texture[index];
             if (texture < 0 || texture >= MAX_TEXTURES || !GameTextures[texture].used) continue;

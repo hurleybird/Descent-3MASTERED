@@ -136,12 +136,19 @@ class GL4Renderer : public IRenderer
 	uint64_t scene_asset_lifetime = 0;
 	ShaderProgram scene_shader;
 	GLuint scene_light_buffer = 0, scene_light_texture = 0;
+	GLuint scene_draw_buffer = 0;
+	struct SceneDrawPacket { const d3scene::SurfaceBinding* binding; GLuint vao; ElementRange range; };
+	std::vector<SceneDrawPacket> scene_draw_packets;
+	std::vector<float> scene_draw_records;
 	GLuint scene_influence_buffer = 0, scene_influence_texture = 0;
 	GLuint scene_uv_buffer = 0, scene_uv_texture = 0;
 	GLuint scene_position_buffer = 0, scene_position_texture = 0;
 	GLuint scene_reflection_buffer = 0, scene_reflection_texture = 0;
-	std::unordered_map<const d3scene::SurfaceBinding*, ElementRange> scene_reflection_ranges, scene_normal_ranges;
-	std::unordered_map<const d3scene::SurfaceBinding*, ElementRange> scene_field_ranges;
+	struct SceneSurfaceRanges { ElementRange reflections, normals, field, lights, uv, texture_uv; };
+	std::vector<SceneSurfaceRanges> scene_surface_ranges;
+	struct SceneRoomBindings { d3scene::RoomSurfaces surfaces; std::vector<SceneSurfaceRanges> ranges; bool reusable = false; };
+	std::vector<SceneRoomBindings> scene_room_bindings;
+	std::unordered_map<const d3scene::PreparedModelPart*,std::vector<ElementRange>> scene_model_influences;
 	struct SceneReflectionRanges { ElementRange sources, normals, field; };
 	std::unordered_map<uint64_t, SceneReflectionRanges> scene_reflection_assets;
 	std::vector<uint64_t> scene_reflection_revisions;
@@ -154,12 +161,9 @@ class GL4Renderer : public IRenderer
 	};
 	std::map<std::pair<d3scene::ViewKind,uint64_t>,SceneDepthSnapshot> scene_depth_snapshots;
 	uint64_t scene_frame_sequence = 0;
-	std::unordered_map<const d3scene::SurfaceBinding*, ElementRange> scene_light_ranges;
-	std::unordered_map<const d3scene::SurfaceBinding*, ElementRange> scene_uv_ranges;
-	std::unordered_map<const d3scene::SurfaceBinding*, ElementRange> scene_texture_uv_ranges;
 	std::unordered_map<const void*, ElementRange> scene_position_ranges;
 	void UploadSceneFrame(const d3scene::Presentation&);
-	struct SceneImageGpu { d3scene::AssetId id; GLuint texture = 0; };
+	struct SceneImageGpu { d3scene::AssetId id; GLuint texture = 0; int sampling = -1; float anisotropy = -1; };
 	std::unordered_map<uint32_t,SceneImageGpu> scene_images;
 	struct SceneViewImageGpu {
 		Framebuffer buffer;
@@ -191,12 +195,11 @@ class GL4Renderer : public IRenderer
 	Framebuffer framebuffers[NUM_GL4_FBOS];
 	Framebuffer resolved_framebuffer;
 	Framebuffer downscale_framebuffer;
-	// Produced only at the scheduled opaque boundary. Color is needed for
-	// authored AO highlight protection; depth also serves motion and bloom.
+	// Depth shared by AO, motion and bloom; no redundant opaque color export.
 	struct OpaqueSceneImages {
-		Framebuffer images, reduction;
-		bool ready = false, has_color = false;
-		void Destroy() { images.Destroy(); reduction.Destroy(); ready = has_color = false; }
+		DepthFramebuffer images;
+		bool ready = false;
+		void Destroy() { images.Destroy(); ready = false; }
 	} opaque_scene;
 	Framebuffer post_present_framebuffer;
 	Framebuffer post_composite_framebuffer;
@@ -252,7 +255,7 @@ class GL4Renderer : public IRenderer
 	ShaderProgram fontshader;
 	ShaderProgram motionvectordebugshader;
 	ShaderProgram motionblurshader;
-	ShaderProgram ao_compositeshader;
+	ShaderProgram scene_ao_debug_shader;
 	ShaderProgram roomfogentryshader;
 	BloomResources bloom;
 	AOResources ao;
@@ -315,17 +318,6 @@ class GL4Renderer : public IRenderer
 	GLint motionblur_has_static_reconstruction = -1;
 	GLint motionblur_has_dynamic_velocity = -1;
 	GLint motionblur_player_translation_delta = -1;
-	GLint ao_composite_final_source = -1;
-	GLint ao_composite_scene_source = -1;
-	GLint ao_composite_ao_source = -1;
-	GLint ao_composite_suppression_mask = -1;
-	GLint ao_composite_intensity = -1;
-	GLint ao_composite_has_suppression_mask = -1;
-	GLint ao_composite_debug_display = -1;
-	GLint ao_composite_debug_channel = -1;
-	GLint ao_composite_visible_origin = -1;
-	GLint ao_composite_visible_size = -1;
-	GLint ao_composite_use_visible_rect = -1;
 	GLfloat max_line_width = 1.0f;
 	GLfloat max_point_size = 1.0f;
 
@@ -624,19 +616,16 @@ private:
 	bool CurrentDrawWritesMotionObjectId() const;
 	bool CurrentDrawIsLateCockpitPixelMotionVectorDraw() const;
 	bool CurrentDrawUsesPixelMotionTarget() const;
-	void ApplyPixelMotionBlur(int supersampling_factor);
+	Framebuffer* ApplyPixelMotionBlur(Framebuffer* source,int supersampling_factor,
+		float color_uv_x,float color_uv_y,float color_uv_w,float color_uv_h);
 	void DrawMotionVectorDebugPreview(int supersampling_factor);
 	void UseSceneDrawBuffers();
-	void ExportOpaqueScene();
+	void ExportOpaqueScene(bool prepass_ready);
 	d3scene::ViewHistory scene_view_history;
 	bool scene_temporal_reset = true;
 	bool scene_sample_resolve_verified = false;
 	// AO changes surface radiance, never fog/emissive radiance. This image stays
 	// in lockstep with scene compositing instead of estimating it from color.
-	GLuint scene_ao_radiance_texture = 0;
-	uint32_t scene_ao_width = 0, scene_ao_height = 0, scene_ao_samples = 0;
-	void BeginSceneRadianceProduct();
-	void CompositeSceneRadiance(bool paused);
 	void DrawRoomFogMultiplyCorrection(GLenum primitive, GLint first, GLsizei count);
 	bool PrepareRoomFogEntryMap(const renderer_room_fog_state& state);
 
@@ -681,9 +670,8 @@ private:
 	bool ResolveCockpitLayerToPostComposite();
 	void ClearPostPresentAlpha();
 	void BlendPostCompositeOverPostPresent();
-	void CompositeWorldDisplay(Framebuffer* world_source,ColorFramebuffer* bloom_output,
+	void CompositeWorldDisplay(Framebuffer* world_source,Framebuffer* color_source,ColorFramebuffer* bloom_output,
 		GLuint protection_mask,float uv_x,float uv_y,float uv_w,float uv_h,float display_gamma);
-	void GammaCorrectPostPresent(float display_gamma);
 	void CompositePendingModalUI();
 	void BindScreenshotSourceForRead(int& read_x, int& read_y);
 	int SupersamplingFactor() const;

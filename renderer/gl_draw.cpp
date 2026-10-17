@@ -518,7 +518,8 @@ bool GL4Renderer::CurrentDrawUsesPixelMotionTarget() const
 	return CurrentDrawWritesPixelMotionVectors();
 }
 
-void GL4Renderer::ApplyPixelMotionBlur(int supersampling_factor)
+Framebuffer* GL4Renderer::ApplyPixelMotionBlur(Framebuffer* source,int supersampling_factor,
+    float color_uv_x,float color_uv_y,float color_uv_w,float color_uv_h)
 {
 	float scene_strength = std::max(0.0f,
 		std::min(OpenGL_preferred_state.pixel_motion_blur_strength, 4.0f));
@@ -531,31 +532,32 @@ void GL4Renderer::ApplyPixelMotionBlur(int supersampling_factor)
 	scene_strength *= afterburner_blur_scale;
 	legacy_object_strength *= afterburner_blur_scale;
 	if ((scene_strength <= 0.0f && legacy_object_strength <= 0.0f) ||
-		motionblurshader.Handle() == 0 || post_present_framebuffer.Handle() == 0 ||
+		motionblurshader.Handle() == 0 || !source || source->Handle() == 0 ||
 		!SceneSurfaceTargetEnabled() || !scene_motion.valid)
 	{
-		return;
+		return source;
 	}
 
 	if (surface_records.width == 0 || surface_records.height == 0)
-		return;
+		return source;
 	if (!opaque_scene.ready) Error("Motion composition requires the opaque scene depth product");
 	const GLuint depth_texture = opaque_scene.images.DepthTextureForRead();
 	const bool has_dynamic_velocity = motion_vectors_dirty;
 	if (scene_strength <= 0.0f && !has_dynamic_velocity)
-		return;
+		return source;
 	GLuint velocity_texture = has_dynamic_velocity ?
 		surface_records.TextureForRead(framebuffers[framebuffer_current_draw].Handle()) : 0;
 	GLuint object_id_texture = has_dynamic_velocity ?
 		surface_records.ObjectIdTextureForRead(framebuffers[framebuffer_current_draw].Handle()) : 0;
 	if (has_dynamic_velocity && (velocity_texture == 0 || object_id_texture == 0))
-		return;
+		return source;
 	if (supersampling_factor < 1)
 		supersampling_factor = 1;
 	const int framebuffer_logical_bottom_offset =
 		framebuffer_logical_height - OpenGL_state.screen_height - framebuffer_logical_offset_y;
-	const float source_width = (float)surface_records.width;
-	const float source_height = (float)surface_records.height;
+	supersampling_factor = surface_records.ReadWidth()/framebuffer_logical_width;
+	const float source_width = (float)surface_records.ReadWidth();
+	const float source_height = (float)surface_records.ReadHeight();
 	const float uv_origin_x = (float)(framebuffer_logical_offset_x * supersampling_factor) / source_width;
 	const float uv_origin_y = (float)(framebuffer_logical_bottom_offset * supersampling_factor) / source_height;
 	const float uv_scale_x = (float)(OpenGL_state.screen_width * supersampling_factor) / source_width;
@@ -563,7 +565,7 @@ void GL4Renderer::ApplyPixelMotionBlur(int supersampling_factor)
 
 	motion_blur_framebuffer.Update(OpenGL_state.screen_width, OpenGL_state.screen_height, 0);
 	if (motion_blur_framebuffer.Handle() == 0)
-		return;
+		return source;
 
 	motionblurshader.Use();
 	if (motionblur_color_source != -1)
@@ -629,7 +631,9 @@ void GL4Renderer::ApplyPixelMotionBlur(int supersampling_factor)
 	}
 
 	rend_ClearBoundTextures();
-	GL_BindFramebufferTexture(post_present_framebuffer.ColorTextureForRead(), 0, GL_LINEAR);
+	glUniform2f(motionblurshader.FindUniform("color_uv_origin"),color_uv_x,color_uv_y);
+	glUniform2f(motionblurshader.FindUniform("color_uv_scale"),color_uv_w,color_uv_h);
+	GL_BindFramebufferTexture(source->ColorTextureForRead(), 0, GL_LINEAR);
 	if (velocity_texture != 0)
 		GL_BindFramebufferTexture(velocity_texture, 1, GL_NEAREST);
 	if (depth_texture != 0)
@@ -638,7 +642,7 @@ void GL4Renderer::ApplyPixelMotionBlur(int supersampling_factor)
 		GL_BindFramebufferTexture(object_id_texture, 4, GL_NEAREST);
 	GL_DrawFramebufferQuad(motion_blur_framebuffer.Handle(), 0, 0,
 		motion_blur_framebuffer.Width(), motion_blur_framebuffer.Height());
-	post_present_framebuffer.SwapStorage(motion_blur_framebuffer);
+	return &motion_blur_framebuffer;
 }
 
 void GL4Renderer::DrawMotionVectorDebugPreview(int supersampling_factor)
@@ -669,15 +673,16 @@ void GL4Renderer::DrawMotionVectorDebugPreview(int supersampling_factor)
 		supersampling_factor = 1;
 	const int framebuffer_logical_bottom_offset =
 		framebuffer_logical_height - OpenGL_state.screen_height - framebuffer_logical_offset_y;
-	const float source_width = (float)surface_records.width;
-	const float source_height = (float)surface_records.height;
+	supersampling_factor = surface_records.ReadWidth()/framebuffer_logical_width;
+	const float source_width = (float)surface_records.ReadWidth();
+	const float source_height = (float)surface_records.ReadHeight();
 	const float uv_origin_x = (float)(framebuffer_logical_offset_x * supersampling_factor) / source_width;
 	const float uv_origin_y = (float)(framebuffer_logical_bottom_offset * supersampling_factor) / source_height;
 	const float uv_scale_x = (float)(OpenGL_state.screen_width * supersampling_factor) / source_width;
 	const float uv_scale_y = (float)(OpenGL_state.screen_height * supersampling_factor) / source_height;
-	const int center_x = std::max(0, std::min((int)surface_records.width - 1,
+	const int center_x = std::max(0, std::min((int)surface_records.ReadWidth() - 1,
 		(int)((uv_origin_x + uv_scale_x * 0.5f) * source_width)));
-	const int center_y = std::max(0, std::min((int)surface_records.height - 1,
+	const int center_y = std::max(0, std::min((int)surface_records.ReadHeight() - 1,
 		(int)((uv_origin_y + uv_scale_y * 0.5f) * source_height)));
 
 	GLint old_read = 0;
@@ -700,9 +705,9 @@ void GL4Renderer::DrawMotionVectorDebugPreview(int supersampling_factor)
 		{
 			const float u = ((float)column + 0.5f) / (float)sample_columns;
 			const float v = ((float)row + 0.5f) / (float)sample_rows;
-			const int sample_x = std::max(0, std::min((int)surface_records.width - 1,
+			const int sample_x = std::max(0, std::min((int)surface_records.ReadWidth() - 1,
 				(int)((uv_origin_x + uv_scale_x * u) * source_width)));
-			const int sample_y = std::max(0, std::min((int)surface_records.height - 1,
+			const int sample_y = std::max(0, std::min((int)surface_records.ReadHeight() - 1,
 				(int)((uv_origin_y + uv_scale_y * v) * source_height)));
 			float velocity[2] = {};
 			glReadPixels(sample_x, sample_y, 1, 1, GL_RG, GL_FLOAT, velocity);
@@ -722,8 +727,8 @@ void GL4Renderer::DrawMotionVectorDebugPreview(int supersampling_factor)
 	debug_sample.valid = true;
 	debug_sample.x = center_x;
 	debug_sample.y = center_y;
-	debug_sample.width = (int)surface_records.width;
-	debug_sample.height = (int)surface_records.height;
+	debug_sample.width = (int)surface_records.ReadWidth();
+	debug_sample.height = (int)surface_records.ReadHeight();
 	debug_sample.vx = center_velocity[0];
 	debug_sample.vy = center_velocity[1];
 	debug_sample.max_x = max_x;

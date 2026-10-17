@@ -1946,7 +1946,7 @@ bool GL4Renderer::BeginPostPresentFrame()
 	const int post_visible_origin_y = framebuffer_logical_bottom_offset;
 	const int post_visible_width = OpenGL_state.screen_width;
 	const int post_visible_height = OpenGL_state.screen_height;
-	post_present_framebuffer.Update(OpenGL_state.screen_width, OpenGL_state.screen_height, 0);
+	post_present_framebuffer.Update(OpenGL_state.screen_width, OpenGL_state.screen_height, 0,GL_RGBA8);
 	// Display composition always consumes completed world color, never an
 	// opaque capture guessed equivalent from a global draw counter.
 	if (supersampling_factor >= 2)
@@ -2025,22 +2025,14 @@ bool GL4Renderer::BeginPostPresentFrame()
 	GL4PerfGpuDrain("GPU.Bloom.Apply");
 	GL4PerfGpuSplitMark(GL4_GPU_SPLIT_BLOOM_AFTER_DEFERRED_SOURCE);
 
-	// Motion consumes linear world color on every presentation path. Display
-	// transfer and cockpit presence cannot change its input color convention.
-	blitshader.Use();
-	glUniform1f(blitshader_gamma, 1.0f);
-	if (blitshader_uv_origin != -1) glUniform2f(blitshader_uv_origin, post_uv_origin_x, post_uv_origin_y);
-	if (blitshader_uv_scale != -1) glUniform2f(blitshader_uv_scale, post_uv_scale_x, post_uv_scale_y);
-	present_framebuffer->BlitTo(post_present_framebuffer.Handle(), 0, 0,
-		post_present_framebuffer.Width(), post_present_framebuffer.Height(), false);
-	if (blitshader_uv_origin != -1) glUniform2f(blitshader_uv_origin, 0.0f, 0.0f);
-	if (blitshader_uv_scale != -1) glUniform2f(blitshader_uv_scale, 1.0f, 1.0f);
-	GL4PerfGpuDrain("GPU.PostPresentBlitLinear");
+	// Linear color feeds motion directly; display conversion writes its output
+	// once instead of first copying every pixel into another linear image.
 	GL4PerfGpuSplitMark(GL4_GPU_SPLIT_BLOOM_AFTER_POST_PRESENT_COPY);
 
-	ApplyPixelMotionBlur(supersampling_factor);
+	auto* color_source = ApplyPixelMotionBlur(present_framebuffer,supersampling_factor,
+		post_uv_origin_x,post_uv_origin_y,post_uv_scale_x,post_uv_scale_y);
 	GL4PerfGpuSplitMark(GL4_GPU_SPLIT_BLOOM_AFTER_MOTION_BLUR);
-	CompositeWorldDisplay(present_framebuffer,bloom_framebuffer,protection_mask_texture,
+	CompositeWorldDisplay(present_framebuffer,color_source,bloom_framebuffer,protection_mask_texture,
 		post_uv_origin_x,post_uv_origin_y,post_uv_scale_x,post_uv_scale_y,display_gamma);
 	DrawMotionVectorDebugPreview(supersampling_factor);
 	ShaderProgram::ClearBinding();
@@ -2069,26 +2061,6 @@ bool GL4Renderer::IsPostPresentFramePending() const
 	return post_present_pending_swap;
 }
 
-void GL4Renderer::GammaCorrectPostPresent(float display_gamma)
-{
-	if (post_present_framebuffer.Handle() == 0)
-		return;
-
-	post_composite_framebuffer.Update(post_present_framebuffer.Width(), post_present_framebuffer.Height(), 0);
-	if (post_composite_framebuffer.Handle() == 0)
-		return;
-
-	blitshader.Use();
-	glUniform1f(blitshader_gamma, display_gamma);
-	if (blitshader_uv_origin != -1)
-		glUniform2f(blitshader_uv_origin, 0.0f, 0.0f);
-	if (blitshader_uv_scale != -1)
-		glUniform2f(blitshader_uv_scale, 1.0f, 1.0f);
-	post_present_framebuffer.BlitTo(post_composite_framebuffer.Handle(), 0, 0,
-		post_composite_framebuffer.Width(), post_composite_framebuffer.Height(), false);
-	post_present_framebuffer.SwapStorage(post_composite_framebuffer);
-	GL4PerfGpuDrain("GPU.WorldDisplayTransfer");
-}
 
 void GL4Renderer::StartCockpitSceneFrame(int x1, int y1, int x2, int y2)
 {
@@ -2142,7 +2114,8 @@ bool GL4Renderer::ResolveCockpitLayerToPostComposite()
 		return false;
 	}
 
-	post_composite_framebuffer.Update(OpenGL_state.screen_width, OpenGL_state.screen_height, 0);
+	// This layer is already display-ready color/coverage, not HDR lighting.
+	post_composite_framebuffer.Update(OpenGL_state.screen_width, OpenGL_state.screen_height, 0,GL_RGBA8);
 	if (post_composite_framebuffer.Handle() == 0)
 		return false;
 
@@ -2302,18 +2275,21 @@ void GL4Renderer::BlendPostCompositeOverPostPresent()
 	RestoreLegacy();
 }
 
-void GL4Renderer::CompositeWorldDisplay(Framebuffer* world_source,ColorFramebuffer* bloom_output,
+void GL4Renderer::CompositeWorldDisplay(Framebuffer* world_source,Framebuffer* color_source,ColorFramebuffer* bloom_output,
 	GLuint protection_mask,float uv_x,float uv_y,float uv_w,float uv_h,float display_gamma)
 {
 	if (post_present_framebuffer.Handle() == 0)
 		return;
 
 	bool composited_bloom = false;
+	const float color_x = color_source == world_source ? uv_x : 0.f;
+	const float color_y = color_source == world_source ? uv_y : 0.f;
+	const float color_w = color_source == world_source ? uv_w : 1.f;
+	const float color_h = color_source == world_source ? uv_h : 1.f;
 	if (bloom_output &&
 		bloom_output->Handle() != 0)
 	{
-		post_composite_framebuffer.Update(post_present_framebuffer.Width(), post_present_framebuffer.Height(), 0);
-		if (post_composite_framebuffer.Handle() != 0)
+		if (post_present_framebuffer.Handle() != 0)
 		{
 			bloom.compositeshader.Use();
 			glUniform1f(bloom.composite_gamma, display_gamma);
@@ -2336,11 +2312,11 @@ void GL4Renderer::CompositeWorldDisplay(Framebuffer* world_source,ColorFramebuff
 				glUniform2f(bloom.composite_uv_scale,
 					uv_w, uv_h);
 			if (bloom.composite_scene_uv_origin != -1)
-				glUniform2f(bloom.composite_scene_uv_origin, 0.0f, 0.0f);
+				glUniform2f(bloom.composite_scene_uv_origin, color_x,color_y);
 			if (bloom.composite_scene_uv_scale != -1)
-				glUniform2f(bloom.composite_scene_uv_scale, 1.0f, 1.0f);
+				glUniform2f(bloom.composite_scene_uv_scale, color_w,color_h);
 			rend_ClearBoundTextures();
-			GL_BindFramebufferTexture(post_present_framebuffer.ColorTextureForRead(), 0, GL_NEAREST);
+			GL_BindFramebufferTexture(color_source->ColorTextureForRead(), 0, GL_NEAREST);
 			GL_BindFramebufferTexture(bloom_output->ColorTextureForRead(), 1, GL_LINEAR);
 			if (protection_mask != 0)
 				GL_BindFramebufferTexture(protection_mask, 3, GL_NEAREST);
@@ -2348,10 +2324,9 @@ void GL4Renderer::CompositeWorldDisplay(Framebuffer* world_source,ColorFramebuff
 				GL_BindFramebufferTexture(world_depth_texture, 4, GL_NEAREST);
 			{
 				PERF_MARKER_SCOPE("Bloom.CompositeWorldDisplay");
-				GL_DrawFramebufferQuad(post_composite_framebuffer.Handle(), 0, 0,
-					post_composite_framebuffer.Width(), post_composite_framebuffer.Height());
+				GL_DrawFramebufferQuad(post_present_framebuffer.Handle(), 0, 0,
+					post_present_framebuffer.Width(), post_present_framebuffer.Height());
 			}
-			post_present_framebuffer.SwapStorage(post_composite_framebuffer);
 			GL4PerfGpuDrain("GPU.Bloom.CompositeWorldDisplay");
 			composited_bloom = true;
 		}
@@ -2359,7 +2334,13 @@ void GL4Renderer::CompositeWorldDisplay(Framebuffer* world_source,ColorFramebuff
 
 	if (!composited_bloom)
 	{
-		GammaCorrectPostPresent(display_gamma);
+		blitshader.Use();
+		glUniform1f(blitshader_gamma,display_gamma);
+		glUniform2f(blitshader_uv_origin,color_x,color_y);
+		glUniform2f(blitshader_uv_scale,color_w,color_h);
+		color_source->BlitTo(post_present_framebuffer.Handle(),0,0,
+			post_present_framebuffer.Width(),post_present_framebuffer.Height(),false);
+		glUniform2f(blitshader_uv_origin,0,0); glUniform2f(blitshader_uv_scale,1,1);
 	}
 
 	ShaderProgram::ClearBinding();
@@ -2369,7 +2350,7 @@ void GL4Renderer::StartPostPresentFrame(int x1, int y1, int x2, int y2, int clea
 {
 	FlushFontBatch();
 
-	post_present_framebuffer.Update(OpenGL_state.screen_width, OpenGL_state.screen_height, 0);
+	post_present_framebuffer.Update(OpenGL_state.screen_width, OpenGL_state.screen_height, 0,GL_RGBA8);
 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, post_present_framebuffer.Handle());
 	glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
 	glDrawBuffer(GL_COLOR_ATTACHMENT0);
@@ -2471,7 +2452,6 @@ void GL4Renderer::EndPostPresentFrame()
 		//so any cached resolve from the previous time we used this slot is stale.
 		framebuffers[framebuffer_current_draw].MarkAllDirty();
 		opaque_scene.ready = false;
-		opaque_scene.has_color = false;
 		post_protection_mask_dirty = false;
 		post_protection_mask_cleared_this_frame = false;
 		motion_vectors_capture_locked = false;
@@ -2767,94 +2747,43 @@ void GL4Renderer::EndFrame(void)
 {
 }
 
-void GL4Renderer::ExportOpaqueScene()
+void GL4Renderer::ExportOpaqueScene(bool prepass_ready)
 {
-	FlushFontBatch();
-
-	opaque_scene.ready = false;
-	opaque_scene.has_color = false;
-
-	const bool ao_enabled = OpenGL_preferred_state.ao_enabled && framebuffer_ok;
-	const bool bloom_enabled = OpenGL_preferred_state.bloom_enabled;
-	const bool motion_depth_enabled = PixelMotionVectorModeEnabled() &&
-		(OpenGL_preferred_state.pixel_motion_blur_strength > 0.0f ||
-		 OpenGL_preferred_state.pixel_motion_blur_legacy_object_strength > 0.0f ||
-		 OpenGL_preferred_state.motion_vector_debug_preview);
-	const bool late_post_enabled = ao_enabled || bloom_enabled || motion_depth_enabled;
-
-	if (!late_post_enabled)
-	{
-		opaque_scene.Destroy();
-	}
-
-	if (framebuffer_ok)
-	{
-		if (late_post_enabled && OpenGL_state.screen_width > 0 && OpenGL_state.screen_height > 0)
-		{
-			GLint old_read = 0, old_draw = 0;
-			glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &old_read);
-			glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &old_draw);
-
-			opaque_scene.images.Update(framebuffer_logical_width, framebuffer_logical_height, 0);
-			if (ao_enabled && bloom_enabled)
-			{
-				int supersampling_factor = SupersamplingFactor();
-				float display_gamma = OpenGL_preferred_state.gamma != 0.0f ? 1.f / OpenGL_preferred_state.gamma : 1.f;
-				const int framebuffer_logical_bottom_offset =
-					framebuffer_logical_height - OpenGL_state.screen_height - framebuffer_logical_offset_y;
-				const int visible_origin_x = framebuffer_logical_offset_x;
-				const int visible_origin_y = framebuffer_logical_bottom_offset;
-				const int visible_width = OpenGL_state.screen_width;
-				const int visible_height = OpenGL_state.screen_height;
-				if (supersampling_factor >= 2)
-				{
-					Framebuffer* source = &framebuffers[framebuffer_current_draw];
-					for (const auto step : d3scene::imageReductionSteps(supersampling_factor)) {
-						Framebuffer& destination = step.destination_scale == 1 ? opaque_scene.images : opaque_scene.reduction;
-						destination.Update(framebuffer_logical_width*step.destination_scale,framebuffer_logical_height*step.destination_scale,0);
-						downsampleshader.Use();
-						source->DownsampleTo(destination.Handle(),0,0,destination.Width(),destination.Height(),
-							downsampleshader_gamma,display_gamma,downsampleshader_dest_origin,
-							downsampleshader_source_visible_origin,downsampleshader_source_visible_size,
-							visible_origin_x*step.source_scale,visible_origin_y*step.source_scale,
-							visible_width*step.source_scale,visible_height*step.source_scale);
-						GL4PerfGpuDrain("GPU.OpaqueImageReduction");
-						source = &destination;
-					}
-				}
-				else
-				{
-					framebuffers[framebuffer_current_draw].BlitToRaw(opaque_scene.images.Handle(), 0, 0,
-						opaque_scene.images.Width(), opaque_scene.images.Height(), GL_NEAREST);
-					GL4PerfGpuDrain("GPU.CaptureBlit");
-				}
-				opaque_scene.has_color = true;
-			}
-			GL4PerfGpuSplitMark(GL4_GPU_SPLIT_CAPTURE_AFTER_COLOR);
-			{
-				PERF_MARKER_SCOPE("Post.CaptureDepth");
-				framebuffers[framebuffer_current_draw].BlitDepthTo(opaque_scene.images.Handle(), 0, 0,
-					opaque_scene.images.Width(), opaque_scene.images.Height());
-			}
-			GL4PerfGpuDrain("GPU.CaptureDepth");
-			GL4PerfGpuSplitMark(GL4_GPU_SPLIT_CAPTURE_AFTER_DEPTH);
-			glBindFramebuffer(GL_READ_FRAMEBUFFER, old_read);
-			glBindFramebuffer(GL_DRAW_FRAMEBUFFER, old_draw);
-			opaque_scene.ready = true;
-		}
-
-		framebuffers[framebuffer_current_draw].ClearAlphaToZero();
-		UseSceneDrawBuffers();
-		if (SceneSurfaceTargetEnabled())
-		{
-			// Resolve the complete surface record while opaque scene depth is
-			// still live, before canvas setup can clear that attachment.
-			surface_records.Resolve(framebuffers[framebuffer_current_draw].Handle());
-			motion_vectors_capture_locked = true;
-			UseSceneDrawBuffers();
-		}
-	}
-
+    FlushFontBatch();
+    opaque_scene.ready = false;
+    const bool motion_depth = PixelMotionVectorModeEnabled() &&
+        (OpenGL_preferred_state.pixel_motion_blur_strength > 0 ||
+         OpenGL_preferred_state.pixel_motion_blur_legacy_object_strength > 0 ||
+         OpenGL_preferred_state.motion_vector_debug_preview);
+    if (!framebuffer_ok || !(OpenGL_preferred_state.ao_enabled ||
+        OpenGL_preferred_state.bloom_enabled || motion_depth)) {
+        opaque_scene.Destroy();
+        return;
+    }
+    GLint read,draw;
+    glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING,&read);
+    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING,&draw);
+    GL4PerfGpuSplitMark(GL4_GPU_SPLIT_CAPTURE_AFTER_COLOR);
+    if (prepass_ready) {
+        if (!opaque_scene.images.Handle() || opaque_scene.images.Width() != framebuffer_logical_width ||
+            opaque_scene.images.Height() != framebuffer_logical_height)
+            Error("Surface prepass did not produce its declared depth extent");
+    } else {
+        PERF_MARKER_SCOPE("Post.CaptureDepth");
+        opaque_scene.images.Update(framebuffer_logical_width,framebuffer_logical_height);
+        if (SceneSurfaceTargetEnabled() && surface_records.NeedsResolve())
+            surface_records.Resolve(framebuffers[framebuffer_current_draw].Handle(),opaque_scene.images.DepthTextureRaw());
+        else framebuffers[framebuffer_current_draw].BlitDepthTo(opaque_scene.images.Handle(),0,0,
+            opaque_scene.images.Width(),opaque_scene.images.Height());
+    }
+    if (SceneSurfaceTargetEnabled()) {
+        surface_records.Resolve(framebuffers[framebuffer_current_draw].Handle());
+        motion_vectors_capture_locked = true;
+    }
+    GL4PerfGpuSplitMark(GL4_GPU_SPLIT_CAPTURE_AFTER_DEPTH);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER,read);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER,draw);
+    opaque_scene.ready = true;
 }
 
 void GL4Renderer::PerfGpuSceneMark(renderer_gpu_scene_mark mark)
@@ -3827,7 +3756,7 @@ void GL4Renderer::BindScreenshotSourceForRead(int& read_x, int& read_y)
 
 	if (supersampling_factor >= 2)
 	{
-		post_present_framebuffer.Update(OpenGL_state.screen_width, OpenGL_state.screen_height, 0);
+	post_present_framebuffer.Update(OpenGL_state.screen_width, OpenGL_state.screen_height, 0,GL_RGBA8);
 		const float uv_origin_x = present_framebuffer->Width() > 0 ?
 			(float)visible_origin_x / (float)present_framebuffer->Width() : 0.0f;
 		const float uv_origin_y = present_framebuffer->Height() > 0 ?
@@ -4042,18 +3971,27 @@ void GL4Renderer::UpdateFramebuffer(void)
 
 	for (int i = 0; i < NUM_GL4_FBOS; i++)
 	{
-		framebuffers[i].Update(target_width, target_height, target_samples);
+		// AO is applied inside material lighting before the game's legacy-range
+		// color write. No deferred subtraction requires an HDR world attachment.
+		framebuffers[i].Update(target_width, target_height, target_samples,GL_RGBA8);
 		if (motion_vectors_enabled)
 		{
-			surface_records.Update(target_width, target_height, framebuffers[i].Samples());
-			surface_records.AttachToFramebuffer(framebuffers[i].Handle());
+			glBindFramebuffer(GL_FRAMEBUFFER,framebuffers[i].Handle());
+			glFramebufferTexture(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT1,0,0);
+			glFramebufferTexture(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT4,0,0);
+			if (OpenGL_preferred_state.ao_enabled)
+				surface_records.Update(framebuffer_logical_width,framebuffer_logical_height,0);
+			else {
+				surface_records.Update(target_width, target_height, framebuffers[i].Samples(),supersampling_factor);
+				surface_records.AttachToFramebuffer(framebuffers[i].Handle());
+			}
 		}
 		post_protection_mask.Update(target_width, target_height, framebuffers[i].Samples());
 		post_protection_mask.AttachToFramebuffer(framebuffers[i].Handle());
 		if (framebuffer_state_changed)
 		{
 			framebuffers[i].ClearAll();
-			if (motion_vectors_enabled)
+			if (motion_vectors_enabled && !OpenGL_preferred_state.ao_enabled)
 			{
 				surface_records.ClearAttached(framebuffers[i].Handle());
 			}
@@ -4070,12 +4008,11 @@ void GL4Renderer::UpdateFramebuffer(void)
 		downscale_framebuffer.Update(framebuffer_logical_width * 2, framebuffer_logical_height * 2, 0);
 	else
 		downscale_framebuffer.Destroy();
-	post_present_framebuffer.Update(OpenGL_state.screen_width, OpenGL_state.screen_height, 0);
+	post_present_framebuffer.Update(OpenGL_state.screen_width, OpenGL_state.screen_height, 0,GL_RGBA8);
 	post_composite_framebuffer.Destroy();
 	motion_blur_framebuffer.Destroy();
 
 	opaque_scene.ready = false;
-	opaque_scene.has_color = false;
 	legacy_draw_uniforms_dirty = true;
 	post_protection_mask_dirty = false;
 	post_protection_mask_cleared_this_frame = false;
@@ -4131,7 +4068,6 @@ void GL4Renderer::CloseFramebuffer(void)
 	soft_particle_depth_copy_valid = false;
 	soft_particle_depth_source_framebuffer = 0;
 	opaque_scene.ready = false;
-	opaque_scene.has_color = false;
 	surface_records.Destroy();
 	scene_motion = {}; completed_scene_motion = {};
 	post_protection_mask.Destroy();

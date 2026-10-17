@@ -75,6 +75,8 @@ bool AutomatedCaptureForcesPrimaryFireInput();
 // Writes an opt-in lifecycle trace when DESCENT3MASTERED_CAPTURE_LOG names a file.
 void AutomatedCaptureLog(const char* format, ...);
 bool AutomatedCapturePending();
+// Capture the currently composed output once, before the presenter's swap.
+void CaptureAutomatedFrameIfRequested();
 int AutomatedCaptureFrameIndex();
 
 class PerfMarkerScope

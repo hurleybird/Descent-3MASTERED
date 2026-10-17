@@ -16,6 +16,7 @@
 #include "gameloop.h"
 #include "game.h"
 #include "object_lighting.h"
+#include "lightmap_info.h"
 #include "room.h"
 #include "terrain.h"
 #include "player.h"
@@ -40,7 +41,7 @@ d3scene::Transform value(const ModelSubmodelTransform& t) {
     return {value(t.translation), value(t.orientation.rvec), value(t.orientation.uvec), value(t.orientation.fvec)};
 }
 using RoomTable = std::unordered_map<int,const d3scene::RoomState*>;
-void prepareFacingPart(d3scene::FrameData& frame,const d3scene::ObjectState& owner,
+void prepareFacingPart(d3scene::FrameData& frame,const d3scene::ObjectState* owner,
     const poly_model& model,size_t part_index,const d3scene::Transform& world) {
     const auto& part = model.submodel[part_index];
     if (part.num_faces < 1 || part.faces[0].texnum < 0 || part.faces[0].texnum >= model.n_textures || !(part.rad > 0)) return;
@@ -51,8 +52,8 @@ void prepareFacingPart(d3scene::FrameData& frame,const d3scene::ObjectState& own
     const int width = bm_w(bitmap,0), height = bm_h(bitmap,0);
     if (width <= 0 || height <= 0) return;
     d3scene::PreparedMesh sprite;
-    sprite.asset = d3scene::assets().publishMesh(2,d3scene::unitBillboardQuad());
-    sprite.owner = owner.handle; sprite.has_owner = true; sprite.room = owner.room;
+    sprite.asset = d3scene::assets().quadMesh();
+    if (owner) { sprite.owner = owner->handle; sprite.has_owner = true; sprite.room = owner->room; }
     sprite.alignment = d3scene::MeshAlignment::Camera;
     sprite.world.position = world.position;
     sprite.world.right = {part.rad,0,0}; sprite.world.up = {0,part.rad*height/width,0};
@@ -63,9 +64,9 @@ void prepareFacingPart(d3scene::FrameData& frame,const d3scene::ObjectState& own
     sprite.surface.soft_depth_range = SceneFacingUsesSoftIntersection(model.name,GameTextures[texture].name) ? 2.f : 0.f;
     frame.meshes.push_back(std::move(sprite));
 }
-void prepareGlowPart(d3scene::FrameData& frame,const d3scene::ObjectState& owner,const object& source,
+void prepareGlowPart(d3scene::FrameData& frame,const d3scene::ObjectState* owner,const object* source,
     const poly_model& model,size_t part_index,const d3scene::Transform& world) {
-    if (source.type == OBJ_WEAPON && !Detail_settings.Weapon_coronas_enabled) return;
+    if (source && source->type == OBJ_WEAPON && !Detail_settings.Weapon_coronas_enabled) return;
     const auto* glow = model.submodel[part_index].glow_info;
     if (!glow || !(glow->glow_size > 0)) return;
     const int bitmap = Fireballs[GRADIENT_BALL_INDEX].bm_handle;
@@ -74,29 +75,30 @@ void prepareGlowPart(d3scene::FrameData& frame,const d3scene::ObjectState& owner
     if (width <= 0 || height <= 0) return;
     d3scene::Vec3 color{glow->glow_r,glow->glow_g,glow->glow_b};
     std::vector<d3scene::GlowSlice> slices;
-    const bool thruster = source.type == OBJ_PLAYER;
+    const bool thruster = source && owner && source->type == OBJ_PLAYER;
     if (thruster) {
-        const auto& player = Players[source.id];
-        const float jitter = (int(d3scene::visualNoise(frame.simulation_time,owner.handle,0x74687275)%100)-50)/50.f;
+        const auto& player = Players[source->id];
+        const float jitter = (int(d3scene::visualNoise(frame.simulation_time,owner->handle,0x74687275)%100)-50)/50.f;
         float length = player.thrust_mag+player.afterburner_mag*3+.2f*jitter;
         if (Katmai) length *= 1.5f;
         float radius = glow->glow_size*(player.thrust_mag+player.afterburner_mag*.5f);
         if (SceneGeometryInspection() && (FindArg("-scene-model-effects-probe") || FindArg("-scene-lod-probe"))) { radius = glow->glow_size; length = 1.5f; }
         slices = d3scene::thrusterSlices(radius,3*length);
         if ((is_multi_demo || (Game_mode & GM_MULTI)) && Num_teams > 1)
-            color = ScenePlayerColor(PlayerGetTeam(source.id));
+            color = ScenePlayerColor(PlayerGetTeam(source->id));
     } else slices.push_back({0,glow->glow_size});
     const auto quantize = [](float c) { return static_cast<unsigned>((std::max)(0.f,(std::min)(1.f,c))*255)/255.f; };
     color = {quantize(color.x),quantize(color.y),quantize(color.z)};
     const auto normal = d3scene::transformDirection(world,value(glow->normal));
     const bool soft = !thruster && SceneGlowUsesSoftIntersection(model.name);
-    const auto quad = d3scene::assets().publishMesh(2,d3scene::unitBillboardQuad());
+    const auto quad = d3scene::assets().quadMesh();
     if (AutomatedCaptureFrameIndex() == 0)
-        AutomatedCaptureLog("scene glow owner=%u model=%s part=%u slices=%u soft=%d",owner.handle,model.name,
+        AutomatedCaptureLog("scene glow owner=%u model=%s part=%u slices=%u soft=%d",owner ? owner->handle : 0,model.name,
             static_cast<unsigned>(part_index),static_cast<unsigned>(slices.size()),soft ? 1 : 0);
     for (const auto& slice : slices) {
         d3scene::PreparedMesh sprite;
-        sprite.asset = quad; sprite.owner = owner.handle; sprite.has_owner = true; sprite.room = owner.room;
+        sprite.asset = quad;
+        if (owner) { sprite.owner = owner->handle; sprite.has_owner = true; sprite.room = owner->room; }
         sprite.alignment = d3scene::MeshAlignment::Camera;
         sprite.world.position = {world.position.x+normal.x*slice.distance,world.position.y+normal.y*slice.distance,
             world.position.z+normal.z*slice.distance};
@@ -192,7 +194,7 @@ d3scene::Vec3 ambientColor(const object& source, const RoomTable& rooms, const d
 }
 }
 
-void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::FrameData* previous) {
+void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::FrameData* previous,bool retain_materials) {
     const int player_color_texture = FindTextureName("MultiColor");
     std::unordered_map<int, d3scene::ModelAssetRef> frame_assets;
     RoomTable rooms;
@@ -271,13 +273,14 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::FrameDat
             if (!model->new_style) throw std::logic_error("Unprepared legacy model format in scene variant");
             auto found = frame_assets.find(model_number);
             if (found == frame_assets.end()) {
-                // Compare once per referenced model, not once per instance or view.
-                // The source loader has no revision counter; publication owns a copy.
-                size_t repaired = 0;
-                auto geometry = CompileSceneModelAsset(*model,&repaired);
-                if (repaired && !d3scene::assets().model(model_number))
-                    AutomatedCaptureLog("scene model=%s repaired shading normals=%u",model->name,static_cast<unsigned>(repaired));
-                auto asset = d3scene::assets().publishModel(model_number, std::move(geometry));
+                PERF_MARKER_SCOPE("Scene.Models.Asset");
+                auto asset = d3scene::assets().model(model_number);
+                if (!asset || !MatchesSceneModelAsset(asset->geometry(),*model)) {
+                    size_t repaired = 0;
+                    auto geometry = CompileSceneModelAsset(*model,&repaired);
+                    if (repaired && !asset) AutomatedCaptureLog("scene model=%s repaired shading normals=%u",model->name,static_cast<unsigned>(repaired));
+                    asset = d3scene::assets().publishModel(model_number,std::move(geometry));
+                }
                 found = frame_assets.emplace(model_number, std::move(asset)).first;
             }
             d3scene::PreparedModel variant;
@@ -307,6 +310,7 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::FrameDat
             if (old != prior.end()) for (const auto& previous_variant : old->second->models)
                 if (previous_variant.asset->id() == variant.asset->id()) { history = &previous_variant; break; }
             const auto roles = ResolveSceneModelRoles(variant.asset->geometry(),source->rtype.pobj_info.subobj_flags,effect.custom_texture >= 0);
+            PERF_MARKER_SCOPE("Scene.Models.Parts");
             for (size_t i = 0; i < variant.asset->geometry().parts.size(); ++i) {
                 const auto& asset_part = variant.asset->geometry().parts[i];
                 d3scene::PreparedModelPart part;
@@ -319,14 +323,45 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::FrameDat
                 part.draw = role == SceneModelPartRole::Surface;
                 const auto attachment_begin = data.meshes.size();
                 if (role == SceneModelPartRole::Facing)
-                    prepareFacingPart(data,owner,*model,i,d3scene::compose(instance.current,part.current));
+                    prepareFacingPart(data,&owner,*model,i,d3scene::compose(instance.current,part.current));
                 if (role == SceneModelPartRole::Glow)
-                    prepareGlowPart(data,owner,*source,*model,i,d3scene::compose(instance.current,part.current));
+                    prepareGlowPart(data,&owner,source,*model,i,d3scene::compose(instance.current,part.current));
                 for (size_t attachment = attachment_begin; attachment < data.meshes.size(); ++attachment) {
                     data.meshes[attachment].model_instance = instance.identity;
                     data.meshes[attachment].model_variant = static_cast<int32_t>(variant_index);
                 }
-                for (size_t j = 0; j < asset_part.geometry.polygons.size(); ++j) {
+                part.material_palette = !baked;
+                part.appearance_inputs = {{ambient.x,ambient.y,ambient.z,effect.alpha,effect.color.x,effect.color.y,effect.color.z,
+                    float(directional),float(source->rtype.pobj_info.tmap_override),float(effect.custom_texture),float(effect.has_player_color),
+                    effect.player_color.x,effect.player_color.y,effect.player_color.z,float(player_color_texture),float(part.draw)}};
+                const auto* old_part = history ? &history->parts[i] : nullptr;
+                bool reuse_materials = retain_materials && old_part && old_part->material_palette == part.material_palette &&
+                    old_part->appearance_inputs == part.appearance_inputs && old_part->surfaces.publishedFor(variant.asset->id(),uint32_t(i),part.material_palette);
+                if (reuse_materials) for (const auto& surface : old_part->surfaces) {
+                    if (surface.texture < 0) continue;
+                    const auto& texture = GameTextures[surface.texture];
+                    if ((texture.flags & (TF_ANIMATED|TF_PROCEDURAL)) || texture.slide_u || texture.slide_v) { reuse_materials = false; break; }
+                }
+                if (reuse_materials && baked && part.draw) {
+                    for (size_t face = 0; reuse_materials && face < asset_part.geometry.polygons.size(); ++face) {
+                        const auto& source_face = source->lm_object.lightmap_faces[i][face];
+                        const auto& retained = old_part->surfaces[face];
+                        reuse_materials = retained.lightmap == source_face.lmi_handle &&
+                            retained.lightmap_bitmap == LightmapInfo[source_face.lmi_handle].lm_handle &&
+                            retained.baked_uvs.size() == asset_part.geometry.polygons[face].corners.size();
+                        for (size_t corner = 0; reuse_materials && corner < retained.baked_uvs.size(); ++corner)
+                            reuse_materials = retained.baked_uvs[corner].x == source_face.u2[corner] && retained.baked_uvs[corner].y == source_face.v2[corner];
+                    }
+                }
+                if (reuse_materials) {
+                    part.surfaces = old_part->surfaces;
+                    variant.parts.push_back(std::move(part));
+                    continue;
+                }
+                const size_t surface_count = part.material_palette ? asset_part.surface_polygons.size() : asset_part.geometry.polygons.size();
+                part.surfaces.reserve(surface_count);
+                for (size_t material = 0; material < surface_count; ++material) {
+                    const size_t j = part.material_palette ? asset_part.surface_polygons[material] : material;
                     d3scene::SurfaceBinding binding;
                     binding.occlusion_class = d3scene::OcclusionClass::Model;
                     // Normal authored polymodel transparency writes late raster
@@ -364,4 +399,43 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::FrameDat
         if (!instance.models.empty()) data.model_instances.push_back(std::move(instance));
     }
     data.observation_inputs_prepared = true;
+}
+
+void PrepareGameStaticModel(d3scene::FrameData& data,int number,const d3scene::Transform& placement,
+    uint64_t identity,uint64_t collection) {
+    if (number < 0 || number >= MAX_POLY_MODELS || !Poly_models[number].used)
+        throw std::invalid_argument("Static scene model is unavailable");
+    const auto* source = GetPolymodelPointer(number);
+    d3scene::ModelInstance instance;
+    instance.identity = identity; instance.collection = collection; instance.current = instance.previous = placement;
+    d3scene::PreparedModel model;
+    model.asset = d3scene::assets().publishModel(number,CompileSceneModelAsset(*source));
+    const auto pose = EvaluateModelPose(*source,nullptr,static_cast<float>(data.simulation_time));
+    const auto transforms = ComposeModelPose(*source,pose);
+    const auto roles = ResolveSceneModelRoles(model.asset->geometry(),0xffffffffu,false);
+    for (size_t index = 0; index < model.asset->geometry().parts.size(); ++index) {
+        const auto& geometry = model.asset->geometry().parts[index];
+        d3scene::PreparedModelPart part;
+        part.current = part.previous = value(transforms.submodels[index]);
+        part.draw = roles[index] == SceneModelPartRole::Surface;
+        const auto attachment_begin = data.meshes.size();
+        const auto world = d3scene::compose(placement,part.current);
+        if (roles[index] == SceneModelPartRole::Facing) prepareFacingPart(data,nullptr,*source,index,world);
+        if (roles[index] == SceneModelPartRole::Glow) prepareGlowPart(data,nullptr,nullptr,*source,index,world);
+        for (size_t attachment = attachment_begin; attachment < data.meshes.size(); ++attachment) {
+            data.meshes[attachment].collection = collection;
+            data.meshes[attachment].model_instance = identity;
+            data.meshes[attachment].model_variant = 0;
+        }
+        for (size_t polygon = 0; polygon < geometry.geometry.polygons.size(); ++polygon) {
+            d3scene::SurfaceBinding surface; surface.unlit = true;
+            const int material = geometry.polygon_materials[polygon];
+            if (material >= 0) surface.texture = model.asset->geometry().textures[material];
+            else surface.base_color = geometry.polygon_colors[polygon];
+            part.surfaces.push_back(std::move(surface));
+        }
+        model.parts.push_back(std::move(part));
+    }
+    instance.models.push_back(std::move(model));
+    data.model_instances.push_back(std::move(instance));
 }
