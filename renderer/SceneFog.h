@@ -3,6 +3,9 @@
 #include "Scene.h"
 namespace d3scene {
 struct Camera;
+// Conservative storage eligibility, including repeated store-rounding growth.
+// This is an overflow guard, not an image-quality guarantee.
+bool fogFieldFitsHalf(double optical_bound,size_t volume_count);
 // Fog integrates camera-to-surface rays, not just the geometry clipping range.
 // Never apply the geometry near plane or mirror plane to optical candidates.
 bool fogMayIntersectView(const Bounds&,const Camera&,bool perspective);

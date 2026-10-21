@@ -540,7 +540,7 @@ void GL4Renderer::DestroySceneResources() {
     if (scene_fog_field_texture) glDeleteTextures(1,&scene_fog_field_texture);
     scene_fog_field_texture = 0;
     scene_fog_field_width = scene_fog_field_height = 0;
-    scene_fog_field_shader.Destroy();
+    for (auto& program : scene_fog_field_programs) program.shader.Destroy();
     scene_fog_id = {};
     scene_view_fog = {}; scene_view_fog_volumes.clear();
     for (auto& depth : scene_depth_snapshots) depth.second.Destroy();
@@ -1419,6 +1419,28 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     float field_range = 0;
     if (field_fog) {
         PERF_MARKER_SCOPE("Scene.FogField");
+        field_range = 1;
+        double density_bound = 0;
+        for (auto index : scene_view_fog_volumes) {
+            const auto& volume = fog_volumes[index];
+            const auto& bounds = volume.bounds;
+            const auto& n = camera.forward;
+            const d3scene::Vec3 p{n.x >= 0 ? bounds.maximum.x : bounds.minimum.x,
+                n.y >= 0 ? bounds.maximum.y : bounds.minimum.y,n.z >= 0 ? bounds.maximum.z : bounds.minimum.z};
+            field_range = (std::max)(field_range,(p.x-camera.position.x)*n.x+(p.y-camera.position.y)*n.y+(p.z-camera.position.z)*n.z+1.f);
+            density_bound += (std::max)({1.0,std::abs(double(volume.color.x)),std::abs(double(volume.color.y)),
+                std::abs(double(volume.color.z))})/volume.depth;
+        }
+        // Every per-volume occupied prefix is bounded by the field's forward
+        // range. Include repeated half-store rounding and a factor-two margin;
+        // dense/long-range content keeps full precision rather than overflowing.
+        const double storage_bound = density_bound*field_range;
+        const bool half_field = !FindArg("-scene-fog-full-precision") &&
+            d3scene::fogFieldFitsHalf(storage_bound,scene_view_fog_volumes.size());
+        const GLenum field_format = half_field ? GL_RGBA16F : GL_RGBA32F;
+        auto& program = scene_fog_field_programs[half_field ? 1 : 0];
+        auto& scene_fog_field_shader = program.shader;
+        auto& scene_fog_field_range = program.range;
         if (!scene_fog_field_shader.Handle()) {
             std::string source = SceneLightingShader;
             source.replace(0,source.find('\n'),"#version 430 core");
@@ -1426,6 +1448,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
             source += SceneFogIntersectionShader;
             source += "\n#define SCENE_FOG_SLICES "+std::to_string(SceneFogFieldSlices)+"\n";
             source += "\n#define SCENE_FOG_LANES "+std::to_string(SceneFogFieldLanes)+"\n";
+            source += half_field ? "\n#define SCENE_FOG_FIELD_FORMAT rgba16f\n" : "\n#define SCENE_FOG_FIELD_FORMAT rgba32f\n";
             source += SceneFogFieldComputeShader;
             scene_fog_field_shader.AttachComputeSource(source.c_str());
             glUniformBlockBinding(scene_fog_field_shader.Handle(),glGetUniformBlockIndex(scene_fog_field_shader.Handle(),"SceneViewBlock"),8);
@@ -1450,30 +1473,24 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
             glTexParameteri(GL_TEXTURE_3D,GL_TEXTURE_WRAP_R,GL_CLAMP_TO_EDGE);
         };
         glActiveTexture(GL_TEXTURE12);
-        if (width != scene_fog_field_width || height != scene_fog_field_height) {
-            allocate(scene_fog_field_texture,SceneFogFieldSlices+1,GL_RGBA32F);
+        if (width != scene_fog_field_width || height != scene_fog_field_height || field_format != scene_fog_field_format) {
+            allocate(scene_fog_field_texture,SceneFogFieldSlices+1,field_format);
             scene_fog_field_width = width; scene_fog_field_height = height;
-        }
-        field_range = 1;
-        for (auto index : scene_view_fog_volumes) {
-            const auto& bounds = fog_volumes[index].bounds;
-            const auto& n = camera.forward;
-            const d3scene::Vec3 p{n.x >= 0 ? bounds.maximum.x : bounds.minimum.x,
-                n.y >= 0 ? bounds.maximum.y : bounds.minimum.y,n.z >= 0 ? bounds.maximum.z : bounds.minimum.z};
-            field_range = (std::max)(field_range,(p.x-camera.position.x)*n.x+(p.y-camera.position.y)*n.y+(p.z-camera.position.z)*n.z+1.f);
+            scene_fog_field_format = field_format;
         }
         // Wait for the preceding view's sampler reads before reusing scratch.
         glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
         scene_fog_field_shader.Use();
         glUniform1f(scene_fog_field_range,field_range);
-        glBindImageTexture(0,scene_fog_field_texture,0,GL_TRUE,0,GL_READ_WRITE,GL_RGBA32F);
+        glBindImageTexture(0,scene_fog_field_texture,0,GL_TRUE,0,GL_READ_WRITE,field_format);
         glDispatchCompute((width+SceneFogFieldLanes-1)/SceneFogFieldLanes,height,1);
         glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT);
         glBindImageTexture(0,0,0,GL_FALSE,0,GL_WRITE_ONLY,GL_RGBA32F);
         glActiveTexture(GL_TEXTURE12); glBindTexture(GL_TEXTURE_3D,scene_fog_field_texture);
         if (AutomatedCapturePending() && FindArg("-scene-fog-field-audit"))
             AuditSceneFogField(view,visibility.camera,fog_volumes,scene_view_fog_volumes,width,height,field_range);
-        if (AutomatedCapturePending()) AutomatedCaptureLog("scene fog field %dx%dx%d range=%.6g",width,height,SceneFogFieldSlices,field_range);
+        if (AutomatedCapturePending()) AutomatedCaptureLog("scene fog field %dx%dx%d range=%.6g storage=%d bound=%.9g",
+            width,height,SceneFogFieldSlices,field_range,half_field ? 16 : 32,storage_bound);
     }
     scene_shader.Use();
     glUniform1f(scene_uniforms.fog_field_range,field_range);

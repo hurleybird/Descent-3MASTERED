@@ -22,6 +22,16 @@ d3scene::RoomState box(d3scene::SceneAssets& assets,int id,float z) {
 int runFogTests() {
     {
         using namespace d3scene;
+        check(fogFieldFitsHalf(1,1) && fogFieldFitsHalf(100,32),"Ordinary fog rejected compact storage");
+        check(!fogFieldFitsHalf(32768,0) && !fogFieldFitsHalf(65504,1) && !fogFieldFitsHalf(1.e12,1),
+            "Dense/long-range fog can overflow compact storage");
+        check(fogFieldFitsHalf(32760,0) && !fogFieldFitsHalf(32760,1),"Store-rounding growth omitted");
+        check(!fogFieldFitsHalf(-1,1) && !fogFieldFitsHalf(std::numeric_limits<double>::infinity(),1) &&
+            !fogFieldFitsHalf(std::numeric_limits<double>::quiet_NaN(),1),"Invalid compact storage bound accepted");
+        check(!fogFieldFitsHalf(1,1000000),"Accumulation bound overflow accepted");
+    }
+    {
+        using namespace d3scene;
         View request; request.history_key = 1; request.viewport = request.projection_anchor = {0,0,800,600};
         request.has_clip_plane = true; request.clip_plane = {{0,0,1},-4};
         auto camera = prepareCamera(request);

@@ -2,6 +2,30 @@
 
 ## Current handoff state — view-level fog pipelines verified
 
+LATEST: bounded compact optical-field storage. Field remains opt-in, exact fog
+remains default. The field now selects RGBA16F when a conservative optical-depth
+bound including color magnitude and repeated store-rounding fits a half-range
+margin; otherwise RGBA32F. No normalization overflow or saturated-depth truncation.
+Diagnostic -scene-fog-full-precision forces32. Earlier -scene-fog-half-field trial
+flag removed (old capture manifests still name it). Two compute programs own
+format-specific layouts/uniforms; texture reallocates on dimension/format change.
+Unit tests cover ordinary/dense/long/invalid/rounding-growth bounds. Build/tests
+fog-half-bound-* pass; final flag wiring fog-half-final-build.log, both runtime
+formats audited in fog-precision-{default,full}. Runtime scene-view-test matches.
+
+640x320x65 memory203.1MiB->101.6MiB. 4K500frame002 GPU clean3.23->2.98ms;
+AO/bloom12.62->12.54ms (small/noisy improvement, NOT general victory). Old clean
+2.72ms, so high-quality field still behind old clean GPU. Full64frame4K roof:
+32biterror/flicker .412680/.465575;16bit .414803/.466743. Tiny precision cost,
+still much better than320column .668850/.769273. Audits001/003/007 maxerrors
+.00021653/.00002555/.00005943; multiview .00048548/.00045305, references agree.
+Normal4K half screenshot visually inspected. Capture maxRGB75 in effects image
+falls in known moving-object region; do not attribute that peak to quantization.
+Raw fog4k-half-*,fog-half-audit-*,fog-half-multiview,roof4k-motion-half640.
+No preview/Candidate/main changes. C:free26GB; avoid duplicate full4K series.
+Next CPU candidate: compile model/mesh owner ordinals once during publication
+instead of repeated identity hashes in each view. Not implemented yet.
+
 Native4K roof qualification completed (3840x2160). Full64frame rotating series
 fog-series-roof4k-motion-{ref,field320,field640}. Scaled diagnostic ROI/band by
 image height;720p results unchanged. 4K boundary meanerror/flicker320 .668850/.769273,

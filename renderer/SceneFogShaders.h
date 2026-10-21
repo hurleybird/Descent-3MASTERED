@@ -46,7 +46,7 @@ bool fogBounds(vec3 low,vec3 high,vec3 inverse_direction,bvec3 parallel,float le
 // once per ray, analytically integrated per cell, then accumulated in depth.
 static const char* SceneFogFieldComputeShader = R"GLSL(
 layout(local_size_x=SCENE_FOG_LANES,local_size_y=1) in;
-layout(rgba32f,binding=0) coherent uniform image3D fog_field_output;
+layout(SCENE_FOG_FIELD_FORMAT,binding=0) coherent uniform image3D fog_field_output;
 uniform float fog_field_range;
 const int FOG_SLICES = SCENE_FOG_SLICES;
 shared float slope_events[FOG_SLICES*SCENE_FOG_LANES];

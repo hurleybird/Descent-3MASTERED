@@ -9,6 +9,10 @@
 #include <stdexcept>
 #include <unordered_set>
 namespace d3scene {
+bool fogFieldFitsHalf(double optical_bound,size_t volume_count) {
+    if (!std::isfinite(optical_bound) || optical_bound < 0) return false;
+    return optical_bound*std::pow(1.0+1.0/1024.0,double(volume_count)) < 32768;
+}
 bool fogMayIntersectView(const Bounds& bounds,const Camera& camera,bool perspective) {
     if (!perspective) return true; // orthographic endpoints still use eye-origin optical rays
     for (size_t i = 0; i < 5; ++i) {
