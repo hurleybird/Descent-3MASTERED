@@ -1188,7 +1188,8 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     auto& depth = target.depth;
     const auto raster = target.raster;
     const bool owns_world_products = target.role == SceneOutputRole::MainWorld;
-    const bool writes_protection = owns_world_products || target.role == SceneOutputRole::SceneLayer;
+    const bool writes_protection = post_protection_mask.mask_texture != 0 &&
+        (owns_world_products || target.role == SceneOutputRole::SceneLayer);
     const auto& visibility = prepared.visibility();
     if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
         AutomatedCaptureLog("scene view collection=%llu target=%u projection=%u surfaces=%u",
@@ -2004,17 +2005,6 @@ void main() {
         const GLboolean motion_write = solid && writes_motion ? GL_TRUE : GL_FALSE;
         glColorMaski(1,motion_write,motion_write,motion_write,motion_write);
         glColorMaski(4,motion_write,motion_write,motion_write,motion_write);
-        // The eligible-radiance image follows the same RGB compositing law.
-        // Translucent surfaces do not have their own depth AO, so only transmit
-        // the already-visible opaque radiance; additive light leaves it alone.
-        glColorMaski(3,GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);
-        if (solid || policy.layer == d3scene::RenderLayer::Background) glDisablei(GL_BLEND,3);
-        else {
-            glEnablei(GL_BLEND,3);
-            if (policy.blend == d3scene::BlendMode::Multiply) glBlendFunci(3,GL_DST_COLOR,GL_ZERO);
-            else if (policy.blend == d3scene::BlendMode::Additive) glBlendFunci(3,GL_ZERO,GL_ONE);
-            else glBlendFunci(3,GL_ZERO,GL_ONE_MINUS_SRC_ALPHA);
-        }
         glDepthMask(policy.writesDepth() ? GL_TRUE : GL_FALSE);
         if (policy.testsDepth()) glEnable(GL_DEPTH_TEST); else glDisable(GL_DEPTH_TEST);
         if (cull) {

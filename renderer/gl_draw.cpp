@@ -277,6 +277,8 @@ bool GL4Renderer::UsesExactRoomFogMultiply() const
 
 bool GL4Renderer::CurrentDrawNeedsPostMask(bool include_ao_class) const
 {
+	if (post_protection_mask.mask_texture == 0)
+		return false;
 	if (include_ao_class || ao_suppression_draw_value > 0.0f ||
 		bloom_suppression_draw_value > 0.0f ||
 		texture_bloom_protection_draw_value > 0.0f || room_fog_overlay)
@@ -1429,6 +1431,7 @@ void GL4Renderer::FlushFontBatchVertices(int batch_index)
 
 	const int offset = CopyVertices(font_batch_vertices[batch_index].data(), (int)font_batch_vertices[batch_index].size());
 	const bool suppress_ao_class_write = framebuffer_ok &&
+		post_protection_mask.mask_texture != 0 &&
 		OpenGL_state.cur_zbuffer_state == 0 &&
 		GL4DrawTargetIsFramebuffer(framebuffers[framebuffer_current_draw].Handle());
 	if (suppress_ao_class_write)

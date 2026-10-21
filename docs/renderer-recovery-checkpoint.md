@@ -2,6 +2,24 @@
 
 ## Active 2026-10-21 flare regression investigation
 
+LATEST after f0aba62: shelved ordered canvas collection composition. Exact
+normal/heavy images, tests passed, but ABBA005 CPU1.33/1.36/1.32/1.29ms did not
+show a win. All source changes removed; out/rejected-canvas-composition.patch
+and out/canvas-composition-candidate.exe preserve the experiment only.
+
+Bloom protection now allocated/written only when bloom consumes it. Bloom-only
+settings changes update framebuffer resources; zero attachment explicitly
+detaches retired storage. Removed obsolete scene attachment3 blend policy.
+Capture-only -scene-bloom-resource-probe tests off/on/restore without changing
+dimensions or user settings. bloom-demand006 and bloom-demand-multiview images
+exact against controls (heavy AO/MSAA/SSAA + resource audits). Toggle captures
+False/True versus steady have maximum RGB delta2, no pixels above2; inspected.
+Build bloom-demand-build3.log passes. ABBA006 GPU .523/.521/.517/.532ms;
+007 .694/.683/.743/.687ms: no clear timing win claimed. This removes unused
+storage/work but does not solve GPU006/007 regressions. Owned runtime is
+out/bloom-demand-candidate.exe; delivered v3.1 and Candidate remain untouched.
+Last usage39% consumed; credits unchanged62451.4387600000.
+
 LATEST after732e1c5: rejected the shared GPU constant upload arena. Persistent
 and subdata paths matched the heavy multiview image exactly, but initially put
 fence retirement mid-submission and increased measured GPU interval. Moving

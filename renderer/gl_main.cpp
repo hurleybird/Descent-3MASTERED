@@ -1468,6 +1468,7 @@ int GL4Renderer::SetPreferredState(renderer_preferred_state* pref_state)
 			|| pref_state->fullscreen != old_state.fullscreen || pref_state->antialised != old_state.antialised
 			|| pref_state->supersampling_factor != old_state.supersampling_factor
 			|| pref_state->msaa_samples != old_state.msaa_samples
+			|| pref_state->bloom_enabled != old_state.bloom_enabled
 			|| GL4OverscanPercent(*pref_state) != GL4OverscanPercent(old_state)
 			|| new_motion_vectors_needed != old_motion_vectors_needed;
 		if (pref_state->msaa_samples != old_state.msaa_samples ||
@@ -3968,6 +3969,10 @@ void GL4Renderer::UpdateFramebuffer(void)
 	ao.DestroyFramebuffers();
 	if (!motion_vectors_enabled)
 		surface_records.Destroy();
+	// Only bloom consumes the post-protection image. AO and motion own their
+	// surface records; neither needs this full-resolution coverage attachment.
+	if (!OpenGL_preferred_state.bloom_enabled)
+		post_protection_mask.Destroy();
 
 	for (int i = 0; i < NUM_GL4_FBOS; i++)
 	{
@@ -3986,7 +3991,8 @@ void GL4Renderer::UpdateFramebuffer(void)
 				surface_records.AttachToFramebuffer(framebuffers[i].Handle());
 			}
 		}
-		post_protection_mask.Update(target_width, target_height, framebuffers[i].Samples());
+		if (OpenGL_preferred_state.bloom_enabled)
+			post_protection_mask.Update(target_width, target_height, framebuffers[i].Samples());
 		post_protection_mask.AttachToFramebuffer(framebuffers[i].Handle());
 		if (framebuffer_state_changed)
 		{

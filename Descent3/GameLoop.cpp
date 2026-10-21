@@ -3015,6 +3015,17 @@ void GameRenderFrame(void)
 		Game_window_w = Max_window_w*3/5; Game_window_h = Max_window_h*3/5;
 		Game_window_x = (Max_window_w-Game_window_w)/2; Game_window_y = (Max_window_h-Game_window_h)/2;
 	}
+	if (SceneGeometryInspection() && FindArg("-scene-bloom-resource-probe")) {
+		const int index = AutomatedCaptureFrameIndex();
+		if (index == 15 || index == 35 || index == 55) {
+			// Keep dimensions/sample count unchanged: bloom alone must create
+			// and retire its coverage image through the ordinary settings API.
+			auto state = Render_preferred_state;
+			if (index != 55) state.bloom_enabled = index == 35;
+			if (!rend_SetPreferredState(&state)) Error("Bloom resource transition failed");
+			AutomatedCaptureLog("scene bloom transition frame=%d enabled=%d",index,state.bloom_enabled ? 1 : 0);
+		}
+	}
 	if (SceneGeometryInspection() && FindArg("-scene-resource-probe")) {
 		const int index = AutomatedCaptureFrameIndex();
 		if (index >= 10 && index <= 50 && index % 10 == 0) {

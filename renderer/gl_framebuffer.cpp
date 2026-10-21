@@ -1309,9 +1309,7 @@ void PostProtectionMaskResources::Destroy()
 
 void PostProtectionMaskResources::AttachToFramebuffer(GLuint framebuffer)
 {
-	if (mask_texture == 0)
-		return;
-
+	// Zero explicitly detaches the old image when the consumer is disabled.
 	glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
 	if (msaa_renderbuffer_storage)
 		glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2, GL_RENDERBUFFER, mask_texture);
