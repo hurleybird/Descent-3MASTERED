@@ -234,6 +234,7 @@ struct automated_capture_state
 	bool capture_pending;
 	bool exit_pending;
 	int target_frame;
+	int series_from_frame;
 	int gameplay_frame;
 	float fixed_delta;
 	bool realtime;
@@ -526,6 +527,7 @@ static void InitAutomatedCapture()
 	Automated_capture.forward_until_frame = capture_frame_option("-capture-forward-until", INT_MAX);
 	Automated_capture.up_from_frame = capture_frame_option("-capture-up-from", 0);
 	Automated_capture.heading_until_frame = capture_frame_option("-capture-heading-until", INT_MAX);
+	Automated_capture.series_from_frame = capture_frame_option("-capture-series-from", INT_MAX);
 	Automated_capture.force_primary_fire =
 		FindArg("-capture-fire-primary") != 0;
 	Automated_capture.place_scorch = FindArg("-capture-scorch") != 0;
@@ -707,7 +709,9 @@ static void BeginAutomatedCaptureFrame()
 		Automated_capture.primary_slot_applied = true;
 	}
 	Automated_capture.capture_pending =
-		Automated_capture.gameplay_frame == Automated_capture.target_frame;
+		Automated_capture.gameplay_frame == Automated_capture.target_frame ||
+		(Automated_capture.gameplay_frame >= Automated_capture.series_from_frame &&
+		 Automated_capture.gameplay_frame < Automated_capture.target_frame);
 	if (!Automated_capture.realtime)
 		Frametime = Automated_capture.fixed_delta;
 }
@@ -732,15 +736,24 @@ void CaptureAutomatedFrameIfRequested()
 	}
 
 	Automated_capture.capture_pending = false;
+	const bool final_capture = Automated_capture.gameplay_frame == Automated_capture.target_frame;
+	char series_path[PSPATHNAME_LEN];
+	const char* output_path = Automated_capture.output_path;
+	if (!final_capture) {
+		const int length = snprintf(series_path,sizeof(series_path),"%s.frame%06d.png",
+			output_path,Automated_capture.gameplay_frame);
+		if (length < 0 || size_t(length) >= sizeof(series_path)) Error("Capture series path is too long");
+		output_path = series_path;
+	}
 	StopTime();
-	const int saved = rend_SaveScreenshotPNG(Automated_capture.output_path);
+	const int saved = rend_SaveScreenshotPNG(output_path);
 	StartTime();
 	mprintf((0, "Automated capture %s: gameplay frame %d -> %s.\n",
 		saved ? "saved" : "failed", Automated_capture.gameplay_frame,
-		Automated_capture.output_path));
+		output_path));
 	AutomatedCaptureLog("capture %s frame=%d output=%s",
 		saved ? "saved" : "failed", Automated_capture.gameplay_frame,
-		Automated_capture.output_path);
+		output_path);
 	if (Player_object && Player_object->movement_type == MT_PHYSICS)
 	{
 		const physics_info& physics = Player_object->mtype.phys_info;
@@ -753,13 +766,13 @@ void CaptureAutomatedFrameIfRequested()
 	}
 	const int save_arg = FindArg("-capture-save-output");
 	const char* save_path = save_arg ? GetArg(save_arg + 1) : nullptr;
-	if (save_path && save_path[0])
+	if (final_capture && save_path && save_path[0])
 	{
 		const bool save_ok = SaveGameState(save_path, "Automated capture");
 		AutomatedCaptureLog("save %s output=%s", save_ok ? "saved" : "failed",
 			save_path);
 	}
-	Automated_capture.exit_pending = true;
+	Automated_capture.exit_pending = final_capture;
 }
 
 static void EndAutomatedCaptureFrame()

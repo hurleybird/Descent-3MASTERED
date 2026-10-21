@@ -1,5 +1,62 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## October 21 continuation — full-cycle roof-edge validation
+
+Added `-capture-series-from N`: captures each frame N..target, exits only at
+target. Intermediate names append `.frameNNNNNN.png`; final name unchanged.
+Save-output is final-frame-only. Five-frame smoke check preserved the final
+single-capture image exactly. Series introduce readback/diagnostic overhead;
+NEVER use their frame times as performance evidence.
+
+Full 64-frame cycle (90..153), stationary and rotating roofprobe20261021,
+`fog-series-edge-{still,motion}-{ref,raw,temporal,wide}`. Reference is exact
+post-shell integrator, raw disables history, wide uses width320, others160.
+Grayscale fog diagnostic; metric ROI y100..429, reference low optical depth
+(0<gray<80) in either frame. This is a low-density-region proxy, not an isolated
+geometric contour or HUD-free mask. Residual flicker measures change in
+(candidate-reference), removing common scene motion; units are 8-bit levels.
+
+| Mode | Still mean error / flicker | Rotation mean error / flicker |
+|---|---|---|
+| Raw jitter | 1.274 / 1.605 | .884 / 1.101 |
+| Temporal160 | 1.023 / .285 | 1.274 / .589 |
+| Temporal320 | .807 / .225 | 1.094 / .500 |
+| Temporal160, local history bound | .959 / .293 | 1.095 / .606 |
+
+Local history bound clamps reprojected density to current cell plus six axis
+neighbors. Reduces accumulated boundary smear, modestly worsens flicker. Build
+out/fog-history-bound-build.log; runtime captures fog-series-bound-*, normal
+color fog-bound-color-{ref,field}, both inspected. Clear ceiling strip persists.
+Single500frame clean/effects GPU .80/6.24ms vs before bound .79/6.26ms. CPU
+1.79/1.97 vs1.67/1.82ms (no CPU-path change; not a controlled CPU conclusion).
+Effects1920x1080 SSAA2 MSAA4 AO+bloom, clean1280x720 no effects. Rows100..449.
+Full CSVs and reproduction script under ignored out/fog-series*metrics.csv and
+out/measure-fog-temporal.ps1. Old preview and Candidate NOT updated.
+
+REJECTED EXPERIMENT: round field range up to power-of-two depth bands to
+reduce camera-rotation rescaling. Captures fog-series-depth-* measured still
+error/flicker1.044/.296, rotation1.243/.613: worse than local bound with fitted
+range. Removed; loss of depth resolution outweighed hoped-for stability.
+Bound-only executable preserved out/perf-checkpoints/fog-history-bound.exe.
+Latest usage9% consumed, ordinary allowed.
+
+Additional boundary-band metric includes clear pixels within a four-pixel cross
+of nonzero reference fog (high<80); still includes some HUD/geometry transitions.
+Tracked reproducer tools/renderer-fog-temporal-metrics.ps1 requires -Root and
+supports -BoundaryBand. Full-cycle before/after local bound: still error
+3.647->3.539, flicker .892->.925; rotation error2.384->2.090, flicker2.176->2.087.
+Thus edge-local measurements support modest improvement, NOT solved shimmer.
+
+Cross-scene500frame suite fog-bound-suite-savegNNN-{ref,field}, clean settings:
+GPU ref->field000 .31->.56;0011.82->.89;003 .30->.55;004 .22->.21;
+005 .19->.19;006 .93->.98;0071.48->.86. Images003..006 pixel-exact;
+001meanRGB .388 max7;007 .045 max2. 000 image comparison INVALID for fog-only
+inference: visually different animated door/robot poses between runs (mean2.91).
+This reveals wasted field work in003: camera-cone fog candidates beyond visible
+surfaces still trigger injection. Next safe direction: conservative maximum
+endpoint depth from submitted geometry, shared optical candidate rejection,
+NOT camera-room membership hacks. No implementation of that culling yet.
+
 ## October 21 continuation — density history, roof reproduction, snapshot repair
 
 LATEST UPDATE (supersedes storage/injection details below): actual upstream bug

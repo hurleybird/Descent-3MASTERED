@@ -159,8 +159,20 @@ void main() {
         // Reject history outside its actual sample support, including near/far
         // cells. No clamped border texel is allowed to masquerade as history.
         vec3 half_texel=0.5/vec3(textureSize(fog_previous_density,0));
-        if (previous.w>0.0 && all(greaterThanEqual(previous_uv,half_texel)) && all(lessThanEqual(previous_uv,1.0-half_texel)))
-            current=mix(current,texture(fog_previous_density,previous_uv),fog_history_weight);
+        if (previous.w>0.0 && all(greaterThanEqual(previous_uv,half_texel)) && all(lessThanEqual(previous_uv,1.0-half_texel))) {
+            // Repeated reprojection must not transport old density beyond the
+            // current medium's local support. Keep sub-cell jitter coverage at
+            // boundaries, but reject fog leaking into uniformly clear cells.
+            vec4 low=current,high=current;
+            for (int axis=0;axis<3;++axis) {
+                ivec3 offset=ivec3(0); offset[axis]=1;
+                vec4 a=texelFetch(fog_current_density,max(cell-offset,ivec3(0)),0);
+                vec4 b=texelFetch(fog_current_density,min(cell+offset,size-1),0);
+                low=min(low,min(a,b)); high=max(high,max(a,b));
+            }
+            vec4 previous_density=clamp(texture(fog_previous_density,previous_uv),low,high);
+            current=mix(current,previous_density,fog_history_weight);
+        }
     }
     imageStore(fog_density_output,cell,current);
 }
