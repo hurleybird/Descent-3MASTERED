@@ -92,6 +92,15 @@ int runModelSceneTests() {
     check(compiled.parts[0].geometry.polygons[0].corners[1].alpha == 127, "Authored model alpha lost");
     check(compiled.parts[0].polygon_colors[0].x == 128/255.f, "Flat model color lost");
     SceneAssets assets;
+    auto animation_geometry = compiled;
+    auto mutable_animation = std::make_shared<ModelAnimation>(*compiled.animation);
+    animation_geometry.animation = mutable_animation;
+    const auto animated_asset = assets.publishModel(7,animation_geometry);
+    mutable_animation->submodel[0].rps = 123;
+    check(animated_asset->geometry().animation->submodel[0].rps != 123,"Published animation retained a mutable builder alias");
+    check(assets.publishModel(7,animation_geometry)->id() != animated_asset->id(),"Changed animation did not revise its model asset");
+    animation_geometry.animation = std::make_shared<ModelAnimation>();
+    rejects([&] { assets.publishModel(7,animation_geometry); });
     auto authored = modelGeometry();
     const auto shape = deformMesh(authored.parts[0].geometry,.2f,3.5,42,1);
     const auto same_shape = deformMesh(authored.parts[0].geometry,.2f,3.5,42,1);

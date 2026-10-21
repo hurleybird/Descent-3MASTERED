@@ -71,14 +71,19 @@ int runModelPoseTests() {
     model.n_models = 3; model.num_key_angles = model.num_key_pos = 3; model.submodel = source;
     for (int style = 0; style < 2; ++style) for (int timed = 0; timed < 2; ++timed) {
         model.new_style = style; model.flags = timed ? PMF_TIMED : 0;
+        const auto animation = CompileModelAnimation(model);
         for (int step = 0; step <= 100; ++step) {
             float times[] = {step / 100.f, (100 - step) / 100.f, step / 100.f};
             ReferenceClock = step * 0.071f;
             const auto before = std::array<bsp_info, 3>{source[0], source[1], source[2]};
             const auto pose = EvaluateModelPose(model, times, ReferenceClock);
+            const auto owned_pose = EvaluateModelPose(animation,times,ReferenceClock);
             check(std::memcmp(source, before.data(), sizeof(source)) == 0, "Evaluator mutated shared model");
             ReferencePose(&model, times, 0xffffffffu);
-            for (int i = 0; i < 3; ++i) check(same(pose.submodels[i], source[i]), "Animation differs from original evaluator");
+            for (int i = 0; i < 3; ++i) {
+                check(same(pose.submodels[i], source[i]), "Animation differs from original evaluator");
+                check(same(owned_pose.submodels[i],source[i]),"Owned animation differs from original evaluator");
+            }
             // Interleaving another instance cannot change an already-owned pose.
             const auto saved = pose;
             times[0] = 1 - times[0];
@@ -89,8 +94,10 @@ int runModelPoseTests() {
         // bank-angle bug in the old non-timed rest-pose branch.
         for (auto& sm : source) { sm.angs = {}; sm.mod_pos = {}; }
         const auto rest = EvaluateModelPose(model, nullptr, ReferenceClock);
+        const auto owned_rest = EvaluateModelPose(animation,nullptr,ReferenceClock);
         ReferencePose(&model, nullptr, 0xffffffffu);
         for (int i = 0; i < 3; ++i) check(same(rest.submodels[i], source[i]), "Null-input pose semantics changed");
+        for (int i = 0; i < 3; ++i) check(same(owned_rest.submodels[i],source[i]),"Owned null-input animation changed");
     }
     model.flags = 0;
     model.num_key_angles = model.num_key_pos = 0;
@@ -150,7 +157,14 @@ int runModelPoseTests() {
     source[1].parent = 3;
     rejects([&] { ComposeModelPose(model, retained); });
     source[1].parent = -1;
+    const auto owned_animation = CompileModelAnimation(model);
+    const auto owned_transforms = ComposeModelPose(owned_animation,retained);
     model.submodel = nullptr;
+    const auto retained_transforms = ComposeModelPose(owned_animation,retained);
+    check(owned_transforms.submodels[0].translation.x == retained_transforms.submodels[0].translation.x,
+        "Compiled hierarchy retained game model pointers");
+    positions[0].x += 100;
+    check(owned_animation.submodel[0].keyframe_pos[0].x != positions[0].x,"Compiled animation retained source key storage");
     check(retained.count == 3 && std::isfinite(retained.submodels[0].translation.x), "Pose depended on asset lifetime");
     rejects([&] { EvaluateModelPose(model, times, 0); });
     return checks;

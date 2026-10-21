@@ -10,6 +10,7 @@
 #include <array>
 #include <unordered_map>
 
+struct ModelAnimation;
 namespace d3scene {
 
 struct Vec2 { float x = 0, y = 0; };
@@ -102,6 +103,7 @@ struct ModelPart {
     Bounds local_bounds;
 };
 struct ModelGeometry {
+    std::shared_ptr<const ModelAnimation> animation;
     std::vector<ModelPart> parts;
     std::vector<int32_t> textures;
     // Compiled local-to-model transforms for an unanimated rest pose. Empty

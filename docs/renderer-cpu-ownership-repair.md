@@ -2,6 +2,19 @@
 
 ## October 20 continuation
 
+Model assets now own animation tracks as well as topology. The original and
+owned-track pose APIs share one evaluator/composer; no second animation math
+implementation was introduced. Asset publication severs mutable builder aliases
+and verifies that animation and geometry hierarchies agree. Source revision
+audits now compare animation keys too. World/static/cockpit sampling uses the
+owned tracks. This is a prerequisite for demand-driven model evaluation, not
+that scheduling change itself: poses are still eagerly assembled at this point.
+All eight `cpu-owned-animation-audit-20261020-savegNNN` images match the preceding
+checkpoint exactly. The auxiliary-view/deformation/resource/AO/bloom probe also
+matches exactly. Tests compare 404 keyed samples against the original evaluator
+plus rest, source-lifetime and mutable-alias cases. Dense clean CPU is 6.45 ms
+in the latest run; do not attribute the small variation to the ownership change.
+
 Latest checkpoint: authored special-face reflection data and lightmap-info
 assignments have producer revisions; the material-input scan falls from about
 0.49 to 0.03 ms. Geometry audit retains the full comparison and completed all

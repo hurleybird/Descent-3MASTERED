@@ -44,7 +44,7 @@ using RoomTable = std::unordered_map<int,const d3scene::RoomState*>;
 // A pose is a function of the model, its animation inputs and the presentation
 // clock, not of object placement. Instances with identical inputs share the
 // evaluation. Scratch retains capacity only; frames copy the resulting values.
-const ModelTransforms& evaluateSharedPose(int number,const poly_model& model,const float* input,
+const ModelTransforms& evaluateSharedPose(int number,const ModelAnimation& model,const float* input,
     uint64_t sequence,float time) {
     struct Entry {
         bool has_input = false;
@@ -368,7 +368,7 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::FrameDat
             pose_reused += reuse_pose; pose_clock += variant.asset->geometry().pose_uses_clock;
             pose_changed += !same_inputs;
             const ModelTransforms* transforms = nullptr;
-            if (!rest && !reuse_pose) transforms = &evaluateSharedPose(model_number,*model,input,data.sequence,static_cast<float>(data.simulation_time));
+            if (!rest && !reuse_pose) transforms = &evaluateSharedPose(model_number,*variant.asset->geometry().animation,input,data.sequence,static_cast<float>(data.simulation_time));
             if (audit_geometry) {
                 const auto evaluated = ComposeModelPose(*model,EvaluateModelPose(*model,input,static_cast<float>(data.simulation_time)));
                 const auto same = [](d3scene::Vec3 a,d3scene::Vec3 b) { return a.x == b.x && a.y == b.y && a.z == b.z; };
@@ -480,8 +480,9 @@ void PrepareGameStaticModel(d3scene::FrameData& data,int number,const d3scene::T
     instance.identity = identity; instance.collection = collection; instance.current = instance.previous = placement;
     d3scene::PreparedModel model;
     model.asset = PrepareGameModelAsset(number,FindArg("-scene-geometry-revision-audit") != 0);
-    const auto pose = EvaluateModelPose(*source,nullptr,static_cast<float>(data.simulation_time));
-    const auto transforms = ComposeModelPose(*source,pose);
+    const auto& animation = *model.asset->geometry().animation;
+    const auto pose = EvaluateModelPose(animation,nullptr,static_cast<float>(data.simulation_time));
+    const auto transforms = ComposeModelPose(animation,pose);
     const auto roles = ResolveSceneModelRoles(model.asset->geometry(),0xffffffffu,false);
     for (size_t index = 0; index < model.asset->geometry().parts.size(); ++index) {
         const auto& geometry = model.asset->geometry().parts[index];

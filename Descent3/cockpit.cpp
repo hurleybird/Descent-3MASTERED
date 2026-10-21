@@ -859,7 +859,7 @@ void PrepareGameCockpit(d3scene::FrameData& frame, bool advance,const d3scene::F
     keyframe = (std::max)(float(model.frame_min),(std::min)(float(model.frame_max),keyframe));
     float normalized[MAX_SUBOBJECTS]{};
     SetNormalizedTimeAnim(keyframe,normalized,Cockpit_info.model);
-    auto pose = EvaluateModelPose(model,normalized,static_cast<float>(frame.simulation_time));
+    auto pose = EvaluateModelPose(*asset->geometry().animation,normalized,static_cast<float>(frame.simulation_time));
     const float spread = Cockpit_alt_mode ? GetCockpitDisplaySpread() : 0.f;
     if (spread > .0001f && Cockpit_info.display_adjust_available) {
         vector offsets[MAX_SUBOBJECTS]{};
@@ -867,7 +867,7 @@ void PrepareGameCockpit(d3scene::FrameData& frame, bool advance,const d3scene::F
             offsets[i] = Cockpit_info.display_adjust_unit[i]*spread;
         pose = OffsetModelPose(model,pose,offsets,Cockpit_info.display_adjust_count);
     }
-    const auto transforms = ComposeModelPose(model,pose);
+    const auto transforms = ComposeModelPose(*asset->geometry().animation,pose);
     float r,g,b;
     if (OBJECT_OUTSIDE(Player_object)) r = g = b = GetTerrainDynamicScalar(&Player_object->pos,CELLNUM(Player_object->roomnum));
     else GetRoomDynamicScalar(&Player_object->pos,&Rooms[Player_object->roomnum],&r,&g,&b);

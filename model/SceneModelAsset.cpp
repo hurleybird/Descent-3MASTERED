@@ -46,6 +46,7 @@ d3scene::ModelGeometry CompileSceneModelAsset(const poly_model& model, size_t* r
         model.n_textures > MAX_MODEL_TEXTURES || (model.n_models && !model.submodel))
         throw std::invalid_argument("Invalid authored model counts");
     d3scene::ModelGeometry geometry;
+    geometry.animation = std::make_shared<const ModelAnimation>(CompileModelAnimation(model));
     geometry.textures.assign(model.textures, model.textures + model.n_textures);
     for (int i = 0; i < model.n_models; ++i) {
         const auto& source = model.submodel[i];
@@ -116,6 +117,7 @@ d3scene::ModelGeometry CompileSceneModelAsset(const poly_model& model, size_t* r
 bool MatchesSceneModelAsset(const d3scene::ModelGeometry& geometry,const poly_model& model) {
     if (model.n_models < 0 || model.n_textures < 0 || geometry.parts.size() != size_t(model.n_models) ||
         geometry.textures.size() != size_t(model.n_textures) || (model.n_models && !model.submodel)) return false;
+    if (!geometry.animation || !(*geometry.animation == CompileModelAnimation(model))) return false;
     const bool static_rest = (model.flags & PMF_TIMED) || std::none_of(geometry.parts.begin(),geometry.parts.end(),
         [](const d3scene::ModelPart& part) { return (part.authored_flags & (SOF_ROTATE|SOF_TURRET)) != 0; });
     if (static_rest != (geometry.rest_pose.size() == geometry.parts.size())) return false;

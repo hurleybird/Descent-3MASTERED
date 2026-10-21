@@ -1,5 +1,6 @@
 // Descent 3MASTERED - GPL-3.0-or-later
 #include "Scene.h"
+#include "../model/ModelPose.h"
 #include "SceneCompositing.h"
 #include "SceneTerrain.h"
 #include "SceneFog.h"
@@ -249,6 +250,7 @@ void SceneAssets::removeRoom(uint32_t slot) {
 }
 
 bool operator==(const ModelGeometry& a, const ModelGeometry& b) {
+    if (bool(a.animation) != bool(b.animation) || (a.animation && !(*a.animation == *b.animation))) return false;
     if (a.pose_uses_clock != b.pose_uses_clock) return false;
     if (a.rest_pose.size() != b.rest_pose.size()) return false;
     for (size_t i = 0; i < a.rest_pose.size(); ++i) {
@@ -293,10 +295,18 @@ ModelAssetRef SceneAssets::model(uint32_t slot) const {
     return slot < models_.size() ? models_[slot] : nullptr;
 }
 ModelAssetRef SceneAssets::publishModel(uint32_t slot, ModelGeometry geometry) {
+    require(!geometry.animation || (geometry.animation->n_models >= 0 &&
+        size_t(geometry.animation->n_models) == geometry.parts.size() && geometry.animation->submodel.size() == geometry.parts.size()),
+        "Incomplete model animation hierarchy");
     require(geometry.rest_pose.empty() || geometry.rest_pose.size() == geometry.parts.size(),"Incomplete model rest pose");
     for (const auto& transform : geometry.rest_pose) require(finite(transform),"Invalid model rest pose");
     for (size_t i = 0; i < geometry.parts.size(); ++i) {
         const auto& part = geometry.parts[i];
+        if (geometry.animation) {
+            const auto& animated = geometry.animation->submodel[i];
+            require(animated.parent == part.parent && animated.offset.x == part.offset.x &&
+                animated.offset.y == part.offset.y && animated.offset.z == part.offset.z,"Animation and geometry hierarchy disagree");
+        }
         validateGeometry(part.geometry);
         require(part.geometry.raster_offsets.empty(),"Model geometry cannot use raster markers");
         require(finite(part.offset), "Invalid model offset");
@@ -319,6 +329,9 @@ ModelAssetRef SceneAssets::publishModel(uint32_t slot, ModelGeometry geometry) {
     }
     const auto previous = model(slot);
     if (previous && previous->geometry() == geometry) return previous;
+    // A caller may retain a mutable shared alias while building. Publication
+    // severs it, just as it owns the topology passed by value.
+    if (geometry.animation) geometry.animation = std::make_shared<const ModelAnimation>(*geometry.animation);
     if (revision_ == std::numeric_limits<uint64_t>::max()) throw std::overflow_error("Scene revision exhausted");
     ModelAssetRef replacement(new ModelAsset({lifetime_, revision_ + 1, slot}, std::move(geometry)));
     if (slot >= models_.size()) models_.resize(static_cast<size_t>(slot) + 1);
