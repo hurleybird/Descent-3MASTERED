@@ -2,6 +2,32 @@
 
 ## Active 2026-10-21 flare regression investigation
 
+LATEST after b53e1d2: foreground composition consumes its existing RGBA8 layer
+directly when SSAA is off; MSAA still resolves on read, SSAA keeps its reduction.
+BlendLayerOverPostPresent replaces the hardwired post-composite input. The
+fullscreen pass writes source alpha directly (ONE,ZERO), exactly replacing
+clear-alpha-then-source-over. Prepared rendering no longer clears alpha first.
+Legacy adapter retains its clear. -scene-copy-foreground selects the reference
+copy/clear schedule for measurement; no source/GPU quality reduction.
+Build/contract tests pass. 006 short and 4K long,005 long, MSAA4/AO/bloom006 and
+heavy SSAA2/MSAA4/AO/bloom multiview are pixel-exact. Heavy image inspected.
+Requested1293x731 fell back1280x720; do NOT claim odd dimensions were tested.
+Same-binary ABBA 4K006 copy/direct/direct/copy (frames400..899 of1000):
+CPU .621204/.646870/.639166/.619816; GPU2.056648/1.837332/1.838224/2.064036.
+GPU improves ~.223ms (~11%); CPU slightly worse, NOT a CPU win claim.
+720p005 CPU1.179576/1.174798/1.193564/1.146526;
+GPU .171166/.157860/.154590/.163896. CPU remains mixed/no demonstrated benefit.
+Evidence foreground-final4k006-*,foreground-final005-*,foreground-msaa006-*,
+foreground-coverage-multiview. Runtime/build contain this tested candidate.
+
+Rejected per-view reflection-interface specialization: seven fewer vec4 varyings
+when no active authored fields, pixel-exact006 but no GPU gain at720p or4K.
+ALL experiment source removed. out/rejected-reflection-interface.txt has numbers.
+No extra binary copy retained. User emphatically reiterated do not stop; continue
+after checkpoints. No PowerShell deletion; no cleanup deletions occurred.
+Next: reconstruct pre-rewrite source bfb59647 as a clearly labeled NEW baseline,
+reuse the owned runtime/build storage where possible, do not claim old hash parity.
+
 LATEST after e4983b1: camera winding now travels in the per-view fog traversal
 entry; immutable fog geometry no longer receives glBufferSubData per volume/view.
 Geometry headers shrink from four to three vec4 records. Exact fog retains its

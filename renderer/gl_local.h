@@ -729,7 +729,7 @@ private:
 	void StartCockpitSceneFrame(int x1, int y1, int x2, int y2);
 	bool ResolveCockpitLayerToPostComposite();
 	void ClearPostPresentAlpha();
-	void BlendPostCompositeOverPostPresent();
+	void BlendLayerOverPostPresent(Framebuffer& layer,int x,int y,int width,int height);
 	void CompositeWorldDisplay(Framebuffer* world_source,Framebuffer* color_source,ColorFramebuffer* bloom_output,
 		GLuint protection_mask,float uv_x,float uv_y,float uv_w,float uv_h,float display_gamma);
 	void CompositePendingModalUI();

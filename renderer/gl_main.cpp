@@ -17,6 +17,7 @@
 * along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 #include "gl_local.h"
+#include "args.h"
 #include "gameloop.h"
 #include "game.h"
 #include "descent.h"
@@ -2210,23 +2211,23 @@ void GL4Renderer::ClearPostPresentAlpha()
 		glDrawBuffer(old_draw_buffer);
 }
 
-void GL4Renderer::BlendPostCompositeOverPostPresent()
+void GL4Renderer::BlendLayerOverPostPresent(Framebuffer& layer,int x,int y,int width,int height)
 {
-	if (post_present_framebuffer.Handle() == 0 || post_composite_framebuffer.Handle() == 0)
+	if (post_present_framebuffer.Handle() == 0 || layer.Handle() == 0)
 		return;
 
-	GLuint cockpit_texture = post_composite_framebuffer.ColorTextureForRead();
+	GLuint cockpit_texture = layer.ColorTextureForRead();
 	if (cockpit_texture == 0)
 		return;
 
 	blitshader.Use();
 	glUniform1f(blitshader_gamma, 1.0f);
 	if (blitshader_uv_origin != -1)
-		glUniform2f(blitshader_uv_origin, 0.0f, 0.0f);
+		glUniform2f(blitshader_uv_origin, float(x)/layer.Width(), float(y)/layer.Height());
 	if (blitshader_uv_scale != -1)
-		glUniform2f(blitshader_uv_scale, 1.0f, 1.0f);
+		glUniform2f(blitshader_uv_scale, float(width)/layer.Width(), float(height)/layer.Height());
 	rend_ClearBoundTextures();
-	GL_BindFramebufferTexture(cockpit_texture, 0, GL_LINEAR);
+	GL_BindFramebufferTexture(cockpit_texture, 0, GL_NEAREST);
 
 	const GLboolean blend_was_enabled = glIsEnabled(GL_BLEND);
 	const GLboolean depth_was_enabled = glIsEnabled(GL_DEPTH_TEST);
@@ -2254,7 +2255,9 @@ void GL4Renderer::BlendPostCompositeOverPostPresent()
 	glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
 	glViewport(0, 0, post_present_framebuffer.Width(), post_present_framebuffer.Height());
 	glEnable(GL_BLEND);
-	glBlendFuncSeparate(GL_ONE, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+	// The fullscreen layer owns destination coverage. Writing source alpha is
+	// exactly source-over onto zero alpha, without clearing the target first.
+	glBlendFuncSeparate(GL_ONE, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ZERO);
 	glDisable(GL_DEPTH_TEST);
 	glDisable(GL_CULL_FACE);
 	glDisable(GL_SCISSOR_TEST);
@@ -2263,6 +2266,8 @@ void GL4Renderer::BlendPostCompositeOverPostPresent()
 	rend_RecordDrawCall(RENDERER_DRAW_CALL_POSTPROCESS);
 	glDrawArrays(GL_TRIANGLES, 0, 3);
 
+	if (blitshader_uv_origin != -1) glUniform2f(blitshader_uv_origin,0,0);
+	if (blitshader_uv_scale != -1) glUniform2f(blitshader_uv_scale,1,1);
 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, old_draw);
 	glViewport(old_viewport[0], old_viewport[1], old_viewport[2], old_viewport[3]);
 	glBlendFuncSeparate(old_src_rgb, old_dst_rgb, old_src_alpha, old_dst_alpha);
@@ -2528,9 +2533,19 @@ void GL4Renderer::RenderForeground(const d3scene::Presentation& frame,
 		cockpit_scene_frame_active = true;
 		try {
 			for (const auto& view : layer.scene_views) RenderSceneView(d3scene::prepareView(frame,view));
-			ClearPostPresentAlpha();
-			if (!ResolveCockpitLayerToPostComposite()) Error("Foreground image resolve failed");
-			BlendPostCompositeOverPostPresent();
+			const bool copy_foreground = FindArg("-scene-copy-foreground") != 0;
+			if (copy_foreground) ClearPostPresentAlpha(); // diagnostic reference schedule
+			// An isolated display-resolution layer is already the composition
+			// input. MSAA resolves on read; only SSAA requires image reduction.
+			if (SupersamplingFactor() < 2 && !copy_foreground) {
+				const int bottom = framebuffer_logical_height-OpenGL_state.screen_height-framebuffer_logical_offset_y;
+				BlendLayerOverPostPresent(storage,framebuffer_logical_offset_x,bottom,
+					OpenGL_state.screen_width,OpenGL_state.screen_height);
+			} else {
+				if (!ResolveCockpitLayerToPostComposite()) Error("Foreground image resolve failed");
+				BlendLayerOverPostPresent(post_composite_framebuffer,0,0,
+					post_composite_framebuffer.Width(),post_composite_framebuffer.Height());
+			}
 		} catch (...) {
 			cockpit_scene_frame_active = false;
 			throw;
@@ -2555,7 +2570,8 @@ void GL4Renderer::EndCockpitFrame()
 	const bool cockpit_layer_resolved = cockpit_scene_frame_active && ResolveCockpitLayerToPostComposite();
 	GL4PerfGpuSplitMark(GL4_GPU_SPLIT_COCKPIT_AFTER_RESOLVE);
 	if (cockpit_layer_resolved)
-		BlendPostCompositeOverPostPresent();
+		BlendLayerOverPostPresent(post_composite_framebuffer,0,0,
+			post_composite_framebuffer.Width(),post_composite_framebuffer.Height());
 	GL4PerfGpuSplitMark(GL4_GPU_SPLIT_COCKPIT_AFTER_BLEND);
 	cockpit_scene_frame_active = false;
 	UseDrawVAO();
