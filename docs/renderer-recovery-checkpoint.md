@@ -2,6 +2,44 @@
 
 ## Active 2026-10-21 flare regression investigation
 
+LATEST current source: ExecuteSceneView plans passes before GPU preparation.
+Empty non-clearing views skip GPU uploads/setup, but still advance view history;
+depth clears, sky clears and exported main-world products continue executing.
+Stage-local glGetError checks are always on in non-NDEBUG; Release opts in with
+-scene-gl-audit. Same-binary audit on/off ABBA005 CPU1.0535/1.0652/1.0631/1.1684
+does not demonstrate a reliable speedup from removing polling alone.
+Empty-view ABBA005 CPU control1.090722 / scheduled1.075722 /
+scheduled1.072942 / control1.094944; GPU .16148/.16198/.16239/.16176.
+Small consistent ~.019ms CPU improvement, NOT the all-baseline goal complete.
+Contract tests/build pass. empty-view005 image exact; empty-view-multiview
+(1920x1080 SSAA2 MSAA4 AO+bloom, image/deformation/resource probes and GL,
+geometry/image/fog audits) pixel-exact against scalar-fog-multiview. Visually
+inspected heavy image, no new defect apparent. out/empty-view-candidate.exe
+preserves final tested binary; runtime restored to that after benchmarking.
+
+LATEST after82f2525: texture producer-revision audit found writable GameTextures
+exported to external game modules (Game2DLL/DMFC). Do NOT replace the table scan
+with only in-repo writer notifications. Fresh current82 stack005 profile:
+5534 samples,422 preparation,819 total rendering; prepareImages116,
+procedural bitmap evaluation77, publication93, models86; material scan7 only.
+View preparation122, driver123, foreground198 (inclusive; not additive).
+Attempted bounded immutable fire/water input storage reuse. Tests/build passed,
+pixel-input005 image exact, but ABBA CPU .983354/1.151224/1.039534/1.063990
+did NOT show a gain. All source removed; out/rejected-pixel-input-pool.txt and
+out/pixel-input-candidate.exe preserve experiment. Runtime restored control82.
+The old frozen perf-old-runtime directory is now also absent; 45 selected
+executables plus140 worktree-out executables did not yield old SHA DED4E006.
+Candidate/Prev hashEDAB17AA is a DIFFERENT build, not the benchmark replacement.
+Asked user asynchronously if the frozen baseline was moved. Do not substitute
+another baseline silently. Continue independent work, no blocker stop.
+Current uncommitted gl_scene.cpp moves four unconditional glGetError polls per
+view behind Release -scene-gl-audit (always enabled non-NDEBUG). Build running
+out/scene-gl-audit-build.log; not yet benchmarked. Plan same-binary audit on/off
+and heavy GL-audit capture. Next potential upstream improvement: build the view
+pass schedule BEFORE GPU preparation; an empty non-clearing view has no GPU work
+but currently still uploads state. Preserve main world products, clears/history.
+Usage49% consumed; credits unchanged62451.4387600000. No preview touched.
+
 LATEST after 0a2a8d6: opt-in -capture-thread-cycles appends raw render_thread_cycles
 to the TSV (-1 unavailable/disabled). Windows QueryThreadCycleTime includes
 user/kernel thread work; never convert these counts to elapsed milliseconds.

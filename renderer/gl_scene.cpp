@@ -1236,7 +1236,36 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
             if (item.mesh && presentation.data().meshes[item.mesh_index].receiver_polygon >= 0) ++receivers;
         if (receivers) AutomatedCaptureLog("scene receiver meshes visible=%u",receivers);
     }
-    const auto check_scene_error = [](const char* stage) { const auto error = glGetError(); if (error != GL_NO_ERROR) Error("Scene GL error 0x%x at %s",error,stage); };
+    // Driver error polling is diagnostic work, not part of each view's normal
+    // submission contract. Keep scene-data validation unconditional; enable
+    // these stage-local GL checks explicitly in Release qualification runs.
+#ifndef NDEBUG
+    constexpr bool audit_scene_gl = true;
+#else
+    static const bool audit_scene_gl = FindArg("-scene-gl-audit") != 0;
+#endif
+    const d3scene::ViewProducts products{owns_world_products,
+        owns_world_products && OpenGL_preferred_state.ao_enabled && framebuffer_ok};
+    const auto passes = d3scene::buildViewPasses(presentation,visibility,products);
+    const auto history = target.history.prepare(presentation.data(),view,visibility.camera);
+    const bool clears_sky = visibility.exterior_visible && presentation.data().sky_enabled;
+    // Plan before uploading or touching driver state. An empty overlay has no
+    // raster work; a depth clear or opaque-world export is still real work even
+    // without surfaces. Image targets have already been initialized by their
+    // owning producer. Camera history advances independently of raster work.
+    if (passes.empty() && !view.clear_depth && !clears_sky) {
+        target.history.commit(history);
+        d3scene::VisibilityReport result;
+        result.frame_sequence = presentation.data().sequence;
+        result.scene_lifetime = presentation.data().scene_lifetime;
+        result.view_history_key = view.history_key;
+        return result;
+    }
+    const auto check_scene_error = [&](const char* stage) {
+        if (!audit_scene_gl) return;
+        const auto error = glGetError();
+        if (error != GL_NO_ERROR) Error("Scene GL error 0x%x at %s",error,stage);
+    };
     check_scene_error("entry");
     FlushFontBatch();
     const GLboolean inherited_scissor = glIsEnabled(GL_SCISSOR_TEST);
@@ -1248,7 +1277,6 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         scene_sample_resolve_verified = true;
         check_scene_error("sample resolve self-test");
     }
-    const auto history = target.history.prepare(presentation.data(),view,visibility.camera);
     if (owns_world_products) {
         scene_motion = d3scene::prepareImageMotion(presentation.data(),history,completed_scene_motion);
         scene_temporal_reset = !history.previous_valid;
@@ -1331,8 +1359,6 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     glDepthFunc(GL_LEQUAL);
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
     if (writes_protection) post_protection_mask.UseSceneDrawBuffers(output.Handle(),false,false);
-    const d3scene::ViewProducts products{owns_world_products,
-        owns_world_products && OpenGL_preferred_state.ao_enabled && framebuffer_ok};
     const bool writes_motion = products.opaque_scene && SceneSurfaceTargetEnabled();
     bool depth_prepass = false;
     const auto bind_outputs = [&] {
@@ -1369,7 +1395,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         surface_records.MarkDirty(); motion_vectors_dirty = true;
     }
     if (writes_protection) post_protection_mask.resolve_valid = false;
-    if (visibility.exterior_visible && presentation.data().sky_enabled) {
+    if (clears_sky) {
         // Clear only this view's color attachment. Background geometry never
         // tests or writes world depth, including in auxiliary viewports.
         GLint viewport[4], previous_scissor[4]; GLfloat previous_color[4];
@@ -1601,7 +1627,6 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         return !found || presentation.data().rooms[found->second].exterior;
     };
 
-    const auto passes = d3scene::buildViewPasses(presentation,visibility,products);
     check_scene_error("pass setup");
 
     // Build compact GPU draw records once, then submit by buffer offset. The

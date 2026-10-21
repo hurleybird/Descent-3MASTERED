@@ -1189,6 +1189,8 @@ int runSceneViewTests() {
         try { d3scene::Presentation::freeze(depth_scene); } catch (const std::invalid_argument&) { invalid_depth = true; }
         check(invalid_depth,"Background depth writes accepted");
     }
+    check(d3scene::buildViewPasses(*empty_frame,d3scene::queryView(*empty_frame,view())).empty(),
+        "Empty view without products scheduled raster passes");
     const auto empty_passes = d3scene::buildViewPasses(*empty_frame,d3scene::queryView(*empty_frame,view()),{true});
     check(empty_passes.size() == 1 && empty_passes[0].kind == d3scene::ViewPassKind::ExportOpaqueScene,
         "An empty view reused a previous view's opaque image product");
