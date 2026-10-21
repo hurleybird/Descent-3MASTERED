@@ -2,6 +2,10 @@
 #pragma once
 #include "Scene.h"
 namespace d3scene {
+struct Camera;
+// Fog integrates camera-to-surface rays, not just the geometry clipping range.
+// Never apply the geometry near plane or mirror plane to optical candidates.
+bool fogMayIntersectView(const Bounds&,const Camera&,bool perspective);
 // Connected authored space, compiled before any camera query. Interior portal
 // faces disappear from the boundary; all other faces close the volume.
 struct FogPortalSource { int32_t polygon, destination_room, destination_portal; bool open; };

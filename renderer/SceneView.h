@@ -72,7 +72,14 @@ struct ViewQueryStats {
     uint32_t rooms_considered = 0, surfaces_considered = 0;
     uint32_t surfaces_backfacing = 0, surfaces_outside = 0;
 };
+struct ViewStoragePool;
 struct ViewVisibility {
+    ViewVisibility();
+    ~ViewVisibility();
+    ViewVisibility(const ViewVisibility&) = default;
+    ViewVisibility& operator=(const ViewVisibility&) = default;
+    ViewVisibility(ViewVisibility&&) noexcept = default;
+    ViewVisibility& operator=(ViewVisibility&&) noexcept = default;
     ViewOrdering ordering = ViewOrdering::Depth;
     uint64_t frame_sequence = 0, scene_lifetime = 0, history_key = 0;
     Camera camera;
@@ -81,6 +88,8 @@ struct ViewVisibility {
     std::vector<uint32_t> room_indices;
     ViewQueryStats stats;
     bool exterior_visible = false;
+private:
+    std::shared_ptr<ViewStoragePool> storage_pool_;
 };
 // Executable view preparation owns the exact immutable frame it queried.
 // Consumers cannot replace its camera/collection while retaining old results.
@@ -109,6 +118,9 @@ struct ViewPass {
 };
 const SurfaceBinding& visibleSurfaceBinding(const Presentation&,const VisibleSurface&);
 MaterialPolicy visibleSurfacePolicy(const Presentation&,const VisibleSurface&);
+// Stable pass/depth or authored-composition order. Sort compact keys rather
+// than repeatedly moving full geometry/transform records.
+void orderViewSurfaces(const Presentation&,ViewVisibility&);
 uint32_t selectModelVariant(const ModelInstance&,const Camera&);
 std::vector<ViewPass> buildViewPasses(const Presentation&,const ViewVisibility&,ViewProducts products = {});
 

@@ -1,5 +1,6 @@
 // Descent 3MASTERED - GPL-3.0-or-later
 #include "SceneFog.h"
+#include "SceneView.h"
 #include <algorithm>
 #include <cmath>
 #include <unordered_map>
@@ -8,6 +9,25 @@
 #include <stdexcept>
 #include <unordered_set>
 namespace d3scene {
+bool fogMayIntersectView(const Bounds& bounds,const Camera& camera,bool perspective) {
+    if (!perspective) return true; // orthographic endpoints still use eye-origin optical rays
+    for (size_t i = 0; i < 5; ++i) {
+        auto plane = camera.planes[i];
+        if (i == 4) {
+            plane.normal = camera.transform.forward;
+            const auto& n = plane.normal; const auto& eye = camera.transform.position;
+            plane.constant = -(double(n.x)*eye.x+double(n.y)*eye.y+double(n.z)*eye.z);
+        }
+        const auto& n = plane.normal;
+        const Vec3 p{n.x >= 0 ? bounds.maximum.x : bounds.minimum.x,
+            n.y >= 0 ? bounds.maximum.y : bounds.minimum.y,n.z >= 0 ? bounds.maximum.z : bounds.minimum.z};
+        const double d = double(n.x)*p.x+double(n.y)*p.y+double(n.z)*p.z+plane.constant;
+        const double epsilon = 2.e-6*(1+std::abs(double(n.x)*p.x)+std::abs(double(n.y)*p.y)+
+            std::abs(double(n.z)*p.z)+std::abs(plane.constant));
+        if (d < -epsilon) return false;
+    }
+    return true;
+}
 namespace {
 Vec3 sub(Vec3 a,Vec3 b) { return {a.x-b.x,a.y-b.y,a.z-b.z}; }
 Vec3 cross(Vec3 a,Vec3 b) { return {a.y*b.z-a.z*b.y,a.z*b.x-a.x*b.z,a.x*b.y-a.y*b.x}; }
@@ -139,6 +159,33 @@ std::vector<FogVolume> compileFogVolumes(const std::vector<FogRoomSource>& rooms
     return volumes;
 }
 FogAssetRef SceneAssets::publishFog(const std::vector<RoomState>& rooms) {
+    // Compare current inputs directly against the owned compilation source.
+    // Unchanged fog must not allocate/copy a room-and-portal graph just to
+    // discover that it already has the correct geometry and optical boundary.
+    if (fog_) {
+        size_t index = 0;
+        bool same = true;
+        for (const auto& room : rooms) {
+            if (!room.fog_enabled) continue;
+            if (!std::isfinite(room.fog_depth)) throw std::invalid_argument("Invalid fog depth");
+            if (!(room.fog_depth > 0)) continue;
+            if (index == fog_->source_.size()) { same = false; break; }
+            const auto& source = fog_->source_[index++];
+            if (!room.asset || room.number != source.number || room.asset->id() != source.asset->id() ||
+                room.fog_depth != source.depth || room.fog_color.x != source.color.x ||
+                room.fog_color.y != source.color.y || room.fog_color.z != source.color.z ||
+                room.portals.size() != source.portals.size()) { same = false; break; }
+            for (size_t i = 0; i < room.portals.size(); ++i) {
+                const auto& a = room.portals[i]; const auto& b = source.portals[i];
+                if (a.polygon != b.polygon || a.destination_room != b.destination_room ||
+                    a.destination_portal != b.destination_portal || a.polygon < 0 ||
+                    size_t(a.polygon) >= room.surfaces.size() ||
+                    (!room.surfaces[a.polygon].draw_surface) != b.open) { same = false; break; }
+            }
+            if (!same) break;
+        }
+        if (same && index == fog_->source_.size()) return fog_;
+    }
     std::vector<FogRoomSource> source;
     std::unordered_set<int32_t> numbers;
     for (const auto& room : rooms) {
@@ -156,15 +203,6 @@ FogAssetRef SceneAssets::publishFog(const std::vector<RoomState>& rooms) {
         }
         source.push_back(std::move(input));
     }
-    const auto same = [](const FogRoomSource& a,const FogRoomSource& b) {
-        if (a.number != b.number || a.asset->id() != b.asset->id() || !matching(a,b) || a.portals.size() != b.portals.size()) return false;
-        for (size_t i = 0; i < a.portals.size(); ++i) {
-            const auto& x = a.portals[i]; const auto& y = b.portals[i];
-            if (x.polygon != y.polygon || x.destination_room != y.destination_room || x.destination_portal != y.destination_portal || x.open != y.open) return false;
-        }
-        return true;
-    };
-    if (fog_ && source.size() == fog_->source_.size() && std::equal(source.begin(),source.end(),fog_->source_.begin(),same)) return fog_;
     if (revision_ == std::numeric_limits<uint64_t>::max()) throw std::overflow_error("Scene revision exhausted");
     auto volumes = compileFogVolumes(source);
     const auto finite = [](Vec3 v) { return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z); };

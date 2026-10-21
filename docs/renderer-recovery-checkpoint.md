@@ -2,6 +2,14 @@
 
 ## October 21 resumed work — supersedes restart pause below
 
+Newest verification binary: fog-view-final.exe. All eight images, combined probe,
+SSAA2/MSAA4/AO/bloom exact to water-owned. View storage/order and fog source/camera
+candidate work tested; CPU timings mixed, not a claimed win. Fog GPU remains slow
+despite candidates 29 -> 1 in save007. Three-round water-owned vs old comparison
+is six ahead/two behind (005/007), not the marked-win goal. Last usage 28% remaining.
+Uncommitted next change: frame-compilation storage recycling; build/tests running
+under cpu-compiled-storage-*; do not assume that work is verified yet.
+
 Newest: water-owned pixel recipes built/tested, all eight save images and combined
 probe exact. Long paired dense/wall CPU wins; full old/current baseline repeats
 are running under `cpu-water-baseline-*` (three rounds). Do not build while those

@@ -9,6 +9,8 @@
 #include <limits>
 #include <cmath>
 #include <stdexcept>
+#include <thread>
+#include <algorithm>
 
 namespace {
 int Checks = 0;
@@ -44,6 +46,70 @@ void appendRoom(d3scene::SceneAssets& assets,d3scene::FrameData& data,d3scene::M
 }
 
 int runSceneViewTests() {
+    {
+        using namespace d3scene;
+        const VisibleSurface* storage = nullptr;
+        {
+            ViewVisibility first;
+            first.surfaces.resize(8192); first.surfaces[0].polygon_index = 31;
+            storage = first.surfaces.data();
+            auto copy = first;
+            check(copy.surfaces.data() != storage && copy.surfaces[0].polygon_index == 31,"Copied visibility aliases mutable storage");
+            auto moved = std::move(first);
+            check(moved.surfaces.data() == storage,"Moved visibility copied its records");
+        }
+        // A held result is never recycled even while later queries come/go.
+        ViewVisibility held; held.surfaces.resize(32); held.surfaces[0].polygon_index = 71;
+        const auto held_storage = held.surfaces.data();
+        { ViewVisibility next; next.surfaces.resize(8192);
+          check(next.surfaces.data() != held_storage,"Live view storage was recycled"); }
+        check(held.surfaces[0].polygon_index == 71,"Subsequent query changed a held view");
+        {
+            ViewVisibility warm; warm.surfaces.reserve(16384); storage = warm.surfaces.data();
+        }
+        { ViewVisibility reused;
+          check(reused.surfaces.empty() && reused.surfaces.data() == storage,"Released visibility capacity was not reused"); }
+        std::thread release([owned = std::move(held)]() mutable { owned.surfaces.clear(); });
+        release.join();
+    }
+    {
+        using namespace d3scene;
+        SceneAssets assets; FrameData data; data.sequence = 1; data.scene_lifetime = assets.lifetime();
+        for (int i = 0; i < 17; ++i) {
+            appendRoom(assets,data,triangle(0,4));
+            data.rooms.back().surfaces[0].composition_order = (i*7)%9-4;
+        }
+        const auto frame = Presentation::freeze(data);
+        uint32_t random = 314159;
+        for (const auto ordering : {ViewOrdering::Depth,ViewOrdering::Compositing}) {
+            ViewVisibility result; result.ordering = ordering;
+            for (uint32_t i = 0; i < 4096; ++i) {
+                random = random*1664525u+1013904223u;
+                VisibleSurface item; item.room_index = i%17; item.model_instance_index = i;
+                item.depth = float(int(random%31)-15);
+                item.layer = (random&3) == 0 ? RenderLayer::Background : RenderLayer::World;
+                item.late = (random&4) != 0;
+                result.surfaces.push_back(item);
+            }
+            auto expected = result.surfaces;
+            std::stable_sort(expected.begin(),expected.end(),[&](const VisibleSurface& a,const VisibleSurface& b) {
+                if (ordering == ViewOrdering::Compositing)
+                    return visibleSurfaceBinding(*frame,a).composition_order < visibleSurfaceBinding(*frame,b).composition_order;
+                if (a.layer != b.layer) return a.layer == RenderLayer::Background;
+                if (a.layer == RenderLayer::Background) return false;
+                if (a.late != b.late) return !a.late;
+                return a.late ? a.depth > b.depth : a.depth < b.depth;
+            });
+            orderViewSurfaces(*frame,result);
+            bool same = result.surfaces.size() == expected.size();
+            for (size_t i = 0; same && i < expected.size(); ++i)
+                same = result.surfaces[i].model_instance_index == expected[i].model_instance_index;
+            check(same,"Compact-key ordering differs from stable full-record ordering");
+            result.surfaces.clear(); orderViewSurfaces(*frame,result);
+            result.surfaces.resize(1); orderViewSurfaces(*frame,result);
+            check(result.surfaces.size() == 1,"Empty/single-element ordering failed");
+        }
+    }
     {
         using namespace d3scene;
         const auto reference = [](const Camera& camera,const Bounds& bounds,PortalWindow window) {

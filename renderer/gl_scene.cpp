@@ -205,6 +205,7 @@ layout(location=1) out vec4 surface_motion; // XY displacement, Z history validi
 layout(location=4) out uint surface_identity;
 uniform samplerBuffer scene_fog;
 uniform int fog_volume_count;
+uniform int fog_volume_offset;
 uniform vec4 fog_path_plane; // zero: camera origin; otherwise retained optical half-space
 
 uniform sampler2D opaque_depth;
@@ -300,7 +301,8 @@ vec3 applySceneFog(vec3 radiance,out float transmission) {
     }
     float optical_depth = 0.0;
     vec3 weighted_color = vec3(0);
-    for (int volume = 0; volume < fog_volume_count; ++volume) {
+    for (int candidate = 0; candidate < fog_volume_count; ++candidate) {
+        int volume = texelFetch(scene_influences,fog_volume_offset+candidate).r;
         vec4 appearance = texelFetch(scene_fog,volume*4);
         vec4 low = texelFetch(scene_fog,volume*4+1), high = texelFetch(scene_fog,volume*4+2);
         if (!fogBounds(low.xyz,high.xyz,direction,distance)) continue;
@@ -594,12 +596,18 @@ void GL4Renderer::PrepareSceneViewTables(const d3scene::PreparedView& prepared) 
         surfaces.assign(frame.data().compiled_surface_count,0);
         parts.clear();
         visible_models.clear();
+        bool optical_frustum = prepared.view().projection == d3scene::ViewProjection::Perspective;
         for (const auto& item : demand.surfaces) {
             if (item.model) {
                 parts.push_back(&frame.resolvedModel(item.model_instance_index,item.model_variant).parts[item.part_index]);
                 visible_models.emplace_back(item.model_instance_index,item.model_variant);
             }
-            else if (item.mesh) meshes[item.mesh_index] = 1;
+            else if (item.mesh) {
+                meshes[item.mesh_index] = 1;
+                // Pixel-expanded geometry can shade an off-frustum world point.
+                // Its optical segment is not bounded by the ordinary camera cone.
+                if (!frame.data().meshes[item.mesh_index].asset->geometry().raster_offsets.empty()) optical_frustum = false;
+            }
             else if (item.terrain) surfaces[frame.data().terrain.patches[item.terrain_patch].surface_base+item.terrain_batch] = 1;
             else {
                 rooms[item.room_index] = 1;
@@ -823,6 +831,15 @@ void GL4Renderer::PrepareSceneViewTables(const d3scene::PreparedView& prepared) 
         }
         glBindBuffer(GL_TEXTURE_BUFFER,scene_position_buffer);
         glBufferData(GL_TEXTURE_BUFFER,positions.size()*sizeof(d3scene::PositionPair),positions.data(),GL_STREAM_DRAW);
+        scene_view_fog = ElementRange(uint32_t(indices.size()),0);
+        if (prepared.view().collection == 0) {
+            const auto& volumes = d3scene::fogVolumes(frame.data());
+            for (size_t i = 0; i < volumes.size(); ++i)
+                if (d3scene::fogMayIntersectView(volumes[i].bounds,demand.camera,optical_frustum)) indices.push_back(int32_t(i));
+            scene_view_fog.count = uint32_t(indices.size())-scene_view_fog.offset;
+        }
+        if (AutomatedCapturePending()) AutomatedCaptureLog("scene optical fog candidates=%u total=%u",
+            scene_view_fog.count,unsigned(d3scene::fogVolumes(frame.data()).size()));
         if (indices.empty()) indices.push_back(0);
         if (uvs.empty()) uvs.push_back({0,0});
         glBindBuffer(GL_TEXTURE_BUFFER,scene_uv_buffer);
@@ -1024,6 +1041,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         scene_uniforms.scene_occlusion = scene_shader.FindUniform("scene_occlusion");
         scene_uniforms.scene_raster_extent = scene_shader.FindUniform("scene_raster_extent");
         scene_uniforms.fog_volume_count = scene_shader.FindUniform("fog_volume_count");
+        scene_uniforms.fog_volume_offset = scene_shader.FindUniform("fog_volume_offset");
         scene_uniforms.exterior_fog_color = scene_shader.FindUniform("exterior_fog_color");
         scene_uniforms.exterior_fog_range = scene_shader.FindUniform("exterior_fog_range");
         scene_uniforms.scene_occlusion_intensity = scene_shader.FindUniform("scene_occlusion_intensity");
@@ -1176,7 +1194,8 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     }
     glActiveTexture(GL_TEXTURE6); glBindTexture(GL_TEXTURE_BUFFER,scene_fog_texture);
     if (new_fog_buffer) glTexBuffer(GL_TEXTURE_BUFFER,GL_RGBA32F,scene_fog_buffer);
-    glUniform1i(scene_uniforms.fog_volume_count,view.collection == 0 ? static_cast<GLint>(fog_volumes.size()) : 0);
+    glUniform1i(scene_uniforms.fog_volume_count,scene_view_fog.count);
+    glUniform1i(scene_uniforms.fog_volume_offset,scene_view_fog.offset);
     const auto& exterior_fog = presentation.data().exterior_fog;
     vec(scene_uniforms.exterior_fog_color,exterior_fog.color);
     glUniform2f(scene_uniforms.exterior_fog_range,exterior_fog.start,exterior_fog.end);

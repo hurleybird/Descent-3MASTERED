@@ -2,6 +2,36 @@
 
 ## October 20 continuation
 
+October 21: released view-result vectors now retain bounded, thread-owned
+capacity; copied/held views remain independent, foreign-thread release does not
+touch publisher storage. Surface ordering sorts compact keys and applies one
+permutation, preserving stable depth/alpha/background/composition ordering.
+Tests compare 4096-key permutations with the old stable comparator and cover
+copy/move/release ownership. Fog publication compares against retained source
+before allocating a replacement room/portal graph. Changed geometry, materials,
+portal sheets and malformed inputs still invalidate/reject normally.
+These changes remove allocations, but paired CPU timings were mixed, NOT a
+demonstrated speed win (see `cpu-view-storage-long-*`, `cpu-fog-source-long-*`).
+
+Fog GPU candidates now use the optical camera cone before per-fragment traversal.
+The geometry near plane/mirror clip plane never excludes optical prefixes;
+orthographic and pixel-expanded geometry conservatively retain all candidates.
+Tests include 2000 camera-to-surface segment samples and clipped/near/enclosing
+volumes. Save007 candidates fall from 29 to one. First short GPU comparison
+10.55 -> 9.71 ms is encouraging but is NOT a fix for the remaining ~9 ms
+boundary traversal, versus ~0.53 ms in the old renderer. Final binary
+`fog-view-final.exe`; all eight saves, combined probe and SSAA2/MSAA4/AO/bloom
+images match water-owned exactly. Build/tests `cpu-fog-view-*` pass.
+
+Three interleaved 90-frame old/current rounds at water-owned, mean render_ms
+over frames 15-84 (current / pre-rewrite):
+000 1.4269/1.4817; 001 1.0982/1.6547; 002 2.1615/2.3083;
+003 2.1519/2.5630; 004 .6049/.7989; 005 1.3000/.9483;
+006 .7577/.8494; 007 1.6312/1.1399.
+Six ahead on average, two still materially behind; several gains are small.
+Target of marked improvement in EVERY baseline remains unmet. Raw evidence:
+`cpu-water-baseline-{1,2,3}-{current,legacy}-savegNNN-20261021`.
+
 October 21: water simulation now publishes an owned height/base/shading recipe;
 pixel expansion is demand-resolved once, without advancing simulation. Bitmap
 readers materialize the same value through bm_data, while scene publication

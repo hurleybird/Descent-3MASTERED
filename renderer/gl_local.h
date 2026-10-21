@@ -165,6 +165,7 @@ class GL4Renderer : public IRenderer
 		GLint scene_occlusion = -1;
 		GLint scene_raster_extent = -1;
 		GLint fog_volume_count = -1;
+		GLint fog_volume_offset = -1;
 		GLint exterior_fog_color = -1;
 		GLint exterior_fog_range = -1;
 		GLint scene_occlusion_intensity = -1;
@@ -182,6 +183,7 @@ class GL4Renderer : public IRenderer
 	std::vector<SceneDrawPacket> scene_draw_packets;
 	std::vector<float> scene_draw_records;
 	GLuint scene_influence_buffer = 0, scene_influence_texture = 0;
+	ElementRange scene_view_fog;
 	GLuint scene_uv_buffer = 0, scene_uv_texture = 0;
 	GLuint scene_position_buffer = 0, scene_position_texture = 0;
 	GLuint scene_reflection_buffer = 0, scene_reflection_texture = 0;

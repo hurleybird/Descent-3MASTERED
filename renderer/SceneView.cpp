@@ -10,8 +10,35 @@
 #include <stdexcept>
 #include <limits>
 #include <set>
+#include <thread>
 
 namespace d3scene {
+struct ViewStoragePool {
+    struct Buffers {
+        std::vector<VisibleSurface> surfaces;
+        std::vector<uint32_t> objects,rooms;
+    };
+    std::array<Buffers,4> spare;
+    size_t count = 0;
+    const std::thread::id publisher = std::this_thread::get_id();
+};
+ViewVisibility::ViewVisibility() {
+    static thread_local auto pool = std::make_shared<ViewStoragePool>();
+    storage_pool_ = pool;
+    if (pool->count) {
+        auto& buffers = pool->spare[--pool->count];
+        surfaces.swap(buffers.surfaces); object_indices.swap(buffers.objects); room_indices.swap(buffers.rooms);
+    }
+}
+ViewVisibility::~ViewVisibility() {
+    // Only released storage returns to its preparing thread. Held/copied views
+    // own independent vectors; foreign-thread destruction never touches spares.
+    const auto& pool = storage_pool_;
+    if (!pool || pool->publisher != std::this_thread::get_id() || pool->count == pool->spare.size()) return;
+    auto& buffers = pool->spare[pool->count++];
+    surfaces.clear(); object_indices.clear(); room_indices.clear();
+    surfaces.swap(buffers.surfaces); object_indices.swap(buffers.objects); room_indices.swap(buffers.rooms);
+}
 static ViewVisibility queryResolvedView(const Presentation&,const View&);
 PreparedView prepareView(const Presentation& frame,const View& request) {
     auto view = resolveView(frame,request);
@@ -499,7 +526,9 @@ static ViewVisibility queryResolvedView(const Presentation& frame,const View& vi
     }
     const auto& owner_indices = frame.objectIndices();
     const auto& instances = frame.modelIndices();
-    std::vector<bool> model_owners(world_content ? frame.data().objects.size() : 0), visible_owners(model_owners.size());
+    static thread_local std::vector<bool> model_owners,visible_owners;
+    model_owners.assign(world_content ? frame.data().objects.size() : 0,false);
+    visible_owners.assign(model_owners.size(),false);
     if (world_content) for (const auto index : collection.models) {
         const auto& instance = frame.data().model_instances[index];
         if (instance.has_owner) model_owners[owner_indices.at(instance.owner)] = true;
@@ -631,15 +660,41 @@ static ViewVisibility queryResolvedView(const Presentation& frame,const View& vi
         result.surfaces.push_back(item);
     }
     std::sort(result.object_indices.begin(),result.object_indices.end());
-    std::stable_sort(result.surfaces.begin(),result.surfaces.end(),[&](const VisibleSurface& a,const VisibleSurface& b) {
-        if (view.ordering == ViewOrdering::Compositing)
-            return visibleSurfaceBinding(frame,a).composition_order < visibleSurfaceBinding(frame,b).composition_order;
-        if (a.layer != b.layer) return a.layer == RenderLayer::Background;
-        if (a.layer == RenderLayer::Background) return false; // retain authored compositing order
-        if (a.late != b.late) return !a.late;
-        return a.late ? a.depth > b.depth : a.depth < b.depth;
-    });
+    orderViewSurfaces(frame,result);
     return result;
+}
+void orderViewSurfaces(const Presentation& frame,ViewVisibility& result) {
+    struct Key { uint32_t source; int32_t composition; float depth; uint32_t group; };
+    static thread_local std::vector<Key> keys;
+    const auto size = result.surfaces.size();
+    if (size > UINT32_MAX) throw std::length_error("Too many view surfaces");
+    keys.resize(size);
+    const bool compositing = result.ordering == ViewOrdering::Compositing;
+    for (size_t i = 0; i < size; ++i) {
+        const auto& surface = result.surfaces[i];
+        const uint32_t group = surface.layer == RenderLayer::Background ? 0 : surface.late ? 2 : 1;
+        keys[i] = {uint32_t(i),compositing ? visibleSurfaceBinding(frame,surface).composition_order : 0,
+            surface.depth,compositing ? 0 : group};
+    }
+    std::sort(keys.begin(),keys.end(),[](const Key& a,const Key& b) {
+        if (a.group != b.group) return a.group < b.group;
+        if (a.composition != b.composition) return a.composition < b.composition;
+        if (a.group && a.depth != b.depth) return a.group == 2 ? a.depth > b.depth : a.depth < b.depth;
+        return a.source < b.source; // exactly preserve equal-key authored order
+    });
+    // Apply new-index -> source-index cycles once. This needs one record of
+    // temporary storage, not stable_sort's allocation and repeated wide moves.
+    for (size_t first = 0; first < size; ++first) {
+        if (keys[first].source == first) continue;
+        auto saved = std::move(result.surfaces[first]);
+        size_t at = first;
+        while (keys[at].source != first) {
+            const auto next = keys[at].source;
+            result.surfaces[at] = std::move(result.surfaces[next]);
+            keys[at].source = uint32_t(at); at = next;
+        }
+        result.surfaces[at] = std::move(saved); keys[at].source = uint32_t(at);
+    }
 }
 const SurfaceBinding& visibleSurfaceBinding(const Presentation& frame,const VisibleSurface& item) {
     const auto& data = frame.data();

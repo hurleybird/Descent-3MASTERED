@@ -1,7 +1,9 @@
 // Descent 3MASTERED - GPL-3.0-or-later
 #include "../../renderer/SceneFog.h"
+#include "../../renderer/SceneView.h"
 #include <cmath>
 #include <stdexcept>
+#include <limits>
 namespace {
 int Checks = 0;
 void check(bool value,const char* message) { ++Checks; if (!value) throw std::runtime_error(message); }
@@ -18,6 +20,29 @@ d3scene::RoomState box(d3scene::SceneAssets& assets,int id,float z) {
 }
 }
 int runFogTests() {
+    {
+        using namespace d3scene;
+        View request; request.history_key = 1; request.viewport = request.projection_anchor = {0,0,800,600};
+        request.has_clip_plane = true; request.clip_plane = {{0,0,1},-4};
+        auto camera = prepareCamera(request);
+        check(fogMayIntersectView({{-.01f,-.01f,.01f},{.01f,.01f,.02f}},camera,true),
+            "Optical candidates incorrectly used geometry near/mirror clipping");
+        check(!fogMayIntersectView({{100,100,1},{101,101,2}},camera,true),"Off-axis fog remained a candidate");
+        check(!fogMayIntersectView({{-1,-1,-4},{1,1,-2}},camera,true),"Fog wholly behind the eye remained a candidate");
+        check(fogMayIntersectView({{-100,-100,-100},{100,100,100}},camera,true),"Enclosing fog was rejected");
+        check(fogMayIntersectView({{100,100,1},{101,101,2}},camera,false),"Orthographic optical rays were perspective-culled");
+        request.viewport = {200,100,400,300}; request.camera.position = {100,-20,30};
+        camera = prepareCamera(request);
+        uint32_t random = 887;
+        const auto sample = [&] { random = random*1664525u+1013904223u; return float(random>>8)/16777216.f; };
+        for (int i = 0; i < 2000; ++i) {
+            const auto end = unproject(camera,sample()*2-1,sample()*2-1,.999f);
+            const float t = sample(); const auto eye = camera.transform.position;
+            const Vec3 p{eye.x+t*(end.x-eye.x),eye.y+t*(end.y-eye.y),eye.z+t*(end.z-eye.z)};
+            check(fogMayIntersectView({{p.x-.01f,p.y-.01f,p.z-.01f},{p.x+.01f,p.y+.01f,p.z+.01f}},camera,true),
+                "Fog candidate rejection lost a camera-to-surface ray segment");
+        }
+    }
     d3scene::SceneAssets assets;
     d3scene::FrameData frame; frame.rooms.push_back(box(assets,0,2));
     frame.fog = assets.publishFog(frame.rooms);
@@ -25,6 +50,21 @@ int runFogTests() {
     const auto volume = frame.fog->volumes()[0];
     const auto original_asset = frame.fog;
     check(assets.publishFog(frame.rooms) == original_asset,"Unchanged fog rebuilt its spatial asset");
+    {
+        auto invalid = frame.rooms;
+        invalid[0].fog_depth = std::numeric_limits<float>::quiet_NaN();
+        bool rejected = false;
+        try { assets.publishFog(invalid); } catch (const std::invalid_argument&) { rejected = true; }
+        check(rejected,"Retained fog skipped source validation");
+        auto changed = frame.rooms;
+        auto geometry = changed[0].asset->geometry(); geometry.vertices[0].x -= .1f;
+        changed[0].asset = assets.publishRoom(0,std::move(geometry));
+        const auto replacement = assets.publishFog(changed);
+        check(replacement != original_asset && assets.publishFog(changed) == replacement,
+            "Fog compilation ignored geometry revision or failed reuse");
+        check(assets.publishFog(frame.rooms)->volumes()[0].boundary[0].a.x == -1,
+            "Held fog geometry was replaced by a newer source slot");
+    }
     frame.rooms[0].fog_color.x = .7f;
     const auto recolored = assets.publishFog(frame.rooms);
     check(recolored->id() != original_asset->id() && original_asset->volumes()[0].color.x == .2f,
@@ -95,6 +135,13 @@ int runFogTests() {
     frame.fog = assets.publishFog(frame.rooms);
     check(frame.fog->volumes().size() == 1 && frame.fog->volumes()[0].rooms.size() == 2 && frame.fog->volumes()[0].boundary.size() == 20,
         "Matching connected fog was split or retained internal portal faces");
+    check(assets.publishFog(frame.rooms) == frame.fog,"Connected fog did not reuse its compiled portal source");
+    {
+        auto invalid = frame.rooms; invalid[0].surfaces.clear();
+        bool rejected = false;
+        try { assets.publishFog(invalid); } catch (const std::invalid_argument&) { rejected = true; }
+        check(rejected,"Retained fog indexed a missing portal surface");
+    }
     check(near(d3scene::fogSegmentLength(frame.fog->volumes()[0],{0,0,0},{0,0,10},false),4),"Connected room seam changed optical distance");
     check(near(d3scene::fogSegmentLength(frame.fog->volumes()[0],{0,0,4},{0,0,10},true),2),"Camera on internal portal lost fog");
     frame.rooms[1].fog_color.x = .3f; frame.fog = assets.publishFog(frame.rooms);
