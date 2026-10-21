@@ -2,6 +2,14 @@
 
 ## October 20 continuation
 
+October 21: scene sampling policies now use eight shared sampler objects rather
+than mutating image storage. Consecutive identical image bindings are reused
+within a geometry pass; samplers are unbound before image-space/canvas consumers.
+Dense/save005/combined effects-and-resource-reset captures are pixel-exact to
+dependency-unions. Submission measured 0.235/0.078 ms versus 0.261/0.088 ms;
+totals 3.339/2.273 ms. These small single-run differences are not an all-baseline
+win. Capture folders: `cpu-samplers-{saveg003,saveg005,probe}-20261021`.
+
 October 21: image and GPU-reflection inventories share a retained dependency-union
 implementation. Unchanged immutable lists are compared by owned identity, without
 flattening/sorting again; replacement/reordering with equivalent contents does

@@ -447,6 +447,10 @@ void GL4Renderer::DestroySceneResources() {
     scene_temporal_reset = true;
     for (auto& image : scene_images) if (image.second.texture) glDeleteTextures(1,&image.second.texture);
     scene_images.clear();
+    for (auto& sampler : scene_samplers) {
+        if (sampler.sampler) glDeleteSamplers(1,&sampler.sampler);
+        sampler = {};
+    }
     for (auto& room : scene_rooms) {
         if (room.vao) glDeleteVertexArrays(1, &room.vao);
         if (room.buffer) glDeleteBuffers(1, &room.buffer);
@@ -505,7 +509,7 @@ void GL4Renderer::BindSceneImage(const d3scene::ImageAsset& image,int unit,bool 
     glActiveTexture(GL_TEXTURE0+unit);
     if (gpu.id != image.id()) {
         if (gpu.texture) glDeleteTextures(1,&gpu.texture);
-        glGenTextures(1,&gpu.texture); gpu.id = image.id(); gpu.sampling = -1;
+        glGenTextures(1,&gpu.texture); gpu.id = image.id();
         glBindTexture(GL_TEXTURE_2D,gpu.texture);
         glPixelStorei(GL_UNPACK_ALIGNMENT,1);
         for (size_t level = 0; level < image.mips().size(); ++level) {
@@ -540,14 +544,22 @@ void GL4Renderer::BindSceneImage(const d3scene::ImageAsset& image,int unit,bool 
     const bool mip = !baked && OpenGL_preferred_state.mipping && (image.generatedLevels() > 1 || image.mips().size() > 1);
     const int sampling = int(wrap)|(int(filter)<<1)|(int(mip)<<2);
     const float anisotropy = mip ? std::min(OpenGL_max_anisotropy,std::max(1.f,static_cast<float>(OpenGL_preferred_state.anisotropy))) : 1;
-    if (gpu.sampling == sampling && gpu.anisotropy == anisotropy) return;
-    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,wrap ? GL_REPEAT : GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,wrap ? GL_REPEAT : GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,filter ? GL_LINEAR : GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,mip ? (filter ? GL_LINEAR_MIPMAP_LINEAR : GL_NEAREST_MIPMAP_NEAREST) : (filter ? GL_LINEAR : GL_NEAREST));
-    if (OpenGL_max_anisotropy > 1)
-        glTexParameterf(GL_TEXTURE_2D,GL_TEXTURE_MAX_ANISOTROPY_EXT,anisotropy);
-    gpu.sampling = sampling; gpu.anisotropy = anisotropy;
+    // Sampling belongs to a binding, not to image storage: one image may be
+    // read with different policies on multiple units in the same draw.
+    auto& sampler = scene_samplers[sampling];
+    if (!sampler.sampler) {
+        glGenSamplers(1,&sampler.sampler);
+        glSamplerParameteri(sampler.sampler,GL_TEXTURE_WRAP_S,wrap ? GL_REPEAT : GL_CLAMP_TO_EDGE);
+        glSamplerParameteri(sampler.sampler,GL_TEXTURE_WRAP_T,wrap ? GL_REPEAT : GL_CLAMP_TO_EDGE);
+        glSamplerParameteri(sampler.sampler,GL_TEXTURE_MAG_FILTER,filter ? GL_LINEAR : GL_NEAREST);
+        glSamplerParameteri(sampler.sampler,GL_TEXTURE_MIN_FILTER,mip ? (filter ? GL_LINEAR_MIPMAP_LINEAR : GL_NEAREST_MIPMAP_NEAREST) : (filter ? GL_LINEAR : GL_NEAREST));
+    }
+    if (sampler.anisotropy != anisotropy) {
+        if (OpenGL_max_anisotropy > 1)
+            glSamplerParameterf(sampler.sampler,GL_TEXTURE_MAX_ANISOTROPY_EXT,anisotropy);
+        sampler.anisotropy = anisotropy;
+    }
+    glBindSampler(unit,sampler.sampler);
 }
 
 void GL4Renderer::UploadSceneFrame(const d3scene::Presentation& frame, const d3scene::ViewVisibility* demand) {
@@ -1475,6 +1487,16 @@ void main() {
       RasterKey previous_raster;
       bool raster_bound = false;
       GLuint previous_vao = 0;
+      struct ImageBinding { uint32_t image = 0; bool wrap = false; };
+      std::array<ImageBinding,9> image_bindings{};
+      const auto bind_image = [&](uint32_t image,int unit,bool wrap,bool baked) {
+          if (!image) return;
+          auto& previous = image_bindings[unit];
+          // Each unit has a fixed baked/non-baked role throughout this pass.
+          if (previous.image == image && previous.wrap == wrap) return;
+          BindSceneImage(presentation.image(image),unit,wrap,baked);
+          previous = {image,wrap};
+      };
       for (uint32_t item_index = pass.begin; item_index < pass.end; ++item_index) {
         const auto& item = visibility.surfaces[item_index];
         const auto& packet = packets[item_index];
@@ -1485,7 +1507,7 @@ void main() {
         if ((surface.bitmap >= 0 && !surface.color_image) || (surface.lightmap_bitmap >= 0 && !surface.baked_image) ||
             (surface.specular_bitmap >= 0 && !surface.specular_image))
             Error("Scene surface reached execution without prepared image assets");
-        if (surface.color_image) BindSceneImage(presentation.image(surface.color_image),0,surface.texture_wrap,false);
+        bind_image(surface.color_image,0,surface.texture_wrap,false);
         const auto bind_view_image = [&](uint64_t slot,int unit) -> const SceneViewImageGpu& {
             const auto found = scene_view_images.find(d3scene::viewImageSource(view,slot));
             if (found == scene_view_images.end() || found->second.sequence != presentation.data().sequence)
@@ -1496,6 +1518,8 @@ void main() {
             glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING,&draw); glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING,&read);
             const auto texture = found->second.buffer.ColorTextureForRead();
             glBindFramebuffer(GL_DRAW_FRAMEBUFFER,draw); glBindFramebuffer(GL_READ_FRAMEBUFFER,read);
+            image_bindings = {};
+            glBindSampler(unit,0);
             glActiveTexture(GL_TEXTURE0+unit); glBindTexture(GL_TEXTURE_2D,texture);
             glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
             glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
@@ -1510,8 +1534,8 @@ void main() {
             scene_shader.Use();
             glUniformMatrix4fv(scene_uniforms.planar_projection,1,GL_FALSE,image.matrices.view_projection.data());
         }
-        if (surface.baked_image) BindSceneImage(presentation.image(surface.baked_image),1,surface.lightmap_wrap,true);
-        if (surface.specular_image) BindSceneImage(presentation.image(surface.specular_image),8,surface.texture_wrap,false);
+        bind_image(surface.baked_image,1,surface.lightmap_wrap,true);
+        bind_image(surface.specular_image,8,surface.texture_wrap,false);
         scene_shader.Use();
         glBindBufferRange(GL_UNIFORM_BUFFER,7,scene_draw_buffer,item_index*record_bytes,22*16);
         const bool cull = item.terrain || (item.mesh && !surface.two_sided);
@@ -1557,6 +1581,9 @@ void main() {
         glDrawArrays(GL_TRIANGLES,range.offset,range.count);
         rend_RecordDrawCall(RENDERER_DRAW_CALL_3D);
       }
+      // Image-space consumers and the remaining canvas adapter own their
+      // texture policies. Scene samplers must not override those policies.
+      glBindSampler(0,0); glBindSampler(1,0); glBindSampler(8,0);
       glDisable(GL_CLIP_DISTANCE0);
     }
     if (measure_passes) {
