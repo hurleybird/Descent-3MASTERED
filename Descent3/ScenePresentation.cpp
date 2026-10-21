@@ -683,20 +683,19 @@ d3scene::PresentationRef PrepareGamePresentation() {
     }
     PrepareGameSceneResources(data);
     { PERF_MARKER_SCOPE("Scene.PrepareLights"); PrepareGameSceneLights(data); }
-    for (auto& room : data.rooms) for (size_t p = 0; p < room.portals.size(); ++p) {
+    for (auto& room : data.rooms) {
+      if (room.portals.publishedFor(room.surfaces)) continue;
+      for (size_t p = 0; p < room.portals.size(); ++p) {
         const auto& portal = room.portals.read()[p];
-        // Exterior door apertures have authored winding conventions that are
-        // not interior-facing portal planes. Compile this once, not in queries.
-        const bool two_sided = room.exterior && portal.destination_room >= 0 &&
-            portal.destination_room < MAX_ROOMS && (Rooms[portal.destination_room].flags & RF_DOOR);
         const auto& surface = room.surfaces.read()[portal.polygon];
-        const auto material = room.surfaces.published() ? surface.material :
-            d3scene::compileMaterialPolicy(surface,room.asset->geometry().polygons[portal.polygon]);
-        const bool traversable = !(portal.flags & PF_RENDER_FACES) || material.allowsBehind() ||
-            (GameTextures[surface.texture].flags & TF_PROCEDURAL);
-        if (portal.two_sided != two_sided || portal.traversable != traversable) {
-            auto& changed = room.portals[p]; changed.two_sided = two_sided; changed.traversable = traversable;
+        // Procedural opacity is not a stable aperture blocker. Otherwise the
+        // renderer compiles traversal from the final material (including mirrors).
+        const bool controlled = (portal.flags & PF_RENDER_FACES) && !(GameTextures[surface.texture].flags & TF_PROCEDURAL);
+        if (portal.surface_controls_visibility != controlled || (!controlled && !portal.traversable)) {
+            auto& changed = room.portals[p]; changed.surface_controls_visibility = controlled;
+            if (!controlled) changed.traversable = true;
         }
+      }
     }
     { PERF_MARKER_SCOPE("Scene.PublishFog"); data.fog = d3scene::assets().publishFog(data.rooms); }
     if (SceneGeometryInspection() && FindArg("-scene-lod-probe") && Player_object) {

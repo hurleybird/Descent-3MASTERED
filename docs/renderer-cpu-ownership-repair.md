@@ -2,6 +2,20 @@
 
 ## October 20 continuation
 
+October 21: portal traversal is compiled after final material publication,
+including mirror film policy. A portal table retains its material proof and
+shares one owner, so unchanged rooms need no whole-level policy recomputation.
+The source adapter captures only whether the surface controls the aperture;
+procedural opacity remains explicitly non-blocking. Exterior-door winding is
+captured/invalidation-checked with portal topology, including destination flag
+changes. Tests cover changed and mixed sealed material tables, explicit open
+apertures, held snapshots, destination door changes and first-frame mirrors.
+Build/tests `cpu-portal-policy-*`; binary `portal-policy.exe`.
+Dense/wall 500-frame, combined probe and explicit mirror-surface captures are
+pixel-exact to frame-tables. Mirror capture visually inspected. Interleaved
+100-449-frame means parent/current: dense 1.887/1.739 ms; wall 1.263/1.276 ms.
+Timing spread remains material; this is not a claimed win in every scene.
+
 October 21: GPU table preparation and rebinding are separate operations.
 Frame light records upload once per publication (weak ownership identifies the
 exact frame, not just a sequence integer). View streams remain view-local.

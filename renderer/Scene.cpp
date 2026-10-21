@@ -1027,8 +1027,7 @@ PresentationRef Presentation::complete(FrameData data) {
     for (auto& surface : prepared->data_.terrain.materials)
         surface.material = compileMaterialPolicy(surface,MeshPolygon{});
     for (auto& room : prepared->data_.rooms) {
-        room.portals.seal();
-        if (room.surfaces.publishedForRoom(room.asset->id(),room.mirrors)) continue;
+        if (!room.surfaces.publishedForRoom(room.asset->id(),room.mirrors)) {
         for (size_t face = 0; face < room.surfaces.size(); ++face)
             room.surfaces[face].material = compileMaterialPolicy(room.surfaces[face],room.asset->geometry().polygons[face]);
         for (size_t group = 0; group < room.mirrors.size(); ++group) for (auto face : room.mirrors[group].polygons) {
@@ -1043,6 +1042,16 @@ PresentationRef Presentation::complete(FrameData data) {
             policy.texture_alpha = TextureAlpha::Continuous; policy.alpha_cutoff = 0;
         }
         room.surfaces.seal(room.asset->id(),UINT32_MAX,false,&room.mirrors);
+        }
+        if (!room.portals.publishedFor(room.surfaces)) {
+            for (size_t i = 0; i < room.portals.size(); ++i) {
+                const auto& portal = room.portals.read()[i];
+                if (!portal.surface_controls_visibility) continue;
+                const bool traversable = room.surfaces.read()[portal.polygon].material.allowsBehind();
+                if (portal.traversable != traversable) room.portals[i].traversable = traversable;
+            }
+            room.portals.seal(room.surfaces);
+        }
     }
     uint32_t resolved_index = 0;
     for (auto& object : prepared->data_.model_instances) {

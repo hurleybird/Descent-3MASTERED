@@ -152,10 +152,14 @@ int runSceneViewTests() {
         appendRoom(assets,data,triangle(0,3));
         data.rooms[0].mirrors = compilePlanarSurfaces(data.rooms[0].asset->geometry(),{0});
         data.rooms[0].surfaces[0].alpha = .3f;
+        Portal mirror_portal; mirror_portal.polygon = 0; mirror_portal.surface_controls_visibility = true;
+        data.rooms[0].portals.push_back(mirror_portal);
         const auto frame = Presentation::freeze(data);
         const auto& material = frame->data().rooms[0].surfaces[0].material;
         check(material.planar_slot && material.writesSolidDepth() && !material.allowsBehind() && material.alpha_cutoff == 0,
             "Layered mirror film was compiled as a translucent hole");
+        check(!frame->data().rooms[0].portals[0].traversable,
+            "Portal policy was compiled before the final mirror film material");
         auto parent = view(); parent.room = 0;
         const auto plan = planPlanarViews(*frame,parent);
         check(&plan.consumer.frame() == frame.get() && plan.consumer.visibility().surfaces.size() == queryView(*frame,parent).surfaces.size(),

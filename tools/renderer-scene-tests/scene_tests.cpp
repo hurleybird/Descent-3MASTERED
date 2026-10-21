@@ -158,6 +158,30 @@ void frameTests() {
     data.rooms[0].surfaces[0].texture_scale = {-2,3};
     const auto tiled_material = d3scene::Presentation::freeze(data);
     {
+        auto aperture = data;
+        d3scene::Portal portal; portal.polygon = 0; portal.surface_controls_visibility = true;
+        aperture.rooms[0].portals.push_back(portal);
+        const auto solid = d3scene::Presentation::freeze(aperture);
+        check(!solid->data().rooms[0].portals[0].traversable,"Solid portal material did not block traversal");
+        auto glass = solid->data();
+        glass.rooms[0].surfaces[0].blend = d3scene::BlendMode::Alpha;
+        const auto transparent = d3scene::Presentation::freeze(glass);
+        check(transparent->data().rooms[0].portals[0].traversable && !solid->data().rooms[0].portals[0].traversable,
+            "Material change reused old portal policy or modified a held frame");
+        auto combined = solid->data(); combined.rooms[0].surfaces = transparent->data().rooms[0].surfaces;
+        const auto rebound = d3scene::Presentation::freeze(combined);
+        check(rebound->data().rooms[0].portals[0].traversable,
+            "A different sealed material table bypassed portal policy compilation");
+        const auto stable = d3scene::Presentation::freeze(rebound->data());
+        check(&stable->data().rooms[0].portals.read() == &rebound->data().rooms[0].portals.read(),
+            "Unchanged portal material proof was rebuilt");
+        combined.rooms[0].portals[0].surface_controls_visibility = false;
+        combined.rooms[0].portals[0].traversable = true;
+        combined.rooms[0].surfaces = solid->data().rooms[0].surfaces;
+        check(d3scene::Presentation::freeze(combined)->data().rooms[0].portals[0].traversable,
+            "Explicit open aperture was overridden by surface opacity");
+    }
+    {
         auto dependencies = data;
         auto& surface = dependencies.rooms[0].surfaces[0];
         surface.bitmap = surface.specular_bitmap = surface.lightmap_bitmap = 9;
@@ -368,6 +392,15 @@ void extractionTests() {
         const auto changed = ExtractGamePresentation(2.73,0,false,false,next.get());
         check(changed->data().rooms[0].portals[0].destination_room == 0 && changed->data().rooms[0].portals[0].flags == 1 &&
             first->data().rooms[0].portals[0].destination_room == -1,"Portal reconnection was stale or changed a held frame");
+        const auto original_flags = source.flags;
+        source.flags |= RF_EXTERNAL; connection.croom = 1;
+        Rooms[1] = source; Rooms[1].flags = RF_DOOR; Rooms[1].num_portals = 0; Rooms[1].portals = nullptr;
+        const auto door = ExtractGamePresentation(2.74,0,false,false,changed.get());
+        Rooms[1].flags = 0;
+        const auto ordinary = ExtractGamePresentation(2.75,0,false,false,door.get());
+        check(door->data().rooms[0].portals[0].two_sided && !ordinary->data().rooms[0].portals[0].two_sided,
+            "Destination door classification reused stale aperture winding");
+        Rooms[1] = {}; source.flags = original_flags;
         source.num_portals = 0; source.portals = nullptr;
     }
     surface.flags |= FF_SCORCHED; // effect bookkeeping is not a material input

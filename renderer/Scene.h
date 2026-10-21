@@ -360,36 +360,7 @@ struct Portal {
     uint32_t flags = 0;
     bool traversable = true;
     bool two_sided = false; // aperture policy, independent of surface winding
-};
-class RoomPortals {
-    using Storage = std::vector<Portal>;
-    std::shared_ptr<Storage> values_;
-    bool sealed_ = false;
-    Storage& edit() {
-        if (!values_) values_ = std::make_shared<Storage>();
-        else if (sealed_ || values_.use_count() != 1) values_ = std::make_shared<Storage>(*values_);
-        sealed_ = false; return *values_;
-    }
-    void seal() { sealed_ = true; }
-    friend class Presentation;
-public:
-    RoomPortals() = default;
-    RoomPortals(std::initializer_list<Portal> values) : values_(std::make_shared<Storage>(values)) {}
-    RoomPortals(const RoomPortals& other) : values_(!other.values_ || other.sealed_ ? other.values_ :
-        std::make_shared<Storage>(*other.values_)),sealed_(other.sealed_) {}
-    RoomPortals& operator=(const RoomPortals& other) { if (this != &other) { RoomPortals copy(other); *this = std::move(copy); } return *this; }
-    RoomPortals(RoomPortals&&) = default;
-    RoomPortals& operator=(RoomPortals&&) = default;
-    const Storage& read() const { static const Storage empty; return values_ ? *values_ : empty; }
-    size_t size() const { return read().size(); }
-    bool empty() const { return read().empty(); }
-    const Portal& operator[](size_t i) const { return read()[i]; }
-    Portal& operator[](size_t i) { return edit()[i]; }
-    auto begin() const { return read().begin(); }
-    auto end() const { return read().end(); }
-    auto begin() { return edit().begin(); }
-    auto end() { return edit().end(); }
-    void push_back(Portal portal) { edit().push_back(portal); }
+    bool surface_controls_visibility = false; // compile traversal from the final material
 };
 struct PlanarSurface {
     Plane plane;
@@ -441,6 +412,7 @@ public:
         return published() && table_->publication == asset && table_->part == part && table_->palette == palette;
     }
     bool published() const { return table_ && table_->publication.revision != 0; }
+    bool sharesPublication(const RoomSurfaces& other) const { return published() && table_ == other.table_; }
     bool publishedForRoom(AssetId asset,const std::vector<PlanarSurface>& planar) const;
     const std::vector<ImageDependency>& images() const { static const std::vector<ImageDependency> empty; const auto& images = imageDependencies(); return images ? *images : empty; }
     const std::shared_ptr<const std::vector<ImageDependency>>& imageDependencies() const {
@@ -470,6 +442,51 @@ public:
     void reserve(size_t n) { edit().reserve(n); }
     void resize(size_t n) { edit().resize(n); }
     void push_back(const SurfaceBinding& value) { edit().push_back(value); }
+};
+// A compiled portal table owns the material publication that proved its
+// traversal policy. Copying either table cannot silently reuse another
+// material's visibility decision; mutation detaches the proof with the values.
+class RoomPortals {
+    using Storage = std::vector<Portal>;
+    struct Table {
+        Storage values;
+        RoomSurfaces material;
+        bool sealed = false;
+        Table() = default;
+        explicit Table(const Storage& source) : values(source) {}
+    };
+    std::shared_ptr<Table> table_;
+    Storage& edit() {
+        if (!table_) table_ = std::make_shared<Table>();
+        else if (table_->sealed || table_.use_count() != 1) table_ = std::make_shared<Table>(table_->values);
+        return table_->values;
+    }
+    void seal(const RoomSurfaces& material) {
+        if (empty() || publishedFor(material)) return;
+        edit(); table_->material = material; table_->sealed = true;
+    }
+    friend class Presentation;
+public:
+    RoomPortals() = default;
+    RoomPortals(std::initializer_list<Portal> values) : table_(std::make_shared<Table>(Storage(values))) {}
+    RoomPortals(const RoomPortals& other) : table_(!other.table_ || other.table_->sealed ? other.table_ :
+        std::make_shared<Table>(other.table_->values)) {}
+    RoomPortals& operator=(const RoomPortals& other) { if (this != &other) { RoomPortals copy(other); *this = std::move(copy); } return *this; }
+    RoomPortals(RoomPortals&&) = default;
+    RoomPortals& operator=(RoomPortals&&) = default;
+    const Storage& read() const { static const Storage empty; return table_ ? table_->values : empty; }
+    size_t size() const { return read().size(); }
+    bool empty() const { return read().empty(); }
+    bool publishedFor(const RoomSurfaces& material) const {
+        return empty() || (table_->sealed && table_->material.sharesPublication(material));
+    }
+    const Portal& operator[](size_t i) const { return read()[i]; }
+    Portal& operator[](size_t i) { return edit()[i]; }
+    auto begin() const { return read().begin(); }
+    auto end() const { return read().end(); }
+    auto begin() { return edit().begin(); }
+    auto end() { return edit().end(); }
+    void push_back(Portal portal) { edit().push_back(portal); }
 };
 struct RoomState {
     int32_t number = -1;

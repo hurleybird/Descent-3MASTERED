@@ -180,16 +180,21 @@ d3scene::FrameData ExtractGameFrame(double time, float delta, bool paused, bool 
             state.surfaces.push_back(binding);
         }
         }
+        const auto two_sided = [&](int destination) {
+            return (source.flags & RF_EXTERNAL) && destination >= 0 && destination < MAX_ROOMS &&
+                (Rooms[destination].flags & RF_DOOR);
+        };
         bool retain_portals = cached && cached->portals.size() == size_t(source.num_portals);
         for (int j = 0; retain_portals && j < source.num_portals; ++j) {
             const auto& current = source.portals[j]; const auto& old = cached->portals[j];
             retain_portals = old.polygon == current.portal_face && old.destination_room == current.croom &&
-                old.destination_portal == current.cportal && old.combine_master == current.combine_master && old.flags == uint32_t(current.flags);
+                old.destination_portal == current.cportal && old.combine_master == current.combine_master && old.flags == uint32_t(current.flags) &&
+                old.two_sided == bool(two_sided(current.croom));
         }
         if (retain_portals) state.portals = cached->portals;
         else for (int j = 0; j < source.num_portals; ++j) {
             const portal& p = source.portals[j];
-            state.portals.push_back({p.portal_face, p.croom, p.cportal, p.combine_master, static_cast<uint32_t>(p.flags)});
+            state.portals.push_back({p.portal_face, p.croom, p.cportal, p.combine_master, static_cast<uint32_t>(p.flags),true,bool(two_sided(p.croom))});
         }
         data.rooms.push_back(std::move(state));
     }
