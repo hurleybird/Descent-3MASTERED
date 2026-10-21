@@ -535,12 +535,6 @@ void GL4Renderer::DestroySceneResources() {
     scene_fog_field_texture = 0;
     scene_fog_field_width = scene_fog_field_height = 0;
     scene_fog_field_shader.Destroy();
-    scene_fog_temporal_shader.Destroy(); scene_fog_integrate_shader.Destroy();
-    if (scene_fog_density_texture) glDeleteTextures(1,&scene_fog_density_texture);
-    scene_fog_density_texture = 0;
-    for (auto& item : scene_fog_histories) glDeleteTextures(2,item.second.density);
-    scene_fog_histories.clear();
-    scene_fog_history_retire_sequence = 0;
     scene_fog_id = {};
     scene_view_fog = {}; scene_view_fog_volumes.clear();
     for (auto& depth : scene_depth_snapshots) depth.second.Destroy();
@@ -1119,17 +1113,6 @@ void GL4Renderer::EnsureSceneLifetime(const d3scene::Presentation& presentation)
         DestroySceneResources();
         scene_asset_lifetime = presentation.data().scene_lifetime;
     }
-    const auto sequence = presentation.data().sequence;
-    if (scene_fog_history_retire_sequence != sequence) {
-        // An absent predecessor cannot be reprojected. Retire its storage once
-        // per presentation rather than retaining every transient preview/mirror.
-        for (auto it = scene_fog_histories.begin(); it != scene_fog_histories.end();) {
-            if (it->second.sequence < sequence && sequence-it->second.sequence > 1) {
-                glDeleteTextures(2,it->second.density); it = scene_fog_histories.erase(it);
-            } else ++it;
-        }
-        scene_fog_history_retire_sequence = sequence;
-    }
 }
 d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedView& prepared,const SceneRasterTarget& target) {
     PERF_MARKER_SCOPE("Scene.ExecuteView");
@@ -1313,8 +1296,6 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     if (!scene_fog_buffer) { glGenBuffers(1,&scene_fog_buffer); glGenTextures(1,&scene_fog_texture); }
     glBindBuffer(GL_TEXTURE_BUFFER,scene_fog_buffer);
     if (upload_fog) {
-    scene_fog_density_scale = fog_volumes.empty() ? 1.f : fog_volumes.front().depth;
-    for (const auto& volume : fog_volumes) scene_fog_density_scale = (std::min)(scene_fog_density_scale,volume.depth);
     std::vector<float> fog(fog_volumes.size()*16,0);
     for (size_t index = 0; index < fog_volumes.size(); ++index) {
         const auto& volume = fog_volumes[index];
@@ -1339,7 +1320,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     for (const auto index : scene_view_fog_volumes) {
         const int winding = d3scene::fogWinding(fog_volumes[index],camera.position);
         const float inside = winding > 0 ? 1.f : 0.f;
-        const float state[4] = {inside,float(fog_volumes[index].nodes.size()),float(winding),scene_fog_density_scale/fog_volumes[index].depth};
+        const float state[4] = {inside,float(fog_volumes[index].nodes.size()),float(winding),0};
         glBufferSubData(GL_TEXTURE_BUFFER,(index*16+12)*sizeof(float),sizeof(state),state);
         if (AutomatedCapturePending() && FindArg("-scene-fog-boundary-audit")) {
             const auto& volume = fog_volumes[index];
@@ -1430,31 +1411,13 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
             glUniform1i(scene_fog_field_shader.FindUniform("scene_fog"),6);
             glUniform1i(scene_fog_field_shader.FindUniform("scene_influences"),3);
             scene_fog_field_range = scene_fog_field_shader.FindUniform("fog_field_range");
-            scene_fog_jitter = scene_fog_field_shader.FindUniform("fog_jitter");
-            source = SceneLightingShader;
-            source.replace(0,source.find('\n'),"#version 430 core");
-            source += SceneFogTemporalShader;
-            scene_fog_temporal_shader.AttachComputeSource(source.c_str());
-            glUniformBlockBinding(scene_fog_temporal_shader.Handle(),glGetUniformBlockIndex(scene_fog_temporal_shader.Handle(),"SceneViewBlock"),8);
-            scene_fog_temporal_shader.Use();
-            glUniform1i(scene_fog_temporal_shader.FindUniform("fog_current_density"),13);
-            glUniform1i(scene_fog_temporal_shader.FindUniform("fog_previous_density"),14);
-            scene_fog_temporal_range = scene_fog_temporal_shader.FindUniform("fog_field_range");
-            scene_fog_previous_range = scene_fog_temporal_shader.FindUniform("fog_previous_range");
-            scene_fog_previous_matrix = scene_fog_temporal_shader.FindUniform("fog_previous_matrix");
-            scene_fog_history_weight = scene_fog_temporal_shader.FindUniform("fog_history_weight");
-            scene_fog_integrate_shader.AttachComputeSource(SceneFogIntegrateShader);
-            scene_fog_integrate_shader.Use();
-            glUniform1i(scene_fog_integrate_shader.FindUniform("fog_density"),13);
-            scene_fog_integrate_range = scene_fog_integrate_shader.FindUniform("fog_field_range");
-            scene_fog_integrate_scale = scene_fog_integrate_shader.FindUniform("fog_density_scale");
         }
         const int width_arg = FindArg("-scene-fog-field-width");
         const char* width_text = width_arg ? GetArg(width_arg+1) : nullptr;
         const int width = width_text ? std::atoi(width_text) : 160;
         if (width < 32 || width > 640) Error("Fog field experiment width must be 32..640");
         const int height = (std::max)(1,(std::min)(320,int(std::ceil(double(width)*view.viewport.height/view.viewport.width))));
-        const auto allocate = [&](GLuint& texture,int depth,GLint format = GL_RGBA16F) {
+        const auto allocate = [&](GLuint& texture,int depth,GLint format = GL_RGBA32F) {
             if (!texture) glGenTextures(1,&texture);
             glBindTexture(GL_TEXTURE_3D,texture);
             glTexImage3D(GL_TEXTURE_3D,0,format,width,height,depth,0,GL_RGBA,GL_FLOAT,nullptr);
@@ -1466,15 +1429,8 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         };
         glActiveTexture(GL_TEXTURE12);
         if (width != scene_fog_field_width || height != scene_fog_field_height) {
-            allocate(scene_fog_density_texture,64);
             allocate(scene_fog_field_texture,65,GL_RGBA32F);
             scene_fog_field_width = width; scene_fog_field_height = height;
-        }
-        auto& fog_history = scene_fog_histories[{view.kind,view.history_key}];
-        if (fog_history.width != width || fog_history.height != height) {
-            allocate(fog_history.density[0],64); allocate(fog_history.density[1],64);
-            fog_history.width = width; fog_history.height = height;
-            fog_history.sequence = 0; fog_history.asset = {};
         }
         field_range = 1;
         for (auto index : scene_view_fog_volumes) {
@@ -1484,46 +1440,14 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
                 n.y >= 0 ? bounds.maximum.y : bounds.minimum.y,n.z >= 0 ? bounds.maximum.z : bounds.minimum.z};
             field_range = (std::max)(field_range,(p.x-camera.position.x)*n.x+(p.y-camera.position.y)*n.y+(p.z-camera.position.z)*n.z+1.f);
         }
-        // Reusing scratch/history destinations must wait for the preceding
-        // view's sampler reads, not only make earlier image writes visible.
+        // Wait for the preceding view's sampler reads before reusing scratch.
         glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
-        if (fog_history.sequence != presentation.data().sequence || fog_history.asset != fog_id) {
-            const bool valid = history.previous_valid && fog_history.asset == fog_id &&
-                fog_history.sequence < presentation.data().sequence && presentation.data().sequence-fog_history.sequence == 1;
-            const auto radicalInverse = [](uint64_t value,unsigned base) {
-                float result = 0,weight = 1.f/base;
-                while (value) { result += float(value%base)*weight; value /= base; weight /= base; }
-                return result;
-            };
-            const uint64_t phase = presentation.data().sequence%64+1;
-            scene_fog_field_shader.Use();
-            glUniform1f(scene_fog_field_range,field_range);
-            glUniform2f(scene_fog_jitter,radicalInverse(phase,2),radicalInverse(phase,3));
-            glBindImageTexture(0,scene_fog_density_texture,0,GL_TRUE,0,GL_WRITE_ONLY,GL_RGBA16F);
-            glDispatchCompute((width+7)/8,height,1);
-            glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT);
-            scene_fog_temporal_shader.Use();
-            glActiveTexture(GL_TEXTURE13); glBindTexture(GL_TEXTURE_3D,scene_fog_density_texture);
-            glActiveTexture(GL_TEXTURE14); glBindTexture(GL_TEXTURE_3D,fog_history.density[fog_history.latest]);
-            glUniform1f(scene_fog_temporal_range,field_range);
-            glUniform1f(scene_fog_previous_range,fog_history.range);
-            glUniformMatrix4fv(scene_fog_previous_matrix,1,GL_FALSE,history.previous.view_projection.data());
-            glUniform1f(scene_fog_history_weight,valid && !FindArg("-scene-fog-history-off") ?
-                std::exp(-(std::max)(presentation.data().delta_time,1.f/240)/.08f) : 0);
-            fog_history.latest = 1-fog_history.latest;
-            glBindImageTexture(0,fog_history.density[fog_history.latest],0,GL_TRUE,0,GL_WRITE_ONLY,GL_RGBA16F);
-            glDispatchCompute((width+3)/4,(height+3)/4,16);
-            glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT);
-            fog_history.sequence = presentation.data().sequence; fog_history.asset = fog_id; fog_history.range = field_range;
-        }
-        scene_fog_integrate_shader.Use();
-        glActiveTexture(GL_TEXTURE13); glBindTexture(GL_TEXTURE_3D,fog_history.density[fog_history.latest]);
-        glUniform1f(scene_fog_integrate_range,field_range);
-        glUniform1f(scene_fog_integrate_scale,scene_fog_density_scale);
+        scene_fog_field_shader.Use();
+        glUniform1f(scene_fog_field_range,field_range);
         glBindImageTexture(0,scene_fog_field_texture,0,GL_TRUE,0,GL_WRITE_ONLY,GL_RGBA32F);
-        glDispatchCompute((width+7)/8,(height+7)/8,1);
+        glDispatchCompute((width+7)/8,height,1);
         glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT);
-        glBindImageTexture(0,0,0,GL_FALSE,0,GL_WRITE_ONLY,GL_RGBA16F);
+        glBindImageTexture(0,0,0,GL_FALSE,0,GL_WRITE_ONLY,GL_RGBA32F);
         glActiveTexture(GL_TEXTURE12); glBindTexture(GL_TEXTURE_3D,scene_fog_field_texture);
         if (AutomatedCapturePending() && FindArg("-scene-fog-field-audit"))
             AuditSceneFogField(view,visibility.camera,fog_volumes,scene_view_fog_volumes,width,height,field_range);

@@ -1,5 +1,32 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## LATEST: temporal fog rejected; single-pass field verified against controls
+
+Supersedes ALL history/normalized-half-storage details below. Centered spatial
+control beat bounded temporal on hard-edge error AND flicker. Per-column
+scrambled jitter also failed (still3.466/.719, rotation2.148/2.117 vs centered
+2.927/.272 and1.387/1.481). Removed temporal reconstruction, history textures,
+history lifecycle, jitter toggles and intermediate density textures. No dormant
+alternative. Compile centered ray crossings, analytic per-cell occupancy and
+forward integral in ONE compute dispatch into65-layerRGBA32F. Density is direct
+1/authoredDepth, no normalized-half units. Shell classification fix retained.
+This removes ~170lines, two compute stages and three volume textures. It does
+NOT solve spatial aliasing or change the authored clear roof space.
+
+Source uncommitted atop60c9cae; tests/build PASS out/fog-single-pass-{tests,build}.
+Runtime scene-view-test matches. Completed full64frame
+fog-series-edge-{still,motion}-single, then500frame fog-single-{clean,effects}.
+Boundary-band single-pass error/flicker: still2.92757/.27179, rotation1.38570/1.48045,
+matching centered-control results to rounding. GPU clean .80->.59ms, effects
+6.24->6.02ms, sparse003 .55->.40ms. Single runs, not an all-baselines claim.
+CPUclean1.81/effects1.85/sparse1.77ms. Roof CPU/GPU audit512 endpoint samples:
+maxerror5.96e-7; both independent CPU definitions agree exactly. Normal effects
+image inspected. Raw fog-single-roof-audit/fog-single-sparse. No active processes.
+No release/Candidate/old-preview change. User requested continuous work, no
+shadows, no credits. Last usage11% consumed; no agents. Nonblocking roof-art
+question still pending; do NOT stop waiting for it. Latest spoken update:
+removing temporal because controls beat it, measuring simpler field next.
+
 ## October 21 continuation — full-cycle roof-edge validation
 
 Added `-capture-series-from N`: captures each frame N..target, exits only at
@@ -56,6 +83,39 @@ This reveals wasted field work in003: camera-cone fog candidates beyond visible
 surfaces still trigger injection. Next safe direction: conservative maximum
 endpoint depth from submitted geometry, shared optical candidate rejection,
 NOT camera-room membership hacks. No implementation of that culling yet.
+
+FOLLOW-UP: endpoint culling was implemented, measured, and REJECTED. First
+whole-instance bounds, then upstream ViewVisibility.maximum_endpoint_depth from
+submitted vertices. Both preserved tested exact-reference images. Save003 nodes
+152->79, but still one candidate and field GPU .55ms vs exact .29ms; tight-query
+CPU1.97field/1.80ref vs prior1.77/1.71 (single runs, unfavorable). Global endpoint
+depth does not resolve per-ray occlusion. All eight edited source/test files
+restored via inverse patch; experimental diff out/rejected-fog-endpoint.patch,
+evidence fog-endpoint-* and fog-query-endpoint-*. Revert tests/build PASS
+out/fog-endpoint-revert-{tests,build}. Runtime restored to retained local-bound
+source60c9cae. No active captures/build. Included usage11% used, allowed.
+
+IMPORTANT NEW CONTROL: `-scene-fog-jitter-off -scene-fog-history-off` centered
+sampling beats temporal on the actual clear/fog boundary band! Full64frames:
+centered still error2.927/flicker.272, rotation1.387/1.481, versus bounded temporal
+3.539/.925 and2.090/2.087. Prior comparison against jittered raw overstated the
+practical benefit. Temporal reconstruction has NOT passed acceptance; field
+remains opt-in and original user preview/Candidate untouched. Captures
+fog-series-edge-{still,motion}-centered; CSVout/fog-centered-boundary-metrics.csv.
+
+CURRENT EXPERIMENT: per-column scrambled XY jitter instead of one coherent
+Halton offset across the entire field, testing whether spatially correlated
+error causes the moving edge. Uncommitted SceneFogShaders.h plus diagnostic
+gl_scene.cpp toggle. out/fog-scrambled-build.log PASS, runtime matches. Captures
+fog-series-scrambled-edge-{still,motion}-temporal in progress. Must compare to
+CENTERED control, not only raw jitter. Reject if unjustified; temporary shader
+uses (.5,.5) diagnostic sentinel, clean up explicitly if retaining experiment.
+
+Asked user nonblocking art-direction question: soften fog into authored clear
+roof space vs continuous fog vs preserveclear/fixshimmer. No response yet. Do
+not pause; continue performance/sampling regardless. Looked at official Flax
+VolumetricFog.shader (GitHub master): density/scattering history beforeintegration,
+extra samples when history unavailable. No code copied or new feature adopted.
 
 ## October 21 continuation — density history, roof reproduction, snapshot repair
 
