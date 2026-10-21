@@ -497,6 +497,7 @@ const PreparedModel& Presentation::resolvedModel(size_t instance,size_t variant)
     uint32_t surface_base = source.surface_base;
     for (size_t i = 0; i < result->parts.size(); ++i) {
         auto& part = result->parts[i];
+        part.compiled_index = source.part_base+uint32_t(i);
         part.surface_base = surface_base; surface_base += uint32_t(part.surfaces.size());
         part.has_previous = source.previous_pose_valid && (source.previous_draw_mask & (uint32_t(1)<<i));
         part.light_influences_prepared = source.light_influences_prepared;
@@ -828,6 +829,7 @@ PresentationRef Presentation::complete(FrameData data) {
     }
     auto& surface_count = prepared->data_.compiled_surface_count;
     surface_count = 0;
+    prepared->data_.compiled_part_count = 0;
     const auto index_surface = [&](SurfaceBinding& surface) { surface.compiled_index = surface_count++; };
     for (auto& room : prepared->data_.rooms) {
         room.surface_base = surface_count;
@@ -838,13 +840,19 @@ PresentationRef Presentation::complete(FrameData data) {
     for (auto& mesh : prepared->data_.meshes) index_surface(mesh.surface);
     for (auto& model : prepared->data_.model_variants) {
         model.surface_base = surface_count;
+        model.part_base = prepared->data_.compiled_part_count;
+        require(model.parts.size() <= UINT32_MAX-model.part_base,"Too many scene model parts");
+        prepared->data_.compiled_part_count += uint32_t(model.parts.size());
         if (model.deferred_pose && model.parts.publishedFor(model.asset->id())) {
             require(model.parts.summary()->surface_count <= UINT32_MAX-surface_count,"Too many scene surfaces");
             surface_count += uint32_t(model.parts.summary()->surface_count);
             continue;
         }
         for (size_t p = 0; p < model.parts.size(); ++p) {
-            if (!model.deferred_pose) model.parts[p].surface_base = surface_count;
+            if (!model.deferred_pose) {
+                model.parts[p].surface_base = surface_count;
+                model.parts[p].compiled_index = model.part_base+uint32_t(p);
+            }
             surface_count += uint32_t(model.parts.read()[p].surfaces.size());
         }
     }

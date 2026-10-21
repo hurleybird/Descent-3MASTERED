@@ -761,7 +761,8 @@ int runSceneViewTests() {
         check(d3scene::queryView(*restored,view()).surfaces.size() == 1,"Prepared mesh positions did not return to view");
         check(moved->data().meshes[0].vertices[0].x > 90,"Published procedural positions aliased mutable input");
         const auto& prepared = restored->data().meshes[0];
-        const auto pairs = d3scene::preparedPositionPairs(prepared.asset->geometry(),prepared.vertices,prepared.vertices);
+        std::vector<d3scene::PositionPair> pairs;
+        d3scene::appendPreparedPositionPairs(prepared.asset->geometry(),prepared.vertices,prepared.vertices,pairs);
         check(pairs.size() == 6 && pairs[0].current.x == -1 && pairs[0].previous.x == -1,
             "Transient mesh GPU position stream lost topology or invented history");
         transient.meshes[0].vertices.pop_back(); bool incomplete = false;

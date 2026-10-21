@@ -162,6 +162,8 @@ int runModelSceneTests() {
     data.model_instances[1].current.position.z = 20;
     data.modelsFor(1)[0].parts[0].surfaces[0].alpha = 0.5f;
     auto frame = Presentation::freeze(data);
+    check(frame->data().compiled_part_count == 2 && frame->data().modelsFor(0)[0].parts[0].compiled_index == 0 &&
+        frame->data().modelsFor(1)[0].parts[0].compiled_index == 1,"Model parts lack unique packed addresses");
     {
         auto invalid = frame->data(); invalid.model_instances[1].model_begin = 0;
         rejects([&] { Presentation::freeze(invalid); });
@@ -526,6 +528,12 @@ int runModelSceneTests() {
         check(next_frame->data().modelsFor(0)[0].parts.data() ==
             held->data().modelsFor(0)[0].parts.data(),"Unchanged bindings were copied for a new pose");
         const auto* summary = held->data().modelsFor(0)[0].parts.summary();
+        auto duplicated = held->data();
+        auto duplicate = duplicated.model_instances[0]; duplicate.identity = 92; duplicate.model_count = 0;
+        duplicated.appendModel(duplicate,duplicated.modelsFor(0)[0]); duplicated.model_instances.push_back(duplicate);
+        const auto duplicated_frame = Presentation::freeze(duplicated);
+        check(duplicated_frame->data().compiled_part_count == 4 && duplicated_frame->resolvedModel(1,0).parts[1].compiled_index == 3 &&
+            held->resolvedModel(0,0).parts[1].compiled_index == 1,"Shared deferred bindings leaked another instance's part address");
         check(summary && summary->surface_count == 2 && summary->has_geometry &&
             next_frame->data().modelsFor(0)[0].parts.summary() == summary,
             "Unchanged bindings rebuilt their compiled model summary");

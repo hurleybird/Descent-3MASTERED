@@ -2,6 +2,16 @@
 
 ## October 20 continuation
 
+Prepared model parts now have frame-local packed indices. GPU preparation uses
+reusable arrays for per-part light/position ranges and per-mesh position ranges,
+and appends deformed positions directly into the upload buffer. No transient
+pointer-keyed nodes or intermediate position vectors are required for these paths.
+The effects/auxiliary/source-audit probe is pixel-identical to the flat-model
+checkpoint and was visually inspected. Tests verify distinct eager/deferred part
+addresses even when immutable bindings are shared. Initial dense CPU was 4.51 ms;
+full corpus: 3.292, 3.702, 4.632, 4.757, 1.192, 2.901, 1.333, 3.310 ms. Mixed timing
+continues; these results do not meet the pre-rewrite CPU target.
+
 Model variants now occupy one frame-owned array. Instances hold checked,
 non-overlapping ranges rather than individually allocated vectors. Source world,
 cockpit, preview, resource, lighting and GPU consumers use that layout. Filtering

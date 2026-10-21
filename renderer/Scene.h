@@ -450,6 +450,7 @@ struct ExteriorFog {
 };
 
 struct PreparedModelPart {
+    uint32_t compiled_index = 0;
     // Model-space transforms, composed once from the complete hierarchy.
     Transform current, previous;
     bool draw = true;
@@ -522,7 +523,7 @@ struct PreparedModel {
     bool deferred_pose = false, previous_pose_valid = false;
     double previous_pose_time = 0;
     float deformation = 0, previous_deformation = 0;
-    uint32_t deformation_owner = 0, resolved_index = 0, surface_base = 0;
+    uint32_t deformation_owner = 0, resolved_index = 0, surface_base = 0, part_base = 0;
     uint32_t previous_draw_mask = UINT32_MAX;
     bool light_influences_prepared = false;
     std::vector<uint32_t> light_candidates;
@@ -704,7 +705,7 @@ template<class T> struct ModelRange {
     T& at(size_t index) const { if (index >= count) throw std::out_of_range("Model variant"); return first[index]; }
 };
 struct FrameData {
-    uint32_t compiled_surface_count = 0;
+    uint32_t compiled_surface_count = 0, compiled_part_count = 0;
     uint64_t sequence = 0, scene_lifetime = 0;
     double simulation_time = 0;
     float delta_time = 0;

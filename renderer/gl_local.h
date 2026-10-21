@@ -148,7 +148,9 @@ class GL4Renderer : public IRenderer
 	std::vector<SceneSurfaceRanges> scene_surface_ranges;
 	struct SceneRoomBindings { d3scene::RoomSurfaces surfaces; std::vector<SceneSurfaceRanges> ranges; bool reusable = false; };
 	std::vector<SceneRoomBindings> scene_room_bindings;
-	std::unordered_map<const d3scene::PreparedModelPart*,std::vector<ElementRange>> scene_model_influences;
+	struct ScenePartRanges { ElementRange polygons, positions; };
+	std::vector<ScenePartRanges> scene_part_ranges;
+	std::vector<ElementRange> scene_model_influences;
 	struct SceneReflectionRanges { ElementRange sources, normals, field; };
 	std::unordered_map<uint64_t, SceneReflectionRanges> scene_reflection_assets;
 	std::vector<uint64_t> scene_reflection_revisions;
@@ -161,7 +163,7 @@ class GL4Renderer : public IRenderer
 	};
 	std::map<std::pair<d3scene::ViewKind,uint64_t>,SceneDepthSnapshot> scene_depth_snapshots;
 	uint64_t scene_frame_sequence = 0;
-	std::unordered_map<const void*, ElementRange> scene_position_ranges;
+	std::vector<ElementRange> scene_mesh_position_ranges;
 	void UploadSceneFrame(const d3scene::Presentation&, const d3scene::ViewVisibility* demand = nullptr);
 	struct SceneImageGpu { d3scene::AssetId id; GLuint texture = 0; int sampling = -1; float anisotropy = -1; };
 	std::unordered_map<uint32_t,SceneImageGpu> scene_images;
