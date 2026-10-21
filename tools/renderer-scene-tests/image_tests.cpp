@@ -32,16 +32,18 @@ int runSceneImageTests() {
         source.deferred = std::make_shared<CountedPixels>(calls); source.content_revision = 2;
         const auto next = assets.publishImage(0,source);
         check(next != held && *calls == 0,"New recipe aliased old pixels or evaluated during publication");
-        const auto raw = next->mips()[0].pixels;
+        check(next->mips()[0].width == 1 && *calls == 0,"Layout inspection evaluated deferred pixels");
+        check(&next->pixels(0) == &source.deferred->bytes(),"Image copied recipe-owned pixels");
+        const auto raw = next->pixels(0);
         source.deferred.reset(); source.mips[0].pixels = raw.data();
         check(assets.publishImage(0,source) == next,"Reading recipe through bitmap storage changed its identity");
         *calls = 0;
         assets.reset(); source.deferred.reset();
-        check(held->mips()[0].pixels == std::vector<uint8_t>({17,128}) && *calls == 1,"Held recipe lost its owned input");
-        check(held->mips()[0].pixels[0] == 17 && *calls == 1,"Pixel recipe evaluated more than once");
-        const auto bytes = next->mips()[0].pixels;
+        check(held->pixels(0) == std::vector<uint8_t>({17,128}) && *calls == 1,"Held recipe lost its owned input");
+        check(held->pixels(0)[0] == 17 && *calls == 1,"Pixel recipe evaluated more than once");
+        const auto bytes = next->pixels(0);
         source.mips[0].pixels = bytes.data();
-        check(assets.publishImage(0,source)->mips()[0].pixels == bytes,"Materialized recipe changed bytes");
+        check(assets.publishImage(0,source)->pixels(0) == bytes,"Materialized recipe changed bytes");
         source.deferred = std::make_shared<CountedPixels>(calls); source.mips[0].bytes = 4;
         rejects([&] { assets.publishImage(1,source); });
         source.mips[0].bytes = 2; source.format = ImageFormat::RGBA8;
@@ -209,7 +211,7 @@ int runSceneImageTests() {
     pixels[0] = 0xffff;
     source.content_revision = 3;
     auto changed = assets.publishImage(42,source);
-    check(changed->id() != image->id() && image->mips()[0].pixels[0] == 0,"Held image changed with mutable source");
+    check(changed->id() != image->id() && image->pixels(0)[0] == 0,"Held image changed with mutable source");
     uint16_t mip = 0xffff;
     source.mips.push_back({1,1,reinterpret_cast<const uint8_t*>(&mip),2});
     check(assets.publishImage(42,source)->mips().size() == 2,"Authored mip chain lost");
@@ -226,7 +228,7 @@ int runSceneImageTests() {
     uint8_t rgba[] = {7,23,129,42};
     source.format = ImageFormat::RGBA8; source.mips = {{1,1,rgba,4}};
     auto truecolor = assets.publishImage(43,source);
-    check(truecolor->mips()[0].pixels[2] == 129 && truecolor->generatedLevels() == 5,"Truecolor image was quantized");
+    check(truecolor->pixels(0)[2] == 129 && truecolor->generatedLevels() == 5,"Truecolor image was quantized");
     SurfaceBinding surface;
     MeshPolygon polygon; polygon.corners.resize(3);
     auto policy = compileMaterialPolicy(surface,polygon);
@@ -318,7 +320,7 @@ int runSceneImageTests() {
     const auto second = Presentation::publish(std::move(next));
     check(&first->data().rooms[0].surfaces.read() == &second->data().rooms[0].surfaces.read(),
         "Pixel update detached stable surface storage");
-    check(first->image(44).mips()[0].pixels[0] == 7 && second->image(44).mips()[0].pixels[0] == 99,
+    check(first->image(44).pixels(0)[0] == 7 && second->image(44).pixels(0)[0] == 99,
         "Frame image revisions did not preserve held-frame isolation");
     auto missing = second->data(); missing.images.clear();
     rejects([&] { Presentation::freeze(missing); });

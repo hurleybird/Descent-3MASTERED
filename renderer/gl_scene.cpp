@@ -618,7 +618,7 @@ void GL4Renderer::BindSceneImage(const d3scene::ImageAsset& image,int unit,bool 
             const auto& mip = image.mips()[level];
             const uint32_t width = image.paddedExtent() ? image.paddedExtent() : mip.width;
             const uint32_t height = image.paddedExtent() ? image.paddedExtent() : mip.height;
-            const auto* pixels = mip.pixels.data();
+            const auto* pixels = image.pixels(level).data();
             if (image.format() != d3scene::ImageFormat::RGBA8 || image.paddedExtent()) {
                 scene_image_upload.resize(size_t(width)*height*4);
                 if (image.paddedExtent()) std::fill(scene_image_upload.begin(),scene_image_upload.end(),0);

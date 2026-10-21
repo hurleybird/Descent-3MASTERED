@@ -2,6 +2,21 @@
 
 ## Active 2026-10-21 flare regression investigation
 
+LATEST: model batching committed18db51c. Final tests pass; final001 and
+vertexlight images exact. New uncommitted image ownership cleanup separates
+ImageExtent metadata from pixels(level); deferred ImageAsset now returns recipe
+bytes directly instead of copying them through a second call_once/vector.
+Tests verify metadata does not evaluate and vector address is shared; held
+images still valid. image-owner-tests.log passes, image-owner-build.log passes;
+image-owner005/007500frame images exact. CPU1.43/1.63ms vs model-runs1.38/1.62:
+NO reliable timing win claimed, buffer duplication eliminated. Sample now
+out/cpu-model-runs-stack005.txt (40sec,2200frames, do not use timing):8048samples,
+prep1023/render1945; prep resources285/models234/publication224/procedural154;
+render query300/GLexecute483/viewtables149. Owned diagnostic process finished.
+Runtime scene-view-test contains image ownership experiment, v3.1 unchanged.
+out/model-runs-qualified.exe preserves previous executable. Usage30%, credits
+unchanged. Continue targeting current dominant costs, not just old hotspots.
+
 MODEL EXPERIMENT VALIDATION (not in v3.1): primitive light lists + contiguous
 opaque material runs reduce005CPU1.56->1.38ms,0071.81->1.53-1.62ms. Both images
 exact, GPU005~.17,007~.75-.81ms. Still not marked old-renderer wins. First run
