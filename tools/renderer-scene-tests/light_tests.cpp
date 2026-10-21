@@ -100,7 +100,14 @@ int runLightTests() {
         data.rooms.push_back(room);
     }
     data.rooms[0].portals.push_back({0,1,0}); data.rooms[1].portals.push_back({0,0,0});
+    PreparedMesh effect; effect.asset = assets.publishMesh(1,mesh);
+    data.meshes.assign(3,effect); data.meshes[2].surface.unlit = true;
     prepareLightInfluences(data);
+    check(data.meshes[0].light_influences_prepared && data.meshes[0].surface.light_indices.empty() &&
+        data.meshes[0].light_candidates.offset == data.meshes[1].light_candidates.offset &&
+        data.lightCandidates(data.meshes[0].light_candidates).size() == 1 &&
+        data.lightCandidates(data.meshes[0].light_candidates)[0] == 0 && data.meshes[2].light_candidates.empty(),
+        "Effects duplicated their canonical light set or lit an unlit material");
     check(data.lightCandidates(data.rooms[0].light_candidates).size() == 1 &&
         data.lightCandidates(data.rooms[0].light_candidates)[0] == 0,"Source room lost emitter reference");
     check(data.lightCandidates(data.rooms[1].light_candidates).size() == 1 &&

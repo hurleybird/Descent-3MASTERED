@@ -2,6 +2,16 @@
 
 ## October 21 resumed work — supersedes restart pause below
 
+Newest mesh-streams.exe shares canonical effect light candidates and appends
+prepared UVs directly into upload storage (no per-mesh temporary). Tests pass;
+eight short scenes and combined probe EXACT. Long ABBA parent/new CPU:
+003 (2.00,1.87)/(1.98,2.06), 005 (1.34,1.51)/(1.36,1.28),
+007 (1.46,1.50)/(1.38,1.47). Mixed; goal still unmet.
+Latest sampler out/cpu-mesh-streams-stack-005.txt adds external-leaf nearest
+renderer call sites. Sampling finished normally; no sampler active.
+Next experiment: bounded fence-protected persistent per-view upload buffers,
+replacing repeated buffer-store orphaning (old renderer already streams persistently).
+
 Newest binary shared-pose.exe: frame-owned composed model transforms shared by
 cockpit layers; cockpit ambient now instance modulation, so stable part/material
 tables survive animation and lighting changes. General composed-pose execution

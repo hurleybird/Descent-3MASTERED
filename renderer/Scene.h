@@ -334,6 +334,8 @@ struct TerrainState {
 enum class MeshAlignment : uint8_t { World, Camera, FacingEye, CameraUpright, Axis };
 struct PreparedMesh {
     MeshAssetRef asset;
+    bool light_influences_prepared = false;
+    LightCandidateRange light_candidates;
     uint64_t collection = 0; // zero is the world; other collections are isolated view content
     std::vector<Vec3> vertices; // owned frame-local positions; empty uses authored geometry
     std::vector<Vec2> texture_uvs; // optional per-vertex base UVs; split vertices at seams

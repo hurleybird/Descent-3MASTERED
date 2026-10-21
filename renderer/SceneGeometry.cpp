@@ -104,16 +104,14 @@ MeshGeometry unitQuadBatch(uint32_t count) {
     }
     return result;
 }
-std::vector<Vec2> preparedTextureCoordinates(const PreparedMesh& mesh) {
-    if (mesh.texture_uvs.empty()) return {};
+void appendPreparedTextureCoordinates(const PreparedMesh& mesh,std::vector<Vec2>& result) {
+    if (mesh.texture_uvs.empty()) return;
     if (!mesh.asset || mesh.texture_uvs.size() != mesh.asset->geometry().vertices.size())
         throw std::invalid_argument("Prepared UVs do not match mesh topology");
-    std::vector<Vec2> result;
     for (const auto& polygon : mesh.asset->geometry().polygons)
         forEachTriangleCorner(polygon.corners.size(),[&](size_t corner) {
             result.push_back(mesh.texture_uvs.at(polygon.corners[corner].vertex));
         });
-    return result;
 }
 MeshGeometry billboardRing(float inner_ratio,uint8_t inner_alpha,uint8_t outer_alpha,uint32_t segments) {
     if (!std::isfinite(inner_ratio) || inner_ratio < 0 || inner_ratio > 1 || segments < 3 || segments > 256)

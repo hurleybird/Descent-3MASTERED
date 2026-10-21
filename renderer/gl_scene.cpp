@@ -783,14 +783,26 @@ void GL4Renderer::PrepareSceneViewTables(const d3scene::PreparedView& prepared) 
                 else add(surface,index,surface.light_indices);
             }
         }
+        d3scene::LightCandidateRange last_mesh_candidates;
+        ElementRange last_mesh_lights;
+        bool mesh_candidates_uploaded = false;
         for (const auto& mesh : frame.data().meshes) {
             if (!meshes[&mesh-frame.data().meshes.data()]) continue;
-            add(mesh.surface,mesh.surface.compiled_index,mesh.surface.light_indices);
-            const auto coordinates = d3scene::preparedTextureCoordinates(mesh);
-            if (coordinates.empty()) continue;
-            const uint32_t start = static_cast<uint32_t>(uvs.size());
-            uvs.insert(uvs.end(),coordinates.begin(),coordinates.end());
-            scene_surface_ranges[mesh.surface.compiled_index].texture_uv = ElementRange(start,static_cast<uint32_t>(uvs.size())-start);
+            add(mesh.surface,mesh.surface.compiled_index,mesh.light_influences_prepared ? no_lights : mesh.surface.light_indices);
+            if (mesh.light_influences_prepared && !mesh.light_candidates.empty()) {
+                const auto range = mesh.light_candidates;
+                if (!mesh_candidates_uploaded || range.offset != last_mesh_candidates.offset || range.count != last_mesh_candidates.count) {
+                    last_mesh_lights = ElementRange(uint32_t(indices.size()),range.count);
+                    for (const auto light : frame.data().lightCandidates(range)) indices.push_back(int32_t(light));
+                    last_mesh_candidates = range; mesh_candidates_uploaded = true;
+                }
+                scene_surface_ranges[mesh.surface.compiled_index].lights = last_mesh_lights;
+            }
+            if (!mesh.texture_uvs.empty()) {
+                const uint32_t start = static_cast<uint32_t>(uvs.size());
+                d3scene::appendPreparedTextureCoordinates(mesh,uvs);
+                scene_surface_ranges[mesh.surface.compiled_index].texture_uv = ElementRange(start,static_cast<uint32_t>(uvs.size())-start);
+            }
         }
         scene_model_influences.clear();
         scene_part_ranges.resize(frame.data().compiled_part_count);

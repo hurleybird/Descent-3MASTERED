@@ -28,6 +28,6 @@ std::vector<Vec3> deformMesh(const MeshGeometry&,float range,double time,uint32_
 void deformMeshInto(const MeshGeometry&,float range,double time,uint32_t owner,uint32_t part,std::vector<Vec3>&);
 MeshGeometry unitBillboardQuad();
 MeshGeometry unitQuadBatch(uint32_t count);
-std::vector<Vec2> preparedTextureCoordinates(const PreparedMesh&);
+void appendPreparedTextureCoordinates(const PreparedMesh&,std::vector<Vec2>&);
 MeshGeometry billboardRing(float inner_ratio,uint8_t inner_alpha,uint8_t outer_alpha,uint32_t segments = 32);
 }

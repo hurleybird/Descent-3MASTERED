@@ -853,6 +853,7 @@ PresentationRef Presentation::complete(FrameData data) {
     // the asset lifetime belongs to this frame's validation boundary.
     for (const auto& mesh : data.meshes) {
         require(mesh.asset && mesh.asset->id().lifetime == data.scene_lifetime,"Stale generic mesh");
+        data.lightCandidates(mesh.light_candidates);
         require(mesh.vertices.empty() || mesh.vertices.size() == mesh.asset->geometry().vertices.size(),
             "Incomplete prepared mesh positions");
         for (const auto& vertex : mesh.vertices) require(finite(vertex),"Invalid prepared mesh position");

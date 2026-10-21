@@ -152,10 +152,13 @@ void prepareLightInfluences(FrameData& data) {
     };
     // Camera-anchored meshes cannot be spatially culled during view-independent
     // preparation. Keep the canonical light table; the shader evaluates range.
+    auto exterior_models = startRange();
+    for (size_t i = 0; i < data.lights.size(); ++i) packed.push_back(uint32_t(i));
+    finishRange(exterior_models);
     for (auto& mesh : data.meshes) {
         mesh.surface.light_indices.clear();
-        if (!mesh.surface.unlit) for (size_t i = 0; i < data.lights.size(); ++i)
-            mesh.surface.light_indices.push_back(static_cast<uint32_t>(i));
+        mesh.light_influences_prepared = true;
+        mesh.light_candidates = mesh.surface.unlit ? LightCandidateRange{} : exterior_models;
     }
     SceneLookup<int32_t,size_t> rooms;
     rooms.reserve(data.rooms.size());
@@ -192,9 +195,6 @@ void prepareLightInfluences(FrameData& data) {
     }
     static thread_local std::vector<LightCandidateRange> room_models;
     room_models.resize(room_count);
-    auto exterior_models = startRange();
-    for (size_t i = 0; i < data.lights.size(); ++i) packed.push_back(uint32_t(i));
-    finishRange(exterior_models);
     for (size_t r = 0; r < room_count; ++r) {
         auto& room = data.rooms[r];
         room.light_influences_prepared = true;

@@ -449,9 +449,13 @@ int runSceneViewTests() {
         for (int i = 0; i < 8; ++i) batch.texture_uvs.push_back({float(i),float(i+10)});
         data.meshes.push_back(batch);
         const auto frame = d3scene::Presentation::freeze(data);
-        const auto coordinates = d3scene::preparedTextureCoordinates(frame->data().meshes[0]);
+        std::vector<d3scene::Vec2> coordinates;
+        d3scene::appendPreparedTextureCoordinates(frame->data().meshes[0],coordinates);
         const int indices[12] = {0,1,2,0,2,3,4,5,6,4,6,7};
         check(coordinates.size() == 12,"Prepared texture coordinates lost quad batch triangles");
+        d3scene::appendPreparedTextureCoordinates(frame->data().meshes[0],coordinates);
+        check(coordinates.size() == 24 && coordinates[12].x == coordinates[0].x,
+            "UV upload append overwrote an earlier mesh range");
         for (int i = 0; i < 12; ++i) check(coordinates[i].x == indices[i] && coordinates[i].y == indices[i]+10,
             "Prepared base UV ordering diverged from triangulated positions");
         data.meshes[0].texture_uvs[0].x = 99;
