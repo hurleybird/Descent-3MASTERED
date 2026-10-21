@@ -2,6 +2,15 @@
 
 ## October 21 resumed work — supersedes restart pause below
 
+Latest runtime debug-opt-in.exe separates -scene-inspection renderer selection
+from synchronous GL debug callbacks. Explicit -scene-gl-debug or existing
+-scene-geometry-revision-audit enables those diagnostics. Unconditional GL error
+checks remain. This fixes a measurement/configuration confound, NOT the CPU gap:
+same-binary long ABBA dbg-* debug-on/off005(1.355,1.255)/(1.234,1.255),
+007(1.425,1.336)/(1.666,1.280). GPU unchanged; both images and dbg-probe exact.
+Current runtime/PDB match; final tests PASS before this GL configuration-only
+change, build PASS after it. Latest included usage1%; stop at zero.
+
 Last small demand-only MultiColor lookup experiment REJECTED; source restored.
 color-demand.exe and cd-* are evidence only, NOT the checkpoint/runtime.
 Long ABBA parent/new005(1.242,1.196)/(1.305,1.215),

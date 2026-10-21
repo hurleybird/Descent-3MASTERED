@@ -631,7 +631,10 @@ int GL4Renderer::Init(oeApplication* app, renderer_preferred_state* pref_state)
 #else
 	OpenGL_debugging_enabled = false;
 #endif
-    if (FindArg("-scene-inspection") && (GLAD_GL_VERSION_4_5 || CheckExtension("GL_KHR_debug"))) {
+    // Renderer selection must not silently enable synchronous driver diagnostics.
+    // Keep those explicit (and enabled by the revision-audit verification runs).
+    if ((FindArg("-scene-gl-debug") || FindArg("-scene-geometry-revision-audit")) &&
+        (GLAD_GL_VERSION_4_5 || CheckExtension("GL_KHR_debug"))) {
         glEnable(GL_DEBUG_OUTPUT); glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
         glDebugMessageCallback(GL_LogDebugMsg,reinterpret_cast<const void*>(1));
     }
