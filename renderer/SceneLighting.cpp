@@ -139,7 +139,7 @@ void prepareLightInfluences(FrameData& data) {
     }
     for (auto& object : data.model_instances) {
       const auto* room = rooms.find(object.room);
-      for (auto& model : object.models) {
+      for (auto& model : data.variants(object)) {
         if (model.deferred_pose) {
             model.light_influences_prepared = true;
             model.light_candidates.clear();

@@ -480,7 +480,7 @@ void compileModelBounds(const Transform& placement,PreparedModel& model) {
 }
 const PreparedModel& Presentation::resolvedModel(size_t instance,size_t variant) const {
     const auto& object = data_.model_instances.at(instance);
-    const auto& source = object.models.at(variant);
+    const auto& source = data_.variants(object).at(variant);
     if (!source.deferred_pose) return source;
     auto& cached = resolved_models_.at(source.resolved_index);
     if (cached) return *cached;
@@ -719,16 +719,19 @@ PresentationRef Presentation::complete(FrameData data) {
     for (const auto& object : data.objects)
         for (const auto hidden : object.camera_hidden_objects)
             require(objects.count(hidden) != 0,"Camera rig references a missing object allocation");
+    size_t model_end = 0;
     for (const auto& object : data.model_instances) {
         require(object.identity && model_instances.emplace(object.identity,size_t(&object-data.model_instances.data())).second,"Duplicate or absent model instance identity");
         require(!object.has_owner || objects.count(object.owner),"Model owner is not part of this presentation");
         require(finite(object.current) && finite(object.previous),"Invalid model placement");
-        require(!object.models.empty(),"Model instance has no variants");
+        require(object.model_count && object.model_begin == model_end,"Model variants must partition frame storage");
+        const auto variants = data.variants(object);
+        model_end += variants.size();
         require(std::isfinite(object.lod_distances.x) && std::isfinite(object.lod_distances.y) &&
             object.lod_distances.x >= 0 && object.lod_distances.y >= 0,"Invalid model LOD distances");
         for (const auto index : object.lod_models)
-            require(object.models.empty() ? index == 0 : index < object.models.size(),"LOD references an absent model variant");
-        for (const auto& model : object.models) {
+            require(index < variants.size(),"LOD references an absent model variant");
+        for (const auto& model : variants) {
             require(model.asset && model.asset->id().lifetime == data.scene_lifetime, "Stale model asset in frame");
             if (model.deferred_pose) {
                 require(model.parts.size() <= MAX_SUBOBJECTS,"Too many deferred model parts");
@@ -778,15 +781,16 @@ PresentationRef Presentation::complete(FrameData data) {
             }
         }
     }
+    require(model_end == data.model_variants.size(),"Unowned model variants in frame storage");
     for (const auto& mesh : data.meshes) {
         require(!mesh.has_owner || objects.count(mesh.owner),"Mesh owner is not part of this presentation");
         require(mesh.model_variant >= -1 && (mesh.model_instance == 0 ? mesh.model_variant == -1 :
             (model_instances.count(mesh.model_instance) && mesh.model_variant >= 0 &&
-                size_t(mesh.model_variant) < data.model_instances[model_instances.at(mesh.model_instance)].models.size() &&
+                size_t(mesh.model_variant) < data.model_instances[model_instances.at(mesh.model_instance)].model_count &&
                 mesh.collection == data.model_instances[model_instances.at(mesh.model_instance)].collection)),
             "Model attachment references an absent instance variant");
         require(mesh.model_part >= -1 && (mesh.model_part < 0 || (mesh.model_instance &&
-            size_t(mesh.model_part) < data.model_instances[model_instances.at(mesh.model_instance)].models[mesh.model_variant].parts.size())),
+            size_t(mesh.model_part) < data.modelsFor(model_instances.at(mesh.model_instance))[mesh.model_variant].parts.size())),
             "Model attachment references an absent pose part");
     }
     std::shared_ptr<Presentation> prepared(new Presentation(std::move(data)));
@@ -832,7 +836,7 @@ PresentationRef Presentation::complete(FrameData data) {
     for (auto& surface : prepared->data_.terrain.materials) index_surface(surface);
     for (auto& patch : prepared->data_.terrain.patches) for (auto& surface : patch) index_surface(surface);
     for (auto& mesh : prepared->data_.meshes) index_surface(mesh.surface);
-    for (auto& object : prepared->data_.model_instances) for (auto& model : object.models) {
+    for (auto& model : prepared->data_.model_variants) {
         model.surface_base = surface_count;
         if (model.deferred_pose && model.parts.publishedFor(model.asset->id())) {
             require(model.parts.summary()->surface_count <= UINT32_MAX-surface_count,"Too many scene surfaces");
@@ -885,7 +889,7 @@ PresentationRef Presentation::complete(FrameData data) {
             bounds.minimum = {(std::min)(bounds.minimum.x,point.x),(std::min)(bounds.minimum.y,point.y),(std::min)(bounds.minimum.z,point.z)};
             bounds.maximum = {(std::max)(bounds.maximum.x,point.x),(std::max)(bounds.maximum.y,point.y),(std::max)(bounds.maximum.z,point.z)};
         };
-        for (auto& model : object.models) {
+        for (auto& model : prepared->data_.variants(object)) {
             model.resolved_index = resolved_index++;
             compileModelBounds(object.current,model);
             if (model.has_render_bounds) {

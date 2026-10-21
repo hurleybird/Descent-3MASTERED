@@ -10,6 +10,7 @@
 #include <utility>
 #include <array>
 #include <unordered_map>
+#include <stdexcept>
 
 struct ModelAnimation;
 namespace d3scene {
@@ -560,7 +561,7 @@ struct ModelInstance {
     bool has_previous = false;
     // All eligible variants exist before any camera query. LOD selection is
     // view-local; prepared attachments identify their owning variant as well.
-    std::vector<PreparedModel> models;
+    uint32_t model_begin = 0, model_count = 0;
     Vec2 lod_distances;
     std::array<uint32_t,3> lod_models{{0,0,0}};
     Bounds render_bounds; // union of every variant, never the simulation radius
@@ -691,6 +692,17 @@ struct PreparedForeground {
     int32_t order = 0;
     ForegroundPhase phase = ForegroundPhase::WorldOverlay;
 };
+template<class T> struct ModelRange {
+    T* first = nullptr;
+    size_t count = 0;
+    T* begin() const { return first; }
+    T* end() const { return count ? first+count : first; }
+    T* data() const { return first; }
+    size_t size() const { return count; }
+    bool empty() const { return count == 0; }
+    T& operator[](size_t index) const { return first[index]; }
+    T& at(size_t index) const { if (index >= count) throw std::out_of_range("Model variant"); return first[index]; }
+};
 struct FrameData {
     uint32_t compiled_surface_count = 0;
     uint64_t sequence = 0, scene_lifetime = 0;
@@ -705,6 +717,39 @@ struct FrameData {
     std::vector<RoomState> rooms;
     std::vector<ObjectState> objects;
     std::vector<ModelInstance> model_instances;
+    std::vector<PreparedModel> model_variants;
+    ModelRange<PreparedModel> variants(const ModelInstance& instance) {
+        if (instance.model_begin > model_variants.size() || instance.model_count > model_variants.size()-instance.model_begin)
+            throw std::invalid_argument("Invalid model variant range");
+        return {instance.model_count ? model_variants.data()+instance.model_begin : nullptr,instance.model_count};
+    }
+    ModelRange<const PreparedModel> variants(const ModelInstance& instance) const {
+        if (instance.model_begin > model_variants.size() || instance.model_count > model_variants.size()-instance.model_begin)
+            throw std::invalid_argument("Invalid model variant range");
+        return {instance.model_count ? model_variants.data()+instance.model_begin : nullptr,instance.model_count};
+    }
+    ModelRange<PreparedModel> modelsFor(size_t instance) { return variants(model_instances.at(instance)); }
+    ModelRange<const PreparedModel> modelsFor(size_t instance) const { return variants(model_instances.at(instance)); }
+    void appendModel(ModelInstance& instance,PreparedModel model) {
+        if (model_variants.size() >= UINT32_MAX) throw std::invalid_argument("Too many model variants");
+        if (!instance.model_count) instance.model_begin = uint32_t(model_variants.size());
+        if (uint64_t(instance.model_begin)+instance.model_count != model_variants.size())
+            throw std::invalid_argument("Model variants must be appended contiguously");
+        model_variants.push_back(std::move(model)); ++instance.model_count;
+    }
+    // After filtering instances, compact their ranges without reallocating or
+    // keeping orphaned variants. Instance ordering remains the storage order.
+    void compactModels() {
+        size_t write = 0;
+        for (auto& instance : model_instances) {
+            const auto range = variants(instance);
+            if (instance.model_begin < write) throw std::invalid_argument("Overlapping model ranges");
+            for (size_t i = 0; i < range.size(); ++i)
+                if (write+i != instance.model_begin+i) model_variants[write+i] = std::move(range[i]);
+            instance.model_begin = uint32_t(write); write += range.size();
+        }
+        model_variants.resize(write);
+    }
     std::vector<Light> lights;
     // Per-frame immutable pixel revisions. Surface tables name stable slots,
     // never own a pixel revision that would invalidate their material storage.

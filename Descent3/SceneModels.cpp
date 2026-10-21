@@ -218,6 +218,8 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::Presenta
     const auto* previous = previous_frame ? &previous_frame->data() : nullptr;
     if (previous && (previous->scene_lifetime != data.scene_lifetime || previous->simulation_time > data.simulation_time))
         previous_frame = nullptr;
+    data.model_instances.reserve(data.objects.size()+3);
+    data.model_variants.reserve(previous_frame ? previous->model_variants.size() : data.objects.size());
     const bool audit_geometry = FindArg("-scene-geometry-revision-audit") != 0;
     const bool lod_probe = SceneGeometryInspection() && FindArg("-scene-lod-probe");
     const bool deformation_probe = SceneGeometryInspection() && FindArg("-scene-deformation-probe");
@@ -282,13 +284,16 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::Presenta
         }
         for (size_t tier = 0; tier < requested.size(); ++tier) {
             model_number = requested[tier];
-            const auto existing = std::find_if(instance.models.begin(),instance.models.end(),
+            if (instance.model_count) {
+            const auto variants = data.variants(instance);
+            const auto existing = std::find_if(variants.begin(),variants.end(),
                 [&](const d3scene::PreparedModel& model) { return model.asset->id().slot == uint32_t(model_number); });
-            if (existing != instance.models.end()) {
-                instance.lod_models[tier] = uint32_t(existing-instance.models.begin());
+            if (existing != variants.end()) {
+                instance.lod_models[tier] = uint32_t(existing-variants.begin());
                 continue;
             }
-            const uint32_t variant_index = uint32_t(instance.models.size());
+            }
+            const uint32_t variant_index = instance.model_count;
             instance.lod_models[tier] = variant_index;
             if (model_number < 0 || model_number >= MAX_POLY_MODELS || !Poly_models[model_number].used)
                 throw std::invalid_argument("Object references missing model");
@@ -304,7 +309,7 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::Presenta
             variant.pose_source_revision = SceneModelSourceEpoch();
             const auto* old = previous_frame ? previous_frame->modelIndices().find(instance.identity) : nullptr;
             const d3scene::PreparedModel* history = nullptr;
-            if (old) for (const auto& previous_variant : previous->model_instances[old->second].models)
+            if (old) for (const auto& previous_variant : previous->modelsFor(old->second))
                 if (previous_variant.asset->id() == variant.asset->id()) { history = &previous_variant; break; }
             const auto ambient = ambientColor(*source,rooms,data.terrain);
             auto effect = appearance(*source);
@@ -422,9 +427,9 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::Presenta
                 }
                 variant.parts[i] = std::move(part);
             }
-            instance.models.push_back(std::move(variant));
+            data.appendModel(instance,std::move(variant));
         }
-        if (!instance.models.empty()) data.model_instances.push_back(std::move(instance));
+        if (instance.model_count) data.model_instances.push_back(std::move(instance));
     }
     data.observation_inputs_prepared = true;
 }
@@ -433,8 +438,8 @@ void AuditGameModelPoses(const d3scene::Presentation& frame) {
     const auto same = [](d3scene::Vec3 a,d3scene::Vec3 b) { return a.x == b.x && a.y == b.y && a.z == b.z; };
     for (size_t i = 0; i < frame.data().model_instances.size(); ++i) {
         const auto& instance = frame.data().model_instances[i];
-        for (size_t v = 0; v < instance.models.size(); ++v) {
-            const auto& source = instance.models[v];
+        for (size_t v = 0; v < instance.model_count; ++v) {
+            const auto& source = frame.data().variants(instance)[v];
             if (!source.deferred_pose) continue;
             const auto* authored = GetPolymodelPointer(int(source.asset->id().slot));
             const auto expected = ComposeModelPose(*authored,EvaluateModelPose(*authored,
@@ -485,6 +490,6 @@ void PrepareGameStaticModel(d3scene::FrameData& data,int number,const d3scene::T
         }
         model.parts.push_back(std::move(part));
     }
-    instance.models.push_back(std::move(model));
+    data.appendModel(instance,std::move(model));
     data.model_instances.push_back(std::move(instance));
 }

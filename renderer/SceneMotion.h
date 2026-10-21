@@ -27,7 +27,7 @@ inline SurfaceMotion surfaceMotion(const Presentation& frame,const VisibleSurfac
     SurfaceMotion result; result.previous = item.world;
     if (!item.model) return result; // static world uses camera reconstruction
     const auto& object = frame.data().model_instances[item.model_instance_index];
-    const auto& part = object.models[item.model_variant].parts[item.part_index];
+    const auto& part = frame.resolvedModel(item.model_instance_index,item.model_variant).parts[item.part_index];
     result.previous = compose(object.previous,part.previous);
     // Preserve the canvas adapter's zero/static and high-bit blur-policy ABI.
     if (!object.has_owner) return result; // standalone model history is view/layer-owned

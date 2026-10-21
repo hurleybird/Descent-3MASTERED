@@ -890,10 +890,10 @@ void PrepareGameCockpit(d3scene::FrameData& frame, bool advance,const d3scene::F
         const d3scene::PreparedModel* history = nullptr;
         if (retain_materials && previous && previous->scene_lifetime == frame.scene_lifetime)
             for (const auto& instance : previous->model_instances)
-                if (instance.identity == collections[layer] && instance.models.size() == 1 &&
-                    instance.models[0].asset->id() == asset->id() &&
-                    instance.models[0].pose_source_revision == prepared.pose_source_revision)
-                    history = &instance.models[0];
+                if (instance.identity == collections[layer] && instance.model_count == 1 &&
+                    previous->variants(instance)[0].asset->id() == asset->id() &&
+                    previous->variants(instance)[0].pose_source_revision == prepared.pose_source_revision)
+                    history = &previous->variants(instance)[0];
         prepared.parts.reserve(asset->geometry().parts.size());
         const auto roles = ResolveSceneModelRoles(*asset,masks[layer],false);
         for (size_t i = 0; i < asset->geometry().parts.size(); ++i) {
@@ -937,7 +937,7 @@ void PrepareGameCockpit(d3scene::FrameData& frame, bool advance,const d3scene::F
             }
             prepared.parts.push_back(std::move(part));
         }
-        instance.models.push_back(std::move(prepared));
+        frame.appendModel(instance,std::move(prepared));
         frame.model_instances.push_back(std::move(instance));
     }
     if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)

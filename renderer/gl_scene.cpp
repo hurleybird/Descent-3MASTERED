@@ -616,7 +616,7 @@ void GL4Renderer::UploadSceneFrame(const d3scene::Presentation& frame, const d3s
         for (const auto& room : frame.data().rooms) collectTable(room.surfaces);
         for (const auto& patch : frame.data().terrain.patches) for (const auto& surface : patch) collect(surface);
         for (const auto& mesh : frame.data().meshes) collect(mesh.surface);
-        for (const auto& object : frame.data().model_instances) for (const auto& model : object.models) for (const auto& part : model.parts)
+        for (const auto& model : frame.data().model_variants) for (const auto& part : model.parts)
             collectTable(part.surfaces);
         std::sort(reflection_revisions.begin(),reflection_revisions.end());
         reflection_revisions.erase(std::unique(reflection_revisions.begin(),reflection_revisions.end()),reflection_revisions.end());
@@ -666,7 +666,7 @@ void GL4Renderer::UploadSceneFrame(const d3scene::Presentation& frame, const d3s
             for (const auto& room : frame.data().rooms) for (const auto& surface : room.surfaces) reflection(surface);
             for (const auto& patch : frame.data().terrain.patches) for (const auto& surface : patch) reflection(surface);
             for (const auto& mesh : frame.data().meshes) reflection(mesh.surface);
-            for (const auto& object : frame.data().model_instances) for (const auto& model : object.models)
+            for (const auto& model : frame.data().model_variants)
                 for (const auto& part : model.parts) for (const auto& surface : part.surfaces) reflection(surface);
         }
         const auto add = [&](const d3scene::SurfaceBinding& surface,uint32_t index,const std::vector<uint32_t>& lights) {
@@ -922,7 +922,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::Presentat
             const auto& object = presentation.data().model_instances[i];
             const auto variant = d3scene::selectModelVariant(object,visibility.camera);
             AutomatedCaptureLog("scene LOD visible owner=%u variant=%u asset=%u polygons=%u",
-                object.owner,variant,object.models[variant].asset->id().slot,polygons[i]);
+                object.owner,variant,presentation.data().variants(object)[variant].asset->id().slot,polygons[i]);
         }
     }
     if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0) {

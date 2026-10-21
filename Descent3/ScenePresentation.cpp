@@ -314,7 +314,7 @@ void prepareImages(d3scene::FrameData& data) {
     static thread_local uint64_t dependency_lifetime = 0;
     const auto eachTable = [&](auto&& consume) {
         for (const auto& room : data.rooms) consume(room.surfaces);
-        for (const auto& object : data.model_instances) for (const auto& model : object.models)
+        for (const auto& model : data.model_variants)
             for (const auto& part : model.parts) consume(part.surfaces);
     };
     size_t table_count = 0;
@@ -350,7 +350,7 @@ void prepareImages(d3scene::FrameData& data) {
         prepareTable(room.surfaces,false,room.exterior);
     }
     { PERF_MARKER_SCOPE("Scene.Resources.ModelImages");
-    for (auto& object : data.model_instances) for (auto& model : object.models) for (size_t p = 0; p < model.parts.size(); ++p)
+    for (auto& model : data.model_variants) for (size_t p = 0; p < model.parts.size(); ++p)
         if (!model.parts.read()[p].surfaces.published() || (!dependencies_current && !tableUnchanged(model.parts.read()[p].surfaces)))
             prepareTable(model.parts[p].surfaces,true,false);
     }
@@ -372,7 +372,7 @@ void logPreparedModels(const d3scene::Presentation& frame) {
     size_t room_surfaces = 0, model_surfaces = 0, terrain_surfaces = 0, retained_surfaces = 0;
     for (const auto& room : data.rooms) { room_surfaces += room.surfaces.size();
         if (room.surfaces.publishedFor(room.asset->id())) retained_surfaces += room.surfaces.size(); }
-    for (const auto& object : data.model_instances) for (const auto& model : object.models)
+    for (const auto& model : data.model_variants)
         for (const auto& part : model.parts) model_surfaces += part.surfaces.size();
     for (const auto& patch : data.terrain.patches) terrain_surfaces += patch.size();
     AutomatedCaptureLog("scene inventory rooms=%u models=%u terrain=%u meshes=%u",unsigned(room_surfaces),unsigned(model_surfaces),unsigned(terrain_surfaces),unsigned(data.meshes.size()));
@@ -392,8 +392,8 @@ void logPreparedModels(const d3scene::Presentation& frame) {
         AutomatedCaptureLog("scene camera perturbation owner=%u forward=%.9g,%.9g,%.9g",effect.owner,
             effect.rotation.forward.x,effect.rotation.forward.y,effect.rotation.forward.z);
     std::unordered_set<int> textures;
-    for (const auto& instance : data.model_instances) for (const auto& source : instance.models) {
-        const auto& model = frame.resolvedModel(size_t(&instance-data.model_instances.data()),size_t(&source-instance.models.data()));
+    for (const auto& instance : data.model_instances) for (const auto& source : data.variants(instance)) {
+        const auto& model = frame.resolvedModel(size_t(&instance-data.model_instances.data()),size_t(&source-data.variants(instance).data()));
         uint64_t hash = 14695981039346656037ull;
         const auto number = [&](float value) {
             uint32_t bits; std::memcpy(&bits,&value,sizeof(bits));
@@ -420,7 +420,7 @@ void logPreparedModels(const d3scene::Presentation& frame) {
         // Resolve was already performed. Reading the source bitmap here must not
         // call GetTextureBitmap again (which can advance procedural state).
         const d3scene::SurfaceBinding* binding = nullptr;
-        for (const auto& instance : data.model_instances) for (const auto& model : instance.models) for (const auto& part : model.parts)
+        for (const auto& model : data.model_variants) for (const auto& part : model.parts)
             for (const auto& surface : part.surfaces) if (surface.texture == texture) binding = &surface;
         if (!binding || binding->bitmap < 0) continue;
         const int bitmap = binding->bitmap;
@@ -501,7 +501,7 @@ void PrepareGameSceneResources(d3scene::FrameData& data) {
     MaterialResolution resolution(static_cast<float>(data.simulation_time));
     { PERF_MARKER_SCOPE("Scene.Resources.Materials");
     for (auto& surface : data.terrain.materials) resolveMaterial(surface,resolution,false,true);
-    for (auto& object : data.model_instances) for (auto& model : object.models) for (size_t p = 0; p < model.parts.size(); ++p) {
+    for (auto& model : data.model_variants) for (size_t p = 0; p < model.parts.size(); ++p) {
         const auto& input = model.parts.read()[p];
         if (input.surfaces.publishedFor(model.asset->id(),uint32_t(p),input.material_palette)) continue;
         auto& part = model.parts[p];
@@ -703,6 +703,7 @@ d3scene::PresentationRef PrepareGamePresentation() {
             [&](const d3scene::ObjectState& object) { return object.handle != owner; }),data.objects.end());
         data.model_instances.erase(std::remove_if(data.model_instances.begin(),data.model_instances.end(),
             [&](const d3scene::ModelInstance& instance) { return !instance.has_owner || instance.owner != owner; }),data.model_instances.end());
+        data.compactModels();
         data.meshes.erase(std::remove_if(data.meshes.begin(),data.meshes.end(),
             [&](const d3scene::PreparedMesh& mesh) { return mesh.collection == 0 && (!mesh.has_owner || mesh.owner != owner); }),data.meshes.end());
         data.rooms.clear(); data.terrain = {}; data.fog.reset(); data.exterior_fog = {};
@@ -793,11 +794,11 @@ d3scene::VisibilityReport RenderGameSceneView(const d3scene::Presentation& frame
                 const float depth = tier == 0 ? (std::min)(close_depth,object.lod_distances.x*.5f) :
                     tier == 1 ? (object.lod_distances.x+object.lod_distances.y)*.5f :
                     (std::max)(object.lod_distances.x,object.lod_distances.y)*1.1f;
-                if (!(depth > 0) || object.models.empty()) Error("LOD fixture player has no authored LOD range");
+                if (!(depth > 0) || !object.model_count) Error("LOD fixture player has no authored LOD range");
                 distance = depth/std::sqrt(1.f+.45f*.45f);
                 view.zoom *= .4f*close_depth/depth;
                 AutomatedCaptureLog("scene LOD fixture tier=%d variants=%u depth=%.6g thresholds=%.6g,%.6g",
-                    tier,unsigned(object.models.size()),depth,object.lod_distances.x,object.lod_distances.y);
+                    tier,unsigned(object.model_count),depth,object.lod_distances.x,object.lod_distances.y);
             }
             view.camera = pose;
             view.camera.position = {pose.position.x-pose.forward.x*distance+pose.right.x*distance*.45f,

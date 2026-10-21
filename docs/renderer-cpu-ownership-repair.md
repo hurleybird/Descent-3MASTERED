@@ -2,6 +2,21 @@
 
 ## October 20 continuation
 
+Model variants now occupy one frame-owned array. Instances hold checked,
+non-overlapping ranges rather than individually allocated vectors. Source world,
+cockpit, preview, resource, lighting and GPU consumers use that layout. Filtering
+instances explicitly compacts variant storage; publication rejects overlap,
+out-of-range, empty and orphaned ranges. Contract tests and all three LOD source
+audit fixtures pass. Dense instrumented/uninstrumented trials are 4.95/4.64 ms:
+no proven whole-frame speedup is claimed for flattening alone.
+
+This migration exposed a stale motion helper that read canonical unevaluated
+parts after poses became deferred. It now consumes resolved previous poses;
+41 animated/deformed regression samples verify the temporal transform. The
+combined AO/bloom/auxiliary/resource probe now exactly matches the pre-deferred
+owned-animation probe (removing the known two-pixel, max-three-channel delta).
+The plain dense capture exactly matches the preceding summary checkpoint.
+
 Model publication now retains aggregate surface count, conservative motion radius,
 draw membership, required light count and unique image-validation dependencies.
 Held tables share the summary; any part edit invalidates it. Publication/validation
