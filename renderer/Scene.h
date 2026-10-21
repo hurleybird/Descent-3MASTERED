@@ -425,6 +425,7 @@ public:
     const std::vector<ImageDependency>& images() const { static const std::vector<ImageDependency> empty; return images_ ? *images_ : empty; }
     const std::shared_ptr<const std::vector<ImageDependency>>& imageDependencies() const { return images_; }
     const std::vector<uint64_t>& reflections() const { static const std::vector<uint64_t> empty; return reflections_ ? *reflections_ : empty; }
+    const std::shared_ptr<const std::vector<uint64_t>>& reflectionDependencies() const { return reflections_; }
     uint64_t requiredLightCount() const { return required_light_count_; }
     size_t size() const { return read().size(); }
     bool empty() const { return read().empty(); }

@@ -493,7 +493,7 @@ void GL4Renderer::DestroySceneResources() {
     if (scene_reflection_buffer) glDeleteBuffers(1,&scene_reflection_buffer);
     if (scene_reflection_texture) glDeleteTextures(1,&scene_reflection_texture);
     scene_reflection_buffer = scene_reflection_texture = 0;
-    scene_reflection_assets.clear(); scene_reflection_revisions.clear();
+    scene_reflection_assets.clear(); scene_reflection_dependencies.clear();
     scene_light_buffer = scene_influence_buffer = scene_light_texture = scene_influence_texture = 0;
     scene_frame_sequence = 0;
     scene_asset_lifetime = 0;
@@ -604,26 +604,25 @@ void GL4Renderer::UploadSceneFrame(const d3scene::Presentation& frame, const d3s
         static thread_local std::vector<int32_t> indices;
         static thread_local std::vector<d3scene::Vec2> uvs;
         static thread_local std::vector<d3scene::Vec3> reflections;
-        static thread_local std::vector<uint64_t> reflection_revisions;
         indices.clear(); uvs.clear(); reflections.clear();
-        reflection_revisions.assign(1,0); // also initializes the empty GPU buffer once
         const auto collect = [&](const d3scene::SurfaceBinding& surface) {
-            if (surface.reflection && surface.specular_strength > 0) reflection_revisions.push_back(surface.reflection->id().revision);
+            if (surface.reflection && surface.specular_strength > 0) scene_reflection_dependencies.addValue(surface.reflection->id().revision);
         };
         const auto collectTable = [&](const d3scene::RoomSurfaces& table) {
-            if (table.published()) reflection_revisions.insert(reflection_revisions.end(),table.reflections().begin(),table.reflections().end());
+            if (table.published()) scene_reflection_dependencies.add(table.reflectionDependencies());
             else for (const auto& surface : table) collect(surface);
         };
+        bool rebuild_reflections = false;
         if (scene_frame_sequence != frame.data().sequence) {
+        scene_reflection_dependencies.begin();
+        scene_reflection_dependencies.addValue(0); // initialize the empty GPU buffer once
         for (const auto& room : frame.data().rooms) collectTable(room.surfaces);
         for (const auto& patch : frame.data().terrain.patches) for (const auto& surface : patch) collect(surface);
         for (const auto& mesh : frame.data().meshes) collect(mesh.surface);
         for (const auto& model : frame.data().model_variants) for (const auto& part : model.parts)
             collectTable(part.surfaces);
-        std::sort(reflection_revisions.begin(),reflection_revisions.end());
-        reflection_revisions.erase(std::unique(reflection_revisions.begin(),reflection_revisions.end()),reflection_revisions.end());
+        rebuild_reflections = scene_reflection_dependencies.finish();
         }
-        const bool rebuild_reflections = scene_frame_sequence != frame.data().sequence && reflection_revisions != scene_reflection_revisions;
         if (rebuild_reflections) { scene_reflection_assets.clear(); scene_room_bindings.clear(); }
         // Stable frame addresses do not require clearing the whole level for
         // every view. Every demanded entry is fully assigned below (or copied
@@ -781,7 +780,6 @@ void GL4Renderer::UploadSceneFrame(const d3scene::Presentation& frame, const d3s
             if (reflections.empty()) reflections.push_back({});
             glBindBuffer(GL_TEXTURE_BUFFER,scene_reflection_buffer);
             glBufferData(GL_TEXTURE_BUFFER,reflections.size()*sizeof(d3scene::Vec3),reflections.data(),GL_STATIC_DRAW);
-            scene_reflection_revisions = reflection_revisions;
         }
         glBindBuffer(GL_TEXTURE_BUFFER,scene_position_buffer);
         glBufferData(GL_TEXTURE_BUFFER,positions.size()*sizeof(d3scene::PositionPair),positions.data(),GL_STREAM_DRAW);

@@ -49,6 +49,7 @@
 #include "mono.h"
 #include "pserror.h"
 #include "SceneView.h"
+#include "SceneDependencies.h"
 #include "SceneCompositing.h"
 #include "SceneHistory.h"
 #include "gl_shared.h"
@@ -191,7 +192,7 @@ class GL4Renderer : public IRenderer
 	std::vector<ElementRange> scene_model_influences;
 	struct SceneReflectionRanges { ElementRange sources, normals, field; };
 	std::unordered_map<uint64_t, SceneReflectionRanges> scene_reflection_assets;
-	std::vector<uint64_t> scene_reflection_revisions;
+	d3scene::RetainedDependencies<uint64_t> scene_reflection_dependencies;
 	GLuint scene_fog_buffer = 0, scene_fog_texture = 0;
 	d3scene::AssetId scene_fog_id;
 	struct SceneDepthSnapshot {

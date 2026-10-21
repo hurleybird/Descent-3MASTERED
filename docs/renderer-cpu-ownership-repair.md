@@ -2,6 +2,14 @@
 
 ## October 20 continuation
 
+October 21: image and GPU-reflection inventories share a retained dependency-union
+implementation. Unchanged immutable lists are compared by owned identity, without
+flattening/sorting again; replacement/reordering with equivalent contents does
+not rebuild the GPU reflection buffer. Tests cover removal, direct dependencies,
+empty inventories, owner lifetime and resets. Resource-transition/auxiliary probe
+is pixel-exact. Dense/save005 upload-table stages measured ~0.146/~0.098 ms;
+total ~3.383/~2.413 ms, still above the original renderer.
+
 October 21: exact SSE2/scalar procedural kernels replace the fire fade/diffusion
 and four-neighbor water update loops. Tests cover every fire heat/byte value,
 unaligned/tail buffers, wrapped/small rows, signed water extremes and truncation.

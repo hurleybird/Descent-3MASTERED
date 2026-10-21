@@ -1,5 +1,6 @@
 // Descent 3MASTERED - GPL-3.0-or-later
 #include "../../renderer/SceneImages.h"
+#include "../../renderer/SceneDependencies.h"
 #include "../../Descent3/TextureNamePolicy.h"
 #include <stdexcept>
 namespace {
@@ -14,6 +15,34 @@ template<class F> void rejects(F f) {
 int runSceneImageTests() {
     using namespace d3scene;
     checks = 0;
+    {
+        RetainedDependencies<uint64_t> dependencies;
+        auto a = std::make_shared<const std::vector<uint64_t>>(std::initializer_list<uint64_t>{3,1,3});
+        auto b = std::make_shared<const std::vector<uint64_t>>(std::initializer_list<uint64_t>{2,3});
+        dependencies.begin(); dependencies.add(a); dependencies.add(b); dependencies.addValue(5);
+        check(dependencies.finish() && dependencies.values() == std::vector<uint64_t>({1,2,3,5}),
+            "Dependency union lost or duplicated entries");
+        const auto* stable = dependencies.values().data();
+        dependencies.begin(); dependencies.add(a); dependencies.add(b); dependencies.addValue(5);
+        check(!dependencies.layoutChanged() && !dependencies.finish() && dependencies.values().data() == stable,
+            "Unchanged dependency inventory rebuilt its union");
+        std::weak_ptr<const std::vector<uint64_t>> held = a;
+        a.reset();
+        check(!held.expired(),"Dependency owner identity was not retained");
+        a = std::make_shared<const std::vector<uint64_t>>(std::initializer_list<uint64_t>{1,3});
+        dependencies.begin(); dependencies.add(b); dependencies.add(a); dependencies.addValue(5);
+        check(dependencies.layoutChanged() && !dependencies.finish() && dependencies.values().data() == stable,
+            "Equivalent replacement/reordered lists changed the dependency union");
+        check(held.expired(),"Retired dependency owner leaked");
+        dependencies.begin(); dependencies.add(b);
+        check(dependencies.finish() && dependencies.values() == std::vector<uint64_t>({2,3}),
+            "Removed table/direct dependency remained resident");
+        dependencies.begin(); dependencies.add({});
+        check(dependencies.finish() && dependencies.values().empty(),"Empty inventory retained dependencies");
+        dependencies.clear(); dependencies.begin(); dependencies.addValue(0);
+        check(dependencies.finish() && dependencies.values() == std::vector<uint64_t>({0}),
+            "Dependency reset lost the empty-buffer sentinel");
+    }
     {
     TextureNamePolicy<16> policy;
     char name[16] = "monitor";

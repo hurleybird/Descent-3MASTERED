@@ -6,6 +6,7 @@
 #include "SceneModuleContext.h"
 #include "SceneFeedback.h"
 #include "../renderer/SceneGeometry.h"
+#include "../renderer/SceneDependencies.h"
 #include "../renderer/SceneView.h"
 #include "grtext.h"
 #include "gamefont.h"
@@ -308,9 +309,13 @@ void prepareImages(d3scene::FrameData& data) {
     // Owning the lists prevents address reuse from masquerading as identity.
     // Unpublished/edited tables are prepared independently below.
     using Dependency = d3scene::RoomSurfaces::ImageDependency;
-    using Dependencies = std::shared_ptr<const std::vector<Dependency>>;
-    static thread_local std::vector<Dependencies> dependency_owners;
-    static thread_local std::vector<Dependency> dependencies;
+    const auto order = [](const Dependency& a,const Dependency& b) {
+        const auto key = [](const Dependency& d) {
+            return std::make_tuple(d.binding,d.handle,d.texture,d.baked,d.format,d.wrap,d.u_scale,d.v_scale,d.classify_alpha);
+        };
+        return key(a)<key(b);
+    };
+    static thread_local d3scene::RetainedDependencies<Dependency,decltype(order)> dependency_set(order);
     static thread_local uint64_t dependency_lifetime = 0;
     const auto eachTable = [&](auto&& consume) {
         for (const auto& room : data.rooms) consume(room.surfaces);
@@ -318,32 +323,20 @@ void prepareImages(d3scene::FrameData& data) {
             for (const auto& part : model.parts) consume(part.surfaces);
     };
     size_t table_count = 0;
-    bool layout_matches = dependency_lifetime == data.scene_lifetime;
+    if (dependency_lifetime != data.scene_lifetime) { dependency_set.clear(); dependency_lifetime = data.scene_lifetime; }
+    dependency_set.begin();
     eachTable([&](const d3scene::RoomSurfaces& table) {
-        const auto* owner = table.published() ? table.imageDependencies().get() : nullptr;
-        if (table_count >= dependency_owners.size() || dependency_owners[table_count].get() != owner) layout_matches = false;
+        if (table.published()) dependency_set.add(table.imageDependencies());
         ++table_count;
     });
-    layout_matches = layout_matches && table_count == dependency_owners.size();
+    const bool layout_matches = !dependency_set.layoutChanged();
     bool dependencies_current = true;
     { PERF_MARKER_SCOPE("Scene.Resources.DependencyLayout");
     if (!layout_matches) {
         PERF_MARKER_SCOPE("Scene.Resources.RebuildDependencies");
-        dependency_owners.clear(); dependencies.clear(); dependency_owners.reserve(table_count);
-        eachTable([&](const d3scene::RoomSurfaces& table) {
-            dependency_owners.push_back(table.published() ? table.imageDependencies() : Dependencies{});
-            if (table.published()) dependencies.insert(dependencies.end(),table.images().begin(),table.images().end());
-        });
-        const auto key = [](const Dependency& d) {
-            return std::make_tuple(d.binding,d.handle,d.texture,d.baked,d.format,d.wrap,d.u_scale,d.v_scale,d.classify_alpha);
-        };
-        std::sort(dependencies.begin(),dependencies.end(),[&](const Dependency& a,const Dependency& b) { return key(a)<key(b); });
-        dependencies.erase(std::unique(dependencies.begin(),dependencies.end(),[&](const Dependency& a,const Dependency& b) {
-            return key(a)==key(b);
-        }),dependencies.end());
-        dependency_lifetime = data.scene_lifetime;
+        dependency_set.finish();
     }
-    for (const auto& dependency : dependencies) dependencies_current = dependencyUnchanged(dependency) && dependencies_current;
+    for (const auto& dependency : dependency_set.values()) dependencies_current = dependencyUnchanged(dependency) && dependencies_current;
     }
     { PERF_MARKER_SCOPE("Scene.Resources.RoomImages");
     for (auto& room : data.rooms) if (!room.surfaces.published() || (!dependencies_current && !tableUnchanged(room.surfaces)))
@@ -361,7 +354,7 @@ void prepareImages(d3scene::FrameData& data) {
     previous_binding_count = data.images.size();
     if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
         AutomatedCaptureLog("scene frame resources bindings=%u pixel_sources=%u revised_sources=%u dependency_tables=%u unique_dependencies=%u layout_rebuilt=%d",
-            unsigned(data.images.size()),unsigned(image_requests),unsigned(image_misses),unsigned(table_count),unsigned(dependencies.size()),!layout_matches);
+            unsigned(data.images.size()),unsigned(image_requests),unsigned(image_misses),unsigned(table_count),unsigned(dependency_set.values().size()),!layout_matches);
 }
 // Field-wise fingerprints diagnose state-vs-pixel variation; never hash padding
 // or use diagnostic hashes as asset identities.
