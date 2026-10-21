@@ -120,11 +120,13 @@ class ModelAsset final {
 public:
     AssetId id() const { return id_; }
     const ModelGeometry& geometry() const { return geometry_; }
+    bool hasViewAttachments() const { return has_view_attachments_; }
 private:
     friend class SceneAssets;
     ModelAsset(AssetId id, ModelGeometry geometry);
     AssetId id_;
     ModelGeometry geometry_;
+    bool has_view_attachments_ = false;
 };
 using ModelAssetRef = std::shared_ptr<const ModelAsset>;
 
@@ -516,6 +518,7 @@ public:
         AssetId asset;
         uint64_t surface_count = 0, required_light_count = 0;
         uint64_t required_candidate_count = 0;
+        uint32_t drawn_parts = 0; // deferred source models have at most 32 parts
         float motion_radius = 0;
         bool has_geometry = false;
         std::vector<RoomSurfaces::ImageDependency> images;

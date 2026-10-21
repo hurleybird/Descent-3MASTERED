@@ -346,7 +346,6 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::Presenta
             variant.previous_deformation = history ? history->deformation : effect.deformation;
             variant.deformation_owner = owner.handle;
             PerfMarkersEnd("Scene.Models.Pose");
-            const auto roles = ResolveSceneModelRoles(*variant.asset,source->rtype.pobj_info.subobj_flags,effect.custom_texture >= 0);
             variant.binding_inputs.appearance = {{float(directional),float(source->rtype.pobj_info.tmap_override),
                 float(effect.custom_texture),float(effect.has_player_color),effect.player_color.x,
                 effect.player_color.y,effect.player_color.z,float(player_color_texture)}};
@@ -360,10 +359,21 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::Presenta
             else variant.parts.resize(variant.asset->geometry().parts.size());
             variant.previous_draw_mask = 0;
             PERF_MARKER_SCOPE("Scene.Models.Parts");
+            if (history && instance.has_previous) {
+                if (const auto* summary = history->parts.summary()) variant.previous_draw_mask = summary->drawn_parts;
+                else for (size_t i = 0; i < history->parts.size(); ++i)
+                    if (history->parts[i].draw) variant.previous_draw_mask |= uint32_t(1)<<i;
+            }
+            // Pose and modulation were captured above. A sealed binding table
+            // without view-local attachments needs no per-part source traversal.
+            if (reuse_materials && !variant.asset->hasViewAttachments() && !(baked && audit_geometry)) {
+                data.appendModel(instance,std::move(variant));
+                continue;
+            }
+            const auto roles = ResolveSceneModelRoles(*variant.asset,source->rtype.pobj_info.subobj_flags,effect.custom_texture >= 0);
             for (size_t i = 0; i < variant.asset->geometry().parts.size(); ++i) {
                 const auto& asset_part = variant.asset->geometry().parts[i];
-                const bool has_previous = history && history->parts[i].draw && instance.has_previous;
-                if (has_previous) variant.previous_draw_mask |= uint32_t(1)<<i;
+                const bool has_previous = (variant.previous_draw_mask & (uint32_t(1)<<i)) != 0;
                 const auto role = roles[i];
                 const bool draw = role == SceneModelPartRole::Surface;
                 const auto attachment_begin = data.meshes.size();

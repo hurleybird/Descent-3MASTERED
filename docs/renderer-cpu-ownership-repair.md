@@ -2,6 +2,13 @@
 
 ## October 20 continuation
 
+October 21: sealed model summaries now retain the draw mask, and model assets
+record whether they contain view-dependent attachments. Unchanged source models
+without attachments skip per-part source traversal entirely. Saved-lightmap
+topology checks still execute; the UV audit still walks baked parts. Attachment
+metadata and held draw-mask tests pass. Dense/save005 trials: 3.504/2.406 ms;
+save005 and the combined audit/effects probe are pixel-exact to frame-storage.
+
 October 21: released presentations now recycle top-level frame-vector capacity,
 with at most two spare sets per publisher. Held snapshots are never reclaimed;
 foreign-thread releases free normally, and a snapshot can outlive its publisher.

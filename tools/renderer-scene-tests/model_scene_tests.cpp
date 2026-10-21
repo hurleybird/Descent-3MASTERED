@@ -130,6 +130,17 @@ int runModelSceneTests() {
     check(compiled.parts[0].polygon_colors[0].x == 128/255.f, "Flat model color lost");
     SceneAssets assets;
     {
+        auto geometry = modelGeometry();
+        check(!assets.publishModel(98,geometry)->hasViewAttachments(),"Ordinary model requires attachment traversal");
+        for (auto flags : {SOF_FACING,SOF_GLOW,SOF_THRUSTER}) {
+            geometry.parts[0].authored_flags = flags;
+            check(assets.publishModel(98,geometry)->hasViewAttachments(),"Model attachment metadata was lost");
+        }
+        geometry.parts[0].authored_flags = 0;
+        check(!assets.publishModel(98,geometry)->hasViewAttachments(),"Removed attachment retained stale asset metadata");
+        assets.removeModel(98);
+    }
+    {
         auto roles_geometry = modelGeometry();
         roles_geometry.parts.push_back(roles_geometry.parts[0]);
         roles_geometry.parts[1].parent = 0;
@@ -610,7 +621,7 @@ int runModelSceneTests() {
         const auto duplicated_frame = Presentation::freeze(duplicated);
         check(duplicated_frame->data().compiled_part_count == 4 && duplicated_frame->resolvedModel(1,0).parts[1].compiled_index == 3 &&
             held->resolvedModel(0,0).parts[1].compiled_index == 1,"Shared deferred bindings leaked another instance's part address");
-        check(summary && summary->surface_count == 2 && summary->has_geometry &&
+        check(summary && summary->surface_count == 2 && summary->has_geometry && summary->drawn_parts == 3 &&
             next_frame->data().modelsFor(0)[0].parts.summary() == summary,
             "Unchanged bindings rebuilt their compiled model summary");
         auto hidden = held->data();
@@ -618,7 +629,8 @@ int runModelSceneTests() {
         check(!hidden.modelsFor(0)[0].parts.summary(),"Part edit retained stale summary");
         const auto hidden_frame = Presentation::freeze(hidden);
         check(!hidden_frame->data().model_instances[0].has_render_bounds &&
-            !hidden_frame->data().modelsFor(0)[0].parts.summary()->has_geometry && summary->has_geometry,
+            !hidden_frame->data().modelsFor(0)[0].parts.summary()->has_geometry &&
+            !hidden_frame->data().modelsFor(0)[0].parts.summary()->drawn_parts && summary->has_geometry,
             "Changed draw membership retained old conservative bounds or mutated held summary");
         const auto& next_pose = next_frame->resolvedModel(0,0);
         check(next_pose.parts[0].has_previous && !next_pose.parts[1].has_previous,

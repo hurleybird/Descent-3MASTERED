@@ -67,6 +67,7 @@ void ModelParts::seal(const ModelAsset& asset) {
     for (size_t i = 0; i < size(); ++i) {
         const auto& part = read()[i];
         const auto& geometry = asset.geometry().parts[i];
+        if (part.draw && i < 32) summary->drawn_parts |= uint32_t(1)<<i;
         summary->surface_count += part.surfaces.size();
         summary->required_light_count = std::max(summary->required_light_count,part.surfaces.requiredLightCount());
         summary->required_candidate_count = std::max(summary->required_candidate_count,
@@ -306,6 +307,7 @@ bool operator==(const ModelGeometry& a, const ModelGeometry& b) {
 }
 ModelAsset::ModelAsset(AssetId id, ModelGeometry geometry) : id_(id), geometry_(std::move(geometry)) {
     for (auto& part : geometry_.parts) {
+        has_view_attachments_ = has_view_attachments_ || (part.authored_flags & (SOF_FACING|SOF_GLOW|SOF_THRUSTER));
         if (!part.geometry.vertices.empty()) {
             part.local_bounds.minimum = part.local_bounds.maximum = part.geometry.vertices.front();
             for (const auto p : part.geometry.vertices) {
