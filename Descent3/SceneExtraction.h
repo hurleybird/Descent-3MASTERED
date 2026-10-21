@@ -17,6 +17,7 @@ void ResetGamePresentationScene();
 // Geometry/volume writers invalidate at their mutation boundary. Material,
 // light intensity and visibility changes are not geometry mutations.
 void InvalidateGameSceneGeometry();
+void InvalidateGameSceneAppearance();
 uint64_t GameSceneGeometryRevision();
 void PrepareGameModelInstances(d3scene::FrameData&, const d3scene::Presentation* previous,bool retain_materials = false);
 d3scene::ModelAssetRef PrepareGameModelAsset(int number,bool audit_geometry = false);

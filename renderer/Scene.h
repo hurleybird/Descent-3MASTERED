@@ -358,6 +358,7 @@ private:
     bool publication_palette_ = false;
     std::shared_ptr<const std::vector<ImageDependency>> images_;
     std::shared_ptr<const std::vector<uint64_t>> reflections_;
+    std::shared_ptr<const std::vector<PlanarSurface>> planar_;
     uint64_t required_light_count_ = 0;
     void edit() {
         if (!values_) values_ = std::make_shared<Storage>();
@@ -365,14 +366,15 @@ private:
         publication_ = {};
         images_.reset();
         reflections_.reset(); required_light_count_ = 0;
+        planar_.reset();
     }
-    void seal(AssetId asset,uint32_t part = UINT32_MAX,bool palette = false);
+    void seal(AssetId asset,uint32_t part = UINT32_MAX,bool palette = false,const std::vector<PlanarSurface>* planar = nullptr);
     friend class Presentation;
 public:
     RoomSurfaces() = default;
     RoomSurfaces(const RoomSurfaces& other) : values_(!other.values_ || other.publication_.revision ? other.values_ :
         std::make_shared<Storage>(*other.values_)), publication_(other.publication_), publication_part_(other.publication_part_),
-        publication_palette_(other.publication_palette_), images_(other.images_), reflections_(other.reflections_), required_light_count_(other.required_light_count_) {}
+        publication_palette_(other.publication_palette_), images_(other.images_), reflections_(other.reflections_), planar_(other.planar_), required_light_count_(other.required_light_count_) {}
     RoomSurfaces& operator=(const RoomSurfaces& other) {
         if (this != &other) { RoomSurfaces copy(other); *this = std::move(copy); } return *this;
     }
@@ -382,6 +384,7 @@ public:
         return publication_.revision && publication_ == asset && publication_part_ == part && publication_palette_ == palette;
     }
     bool published() const { return publication_.revision != 0; }
+    bool publishedForRoom(AssetId asset,const std::vector<PlanarSurface>& planar) const;
     const std::vector<ImageDependency>& images() const { static const std::vector<ImageDependency> empty; return images_ ? *images_ : empty; }
     const std::vector<uint64_t>& reflections() const { static const std::vector<uint64_t> empty; return reflections_ ? *reflections_ : empty; }
     uint64_t requiredLightCount() const { return required_light_count_; }
@@ -398,13 +401,15 @@ public:
     Storage::iterator end() { edit(); return values_->end(); }
     const SurfaceBinding* data() const { return read().data(); }
     SurfaceBinding* data() { edit(); return values_->data(); }
-    void clear() { values_.reset(); images_.reset(); reflections_.reset(); required_light_count_ = 0; publication_ = {}; }
+    void clear() { values_.reset(); images_.reset(); reflections_.reset(); planar_.reset(); required_light_count_ = 0; publication_ = {}; }
     void reserve(size_t n) { edit(); values_->reserve(n); }
     void resize(size_t n) { edit(); values_->resize(n); }
     void push_back(const SurfaceBinding& value) { edit(); values_->push_back(value); }
 };
 struct RoomState {
     int32_t number = -1;
+    uint64_t source_material_revision = 0;
+    int32_t source_mirror_face = -1;
     RoomAssetRef asset;
     Bounds bounds;
     RoomSurfaces surfaces;

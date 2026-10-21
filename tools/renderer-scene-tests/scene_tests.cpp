@@ -61,6 +61,13 @@ void assetTests() {
         RoomState room; room.number = 0; room.asset = owner.publishRoom(0,mesh);
         room.surfaces.resize(3); room.mirrors = groups; data.rooms.push_back(room);
         const auto held = Presentation::freeze(data);
+        const auto repeated = Presentation::freeze(held->data());
+        check(repeated->data().rooms[0].surfaces.data() == held->data().rooms[0].surfaces.data(),
+            "Unchanged planar room recompiled its material table");
+        auto removed = held->data(); removed.rooms[0].mirrors.clear();
+        const auto ordinary = Presentation::freeze(removed);
+        check(ordinary->data().rooms[0].surfaces[0].material.planar_slot == 0 &&
+            held->data().rooms[0].surfaces[0].material.planar_slot != 0,"Removing mirrors left stale compiled planar policy");
         data.rooms[0].mirrors[1].polygons.push_back(0);
         rejects([&] { Presentation::freeze(data); }, "Repeated mirror membership survived freeze");
         data.rooms[0].mirrors = groups;
@@ -285,6 +292,7 @@ void extractionTests() {
     surface.normal = {0, 0, 1}; surface.portal_num = -1;
     auto& source = Rooms[0];
     source.used = 1; source.num_verts = 3; source.num_faces = 1;
+    source.mirror_face = -1;
     source.verts = vertices; source.faces = &surface;
     source.flags = RF_MIRROR_VISIBLE;
     surface.flags = FF_VISIBLE | FF_NOT_FACING | FF_TOUCHED | FF_SPEC_INVISIBLE;
@@ -314,6 +322,22 @@ void extractionTests() {
     Objects[0].pos.x = 8;
     const auto after_thumbnail = ExtractGamePresentation(2.6, 0, false);
     check(after_thumbnail->data().objects[0].previous.position.x == 5, "thumbnail advanced gameplay presentation history");
+    const auto retained = ExtractGamePresentation(2.7,0,false,false,after_thumbnail.get());
+    check(retained->data().rooms[0].surfaces.data() == after_thumbnail->data().rooms[0].surfaces.data(),
+        "Unchanged room appearance lost published storage");
+    surface.flags |= FF_SCORCHED; // effect bookkeeping is not a material input
+    const auto bookkeeping = d3scene::Presentation::freeze(ExtractGameFrame(2.8,0,false,false,retained.get(),true));
+    check(bookkeeping->data().rooms[0].surfaces.data() == retained->data().rooms[0].surfaces.data(),
+        "Non-material face flags invalidated appearance");
+    surface.tmap = 9;
+    bool missed_appearance = false;
+    try { ExtractGameFrame(2.9,0,false,false,retained.get(),true); }
+    catch (const std::logic_error&) { missed_appearance = true; }
+    check(missed_appearance,"Appearance audit missed an unannounced texture edit");
+    InvalidateGameSceneAppearance();
+    const auto repainted = ExtractGamePresentation(2.9,0,false,false,retained.get());
+    check(repainted->data().rooms[0].surfaces[0].texture == 9 && retained->data().rooms[0].surfaces[0].texture != 9,
+        "Appearance invalidation missed the edit or mutated a held frame");
     Objects[0].handle += HANDLE_COUNT_INCREMENT;
     vertices[0].x = 7; surface.tmap = 8;
     bool missed_invalidation = false;

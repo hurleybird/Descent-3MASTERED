@@ -18,6 +18,7 @@
 
 #include "trigger.h"
 #include "room.h"
+#include "SceneExtraction.h"
 #include "object.h"
 //@$-#include "d3x.h"
 #include "pserror.h"
@@ -159,7 +160,10 @@ void CheckTrigger(int roomnum,int facenum,object *objp,int event_type)
 			{
 				tp->flags |= TF_DEAD;
 				if (fp->portal_num == -1)		//don't destroy a portal face
-					fp->flags |= FF_DESTROYED;
+                {
+                    fp->flags |= FF_DESTROYED;
+                    InvalidateGameSceneAppearance();
+                }
 			}
 
 			if(tp->flags & TF_INFORM_ACTIVATE_TO_LG)

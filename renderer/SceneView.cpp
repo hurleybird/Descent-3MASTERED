@@ -66,32 +66,56 @@ bool boundsOutside(const Camera& camera,const Bounds& bounds,PortalWindow window
     }
     return left || right || bottom || top;
 }
-bool polygonOutside(const Camera& camera, MeshView geometry, const MeshPolygon& polygon, const Transform& world,PortalWindow window) {
-    // A separating frustum plane proves rejection. Not finding one deliberately
-    // keeps possible corner false positives: never reject a large polygon just
-    // because all of its vertices lie outside different planes.
-    for (const auto& plane : camera.planes) {
-        bool all_outside = true;
-        for (const auto& corner : polygon.corners) {
-            const auto point = transformPoint(world,geometry.positions[corner.vertex]);
-            if (distance(plane,point) >= -tolerance(plane,point)) { all_outside = false; break; }
+struct ProjectedVertex { Vec3 world; uint16_t outside = 0; uint64_t generation = 0; };
+struct ProjectionScratch { std::vector<ProjectedVertex> vertices; uint64_t generation = 0; };
+// One cache per geometry placement/aperture, not per face or clip plane.
+// Scratch retains capacity only; generation separates every view and placement.
+class ProjectedMesh {
+    const Camera& camera_;
+    MeshView geometry_;
+    Transform placement_;
+    PortalWindow window_;
+    ProjectionScratch& scratch_;
+    uint64_t generation_;
+public:
+    ProjectedMesh(const Camera& camera,MeshView geometry,Transform placement,PortalWindow window,ProjectionScratch& scratch)
+        : camera_(camera),geometry_(geometry),placement_(placement),window_(window),scratch_(scratch) {
+        if (++scratch_.generation == 0) {
+            for (auto& vertex : scratch_.vertices) vertex.generation = 0;
+            ++scratch_.generation;
         }
-        if (all_outside) return true;
+        generation_ = scratch_.generation;
+        if (scratch_.vertices.size() < geometry.positions.size()) scratch_.vertices.resize(geometry.positions.size());
     }
-    // Homogeneous aperture tests share the exact projection used by execution.
-    // A union window can admit extra geometry, but cannot omit either opening.
-    bool left = true, right = true, bottom = true, top = true;
-    for (const auto& corner : polygon.corners) {
-        const auto p = project(camera,transformPoint(world,geometry.positions[corner.vertex]));
+    const ProjectedVertex& vertex(uint32_t index) {
+        auto& result = scratch_.vertices[index];
+        if (result.generation == generation_) return result;
+        result.world = transformPoint(placement_,geometry_.positions[index]);
+        uint16_t outside = 0;
+        for (size_t i = 0; i < camera_.planes.size(); ++i) {
+            const auto& plane = camera_.planes[i];
+            if (distance(plane,result.world) < -tolerance(plane,result.world)) outside |= uint16_t(1)<<i;
+        }
+        const auto p = project(camera_,result.world);
         const double epsilon = 2.e-6*(1+std::abs(p.x)+std::abs(p.y)+std::abs(p.w));
-        left = left && p.x < window.left*p.w-epsilon;
-        right = right && p.x > window.right*p.w+epsilon;
-        bottom = bottom && p.y < window.bottom*p.w-epsilon;
-        top = top && p.y > window.top*p.w+epsilon;
+        if (p.x < window_.left*p.w-epsilon) outside |= 1<<6;
+        if (p.x > window_.right*p.w+epsilon) outside |= 1<<7;
+        if (p.y < window_.bottom*p.w-epsilon) outside |= 1<<8;
+        if (p.y > window_.top*p.w+epsilon) outside |= 1<<9;
+        result.outside = outside; result.generation = generation_;
+        return result;
     }
-    if (left || right || bottom || top) return true;
-    return false;
-}
+    bool outside(const MeshPolygon& polygon) {
+        // AND, not OR: vertices outside different planes do not prove that
+        // the polygon is outside. Keep the original conservative predicate.
+        uint16_t common = (1<<10)-1;
+        for (const auto& corner : polygon.corners) {
+            common &= vertex(corner.vertex).outside;
+            if (!common) return false;
+        }
+        return true;
+    }
+};
 }
 
 Camera prepareCamera(const View& view) {
@@ -421,17 +445,18 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
         if (room < -1) return exterior_window;
         return PortalWindow{-1,-1,1,1,true};
     };
-    auto consider = [&](MeshView geometry, const SurfaceBinding& surface, VisibleSurface item,PortalWindow window) {
+    static thread_local ProjectionScratch projection_scratch;
+    auto consider = [&](MeshView geometry,ProjectedMesh& projected, const SurfaceBinding& surface, VisibleSurface item) {
         if (!surface.draw_surface) return;
         ++result.stats.surfaces_considered;
         const auto& polygon = geometry.topology.polygons[item.polygon_index];
-        const auto point = transformPoint(item.world,geometry.positions[polygon.corners[0].vertex]);
+        const auto point = projected.vertex(polygon.corners[0].vertex).world;
         const auto normal = transformDirection(item.world,polygon.normal);
         if (dot(normal,subtract(view.camera.position,point)) < 0) {
             ++result.stats.surfaces_backfacing;
             return;
         }
-        if (polygonOutside(result.camera,geometry,polygon,item.world,window)) {
+        if (projected.outside(polygon)) {
             ++result.stats.surfaces_outside;
             return;
         }
@@ -447,9 +472,10 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
         result.room_indices.push_back(static_cast<uint32_t>(r));
         const auto& room = rooms[r];
         const auto& geometry = room.asset->geometry();
+        ProjectedMesh projected(result.camera,MeshView(geometry),{},windows[r],projection_scratch);
         for (size_t f = 0; f < geometry.polygons.size(); ++f) {
             if (excludesSurface(view,{room.asset->id(),static_cast<uint32_t>(f)})) continue;
-            consider(MeshView(geometry),room.surfaces[f],{static_cast<uint32_t>(r),static_cast<uint32_t>(f)},windows[r]);
+            consider(MeshView(geometry),projected,room.surfaces[f],{static_cast<uint32_t>(r),static_cast<uint32_t>(f)});
         }
     }
     const auto& owner_indices = frame.objectIndices();
@@ -493,13 +519,15 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
             if (!model.parts[part].has_render_bounds || boundsOutside(result.camera,model.parts[part].render_bounds,window)) continue;
             const auto world = compose(object.current,model.parts[part].current);
             const auto& geometry = model.asset->geometry().parts[part].geometry;
+            const MeshView mesh(geometry,model.parts[part].vertices);
+            ProjectedMesh projected(result.camera,mesh,world,window,projection_scratch);
             for (size_t face = 0; face < geometry.polygons.size(); ++face) {
                 VisibleSurface item;
                 item.model = true; item.model_instance_index = static_cast<uint32_t>(i);
                 item.model_variant = variant;
                 item.part_index = static_cast<uint32_t>(part); item.polygon_index = static_cast<uint32_t>(face);
                 item.world = world;
-                consider(MeshView(geometry,model.parts[part].vertices),model.parts[part].surface(model.asset->geometry().parts[part],face),item,window);
+                consider(mesh,projected,model.parts[part].surface(model.asset->geometry().parts[part],face),item);
             }
         }
     }
@@ -569,8 +597,9 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
         // centers are outside. Submit the batch; homogeneous GPU clipping sees
         // the expanded vertices and is authoritative for this representation.
         bool visible = !geometry.raster_offsets.empty();
+        ProjectedMesh projected(result.camera,MeshView(geometry,instance.vertices),item.world,window,projection_scratch);
         if (!visible) for (const auto& polygon : geometry.polygons)
-            if (!polygonOutside(result.camera,MeshView(geometry,instance.vertices),polygon,item.world,window)) { visible = true; break; }
+            if (!projected.outside(polygon)) { visible = true; break; }
         if (!visible) continue;
         item.layer = instance.surface.material.layer;
         item.blended = instance.surface.material.blended();

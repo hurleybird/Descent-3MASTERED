@@ -46,6 +46,61 @@ void appendRoom(d3scene::SceneAssets& assets,d3scene::FrameData& data,d3scene::M
 int runSceneViewTests() {
     {
         using namespace d3scene;
+        SceneAssets fixtures;
+        auto geometry = unitBillboardQuad();
+        const auto asset = fixtures.publishMesh(90,geometry);
+        const auto scalarVisible = [&](const PreparedMesh& mesh,const Camera& camera) {
+            const MeshView source(mesh.asset->geometry(),mesh.vertices);
+            for (const auto& polygon : source.topology.polygons) {
+                bool rejected = false;
+                for (const auto& plane : camera.planes) {
+                    bool outside = true;
+                    for (const auto& corner : polygon.corners) {
+                        const auto p = transformPoint(mesh.world,source.positions[corner.vertex]);
+                        const double distance = double(plane.normal.x)*p.x+double(plane.normal.y)*p.y+double(plane.normal.z)*p.z+plane.constant;
+                        const double epsilon = 2e-6*(1+std::abs(double(plane.normal.x)*p.x)+
+                            std::abs(double(plane.normal.y)*p.y)+std::abs(double(plane.normal.z)*p.z)+std::abs(plane.constant));
+                        if (distance >= -epsilon) { outside = false; break; }
+                    }
+                    rejected = rejected || outside;
+                }
+                bool left = true,right = true,bottom = true,top = true;
+                for (const auto& corner : polygon.corners) {
+                    const auto p = project(camera,transformPoint(mesh.world,source.positions[corner.vertex]));
+                    const double epsilon = 2e-6*(1+std::abs(p.x)+std::abs(p.y)+std::abs(p.w));
+                    left = left && p.x < -p.w-epsilon; right = right && p.x > p.w+epsilon;
+                    bottom = bottom && p.y < -p.w-epsilon; top = top && p.y > p.w+epsilon;
+                }
+                if (!rejected && !left && !right && !bottom && !top) return true;
+            }
+            return false;
+        };
+        for (int sample = 0; sample < 300; ++sample) {
+            FrameData fixture; fixture.sequence = sample+1; fixture.scene_lifetime = fixtures.lifetime();
+            auto request = view(); request.kind = ViewKind::Auxiliary; request.portal_visibility = false;
+            request.camera.position = {float(sample%3),float(sample%5),0};
+            if (sample%2) { request.projection = ViewProjection::Orthographic; request.orthographic_size = {20,15}; }
+            if (sample%6 == 0) { request.has_clip_plane = true; request.clip_plane = {{1,0,0},-2}; }
+            for (int instance = 0; instance < 2; ++instance) {
+                PreparedMesh mesh; mesh.asset = asset;
+                mesh.world.position = {float(sample%17-8)*3+instance*7.f,float(sample%11-5)*2,float(sample%23-5)};
+                mesh.world.right = {float(sample%7+1),0,float(instance)};
+                mesh.world.up = {0,float(sample%4+1),0};
+                if (sample%5 == 0) { mesh.vertices = geometry.vertices; mesh.vertices[0].z += 4; }
+                fixture.meshes.push_back(mesh);
+            }
+            const auto camera = prepareCamera(request);
+            const auto frozen = Presentation::freeze(fixture);
+            const auto visible = queryView(*frozen,request);
+            for (size_t i = 0; i < fixture.meshes.size(); ++i) {
+                bool found = false;
+                for (const auto& surface : visible.surfaces) found = found || (surface.mesh && surface.mesh_index == i);
+                check(found == scalarVisible(fixture.meshes[i],camera),"Cached vertex clipping differs from scalar plane tests");
+            }
+        }
+    }
+    {
+        using namespace d3scene;
         SceneAssets assets; FrameData data; data.sequence = 1; data.scene_lifetime = assets.lifetime();
         appendRoom(assets,data,triangle(0,3));
         data.rooms[0].mirrors = compilePlanarSurfaces(data.rooms[0].asset->geometry(),{0});

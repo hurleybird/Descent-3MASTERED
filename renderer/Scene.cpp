@@ -17,7 +17,18 @@
 #include <algorithm>
 
 namespace d3scene {
-void RoomSurfaces::seal(AssetId asset,uint32_t part,bool palette) {
+bool RoomSurfaces::publishedForRoom(AssetId asset,const std::vector<PlanarSurface>& planar) const {
+    if (!publishedFor(asset)) return false;
+    if (!planar_) return planar.empty();
+    if (planar_->size() != planar.size()) return false;
+    for (size_t i = 0; i < planar.size(); ++i) {
+        const auto& a = (*planar_)[i]; const auto& b = planar[i];
+        if (a.plane.normal.x != b.plane.normal.x || a.plane.normal.y != b.plane.normal.y ||
+            a.plane.normal.z != b.plane.normal.z || a.plane.constant != b.plane.constant || a.polygons != b.polygons) return false;
+    }
+    return true;
+}
+void RoomSurfaces::seal(AssetId asset,uint32_t part,bool palette,const std::vector<PlanarSurface>* planar) {
     // Publication is a bulk operation. Reuse contiguous scratch storage rather
     // than allocating one tree node per image/reflection on the render thread.
     // Published tables own copies; subsequent calls cannot mutate held frames.
@@ -46,6 +57,7 @@ void RoomSurfaces::seal(AssetId asset,uint32_t part,bool palette) {
     std::sort(reflections.begin(),reflections.end());
     reflections.erase(std::unique(reflections.begin(),reflections.end()),reflections.end());
     reflections_ = std::make_shared<const std::vector<uint64_t>>(reflections.begin(),reflections.end());
+    planar_ = planar && !planar->empty() ? std::make_shared<const std::vector<PlanarSurface>>(*planar) : nullptr;
 }
 namespace {
 std::atomic<uint64_t> NextLifetime{1};
@@ -620,9 +632,9 @@ PresentationRef Presentation::complete(FrameData data) {
         require(room.asset && room.asset->id().lifetime == data.scene_lifetime &&
             room.asset->id().slot == static_cast<uint32_t>(room.number), "Room asset identity mismatch");
         require(room.surfaces.size() == room.asset->geometry().polygons.size(), "Incomplete room surface bindings");
-        validatePlanarSurfaces(room.asset->geometry(),room.mirrors);
-        const bool retained = room.surfaces.publishedFor(room.asset->id()) && room.mirrors.empty();
+        const bool retained = room.surfaces.publishedForRoom(room.asset->id(),room.mirrors);
         if (!retained) {
+        validatePlanarSurfaces(room.asset->geometry(),room.mirrors);
         for (const auto& surface : room.surfaces) validateSurface(surface);
         for (const auto& surface : room.surfaces) validateIndices(surface);
         for (size_t face = 0; face < room.surfaces.size(); ++face) {
@@ -775,7 +787,7 @@ PresentationRef Presentation::complete(FrameData data) {
     for (auto& patch : prepared->data_.terrain.patches) for (auto& surface : patch)
         surface.material = compileMaterialPolicy(surface,MeshPolygon{});
     for (auto& room : prepared->data_.rooms) {
-        if (room.surfaces.publishedFor(room.asset->id()) && room.mirrors.empty()) continue;
+        if (room.surfaces.publishedForRoom(room.asset->id(),room.mirrors)) continue;
         for (size_t face = 0; face < room.surfaces.size(); ++face)
             room.surfaces[face].material = compileMaterialPolicy(room.surfaces[face],room.asset->geometry().polygons[face]);
         for (size_t group = 0; group < room.mirrors.size(); ++group) for (auto face : room.mirrors[group].polygons) {
@@ -789,7 +801,7 @@ PresentationRef Presentation::complete(FrameData data) {
             policy.blend = BlendMode::Solid; policy.depth = DepthMode::ReadWrite;
             policy.texture_alpha = TextureAlpha::Continuous; policy.alpha_cutoff = 0;
         }
-        room.surfaces.seal(room.asset->id());
+        room.surfaces.seal(room.asset->id(),UINT32_MAX,false,&room.mirrors);
     }
     uint32_t resolved_index = 0;
     for (auto& object : prepared->data_.model_instances) {

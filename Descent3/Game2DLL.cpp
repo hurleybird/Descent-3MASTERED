@@ -772,6 +772,10 @@ void CallGameDLL(int eventnum, dllinfo* data)
 	{
 		data->iRet = 0;
 		DLLGameCall(eventnum, data);
+        // The legacy multiplayer ABI exposes writable Rooms (Entropy paints
+        // faces directly). Treat return from that foreign writer as a mutation
+        // boundary; do not assume it used the engine's tracked setters.
+        InvalidateGameSceneAppearance();
 	}
 }
 // Call this function right after a player connects to the game to see if a player is banned

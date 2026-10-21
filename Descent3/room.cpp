@@ -517,6 +517,7 @@ void ComputePortalCenter(vector* vp, room* rp, int portal_index)
 // Clears lightmaps for a single room
 void ClearRoomLightmaps(int roomnum)
 {
+    InvalidateGameSceneAppearance();
 	int t;
 
 	ASSERT(Rooms[roomnum].used);
@@ -553,6 +554,7 @@ void ClearAllRoomLightmaps(int external)
 // Clears specmaps for a single room
 void ClearRoomSpecmaps(int roomnum)
 {
+    InvalidateGameSceneAppearance();
 	ASSERT(Rooms[roomnum].used);
 
 	for (int t = 0; t < Rooms[roomnum].num_faces; t++)
@@ -944,6 +946,7 @@ bool ChangeRoomFaceTexture(int room_num, int face_num, int texture)
 	face* fp = &rp->faces[face_num];
 
 	fp->tmap = texture;
+    InvalidateGameSceneAppearance();
 	fp->flags |= FF_TEXTURE_CHANGED;
 	rp->room_change_flags |= RCF_TEXTURE;
 	return true;

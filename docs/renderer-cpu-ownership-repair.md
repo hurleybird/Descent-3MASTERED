@@ -2,6 +2,33 @@
 
 ## October 20 continuation
 
+Room appearance now consumes a producer epoch rather than comparing every face
+each frame. Tracked writers include texture setters, destruction, script face
+edits, lightmap/specmap clearing and save restoration. Legacy multiplayer DLLs
+have writable room pointers, so callback return is an explicit conservative
+invalidation boundary. Geometry invalidation also invalidates appearance.
+Only material-relevant face flags cross that boundary; source audits still
+detect unannounced edits. Extraction falls roughly 0.48 to 0.20 ms in save003.
+
+Visibility transforms/tests each demanded vertex once per geometry placement
+and aperture, using cached outcode intersection with the original tolerances.
+600 scalar-reference cases plus the existing portal/mirror tests pass. Query
+time in the initial dense pair is 0.60 -> 0.42 ms, but total timing remains noisy.
+`cpu-projected-mesh-corpus-20261020-savegNNN` means: 4.10, 2.76, 5.93, 5.72,
+1.22, 4.58, 1.52, 4.45 ms. Initial dense capture was 5.00 ms: do not cherry-pick it.
+
+The blanket material-retention exclusion for mirror rooms is removed. Planar
+membership/planes are part of the sealed table's exact publication key; changing
+or removing mirrors recompiles policy. Unchanged mirror rooms reuse materials.
+All eight `cpu-planar-retention-audit-20261020-savegNNN` source audits pass.
+Seven captures match the prior corpus; save000 matches its previously reproduced
+moving-object variant. The combined effects/auxiliary probe matches exactly.
+New tests verify retained mirror storage and removal of stale planar policy.
+Initial dense/small totals are 5.36/1.09 ms, still slower than pre-rewrite.
+Resource-stage diagnostics now split room/model/other image preparation: dense
+capture has 551 bindings, 548 pixel sources, only four revised sources at frame90.
+Most remaining resource CPU work is dependency traversal, not copying new pixels.
+
 Model part bindings now have a publication lifetime independent of frame pose,
 light candidates and surface-table offsets. Unchanged tables are shared across
 frames; editing detaches them. Deferred models carry current light candidates,

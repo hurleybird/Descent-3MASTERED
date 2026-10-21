@@ -172,13 +172,16 @@ void prepareImages(d3scene::FrameData& data) {
     data.images.reserve(previous_binding_count);
     MaterialResolution resolution(static_cast<float>(data.simulation_time));
     const bool audit_images = FindArg("-scene-image-revision-audit") != 0;
+    size_t image_misses = 0, image_requests = 0;
     const auto image = [&](int handle,bool baked) -> d3scene::ImageAssetRef {
+        ++image_requests;
         const int slot = handle+(baked ? MAX_BITMAPS : 0);
         const auto revision = baked ? lm_ContentRevision(handle) : bm_ContentRevision(handle);
         const auto resident = d3scene::assets().image(slot,revision);
         if (resident && !audit_images) {
             return resident;
         }
+        if (!resident) ++image_misses;
         d3scene::ImageSource source;
         source.content_revision = revision;
         if (baked) {
@@ -295,12 +298,21 @@ void prepareImages(d3scene::FrameData& data) {
             }
         }
     };
+    { PERF_MARKER_SCOPE("Scene.Resources.RoomImages");
     for (auto& room : data.rooms) if (!tableUnchanged(room.surfaces)) prepareTable(room.surfaces,false,room.exterior);
+    }
+    { PERF_MARKER_SCOPE("Scene.Resources.ModelImages");
     for (auto& object : data.model_instances) for (auto& model : object.models) for (size_t p = 0; p < model.parts.size(); ++p)
         if (!tableUnchanged(model.parts.read()[p].surfaces)) prepareTable(model.parts[p].surfaces,true,false);
+    }
+    { PERF_MARKER_SCOPE("Scene.Resources.OtherImages");
     for (auto& surface : data.terrain.materials) prepare(surface);
     for (auto& mesh : data.meshes) prepare(mesh.surface);
+    }
     previous_binding_count = data.images.size();
+    if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
+        AutomatedCaptureLog("scene frame resources bindings=%u pixel_sources=%u revised_sources=%u",unsigned(data.images.size()),
+            unsigned(image_requests),unsigned(image_misses));
 }
 // Field-wise fingerprints diagnose state-vs-pixel variation; never hash padding
 // or use diagnostic hashes as asset identities.
@@ -438,12 +450,14 @@ void resolveMaterial(d3scene::SurfaceBinding& surface, MaterialResolution& resol
 void PrepareGameSceneResources(d3scene::FrameData& data) {
     PERF_MARKER_SCOPE("Scene.PrepareResources");
     MaterialResolution resolution(static_cast<float>(data.simulation_time));
+    { PERF_MARKER_SCOPE("Scene.Resources.Materials");
     for (auto& surface : data.terrain.materials) resolveMaterial(surface,resolution,false,true);
     for (auto& object : data.model_instances) for (auto& model : object.models) for (size_t p = 0; p < model.parts.size(); ++p) {
         const auto& input = model.parts.read()[p];
         if (input.surfaces.publishedFor(model.asset->id(),uint32_t(p),input.material_palette)) continue;
         auto& part = model.parts[p];
         for (auto& surface : part.surfaces) resolveMaterial(surface,resolution,true);
+    }
     }
     prepareImages(data);
     d3scene::prepareTerrainPatches(data.terrain);

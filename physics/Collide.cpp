@@ -21,6 +21,7 @@
 #include <algorithm>
 
 #include "collide.h"
+#include "SceneExtraction.h"
 #include "PHYSICS.H"
 #include "pserror.h"
 #include "mono.h"
@@ -425,6 +426,7 @@ bool collide_weapon_and_wall( object * weapon, fix hitspeed, int hitseg, int hit
 				Sound_system.Play3dSound(sound_override_glass_breaking,SND_PRIORITY_HIGH,weapon);
 			
 			fp->flags|=FF_DESTROYED;
+            InvalidateGameSceneAppearance();
 		}
 
 		//Check for a breakable face: If the texture is breakable and it's on a portal 

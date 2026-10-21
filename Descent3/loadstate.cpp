@@ -36,6 +36,7 @@
 #include "vclip.h"
 #include "viseffect.h"
 #include "room.h"
+#include "SceneExtraction.h"
 #include "trigger.h"
 #include "spew.h"
 #include "doorway.h"
@@ -543,6 +544,7 @@ int LGSRooms(CFILE *fp)
 			//if (Gamesave_read_version>=1)
 			//{
 				int num_changed=cf_ReadShort (fp);
+                if (num_changed) InvalidateGameSceneAppearance();
 
 				for (int t=0;t<num_changed;t++)
 				{

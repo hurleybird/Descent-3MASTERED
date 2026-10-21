@@ -13,6 +13,8 @@ std::vector<d3scene::ObjectState> PreviousObjects;
 uint64_t PreviousLifetime = 0;
 double PreviousTime = 0;
 uint64_t GeometryEpoch = 1;
+uint64_t AppearanceEpoch = 1;
+constexpr uint32_t SurfaceAppearanceFlags = FF_LIGHTMAP|FF_DESTROYED|FF_FLOATING_TRIG;
 std::array<uint64_t,MAX_ROOMS> PublishedGeometryEpoch{};
 d3scene::Vec3 value(const vector& v) { return {v.x, v.y, v.z}; }
 d3scene::Transform transform(const vector& p, const matrix& m) {
@@ -83,6 +85,10 @@ void ResetGamePresentationScene() {
 }
 void InvalidateGameSceneGeometry() {
     if (++GeometryEpoch == 0) throw std::overflow_error("Room geometry epoch exhausted");
+    InvalidateGameSceneAppearance();
+}
+void InvalidateGameSceneAppearance() {
+    if (++AppearanceEpoch == 0) throw std::overflow_error("Room appearance epoch exhausted");
 }
 uint64_t GameSceneGeometryRevision() { return GeometryEpoch; }
 
@@ -115,6 +121,8 @@ d3scene::FrameData ExtractGameFrame(double time, float delta, bool paused, bool 
         }
         d3scene::RoomState state;
         state.number = i;
+        state.source_material_revision = AppearanceEpoch;
+        state.source_mirror_face = source.mirror_face;
         state.asset = std::move(asset);
         state.bounds = {value(source.min_xyz), value(source.max_xyz)};
         state.authored_flags = source.flags & ~RF_MIRROR_VISIBLE;
@@ -125,12 +133,14 @@ d3scene::FrameData ExtractGameFrame(double time, float delta, bool paused, bool 
         state.pulse_offset = source.pulse_offset;
         const auto* previous_room = retained_frame ? retained_frame->roomIndices().find(i) : nullptr;
         const d3scene::RoomState* cached = previous_room ? &retained_frame->data().rooms[previous_room->second] : nullptr;
-        bool reuse = cached && source.mirror_face < 0 && cached->asset->id() == state.asset->id() &&
+        bool reuse = cached && cached->source_mirror_face == source.mirror_face && cached->asset->id() == state.asset->id() &&
             cached->surfaces.publishedFor(state.asset->id()) && cached->authored_flags == state.authored_flags &&
             cached->portals.size() == size_t(source.num_portals);
         for (int p = 0; reuse && p < source.num_portals; ++p)
             reuse = cached->portals[p].flags == uint32_t(source.portals[p].flags);
-        for (int j = 0; reuse && j < source.num_faces; ++j) {
+        const bool appearance_current = cached && cached->source_material_revision == AppearanceEpoch;
+        const bool audit_retained = reuse && appearance_current && audit_geometry;
+        for (int j = 0; reuse && (!appearance_current || audit_geometry) && j < source.num_faces; ++j) {
             const auto& face = source.faces[j]; const auto& binding = cached->surfaces[j];
             if (face.tmap < 0 || face.tmap >= MAX_TEXTURES) { reuse = false; break; }
             // Texture sequences are frame resources; UV scrolling is evaluated
@@ -138,11 +148,13 @@ d3scene::FrameData ExtractGameFrame(double time, float delta, bool paused, bool 
             reuse = binding.texture == face.tmap &&
                 binding.lightmap == ((face.flags & FF_LIGHTMAP) ? face.lmi_handle : -1) &&
                 binding.special == face.special_handle && binding.portal == face.portal_num &&
-                binding.authored_flags == (face.flags & ~(FF_VISIBLE|FF_NOT_FACING|FF_TOUCHED|FF_SPEC_INVISIBLE)) &&
+                binding.authored_flags == (face.flags & SurfaceAppearanceFlags) &&
                 binding.light_multiple == face.light_multiple;
         }
+        if (audit_retained && !reuse) throw std::logic_error("Room appearance changed without producer invalidation");
         if (reuse) {
             state.surfaces = cached->surfaces;
+            state.mirrors = cached->mirrors;
             state.uses_room_illumination = cached->uses_room_illumination;
         } else {
         state.surfaces.reserve(source.num_faces);
@@ -153,7 +165,7 @@ d3scene::FrameData ExtractGameFrame(double time, float delta, bool paused, bool 
             binding.lightmap = (face.flags & FF_LIGHTMAP) ? face.lmi_handle : -1;
             binding.special = face.special_handle;
             binding.portal = face.portal_num;
-            binding.authored_flags = face.flags & ~(FF_VISIBLE | FF_NOT_FACING | FF_TOUCHED | FF_SPEC_INVISIBLE);
+            binding.authored_flags = face.flags & SurfaceAppearanceFlags;
             binding.light_multiple = face.light_multiple;
             state.surfaces.push_back(binding);
         }

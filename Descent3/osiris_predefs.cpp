@@ -29,6 +29,7 @@
 #include "AIMain.h"
 #include "soundload.h"
 #include "room.h"
+#include "SceneExtraction.h"
 #include "objinfo.h"
 #include "weapon.h"
 #include "game.h"
@@ -269,11 +270,16 @@ void osipf_RoomValue(int roomnum, char op, char vtype, void* ptr, int index)
 		break;
 	case RMSV_I_FACE_TEXTURE_ID:
 		if (op == VF_SET)
-			rp->faces[index].tmap = *(int*)ptr;
+        {
+            rp->faces[index].tmap = *(int*)ptr;
+            InvalidateGameSceneAppearance();
+        }
 		else if (op == VF_GET)
 			*(int*)ptr = rp->faces[index].tmap;
 		break;
 	case RMSV_I_FACE_FLAGS:
+        if (op == VF_SET || op == VF_SET_FLAGS || op == VF_CLEAR_FLAGS)
+            InvalidateGameSceneGeometry(); // floating-trigger flags also change room volume topology
 		if (op == VF_GET)
 			*(int*)ptr = rp->faces[index].flags;
 		else if (op == VF_SET)

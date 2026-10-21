@@ -34,6 +34,7 @@
 #include "objinfo.h"
 #include "gametexture.h"
 #include "room.h"
+#include "SceneExtraction.h"
 #include "game2dll.h"
 #include "viseffect.h"
 #include "hlsoundlib.h"
@@ -5825,6 +5826,7 @@ void MultiPaintGoalRooms (int *texcolors)
 					if (!goalfaces || (goalfaces && Rooms[roomnum].faces[t].flags & FF_GOALFACE))
 					{
 						Rooms[roomnum].faces[t].tmap=tex;
+                        InvalidateGameSceneAppearance();
 						Rooms[roomnum].faces[t].flags |= FF_TEXTURE_CHANGED;
 
 					}
