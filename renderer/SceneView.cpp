@@ -208,8 +208,9 @@ Vec3 unproject(const Camera& camera,float x,float y,float depth) {
     const float w = orthographic ? 1 : z;
     return transformPoint(camera.transform,{w*(x-p.x_offset)/p.x_scale,w*(y-p.y_offset)/p.y_scale,z});
 }
-Transform resolveMeshTransform(const PreparedMesh& instance,const Camera& camera) {
+Transform resolveMeshTransform(const PreparedMesh& instance,const Camera& camera,const Transform* attachment) {
     auto world = instance.world;
+    if (attachment) world.position = transformPoint(*attachment,world.position);
     auto direction = camera.transform.forward;
     if (instance.eye_distance > 0 || instance.alignment == MeshAlignment::FacingEye) {
         direction = subtract(world.position,camera.transform.position);
@@ -477,14 +478,14 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
         if (!eligible(object)) continue;
         const auto window = spatialWindow(object.room);
         if (!window.visible || !object.has_render_bounds || boundsOutside(result.camera,object.render_bounds,window)) continue;
+        const uint32_t variant = selectModelVariant(object,result.camera);
+        const auto& model = frame.resolvedModel(i,variant);
+        if (!model.has_render_bounds || boundsOutside(result.camera,model.render_bounds,window)) continue;
         if (world_content && object.has_owner) {
             const auto index = owner_indices.at(object.owner);
             if (!visible_owners[index]) result.object_indices.push_back(uint32_t(index));
             visible_owners[index] = true;
         }
-        const uint32_t variant = selectModelVariant(object,result.camera);
-        const auto& model = object.models[variant];
-        if (!model.has_render_bounds || boundsOutside(result.camera,model.render_bounds,window)) continue;
         // Publication compiled these bounds from the same pose/deformation as
         // execution. The simulation radius is not a rendering visibility bound.
         for (size_t part = 0; part < model.parts.size(); ++part) {
@@ -540,8 +541,19 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
         const auto& geometry = instance.asset->geometry();
         if (!instance.surface.draw_surface || geometry.polygons.empty() ||
             (instance.surface.material.layer == RenderLayer::Background && !result.exterior_visible)) continue;
+        PortalWindow window{-1,-1,1,1,true};
+        if (instance.surface.material.layer == RenderLayer::World && view.portal_visibility) {
+            window = spatialWindow(instance.room);
+            if (!window.visible) continue;
+        }
         VisibleSurface item; item.mesh = true; item.mesh_index = static_cast<uint32_t>(index);
-        item.world = resolveMeshTransform(instance,result.camera);
+        Transform attachment;
+        if (instance.model_part >= 0) {
+            const auto index = instances.at(instance.model_instance);
+            const auto& model = frame.resolvedModel(index,size_t(instance.model_variant));
+            attachment = compose(frame.data().model_instances[index].current,model.parts[instance.model_part].current);
+        }
+        item.world = resolveMeshTransform(instance,result.camera,instance.model_part >= 0 ? &attachment : nullptr);
         if (instance.maximum_depth > 0) {
             const auto& b = instance.depth_reference;
             bool beyond = true;
@@ -553,11 +565,6 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
             if (beyond) continue;
         }
         if (instance.size_fade_range.y > 0 && dot(item.world.right,item.world.right) == 0) continue;
-        PortalWindow window{-1,-1,1,1,true};
-        if (instance.surface.material.layer == RenderLayer::World && view.portal_visibility) {
-            window = spatialWindow(instance.room);
-            if (!window.visible) continue;
-        }
         // Pixel-expanded markers can straddle a clip boundary while their
         // centers are outside. Submit the batch; homogeneous GPU clipping sees
         // the expanded vertices and is authoritative for this representation.
@@ -587,7 +594,7 @@ const SurfaceBinding& visibleSurfaceBinding(const Presentation& frame,const Visi
     if (item.mesh) return data.meshes[item.mesh_index].surface;
     if (item.terrain) return data.terrain.patches[item.terrain_patch][item.terrain_batch];
     if (item.model) {
-        const auto& model = data.model_instances[item.model_instance_index].models[item.model_variant];
+        const auto& model = frame.resolvedModel(item.model_instance_index,item.model_variant);
         return model.parts[item.part_index].surface(model.asset->geometry().parts[item.part_index],item.polygon_index);
     }
     return data.rooms[item.room_index].surfaces[item.polygon_index];

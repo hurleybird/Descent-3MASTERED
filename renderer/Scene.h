@@ -101,6 +101,7 @@ struct ModelPart {
     // instance record; geometry and per-face lighting remain independent.
     std::vector<uint32_t> surface_for_polygon, surface_polygons;
     Bounds local_bounds;
+    float motion_radius = 0; // conservative root-space radius across all animation tracks
 };
 struct ModelGeometry {
     std::shared_ptr<const ModelAnimation> animation;
@@ -327,6 +328,7 @@ struct PreparedMesh {
     uint32_t owner = 0;
     bool has_owner = false; // same allocation-generation identity as ObjectState
     uint64_t model_instance = 0; // optional dependency on a prepared model, not a game object
+    int32_t model_part = -1; // sprite position is local to this part; its basis remains camera-local
     int32_t model_variant = -1;
 };
 struct Portal {
@@ -461,6 +463,11 @@ struct PreparedModel {
     ModelAssetRef asset;
     uint64_t pose_source_revision = 0;
     std::shared_ptr<const std::vector<float>> pose_inputs;
+    std::shared_ptr<const std::vector<float>> previous_pose_inputs;
+    bool deferred_pose = false, previous_pose_valid = false;
+    double previous_pose_time = 0;
+    float deformation = 0, previous_deformation = 0;
+    uint32_t deformation_owner = 0, resolved_index = 0;
     std::vector<PreparedModelPart> parts;
     Bounds render_bounds;
     bool has_render_bounds = false;
@@ -666,6 +673,9 @@ public:
     static PresentationRef publish(FrameData&& data);
     const FrameData& data() const { return data_; }
     const ImageAsset& image(uint32_t binding) const;
+    // Pure derived pose, memoized for this immutable presentation. Requests
+    // from auxiliary views never read game state or depend on the main view.
+    const PreparedModel& resolvedModel(size_t instance,size_t variant) const;
     const ForegroundLayer* foreground(uint64_t identity) const;
     const std::unordered_map<int32_t,size_t>& roomIndices() const { return room_indices_; }
     const std::unordered_map<uint32_t,size_t>& objectIndices() const { return object_indices_; }
@@ -677,6 +687,7 @@ private:
     FrameData data_;
     std::unordered_map<int32_t,size_t> room_indices_;
     std::vector<uint32_t> image_slots_; // packed frame-owned name -> image index, zero means empty
+    mutable std::vector<std::unique_ptr<PreparedModel>> resolved_models_;
     std::unordered_map<uint32_t,size_t> object_indices_;
     std::unordered_map<uint64_t,size_t> model_indices_;
 };

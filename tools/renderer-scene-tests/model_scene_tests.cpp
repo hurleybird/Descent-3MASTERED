@@ -412,6 +412,72 @@ int runModelSceneTests() {
         check(queryView(*Presentation::freeze(multi),excluded_view).surfaces.empty(),
             "Owner exclusion failed to exclude all its model instances");
     }
+    // View-driven evaluation must preserve exact poses and temporal geometry,
+    // while its unevaluated bounds enclose every authored animation sample.
+    {
+        auto moving = modelGeometry();
+        moving.parts.push_back(moving.parts[0]);
+        moving.parts[1].parent = 0; moving.parts[1].offset = {3,0,0};
+        auto tracks = std::make_shared<ModelAnimation>();
+        tracks->n_models = 2; tracks->num_key_pos = 2;
+        tracks->submodel.resize(2);
+        tracks->submodel[0].flags = SOF_ROTATE;
+        tracks->submodel[0].rps = .37f; tracks->submodel[0].norm = {0,0,1};
+        tracks->submodel[1].parent = 0; tracks->submodel[1].offset = {3,0,0};
+        for (auto& track : tracks->submodel) track.keyframe_pos = {{0,0,0},{4,-2,1}};
+        moving.animation = tracks;
+        const auto moving_asset = assets.publishModel(80,moving);
+        FrameData deferred; deferred.sequence = 1; deferred.scene_lifetime = assets.lifetime();
+        ModelInstance instance; instance.identity = 91; instance.current.position.z = 25;
+        PreparedModel model; model.asset = moving_asset; model.deferred_pose = true;
+        model.previous_pose_valid = true; model.deformation_owner = 91;
+        model.deformation = .25f; model.previous_deformation = .1f;
+        model.parts.resize(2);
+        for (auto& p : model.parts) { p.surfaces.resize(1); p.has_previous = true; }
+        instance.models.push_back(model); deferred.model_instances.push_back(instance);
+        View camera; camera.history_key = 1; camera.viewport = camera.projection_anchor = {0,0,1280,720};
+        PresentationRef held;
+        for (int sample = 0; sample <= 40; ++sample) {
+            deferred.simulation_time = sample*.11;
+            auto& input = deferred.model_instances[0].models[0];
+            input.previous_pose_time = deferred.simulation_time-.07;
+            input.pose_inputs = std::make_shared<const std::vector<float>>(2,sample/40.f);
+            input.previous_pose_inputs = std::make_shared<const std::vector<float>>(2,(40-sample)/40.f);
+            const auto published = Presentation::freeze(deferred);
+            const auto coarse = published->data().model_instances[0].render_bounds;
+            const auto& resolved = published->resolvedModel(0,0);
+            check(&resolved == &published->resolvedModel(0,0),"Repeated view rebuilt a resolved model");
+            check(published->data().model_instances[0].models[0].deferred_pose,"Resolution mutated published inputs");
+            const auto expected = ComposeModelPose(*tracks,EvaluateModelPose(*tracks,input.pose_inputs->data(),float(deferred.simulation_time)));
+            const auto prior = ComposeModelPose(*tracks,EvaluateModelPose(*tracks,input.previous_pose_inputs->data(),float(input.previous_pose_time)));
+            for (size_t p = 0; p < 2; ++p) {
+                const auto& pose = resolved.parts[p];
+                check(pose.current.position.x == expected.submodels[p].translation.x &&
+                    pose.previous.position.y == prior.submodels[p].translation.y,"Deferred temporal pose changed");
+                const auto previous_vertices = deformMesh(moving.parts[p].geometry,.1f,input.previous_pose_time,91,uint32_t(p));
+                check(pose.previous_vertices[0].x == previous_vertices[0].x,"Deferred previous deformation changed");
+                for (const auto vertex : pose.vertices) {
+                    const auto world = transformPoint(compose(instance.current,pose.current),vertex);
+                    check(world.x >= coarse.minimum.x && world.x <= coarse.maximum.x &&
+                        world.y >= coarse.minimum.y && world.y <= coarse.maximum.y &&
+                        world.z >= coarse.minimum.z && world.z <= coarse.maximum.z,"Conservative animation bound missed deformed vertex");
+                }
+            }
+            const auto first = queryView(*published,camera);
+            auto auxiliary = camera; auxiliary.camera.position.x = 100;
+            queryView(*published,auxiliary);
+            check(queryView(*published,camera).surfaces.size() == first.surfaces.size(),"Auxiliary query changed main model demand");
+            if (!held) held = published;
+        }
+        const auto held_x = held->resolvedModel(0,0).parts[0].vertices[0].x;
+        tracks->submodel.clear(); assets.removeModel(80);
+        check(held->resolvedModel(0,0).parts[0].vertices[0].x == held_x,"Held pose depended on unloaded animation");
+        auto invalid = deferred;
+        invalid.model_instances[0].models[0].pose_inputs = std::make_shared<const std::vector<float>>(1,.5f);
+        rejects([&] { Presentation::freeze(invalid); });
+        invalid = deferred; invalid.model_instances[0].models[0].deformation = std::numeric_limits<float>::infinity();
+        rejects([&] { Presentation::freeze(invalid); });
+    }
     assets.removeModel(3);
     check(!assets.model(3) && frame->data().model_instances[0].models[0].asset == asset, "Model unload invalidated held frame");
     assets.reset();

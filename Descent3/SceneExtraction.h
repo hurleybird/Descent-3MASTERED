@@ -20,6 +20,7 @@ void InvalidateGameSceneGeometry();
 uint64_t GameSceneGeometryRevision();
 void PrepareGameModelInstances(d3scene::FrameData&, const d3scene::FrameData* previous,bool retain_materials = false);
 d3scene::ModelAssetRef PrepareGameModelAsset(int number,bool audit_geometry = false);
+void AuditGameModelPoses(const d3scene::Presentation&);
 void PrepareGameStaticModel(d3scene::FrameData&,int model,const d3scene::Transform&,uint64_t identity,uint64_t collection = 0);
 void PrepareGameSceneResources(d3scene::FrameData&);
 void PrepareGameInspectionBanner(d3scene::FrameData&);

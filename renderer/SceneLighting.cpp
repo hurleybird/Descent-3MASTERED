@@ -135,7 +135,7 @@ void prepareLightInfluences(FrameData& data) {
         const auto bounds = transformBounds(transform,model.asset->geometry().parts[part].local_bounds);
         for (size_t i = 0; i < data.lights.size(); ++i)
             if ((object.room < 0 || reachable[i].count(object.room)) &&
-                (!pose.vertices.empty() || touchesBounds(data.lights[i],bounds))) candidates.push_back(uint32_t(i));
+                (model.deferred_pose || !pose.vertices.empty() || touchesBounds(data.lights[i],bounds))) candidates.push_back(uint32_t(i));
     }
     if (data.terrain.asset) for (size_t patch = 0; patch < data.terrain.patches.size(); ++patch) {
         const auto& bounds = data.terrain.asset->patches()[patch].bounds;

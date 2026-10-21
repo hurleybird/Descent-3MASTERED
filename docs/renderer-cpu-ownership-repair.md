@@ -2,6 +2,26 @@
 
 ## October 20 continuation
 
+World model evaluation is now demand-driven. Published frames retain owned
+animation inputs and conservative animation bounds; a view resolves the selected
+variant only after room/coarse-bound rejection. Current/previous deformation and
+attached sprites consume the same resolved pose, including auxiliary views.
+Observation candidates are added after exact posed-bound rejection, not merely
+because the conservative animation envelope intersects the view.
+
+`cpu-deferred-audit-20261020-savegNNN` passes all eight source/pose audits and
+matches all eight preceding owned-animation captures exactly outside the banner.
+The combined view-image/deformation/resource/AO/bloom probe was visually inspected;
+against the preceding probe its mean channel difference is 0.000155, with only
+two pixels differing by more than two levels (maximum three). It is not pixel-exact.
+Contract tests cover 41 hierarchical animation/deformation samples, conservative
+bounds, previous-pose reconstruction, held frames, repeated/auxiliary queries and
+invalid inputs. Clean CPU means for saves 000–007 are 4.83, 3.37, 6.95, 6.43,
+1.38, 4.90, 1.48, 5.32 ms. **Every baseline still loses to pre-rewrite.** Dense
+total time is effectively unchanged; pose preparation fell 0.38 to 0.08 ms but
+this is not a demonstrated dense-frame speedup. Whole-level instance/material
+assembly, resource preparation, validation and frame storage remain work.
+
 Model assets now own animation tracks as well as topology. The original and
 owned-track pose APIs share one evaluator/composer; no second animation math
 implementation was introduced. Asset publication severs mutable builder aliases

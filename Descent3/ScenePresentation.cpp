@@ -300,7 +300,8 @@ void prepareImages(d3scene::FrameData& data) {
 }
 // Field-wise fingerprints diagnose state-vs-pixel variation; never hash padding
 // or use diagnostic hashes as asset identities.
-void logPreparedModels(const d3scene::FrameData& data) {
+void logPreparedModels(const d3scene::Presentation& frame) {
+    const auto& data = frame.data();
     if (!AutomatedCapturePending() && AutomatedCaptureFrameIndex() != 0) return;
     AutomatedCaptureLog("scene probe frame=%d time=%.9g",AutomatedCaptureFrameIndex(),data.simulation_time);
     size_t room_surfaces = 0, model_surfaces = 0, terrain_surfaces = 0, retained_surfaces = 0;
@@ -326,7 +327,8 @@ void logPreparedModels(const d3scene::FrameData& data) {
         AutomatedCaptureLog("scene camera perturbation owner=%u forward=%.9g,%.9g,%.9g",effect.owner,
             effect.rotation.forward.x,effect.rotation.forward.y,effect.rotation.forward.z);
     std::unordered_set<int> textures;
-    for (const auto& instance : data.model_instances) for (const auto& model : instance.models) {
+    for (const auto& instance : data.model_instances) for (const auto& source : instance.models) {
+        const auto& model = frame.resolvedModel(size_t(&instance-data.model_instances.data()),size_t(&source-instance.models.data()));
         uint64_t hash = 14695981039346656037ull;
         const auto number = [&](float value) {
             uint32_t bits; std::memcpy(&bits,&value,sizeof(bits));
@@ -638,9 +640,10 @@ d3scene::PresentationRef PrepareGamePresentation() {
         data.rooms.clear(); data.terrain = {}; data.fog.reset(); data.exterior_fog = {};
         data.sky_enabled = false;
     }
-    logPreparedModels(data);
     // No domain is declared complete by a diagnostic subset of its consumers.
     auto prepared = [&] { PERF_MARKER_SCOPE("Scene.Freeze"); return d3scene::Presentation::publish(std::move(data)); }();
+    if (FindArg("-scene-geometry-revision-audit")) AuditGameModelPoses(*prepared);
+    logPreparedModels(*prepared);
     if (ps_rand_get_state() != simulation_random)
         Error("Presentation preparation consumed simulation randomness");
     previous_models = prepared;

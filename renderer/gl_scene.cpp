@@ -562,12 +562,17 @@ void GL4Renderer::UploadSceneFrame(const d3scene::Presentation& frame, const d3s
     if (demand) {
         static thread_local std::vector<uint8_t> rooms, meshes, surfaces;
         static thread_local std::vector<const d3scene::PreparedModelPart*> parts;
+        static thread_local std::vector<std::pair<uint32_t,uint32_t>> visible_models;
         rooms.assign(frame.data().rooms.size(),0);
         meshes.assign(frame.data().meshes.size(),0);
         surfaces.assign(frame.data().compiled_surface_count,0);
         parts.clear();
+        visible_models.clear();
         for (const auto& item : demand->surfaces) {
-            if (item.model) parts.push_back(&frame.data().model_instances[item.model_instance_index].models[item.model_variant].parts[item.part_index]);
+            if (item.model) {
+                parts.push_back(&frame.resolvedModel(item.model_instance_index,item.model_variant).parts[item.part_index]);
+                visible_models.emplace_back(item.model_instance_index,item.model_variant);
+            }
             else if (item.mesh) meshes[item.mesh_index] = 1;
             else if (item.terrain) surfaces[frame.data().terrain.patches[item.terrain_patch][item.terrain_batch].compiled_index] = 1;
             else {
@@ -578,6 +583,8 @@ void GL4Renderer::UploadSceneFrame(const d3scene::Presentation& frame, const d3s
         const std::less<const d3scene::PreparedModelPart*> pointer_order;
         std::sort(parts.begin(),parts.end(),pointer_order);
         parts.erase(std::unique(parts.begin(),parts.end()),parts.end());
+        std::sort(visible_models.begin(),visible_models.end());
+        visible_models.erase(std::unique(visible_models.begin(),visible_models.end()),visible_models.end());
         const auto wantsPart = [&](const d3scene::PreparedModelPart& part) {
             return std::binary_search(parts.begin(),parts.end(),&part,pointer_order);
         };
@@ -716,7 +723,10 @@ void GL4Renderer::UploadSceneFrame(const d3scene::Presentation& frame, const d3s
             scene_surface_ranges[mesh.surface.compiled_index].texture_uv = ElementRange(start,static_cast<uint32_t>(uvs.size())-start);
         }
         scene_model_influences.clear();
-        for (const auto& object : frame.data().model_instances) for (const auto& model : object.models) for (const auto& part : model.parts) {
+        for (const auto& key : visible_models) {
+          const auto& object = frame.data().model_instances[key.first];
+          const auto& model = frame.resolvedModel(key.first,key.second);
+          for (const auto& part : model.parts) {
             if (!wantsPart(part)) continue;
             for (size_t surface = 0; surface < part.surfaces.size(); ++surface)
                 add(part.surfaces[surface],part.surface_base+uint32_t(surface),part.surfaces[surface].light_indices);
@@ -731,6 +741,7 @@ void GL4Renderer::UploadSceneFrame(const d3scene::Presentation& frame, const d3s
                     ranges.emplace_back(start,uint32_t(indices.size())-start);
                 }
             }
+          }
         }
         PerfMarkersEnd("Scene.Upload.Tables");
         PerfMarkersBegin("Scene.Upload.Positions");
@@ -747,7 +758,9 @@ void GL4Renderer::UploadSceneFrame(const d3scene::Presentation& frame, const d3s
             positions.insert(positions.end(),pairs.begin(),pairs.end());
             scene_position_ranges.emplace(&mesh,ElementRange(start,static_cast<uint32_t>(positions.size())-start));
         }
-        for (const auto& object : frame.data().model_instances) for (const auto& model : object.models) for (size_t i = 0; i < model.parts.size(); ++i) {
+        for (const auto& key : visible_models) {
+          const auto& model = frame.resolvedModel(key.first,key.second);
+          for (size_t i = 0; i < model.parts.size(); ++i) {
             const auto& part = model.parts[i];
             if (!wantsPart(part)) continue;
             const auto pairs = d3scene::modelPositionPairs(model.asset->geometry().parts[i].geometry,part);
@@ -755,6 +768,7 @@ void GL4Renderer::UploadSceneFrame(const d3scene::Presentation& frame, const d3s
             const uint32_t start = static_cast<uint32_t>(positions.size());
             positions.insert(positions.end(),pairs.begin(),pairs.end());
             scene_position_ranges.emplace(&part,ElementRange(start,static_cast<uint32_t>(positions.size())-start));
+          }
         }
         if (positions.empty()) positions.push_back({});
         PerfMarkersEnd("Scene.Upload.Positions");
@@ -1123,7 +1137,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::Presentat
             binding = &terrain.patches[item.terrain_patch][item.terrain_batch];
         } else if (item.model) {
             const auto& object = presentation.data().model_instances[item.model_instance_index];
-            const auto& model = object.models[item.model_variant];
+            const auto& model = presentation.resolvedModel(item.model_instance_index,item.model_variant);
             const auto id = model.asset->id();
             if (scene_models.size() <= id.slot) scene_models.resize(static_cast<size_t>(id.slot)+1);
             auto& parts = scene_models[id.slot];
@@ -1149,7 +1163,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::Presentat
         record[80] = float(planar_image);
         uint32_t surface_index = binding->compiled_index;
         if (item.model) {
-            const auto& model = presentation.data().model_instances[item.model_instance_index].models[item.model_variant];
+            const auto& model = presentation.resolvedModel(item.model_instance_index,item.model_variant);
             const auto& part = model.parts[item.part_index];
             surface_index = part.surface_base+(part.material_palette ?
                 model.asset->geometry().parts[item.part_index].surface_for_polygon[item.polygon_index] : item.polygon_index);
@@ -1162,7 +1176,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::Presentat
         record[64] = float(surface.static_specular_strength);
         auto influences = ranges.lights;
         if (item.model) {
-            const auto& part = presentation.data().model_instances[item.model_instance_index].models[item.model_variant].parts[item.part_index];
+            const auto& part = presentation.resolvedModel(item.model_instance_index,item.model_variant).parts[item.part_index];
             if (part.light_influences_prepared) {
                 const auto found = scene_model_influences.find(&part);
                 influences = found == scene_model_influences.end() ? ElementRange() : found->second[item.polygon_index];
