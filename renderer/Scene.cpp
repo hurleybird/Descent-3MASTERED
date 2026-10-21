@@ -943,6 +943,16 @@ PresentationRef Presentation::complete(FrameData data) {
     }
     storage->object_indices_.assign(data.objects,[](const ObjectState& object) { return object.handle; });
     const auto& objects = storage->object_indices_.lookup();
+    const auto ownerIndex = [&](bool has_owner,uint32_t handle,size_t hint) {
+        if (!has_owner) return size_t(-1);
+        // Producers already walking the owned object inventory may supply its
+        // ordinal. It is only a hint: reordering and allocation-generation
+        // changes must still resolve against this presentation's identities.
+        if (hint < data.objects.size() && data.objects[hint].handle == handle) return hint;
+        const auto* owner = objects.find(handle);
+        require(owner != nullptr,"Render owner is not part of this presentation");
+        return owner->second;
+    };
     for (const auto& object : data.objects) {
         require(finite(object.current) && finite(object.previous) && std::isfinite(object.radius) && object.radius >= 0,
             "Invalid object transform or radius");
@@ -978,9 +988,7 @@ PresentationRef Presentation::complete(FrameData data) {
     size_t model_end = 0;
     for (auto& object : data.model_instances) {
         require(object.identity,"Absent model instance identity");
-        const auto* owner = object.has_owner ? objects.find(object.owner) : nullptr;
-        require(!object.has_owner || owner,"Model owner is not part of this presentation");
-        object.compiled_owner = owner ? owner->second : size_t(-1);
+        object.compiled_owner = ownerIndex(object.has_owner,object.owner,object.compiled_owner);
         require(finite(object.current) && finite(object.previous),"Invalid model placement");
         data.ambientFor(object);
         require(object.model_count && object.model_begin == model_end,"Model variants must partition frame storage");
@@ -1058,9 +1066,7 @@ PresentationRef Presentation::complete(FrameData data) {
     image_requirements.finish();
     for (const auto& dependency : image_requirements.values()) validateDependency(dependency);
     for (auto& mesh : data.meshes) {
-        const auto* owner = mesh.has_owner ? objects.find(mesh.owner) : nullptr;
-        require(!mesh.has_owner || owner,"Mesh owner is not part of this presentation");
-        mesh.compiled_owner = owner ? owner->second : size_t(-1);
+        mesh.compiled_owner = ownerIndex(mesh.has_owner,mesh.owner,mesh.compiled_owner);
         const auto* attachment = mesh.model_instance ? model_instances.find(mesh.model_instance) : nullptr;
         mesh.compiled_model = attachment ? attachment->second : size_t(-1);
         require(mesh.model_variant >= -1 && (mesh.model_instance == 0 ? mesh.model_variant == -1 :

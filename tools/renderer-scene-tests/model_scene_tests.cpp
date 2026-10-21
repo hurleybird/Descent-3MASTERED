@@ -368,6 +368,15 @@ int runModelSceneTests() {
             "Reordered frame retained stale ownership/attachment ordinals");
         check(held->data().model_instances[0].compiled_owner==0 && held->data().meshes.back().compiled_model==0,
             "Recompiling ownership changed a held frame");
+        auto generation_changed = held->data();
+        generation_changed.objects[0].handle += 0x10000;
+        rejects([&] { Presentation::freeze(generation_changed); });
+        auto invalid_hint = held->data();
+        invalid_hint.model_instances[0].compiled_owner = size_t(-2);
+        invalid_hint.meshes.back().compiled_owner = 1;
+        const auto repaired_hint = Presentation::freeze(invalid_hint);
+        check(repaired_hint->data().model_instances[0].compiled_owner == 0 &&
+            repaired_hint->data().meshes.back().compiled_owner == 0,"Invalid owner hints bypassed identity resolution");
         linked.model_instances[0].has_owner=false; linked.meshes.back().has_owner=false;
         linked.meshes.back().model_instance=0; linked.meshes.back().model_variant=linked.meshes.back().model_part=-1;
         const auto detached=Presentation::freeze(linked);

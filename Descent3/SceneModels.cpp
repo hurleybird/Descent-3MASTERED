@@ -267,6 +267,7 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::Presenta
         d3scene::ModelInstance instance;
         instance.identity = uint64_t(owner.handle)+1;
         instance.owner = owner.handle; instance.has_owner = true; instance.room = owner.room;
+        instance.compiled_owner = size_t(&owner-data.objects.data());
         instance.current = owner.current; instance.previous = owner.previous; instance.has_previous = owner.has_previous;
         instance.ambient_input = data.appendAmbientInput(ambientInput(*source,rooms,data.terrain));
         auto effect = appearance(*source);
@@ -417,6 +418,7 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::Presenta
                 if (role == SceneModelPartRole::Glow)
                     prepareGlowPart(data,&owner,source,*model,i,{});
                 for (size_t attachment = attachment_begin; attachment < data.meshes.size(); ++attachment) {
+                    data.meshes[attachment].compiled_owner = instance.compiled_owner;
                     data.meshes[attachment].model_instance = instance.identity;
                     data.meshes[attachment].model_variant = static_cast<int32_t>(variant_index);
                     data.meshes[attachment].model_part = static_cast<int32_t>(i);

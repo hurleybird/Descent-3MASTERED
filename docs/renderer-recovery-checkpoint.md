@@ -2,6 +2,28 @@
 
 ## Active 2026-10-21 flare regression investigation
 
+CURRENT HEAD4b648d6 commits indexed whole-material groups and producer palettes.
+Owner hint qualification complete:005/007 and roof flare EXACT. Pinned007
+ABBA CPU hints1.405/1.349 vs controls1.404/1.415ms; small/noisy, not major win.
+Unpinned ABBA reverses direction between005 and007: do not claim its raw delta.
+Tests cover invalid hints, reorder, allocation generation change and held frames.
+Further experiment: adjacent multidraw range coalescing produced exact images
+but no repeatable improvement. REJECTED, source removed. ABAB coalesce-pair-*
+CPU control1.429/1.351 vs merged1.432/1.365; do not attribute earlier007 drop
+to it. Runtime timing drift also moves old007 to1.219 vs historical1.508.
+Current uncommitted owner-hint change avoids reconstructing owner membership
+that model producer already knows. Publication validates index against exact
+generation handle, falls back to lookup for stale/reordered builders. Tests
+owner-hints-tests.log pass, game owner-hints-build.log passes; owner-pair007
+images EXACT. Initial timing favourable but drifting; owner-abba005/007 runs
+in progress at this edit. No marked-win claim yet. out/model-palettes-qualified.exe
+is4b648d6 control, out/owner-hints-candidate.exe new experiment.
+Fresh samples: cpu-model-palettes-stack005/007.txt; caller attribution corrected
+in cpu-model-palettes-callers007.txt (skip duplicate top stackwalk frame).
+Largest lookup leaf belongs to publication model owner resolution, motivating
+hint change. Sampling runs never used as timing benchmarks. Usage34%, credits
+still62451.4387600000. No shadows, no deployed preview overwrite.
+
 LATEST UPDATE: image ownership committed24628d2 (supersedes uncommitted text
 below). Whole opaque material groups replace contiguous runs, with static GPU
 index buffers and glDrawElementsBaseVertex; per-primitive light addressing
