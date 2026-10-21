@@ -2,6 +2,19 @@
 
 ## October 20 continuation
 
+Latest user direction (October 21, overnight): continue toward a **marked
+improvement** over the old renderer, not mere parity. Preserve architectural
+quality. Do not consume purchased credits: periodically check included usage,
+and stop before exhaustion with a safety margin because the exposed usage tool
+is read-only. The first check after this direction reported 40% remaining.
+
+October 21: axis-aligned bounds rejection uses the support corner per plane and
+ends aperture projection once every side has a surviving corner. 12,000
+deterministic cases match the original eight-corner reference, including large
+coordinates, perspective/orthographic and world clip planes. Dense/save005/probe
+captures are pixel-exact to material-scope; single-run totals 3.590/2.190 ms do
+not demonstrate a net CPU gain. Captures: `cpu-bounds-*-20261021`.
+
 October 21: material preparation skips sealed whole-model tables (not just each
 part), shares one resolution transaction with image preparation, and uses bounded
 stack arrays instead of temporary vectors. Draw-record exterior classification

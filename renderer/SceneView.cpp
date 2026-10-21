@@ -44,17 +44,21 @@ double tolerance(const Plane& plane, Vec3 point) {
     return 2e-6*(1+std::abs(double(plane.normal.x)*point.x)+
         std::abs(double(plane.normal.y)*point.y)+std::abs(double(plane.normal.z)*point.z)+std::abs(plane.constant));
 }
+}
 bool boundsOutside(const Camera& camera,const Bounds& bounds,PortalWindow window) {
+    for (const auto& plane : camera.planes) {
+        // The support corner maximizes signed distance plus our tolerance:
+        // n*x + epsilon*abs(n*x) is monotonic with the sign of n for epsilon<1.
+        // Testing all eight corners against this plane is therefore redundant.
+        const Vec3 support{plane.normal.x >= 0 ? bounds.maximum.x : bounds.minimum.x,
+            plane.normal.y >= 0 ? bounds.maximum.y : bounds.minimum.y,
+            plane.normal.z >= 0 ? bounds.maximum.z : bounds.minimum.z};
+        if (distance(plane,support) < -tolerance(plane,support)) return true;
+    }
     std::array<Vec3,8> corners;
     for (unsigned i = 0; i < corners.size(); ++i)
         corners[i] = {i&1 ? bounds.maximum.x : bounds.minimum.x,
             i&2 ? bounds.maximum.y : bounds.minimum.y,i&4 ? bounds.maximum.z : bounds.minimum.z};
-    for (const auto& plane : camera.planes) {
-        bool outside = true;
-        for (const auto point : corners)
-            if (distance(plane,point) >= -tolerance(plane,point)) { outside = false; break; }
-        if (outside) return true;
-    }
     bool left = true, right = true, bottom = true, top = true;
     for (const auto point : corners) {
         const auto p = project(camera,point);
@@ -63,9 +67,11 @@ bool boundsOutside(const Camera& camera,const Bounds& bounds,PortalWindow window
         right = right && p.x > window.right*p.w+epsilon;
         bottom = bottom && p.y < window.bottom*p.w-epsilon;
         top = top && p.y > window.top*p.w+epsilon;
+        if (!left && !right && !bottom && !top) return false;
     }
     return left || right || bottom || top;
 }
+namespace {
 struct ProjectedVertex { Vec3 world; uint16_t outside = 0; uint64_t generation = 0; };
 struct ProjectionScratch { std::vector<ProjectedVertex> vertices; uint64_t generation = 0; };
 // One cache per geometry placement/aperture, not per face or clip plane.

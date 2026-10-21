@@ -49,6 +49,9 @@ Transform resolveMeshTransform(const PreparedMesh&,const Camera&,const Transform
 ClipPosition project(const Camera& camera, Vec3 world);
 Vec3 unproject(const Camera& camera, float ndc_x, float ndc_y, float depth);
 bool sphereIntersects(const Camera& camera, Vec3 center, float radius);
+struct PortalWindow;
+// Conservative axis-aligned bounds rejection against the camera and aperture.
+bool boundsOutside(const Camera&,const Bounds&,PortalWindow);
 
 struct VisibleSurface {
     uint32_t room_index = 0, polygon_index = 0;

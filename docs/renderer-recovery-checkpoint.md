@@ -2,8 +2,12 @@
 
 ## October 21 continuation (supersedes timings below)
 
-Active target remains beating **every** pre-rewrite CPU baseline without
-compromising architecture. Latest no-marker corpus has one trial ahead and
+Active target is a **marked improvement over every pre-rewrite CPU baseline**,
+not mere parity, without compromising architecture. User explicitly requested
+overnight continuation, stopping before included usage exhausts (no purchased
+credits). Use the read-only usage tool periodically; first check reported 40%
+remaining. Do not wait for 0% if a safety margin is needed to avoid credit use.
+Latest no-marker corpus has one trial ahead and
 seven behind; dense total ~3.068 vs 2.574 ms, wall-facing save005 ~2.005 vs
 0.967 ms. This is not completion or gameplay qualification. See the top of
 `renderer-cpu-ownership-repair.md` for exact measurements/capture paths.

@@ -46,6 +46,53 @@ void appendRoom(d3scene::SceneAssets& assets,d3scene::FrameData& data,d3scene::M
 int runSceneViewTests() {
     {
         using namespace d3scene;
+        const auto reference = [](const Camera& camera,const Bounds& bounds,PortalWindow window) {
+            std::array<Vec3,8> corners;
+            for (unsigned i = 0; i < 8; ++i) corners[i] = {
+                i&1 ? bounds.maximum.x : bounds.minimum.x,i&2 ? bounds.maximum.y : bounds.minimum.y,
+                i&4 ? bounds.maximum.z : bounds.minimum.z};
+            for (const auto& plane : camera.planes) {
+                bool outside = true;
+                for (const auto p : corners) {
+                    const double distance = double(plane.normal.x)*p.x+double(plane.normal.y)*p.y+double(plane.normal.z)*p.z+plane.constant;
+                    const double epsilon = 2e-6*(1+std::abs(double(plane.normal.x)*p.x)+
+                        std::abs(double(plane.normal.y)*p.y)+std::abs(double(plane.normal.z)*p.z)+std::abs(plane.constant));
+                    if (distance >= -epsilon) { outside = false; break; }
+                }
+                if (outside) return true;
+            }
+            bool left = true,right = true,bottom = true,top = true;
+            for (const auto point : corners) {
+                const auto p = project(camera,point);
+                const double epsilon = 2e-6*(1+std::abs(p.x)+std::abs(p.y)+std::abs(p.w));
+                left = left && p.x < window.left*p.w-epsilon; right = right && p.x > window.right*p.w+epsilon;
+                bottom = bottom && p.y < window.bottom*p.w-epsilon; top = top && p.y > window.top*p.w+epsilon;
+            }
+            return left || right || bottom || top;
+        };
+        uint32_t random = 173;
+        const auto sample = [&] { random = random*1664525u+1013904223u; return float(random>>8)/16777216.f; };
+        for (int i = 0; i < 12000; ++i) {
+            auto request = view();
+            request.kind = ViewKind::Auxiliary; request.portal_visibility = false;
+            const float scale = i%3 == 0 ? 1.e6f : 100.f;
+            request.camera.position = {scale*(sample()-.5f),scale*(sample()-.5f),scale*(sample()-.5f)};
+            const float angle = sample()*6.28f;
+            request.camera.right = {std::cos(angle),0,-std::sin(angle)};
+            request.camera.forward = {std::sin(angle),0,std::cos(angle)};
+            if (i%2) { request.projection = ViewProjection::Orthographic; request.orthographic_size = {200,150}; request.orthographic_depth = {-200,200}; }
+            if (i%10 == 0) { request.has_clip_plane = true; request.clip_plane = {{.6f,0,.8f},sample()*scale}; }
+            const auto camera = prepareCamera(request);
+            Bounds bounds;
+            bounds.minimum = {scale*(sample()-.5f),scale*(sample()-.5f),scale*(sample()-.5f)};
+            bounds.maximum = {bounds.minimum.x+scale*sample(),bounds.minimum.y+scale*sample(),bounds.minimum.z+scale*sample()};
+            const PortalWindow window{-sample(),-sample(),sample(),sample(),true};
+            check(boundsOutside(camera,bounds,window) == reference(camera,bounds,window),
+                "Support-corner bounds test differs from eight-corner reference");
+        }
+    }
+    {
+        using namespace d3scene;
         SceneAssets fixtures;
         auto geometry = unitBillboardQuad();
         const auto asset = fixtures.publishMesh(90,geometry);
