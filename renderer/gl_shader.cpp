@@ -808,6 +808,23 @@ void ShaderProgram::CreateCommonBindings(int bindindex)
 	ClearBinding();
 }
 
+void ShaderProgram::AttachComputeSource(const char* source)
+{
+	GLint size = strlen(source);
+	const GLuint shader = CompileShader(GL_COMPUTE_SHADER, 1, &source, &size);
+	m_name = glCreateProgram();
+	glAttachShader(m_name, shader);
+	glLinkProgram(m_name);
+	glDeleteShader(shader);
+	GLint status;
+	glGetProgramiv(m_name, GL_LINK_STATUS, &status);
+	if (status == GL_FALSE) {
+		char message[4096] = {};
+		glGetProgramInfoLog(m_name, sizeof(message), nullptr, message);
+		Error("Compute program link failed: %s", message);
+	}
+}
+
 void ShaderProgram::AttachSource(const char* vertexsource, const char* fragsource)
 {
 	GLint vertexsourcelen = strlen(vertexsource);

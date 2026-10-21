@@ -1,0 +1,130 @@
+// Descent 3MASTERED - GPL-3.0-or-later
+#pragma once
+
+// Shared by the reference surface integrator and the view-field compiler.
+static const char* SceneFogIntersectionShader = R"GLSL(
+vec2 fogProjectedPoint(vec3 p,int drop) {
+    return drop == 0 ? p.yz : (drop == 1 ? p.zx : p.xy);
+}
+bool fogEdge(vec2 start,vec2 finish,vec2 p,float orientation) {
+    vec2 edge = (finish-start)*orientation;
+    float side = edge.x*(p.y-start.y)-edge.y*(p.x-start.x);
+    return side > 0.0 || (side == 0.0 && (edge.y > 0.0 || (edge.y == 0.0 && edge.x < 0.0)));
+}
+bool fogHit(vec3 a,vec3 b,vec3 c,vec3 direction,out float distance) {
+    vec3 n = cross(b-a,c-a);
+    float denominator = dot(n,direction);
+    if (abs(denominator) < 1.e-12) return false;
+    distance = dot(n,a-eye)/denominator;
+    if (distance < 0.0) return false;
+    vec3 p = eye+direction*distance;
+    vec3 magnitude = abs(n);
+    int drop = magnitude.x >= magnitude.y && magnitude.x >= magnitude.z ? 0 : (magnitude.y >= magnitude.z ? 1 : 2);
+    float component = drop == 0 ? n.x : (drop == 1 ? n.y : n.z);
+    float orientation = component < 0.0 ? -1.0 : 1.0;
+    vec2 pa = fogProjectedPoint(a,drop), pb = fogProjectedPoint(b,drop), pc = fogProjectedPoint(c,drop);
+    vec2 point = fogProjectedPoint(p,drop);
+    return fogEdge(pa,pb,point,orientation) && fogEdge(pb,pc,point,orientation) && fogEdge(pc,pa,point,orientation);
+}
+bool fogBounds(vec3 low,vec3 high,vec3 inverse_direction,bvec3 parallel,float length) {
+    if (any(bvec3(parallel.x && (eye.x < low.x || eye.x > high.x),
+                  parallel.y && (eye.y < low.y || eye.y > high.y),
+                  parallel.z && (eye.z < low.z || eye.z > high.z)))) return false;
+    vec3 a = (low-eye)*inverse_direction, b = (high-eye)*inverse_direction;
+    vec3 entry = min(a,b), exit = max(a,b);
+    entry = vec3(parallel.x ? 0.0 : entry.x,parallel.y ? 0.0 : entry.y,parallel.z ? 0.0 : entry.z);
+    exit = vec3(parallel.x ? length : exit.x,parallel.y ? length : exit.y,parallel.z ? length : exit.z);
+    return max(0.0,max(entry.x,max(entry.y,entry.z))) <= min(length,min(exit.x,min(exit.y,exit.z)));
+}
+)GLSL";
+
+// One invocation owns an entire optical ray. Each boundary crossing contributes
+// a change of slope and intercept to a prefix sum, not 64 repeated traversals.
+// RGB is integrated color*density, A is integrated density; neither is clamped
+// before interpolation. Authored linear forward-depth fog remains unchanged.
+static const char* SceneFogFieldComputeShader = R"GLSL(
+layout(local_size_x=8,local_size_y=1) in;
+layout(rgba32f,binding=0) writeonly uniform image3D fog_field_output;
+uniform float fog_field_range;
+const int FOG_SLICES = 64;
+// Eight independent columns share storage, with lane-interleaved addresses.
+// Explicit workgroup storage avoids spilling two large per-ray local arrays.
+// No barrier is needed: each lane reads/writes only its own column.
+shared float slope_events[FOG_SLICES*8];
+shared float offset_events[FOG_SLICES*8];
+shared vec4 integrated_samples[FOG_SLICES*8];
+void crossingEvent(float z,float sign) {
+    int slice = int(ceil(sqrt(clamp(z/fog_field_range,0.0,1.0))*float(FOG_SLICES-1)));
+    int address=slice*8+int(gl_LocalInvocationIndex);
+    slope_events[address] += sign;
+    offset_events[address] -= sign*z;
+}
+void main() {
+    ivec3 size = imageSize(fog_field_output);
+    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(pixel,size.xy))) return;
+    int lane=int(gl_LocalInvocationIndex);
+    for (int i=0;i<FOG_SLICES;++i) integrated_samples[i*8+lane]=vec4(0);
+    vec2 ndc = (vec2(pixel)+0.5)/vec2(size.xy)*2.0-1.0;
+    vec3 direction = normalize(camera_forward+camera_right*((ndc.x-projection.z)/projection.x)+
+        camera_up*((ndc.y-projection.w)/projection.y));
+    float forward_scale = dot(direction,camera_forward);
+    float length = fog_field_range/forward_scale;
+    bvec3 parallel = lessThan(abs(direction),vec3(1.e-8));
+    vec3 inverse_direction = 1.0/vec3(parallel.x ? 1.0 : direction.x,
+        parallel.y ? 1.0 : direction.y,parallel.z ? 1.0 : direction.z);
+    float start = 0.0;
+    float origin_side = dot(vec4(eye,1),fog_path_plane);
+    if (origin_side < 0.0) {
+        float advance = dot(direction,fog_path_plane.xyz);
+        start = advance > 0.0 ? min(length,-origin_side/advance) : length;
+    }
+    for (int candidate=0;candidate<fog_volume_count;++candidate) {
+        int entry=fog_volume_offset+candidate*3;
+        int volume=texelFetch(scene_influences,entry).r;
+        int view_nodes=texelFetch(scene_influences,entry+1).r;
+        int view_count=texelFetch(scene_influences,entry+2).r;
+        vec4 appearance=texelFetch(scene_fog,volume*4);
+        vec4 low=texelFetch(scene_fog,volume*4+1), high=texelFetch(scene_fog,volume*4+2);
+        if (!fogBounds(low.xyz,high.xyz,inverse_direction,parallel,length)) continue;
+        vec4 density=vec4(appearance.rgb,1.0)/appearance.w;
+        for (int i=0;i<FOG_SLICES;++i) { slope_events[i*8+lane]=0.0; offset_events[i*8+lane]=0.0; }
+        crossingEvent(start*forward_scale,texelFetch(scene_fog,volume*4+3).x);
+        int node=0;
+        while (node<view_count) {
+            int source_node=texelFetch(scene_influences,view_nodes+node*2).r;
+            int record=int(low.w)+source_node*3;
+            vec4 node_low=texelFetch(scene_fog,record),node_high=texelFetch(scene_fog,record+1);
+            if (!fogBounds(node_low.xyz,node_high.xyz,inverse_direction,parallel,length)) {
+                node=texelFetch(scene_influences,view_nodes+node*2+1).r; continue;
+            }
+            int count=int(texelFetch(scene_fog,record+2).x);
+            for (int triangle=0;triangle<count;++triangle) {
+                int offset=int(high.w)+(int(node_low.w)+triangle)*4;
+                float crossing;
+                if (fogHit(texelFetch(scene_fog,offset).xyz,texelFetch(scene_fog,offset+1).xyz,
+                    texelFetch(scene_fog,offset+2).xyz,direction,crossing) && crossing>1.e-5 && crossing<length) {
+                    float sign=dot(texelFetch(scene_fog,offset+3).xyz,direction)>0.0 ? 1.0 : -1.0;
+                    crossingEvent(max(start,crossing)*forward_scale,sign);
+                }
+            }
+            ++node;
+        }
+        float slope=0.0,offset=0.0;
+        for (int slice=0;slice<FOG_SLICES;++slice) {
+            int address=slice*8+lane;
+            slope+=slope_events[address]; offset+=offset_events[address];
+            float t=float(slice)/float(FOG_SLICES-1);
+            float z=t*t*fog_field_range;
+            // Authored rooms can contain overlapping/non-manifold boundary
+            // sheets. Match the reference's per-volume physical path bounds;
+            // clamping only the final color cannot prevent excess density.
+            float path=clamp(slope*z+offset,0.0,max(0.0,z-start*forward_scale));
+            integrated_samples[address]+=density*path;
+        }
+    }
+    for (int slice=0;slice<FOG_SLICES;++slice) {
+        imageStore(fog_field_output,ivec3(pixel,slice),integrated_samples[slice*8+lane]);
+    }
+}
+)GLSL";

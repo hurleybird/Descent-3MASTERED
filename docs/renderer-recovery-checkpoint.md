@@ -1,5 +1,81 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## October 21 fog investigation — ACTIVE after user reset
+
+User renewed work authorization after a usage reset: continue renderer improvements,
+stop before credits. Last usage check was 1% used (99% remaining), not the old zero
+below. No subagents authorized. Main checkout/Candidate/Previous Candidate untouched.
+
+IMPORTANT: user TESTED and REJECTED the first optical-grid preview for visibly lower
+quality and shimmer at face boundaries. The reported roof discontinuity remains.
+Do not promote this prototype or claim the fog problem is solved. It is opt-in only.
+User argues a complete modern volumetric implementation may outperform the exact
+legacy conversion; agreed this is a serious candidate, not inherently too expensive.
+No shadows. Pixel equivalence may be relaxed; common-case appearance and stability
+in motion remain requirements. User was asked optionally to save the bad roof pose.
+
+New experiment: -scene-fog-field, optional -scene-fog-field-width 32..640 (default160).
+Each grid column traverses fog boundaries once, bins signed crossings into slope/
+intercept prefix events, and emits64 quadratic-depth samples. Fragment interpolation
+is LINEAR IN ACTUAL DEPTH between those slices. Grid sampling replaces per-fragment
+BVH traversal. Shared workgroup storage8x1 avoids large local-array spills. NO temporal
+reprojection/jitter/reconstruction: this omission is a known reason not to ship it.
+Sources: renderer/SceneFogShaders.h, gl_scene.cpp, gl_local.h; ShaderProgram compute
+link support gl_shared.h/gl_shader.cpp. -scene-camera-pitch degrees is a capture-only
+view fixture in ScenePresentation.cpp. Default renderer still uses original integrator.
+
+Stable USER PREVIEW copy (do not overwrite while testing):
+C:\tmp\D3RendererVerification\fog-field-preview-20261021
+Launch Fog Preview.cmd starts save002 with grid160; Launch Reference Fog.cmd uses
+same executable without grid (rewrite reference, NOT pre-rewrite renderer).
+Preview SHA256 CCC3863D64BCE8EBC0DB7B2AD20F5C46B4FCCF96349519F7972971DDCED39BB1.
+Preview predates per-volume path clamping fix below. No desktop files created.
+Do not benchmark while user game process runs. Three ff-bound* AUDIT captures
+overlapped user preview: use numerical results/images only, NEVER their timings.
+
+First same-binary fresh measurements (90frames, NoMarkers, avg15..84):
+ff-ref002 CPU1.70 GPU2.52; ff-first002 CPU1.77 GPU.93; shared storage ffs-first002
+CPU1.71 GPU.83. ff-ref007 CPU1.39 GPU1.80; ff-first007 CPU1.30 GPU.81;
+ffs-first007 CPU1.34 GPU.77. Preliminary only, not qualified benchmarks.
+Width80 ff80-first002 GPU.494,007.489; NOT visually qualified or offered as default.
+First001 GPU1.05;006 .92. IMPORTANT006 has ZERO interior fog volumes and exterior=0;
+its regression is separate, despite earlier summaries grouping it with fog scenes.
+First160 images vs ga refs:002 meanRGB.230,max12;001 .460,max8;007 .041,max3;006exact.
+Static small differences did NOT predict the user's visible shimmer. Motion QA required.
+
+GPU numerical audit -scene-fog-field-audit reads512actual texels and compares against
+independent CPU double-precision fogSegmentLength. Initial002 maxerror .005872 was
+because grid omitted reference per-volume clamp(path,0,ray interval). Current source
+restores clamp per volume, using scalar events and accumulated color samples. Audits:
+ff-bound002 max1.28e-6,0012.08e-6,0071.34e-7. Final shader output not performance-tested
+after this correction. Audit never belongs in timing captures. Initial ff-audit002
+was stopped after audit failed; no screenshot. Later ff-audit2-* only diagnosed it.
+
+Current isolated benchmark runtime scene-view-test exe matches latest fog-boundary
+build/PDB, including clamp/audit/pitch fixture. Tests PASS out/fog-field-tests.log;
+latest build PASS out/fog-boundary-build.log. Unrelated lib/gitinfo.h remains untracked.
+No user preview mutation after delivery. No active capture or build at this checkpoint.
+
+Roof investigation: -scene-fog-boundary-audit logs geometric containment vs view.room,
+room convexity and nonplanar faces. fog-roof20 and fog-roof60 are save002 captures
+with pitch20/60 and REFERENCE fog (not grid). Both ceilings still fogged; not yet exact
+reported bad pose. Main eye2675.83887,-264.354462,3646.73877 room188, fogvolume21,
+membership=contains=1,depth200,boundary1452triangles, rooms184/188/189/190. These rooms
+are very non-convex (room188308/311face planes violated), so a single convex hull/box
+is not an adequate replacement. Several authored faces elsewhere are nonplanar.
+Looking upward admits many fog components behind opaque geometry into the optical
+cone; current traversal does not use surface depth to reject whole-view candidates.
+
+Research correction: old renderer is NOT just a single fog-plane algorithm.
+SetupRoomFog retains that older path, but BeginRoomMaterialFog/PrepareRoomFogEntryMap
+and generic.frag RoomFogAmount use rasterized portal entry-depth maps. Must trace
+actual executed path before attributing the roof fault to old plane-selection code.
+Modern references inspected: Epic volumetric fog docs (low-res grid plus jitter and
+temporal reprojection), Epic local fog volumes docs (analytical integrals), Wronski
+SIGGRAPH2014 publication page, Frostbite SIGGRAPH2015 abstract, Flax volumetric docs
+and shader snippets (density/scattering temporal filtering BEFORE final integration).
+Do not merely blur the accumulated optical field to hide unresolved room geometry.
+
 ## October 21 resumed work — supersedes restart pause below
 
 STOPPED AT INCLUDED USAGE 0% (tool reported100% used). User allows only a small

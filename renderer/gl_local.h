@@ -154,6 +154,7 @@ class GL4Renderer : public IRenderer
 		GLint scene_reflections = -1;
 		GLint specular_texture = -1;
 		GLint scene_fog = -1;
+		GLint fog_field_range = -1;
 		GLint surface_prepass = -1;
 		GLint scene_occlusion_enabled = -1;
 		GLint scene_occlusion = -1;
@@ -194,6 +195,10 @@ class GL4Renderer : public IRenderer
 	std::unordered_map<uint64_t, SceneReflectionRanges> scene_reflection_assets;
 	d3scene::RetainedDependencies<uint64_t> scene_reflection_dependencies;
 	GLuint scene_fog_buffer = 0, scene_fog_texture = 0;
+	ShaderProgram scene_fog_field_shader;
+	GLint scene_fog_field_range = -1;
+	GLuint scene_fog_field_texture = 0;
+	int scene_fog_field_width = 0, scene_fog_field_height = 0;
 	d3scene::AssetId scene_fog_id;
 	struct SceneDepthSnapshot {
 		GLuint texture = 0, framebuffer = 0;

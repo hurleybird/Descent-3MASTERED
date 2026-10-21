@@ -769,6 +769,14 @@ d3scene::VisibilityReport RenderGameSceneView(const d3scene::Presentation& frame
             view.exterior_origin = true;
         }
     }
+    const int pitch_arg = FindArg("-scene-camera-pitch");
+    if (pitch_arg && AutomatedCaptureFrameIndex() >= 0 && GetArg(pitch_arg+1)) {
+        const float angle = float(std::atof(GetArg(pitch_arg+1)))*.01745329252f;
+        const float c = std::cos(angle),s = std::sin(angle);
+        const auto up = view.camera.up,forward = view.camera.forward;
+        view.camera.up = {up.x*c-forward.x*s,up.y*c-forward.y*s,up.z*c-forward.z*s};
+        view.camera.forward = {forward.x*c+up.x*s,forward.y*c+up.y*s,forward.z*c+up.z*s};
+    }
     if (FindArg("-scene-history-probe")) {
         const int index = AutomatedCaptureFrameIndex();
         const float angle = .006f*index+(index >= 30 ? .35f : 0.f);

@@ -109,6 +109,7 @@ public:
 	}
 
 	void AttachSource(const char* vertexsource, const char* fragsource);
+	void AttachComputeSource(const char* source);
 	void AttachSourceFromDefiniton(ShaderDefinition& def);
 	//Attaches strings with some preprocessor statements.
 	//Defines USE_TEXTURING if textured is true.
