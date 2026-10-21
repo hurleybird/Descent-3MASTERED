@@ -24,18 +24,19 @@ void RoomSurfaces::seal(AssetId asset,uint32_t part,bool palette) {
     thread_local std::vector<uint64_t> reflections;
     unique.clear(); reflections.clear();
     const auto image = [&](ImageDependency dependency) {
-        const auto key = std::make_pair(dependency.handle,dependency.baked);
+        const auto key = std::make_tuple(dependency.handle,dependency.baked,dependency.texture);
         const auto at = std::lower_bound(unique.begin(),unique.end(),key,
-            [](const ImageDependency& a,const std::pair<int,bool>& b) { return std::make_pair(a.handle,a.baked) < b; });
-        if (at == unique.end() || std::make_pair(at->handle,at->baked) != key) unique.insert(at,std::move(dependency));
+            [](const ImageDependency& a,const std::tuple<int,bool,int>& b) { return std::make_tuple(a.handle,a.baked,a.texture) < b; });
+        if (at == unique.end() || std::make_tuple(at->handle,at->baked,at->texture) != key) unique.insert(at,std::move(dependency));
+        else if (dependency.classify_alpha) *at = dependency;
     };
     required_light_count_ = 0;
     for (const auto& surface : read()) {
         for (auto light : surface.light_indices) required_light_count_ = (std::max)(required_light_count_,uint64_t(light)+1);
         if (surface.reflection && surface.specular_strength > 0) reflections.push_back(surface.reflection->id().revision);
-        if (surface.bitmap >= 0) image({surface.bitmap,false,surface.color_image,false});
-        if (surface.specular_bitmap >= 0) image({surface.specular_bitmap,false,surface.specular_image,false});
-        if (surface.lightmap_bitmap >= 0) image({surface.lightmap_bitmap,true,surface.baked_image,surface.lightmap_wrap});
+        if (surface.bitmap >= 0) image({surface.bitmap,false,surface.color_image,surface.color_format,false,1,1,true,surface.color_texture});
+        if (surface.specular_bitmap >= 0) image({surface.specular_bitmap,false,surface.specular_image,surface.specular_format,false,1,1,true,surface.specular_texture});
+        if (surface.lightmap_bitmap >= 0) image({surface.lightmap_bitmap,true,surface.baked_image,ImageFormat::ARGB1555,surface.lightmap_wrap,surface.lightmap_u_scale,surface.lightmap_v_scale});
     }
     images_ = std::make_shared<const std::vector<ImageDependency>>(unique);
     // Drop scratch references after copying so the scratch capacity does not
@@ -82,6 +83,7 @@ void validateSurface(const SurfaceBinding& surface) {
     require(finite(surface.base_color) && finite(surface.color_modulation) && finite(surface.ambient_color) && finite(surface.ambient_direction) &&
         std::isfinite(surface.alpha) && surface.alpha >= 0 && surface.alpha <= 1 &&
         std::isfinite(surface.u_offset) && std::isfinite(surface.v_offset) &&
+        std::isfinite(surface.scroll_period.x) && std::isfinite(surface.scroll_period.y) &&
         std::isfinite(surface.texture_scale.x) && std::isfinite(surface.texture_scale.y) &&
         std::isfinite(surface.lighting_modulation) && surface.lighting_modulation >= 0 &&
         std::isfinite(surface.lightmap_u_scale) && std::isfinite(surface.lightmap_v_scale), "Invalid scene material values");
@@ -340,7 +342,7 @@ MaterialPolicy compileMaterialPolicy(const SurfaceBinding& surface, const MeshPo
     MaterialPolicy result;
     result.layer = surface.layer;
     if (surface.texture_alpha || surface.blend == BlendMode::Additive || surface.blend == BlendMode::Multiply) {
-        result.texture_alpha = surface.view_image_slot || (surface.color_image && surface.color_image->format() != ImageFormat::ARGB1555) ?
+        result.texture_alpha = surface.view_image_slot || (surface.color_image && surface.color_format != ImageFormat::ARGB1555) ?
             TextureAlpha::Continuous : TextureAlpha::Cutout;
     }
     bool fractional = surface.alpha < 1 || result.texture_alpha == TextureAlpha::Continuous || surface.soft_depth_range > 0;
@@ -360,6 +362,14 @@ const ForegroundLayer* Presentation::foreground(uint64_t identity) const {
 
 PresentationRef Presentation::freeze(const FrameData& data) {
     return complete(data);
+}
+const ImageAsset& Presentation::image(uint32_t binding) const {
+    if (!binding) throw std::invalid_argument("Absent scene image binding");
+    const auto found = std::lower_bound(data_.images.begin(),data_.images.end(),binding,
+        [](const FrameData::ImageBinding& image,uint32_t slot) { return image.binding < slot; });
+    if (found == data_.images.end() || found->binding != binding)
+        throw std::invalid_argument("Missing frame image binding");
+    return *found->asset;
 }
 PresentationRef Presentation::publish(FrameData&& data) {
     return complete(std::move(data));
@@ -399,11 +409,30 @@ PresentationRef Presentation::complete(FrameData data) {
         const auto& n = light.direction;
         require(!light.directional || std::abs(n.x*n.x+n.y*n.y+n.z*n.z-1) < .001f, "Scene light direction is not normalized");
     }
+    for (const auto& image : data.images)
+        require(image.binding && image.asset && image.asset->id().lifetime == data.scene_lifetime,"Stale image asset in frame");
+    std::sort(data.images.begin(),data.images.end(),[](const FrameData::ImageBinding& a,const FrameData::ImageBinding& b) { return a.binding < b.binding; });
+    for (size_t i = 1; i < data.images.size(); ++i)
+        require(data.images[i-1].binding != data.images[i].binding,"Duplicate frame image slot");
+    const auto validateImage = [&](uint32_t binding) -> const ImageAsset* {
+        if (!binding) return nullptr;
+        const auto found = std::lower_bound(data.images.begin(),data.images.end(),binding,
+            [](const FrameData::ImageBinding& image,uint32_t slot) { return image.binding < slot; });
+        require(found != data.images.end() && found->binding == binding,"Missing frame image binding");
+        return found->asset.get();
+    };
+    const auto validateDependency = [&](const RoomSurfaces::ImageDependency& dependency) {
+        const auto* image = validateImage(dependency.binding);
+        require(!image || !dependency.classify_alpha || image->format() == dependency.format,"Image format changed without material recompilation");
+    };
     const auto validateIndices = [&](const SurfaceBinding& surface) {
         require(!surface.reflection || surface.reflection->id().lifetime == data.scene_lifetime,"Stale reflection asset in frame");
         for (auto index : surface.light_indices) require(index < data.lights.size(), "Surface references missing emitter");
-        for (const auto& image : {surface.color_image,surface.baked_image,surface.specular_image})
-            require(!image || image->id().lifetime == data.scene_lifetime,"Stale image asset in frame");
+        for (auto image : {surface.color_image,surface.baked_image,surface.specular_image}) validateImage(image);
+        const auto* color = validateImage(surface.color_image);
+        const auto* specular = validateImage(surface.specular_image);
+        require(!color || color->format() == surface.color_format,"Image format changed without material recompilation");
+        require(!specular || specular->format() == surface.specular_format,"Specular format changed without material recompilation");
     };
     require(finite(data.sky_color),"Invalid sky color");
     require(finite(data.exterior_fog.color) && std::isfinite(data.exterior_fog.start) && std::isfinite(data.exterior_fog.end) &&
@@ -486,6 +515,7 @@ PresentationRef Presentation::complete(FrameData data) {
             // Static asset ownership was validated when this table was sealed.
             // Explicit authored emitter indices still belong to this frame.
             require(room.surfaces.requiredLightCount() <= data.lights.size(),"Surface references missing emitter");
+            for (const auto& dependency : room.surfaces.images()) validateDependency(dependency);
         }
         require(room.light_influences.empty() || room.light_influences.size() == room.surfaces.size(),"Incomplete room influences");
         for (const auto& indices : room.light_influences) for (auto index : indices)
@@ -557,7 +587,10 @@ PresentationRef Presentation::complete(FrameData data) {
                         "Incomplete instance lightmap UVs");
                     for (const auto& corner : uv) require(std::isfinite(corner.x) && std::isfinite(corner.y), "Invalid instance lightmap UVs");
                 }
-                } else require(part.surfaces.requiredLightCount() <= data.lights.size(),"Surface references missing emitter");
+                } else {
+                    require(part.surfaces.requiredLightCount() <= data.lights.size(),"Surface references missing emitter");
+                    for (const auto& dependency : part.surfaces.images()) validateDependency(dependency);
+                }
             }
         }
     }

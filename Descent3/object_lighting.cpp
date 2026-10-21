@@ -87,10 +87,16 @@ ubyte EasterEgg = 0;
 #define EASTER_EGG_TIMER (3600*4)
 
 void ReflectRay(vector*, vector*, vector*);
+namespace { uint64_t Object_lightmap_layout_revision = 1; }
+uint64_t ObjectLightmapLayoutRevision() { return Object_lightmap_layout_revision; }
+void InvalidateObjectLightmapLayouts() {
+    if (++Object_lightmap_layout_revision == 0) Error("Object lightmap layout revision exhausted");
+}
 
 // Frees all the memory associated with this objects lightmap
 void ClearObjectLightmaps(object* obj)
 {
+    InvalidateObjectLightmapLayouts();
 	if (obj->lm_object.used == 1)
 	{
 		RetainedPolymodelInvalidateLightmapObject(&obj->lm_object);
@@ -216,6 +222,7 @@ void ClearAllObjectLightmaps(int terrain)
 // Sets up the memory to be used by an object for lightmaps
 void SetupObjectLightmapMemory(object* obj)
 {
+    InvalidateObjectLightmapLayouts();
 	int Mnum, Fnum;
 	lightmap_object_face* lof;
 

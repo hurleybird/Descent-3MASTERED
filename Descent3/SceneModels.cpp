@@ -300,8 +300,11 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::FrameDat
                 (source->lighting_render_type == LRT_GOURAUD || NoLightmaps);
             // The saved per-object UV layout is not the shared model's topology.
             // Reject mismatched layouts before indexing (including destroyed-model swaps).
+            PerfMarkersBegin("Scene.Models.Layout");
             const bool baked = !NoLightmaps && source->lm_object.used && source->lighting_render_type == LRT_LIGHTMAPS &&
                 model_number == source->rtype.pobj_info.model_num && ObjectLightmapsMatchPolymodel(source);
+            PerfMarkersEnd("Scene.Models.Layout");
+            PerfMarkersBegin("Scene.Models.Pose");
             float normalized[MAX_SUBOBJECTS]{};
             const float* input = nullptr;
             if (source->rtype.pobj_info.anim_frame || model->frame_min != model->frame_max) {
@@ -311,6 +314,7 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::FrameDat
             }
             const auto pose = EvaluateModelPose(*model, input, static_cast<float>(data.simulation_time));
             const auto transforms = ComposeModelPose(*model, pose);
+            PerfMarkersEnd("Scene.Models.Pose");
             const auto old = prior.find(instance.identity);
             const d3scene::PreparedModel* history = nullptr;
             if (old != prior.end()) for (const auto& previous_variant : old->second->models)
@@ -337,18 +341,15 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::FrameDat
                     data.meshes[attachment].model_variant = static_cast<int32_t>(variant_index);
                 }
                 part.material_palette = !baked;
+                part.baked_layout_revision = baked ? ObjectLightmapLayoutRevision() : 0;
                 part.appearance_inputs = {{ambient.x,ambient.y,ambient.z,effect.alpha,effect.color.x,effect.color.y,effect.color.z,
                     float(directional),float(source->rtype.pobj_info.tmap_override),float(effect.custom_texture),float(effect.has_player_color),
                     effect.player_color.x,effect.player_color.y,effect.player_color.z,float(player_color_texture),float(part.draw)}};
                 const auto* old_part = history ? &history->parts[i] : nullptr;
                 bool reuse_materials = retain_materials && old_part && old_part->material_palette == part.material_palette &&
-                    old_part->appearance_inputs == part.appearance_inputs && old_part->surfaces.publishedFor(variant.asset->id(),uint32_t(i),part.material_palette);
-                if (reuse_materials) for (const auto& surface : old_part->surfaces) {
-                    if (surface.texture < 0) continue;
-                    const auto& texture = GameTextures[surface.texture];
-                    if ((texture.flags & (TF_ANIMATED|TF_PROCEDURAL)) || texture.slide_u || texture.slide_v) { reuse_materials = false; break; }
-                }
-                if (reuse_materials && baked && part.draw) {
+                    old_part->appearance_inputs == part.appearance_inputs && old_part->baked_layout_revision == part.baked_layout_revision &&
+                    old_part->surfaces.publishedFor(variant.asset->id(),uint32_t(i),part.material_palette);
+                if (reuse_materials && baked && part.draw && FindArg("-scene-geometry-revision-audit")) {
                     for (size_t face = 0; reuse_materials && face < asset_part.geometry.polygons.size(); ++face) {
                         const auto& source_face = source->lm_object.lightmap_faces[i][face];
                         const auto& retained = old_part->surfaces[face];
@@ -358,6 +359,7 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::FrameDat
                         for (size_t corner = 0; reuse_materials && corner < retained.baked_uvs.size(); ++corner)
                             reuse_materials = retained.baked_uvs[corner].x == source_face.u2[corner] && retained.baked_uvs[corner].y == source_face.v2[corner];
                     }
+                    if (!reuse_materials) throw std::logic_error("Object lightmap layout changed without producer invalidation");
                 }
                 if (reuse_materials) {
                     part.surfaces = old_part->surfaces;

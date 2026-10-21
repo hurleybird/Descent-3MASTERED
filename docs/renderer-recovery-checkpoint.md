@@ -2,6 +2,13 @@
 
 ## October 17 continuation (supersedes the performance status below)
 
+October 20: frame-owned image/resource bindings now preserve material tables
+across pixel updates and animation. Eight clean captures match exactly;
+5,774 contract checks pass. Fresh CPU baselines and current measurements are
+at the top of renderer-cpu-ownership-repair.md. Still slower in all eight cases.
+User has asked to continue until every CPU baseline beats pre-rewrite, without
+compromising architecture. Do not call the partial resource repair completion.
+
 Latest CPU work: see [renderer-cpu-ownership-repair.md](renderer-cpu-ownership-repair.md).
 Producer-owned image/geometry revisions and visibility-driven transient uploads
 are implemented. Dense preparation remains roughly 9–10 ms: not fixed overall.

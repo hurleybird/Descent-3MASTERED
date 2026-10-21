@@ -135,18 +135,13 @@ d3scene::FrameData ExtractGameFrame(double time, float delta, bool paused, bool 
         for (int j = 0; reuse && j < source.num_faces; ++j) {
             const auto& face = source.faces[j]; const auto& binding = cached->surfaces[j];
             if (face.tmap < 0 || face.tmap >= MAX_TEXTURES) { reuse = false; break; }
-            const auto& texture = GameTextures[face.tmap];
-            // Time-dependent materials remain on the rebuilding path until
-            // their compact update records are separated from static surfaces.
-            reuse = !(texture.flags & (TF_ANIMATED|TF_PROCEDURAL)) &&
-                !texture.slide_u && !texture.slide_v && binding.texture == face.tmap &&
+            // Texture sequences are frame resources; UV scrolling is evaluated
+            // only for submitted draws. Neither changes this surface table.
+            reuse = binding.texture == face.tmap &&
                 binding.lightmap == ((face.flags & FF_LIGHTMAP) ? face.lmi_handle : -1) &&
                 binding.special == face.special_handle && binding.portal == face.portal_num &&
                 binding.authored_flags == (face.flags & ~(FF_VISIBLE|FF_NOT_FACING|FF_TOUCHED|FF_SPEC_INVISIBLE)) &&
                 binding.light_multiple == face.light_multiple;
-            if (reuse && (face.flags & FF_DESTROYED) && (texture.flags & TF_DESTROYABLE) &&
-                texture.destroy_handle >= 0 && texture.destroy_handle < MAX_TEXTURES)
-                reuse = !(GameTextures[texture.destroy_handle].flags & (TF_ANIMATED|TF_PROCEDURAL));
         }
         if (reuse) {
             state.surfaces = cached->surfaces;

@@ -252,7 +252,10 @@ struct SurfaceBinding {
     float specular_lightmap_mix = 0, specular_alpha_strength = 1;
     float static_specular_strength = 1;
     int specular_bitmap = -1;
-    ImageAssetRef specular_image;
+    uint32_t specular_image = 0; // stable resource binding; zero means no image
+    int32_t color_texture = -1, specular_texture = -1; // authored image-sequence sources
+    Vec2 scroll_period; // seconds per UV repeat; zero disables that axis
+    float authored_alpha = 1; // pre-texture alpha, retained for format-policy changes
     RenderLayer layer = RenderLayer::World;
     bool unlit = false, two_sided = false;
     BlendMode blend = BlendMode::Solid; // non-solid modes explicitly request compositing
@@ -274,7 +277,9 @@ struct SurfaceBinding {
     Vec3 base_color{1, 1, 1};
     Vec3 color_modulation{1,1,1};
     int32_t bitmap = -1, lightmap_bitmap = -1;
-    ImageAssetRef color_image, baked_image;
+    uint32_t color_image = 0, baked_image = 0;
+    ImageFormat color_format = ImageFormat::ARGB1555;
+    ImageFormat specular_format = ImageFormat::ARGB1555;
     uint64_t view_image_slot = 0; // view-local input slot, never a global bitmap/target
     bool lightmap_wrap = false;
     float lightmap_u_scale = 1, lightmap_v_scale = 1;
@@ -334,7 +339,7 @@ struct PlanarSurface {
 // This preserves held frames even when a builder retains element references.
 class RoomSurfaces {
 public:
-    struct ImageDependency { int handle; bool baked; ImageAssetRef image; bool wrap; };
+    struct ImageDependency { int handle; bool baked; uint32_t binding; ImageFormat format; bool wrap; float u_scale, v_scale; bool classify_alpha = false; int texture = -1; };
 private:
     using Storage = std::vector<SurfaceBinding>;
     std::shared_ptr<Storage> values_;
@@ -440,6 +445,7 @@ struct PreparedModelPart {
     uint32_t surface_base = 0;
     bool light_influences_prepared = false;
     std::array<float,16> appearance_inputs{};
+    uint64_t baked_layout_revision = 0;
     std::vector<std::vector<uint32_t>> polygon_lights;
     const SurfaceBinding& surface(const ModelPart& asset,size_t polygon) const {
         return surfaces[material_palette ? asset.surface_for_polygon[polygon] : polygon];
@@ -628,6 +634,10 @@ struct FrameData {
     std::vector<ObjectState> objects;
     std::vector<ModelInstance> model_instances;
     std::vector<Light> lights;
+    // Per-frame immutable pixel revisions. Surface tables name stable slots,
+    // never own a pixel revision that would invalidate their material storage.
+    struct ImageBinding { uint32_t binding; ImageAssetRef asset; };
+    std::vector<ImageBinding> images;
     std::vector<CameraPerturbation> camera_perturbations;
     TerrainState terrain;
     std::vector<PreparedMesh> meshes;
@@ -647,6 +657,7 @@ public:
     // and all mutable element references; use freeze when aliases may remain.
     static PresentationRef publish(FrameData&& data);
     const FrameData& data() const { return data_; }
+    const ImageAsset& image(uint32_t binding) const;
     const ForegroundLayer* foreground(uint64_t identity) const;
     const std::unordered_map<int32_t,size_t>& roomIndices() const { return room_indices_; }
     const std::unordered_map<uint32_t,size_t>& objectIndices() const { return object_indices_; }

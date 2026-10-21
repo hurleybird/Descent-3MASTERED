@@ -147,8 +147,11 @@ struct MaterialResolution {
         return static_cast<d3scene::OcclusionClass>(result);
     }
 };
+void resolveMaterial(d3scene::SurfaceBinding&,MaterialResolution&,bool model,bool exterior);
 void prepareImages(d3scene::FrameData& data) {
     std::unordered_map<int,d3scene::ImageAssetRef> images;
+    MaterialResolution resolution(static_cast<float>(data.simulation_time));
+    std::unordered_map<uint32_t,size_t> bindings;
     const auto image = [&](int handle,bool baked) -> d3scene::ImageAssetRef {
         const int slot = handle+(baked ? MAX_BITMAPS : 0);
         const auto found = images.find(slot);
@@ -191,34 +194,75 @@ void prepareImages(d3scene::FrameData& data) {
         images.emplace(slot,asset);
         return asset;
     };
+    const auto sample = [&](int handle,bool baked,int texture = -1) -> d3scene::FrameData::ImageBinding {
+        const uint32_t key = texture >= 0 ? uint32_t(MAX_BITMAPS+MAX_LIGHTMAPS+texture+1) : uint32_t(handle+(baked ? MAX_BITMAPS : 0)+1);
+        const auto found = bindings.find(key);
+        if (found != bindings.end()) return data.images[found->second];
+        auto asset = image(texture >= 0 ? resolution.bitmap(texture) : handle,baked);
+        bindings.emplace(key,data.images.size()); data.images.push_back({key,asset});
+        return {key,std::move(asset)};
+    };
     const auto prepare = [&](d3scene::SurfaceBinding& surface) {
-        if (surface.bitmap >= 0) surface.color_image = image(surface.bitmap,false);
-        if (surface.specular_bitmap >= 0) surface.specular_image = image(surface.specular_bitmap,false);
+        if (surface.bitmap >= 0) {
+            const auto resource = sample(surface.bitmap,false,surface.color_texture);
+            surface.color_image = resource.binding; surface.color_format = resource.asset->format();
+        }
+        if (surface.specular_bitmap >= 0) {
+            const auto resource = sample(surface.specular_bitmap,false,surface.specular_texture);
+            surface.specular_image = resource.binding; surface.specular_format = resource.asset->format();
+        }
         if (surface.lightmap_bitmap >= 0) {
-            surface.baked_image = image(surface.lightmap_bitmap,true);
+            surface.baked_image = sample(surface.lightmap_bitmap,true).binding;
             surface.lightmap_wrap = (GameLightmaps[surface.lightmap_bitmap].flags & LF_WRAP) != 0;
         }
     };
-    const auto prepareTable = [&](d3scene::RoomSurfaces& table) {
+    const auto prepareTable = [&](d3scene::RoomSurfaces& table,bool model,bool exterior) {
         if (table.published()) {
             bool unchanged = true;
             for (const auto& dependency : table.images()) {
                 const bool wrap = dependency.baked && (GameLightmaps[dependency.handle].flags & LF_WRAP);
-                if (image(dependency.handle,dependency.baked) != dependency.image || wrap != dependency.wrap) { unchanged = false; break; }
+                const auto resource = sample(dependency.handle,dependency.baked,dependency.texture);
+                if (resource.binding != dependency.binding || wrap != dependency.wrap ||
+                    (dependency.classify_alpha && resource.asset->format() != dependency.format)) unchanged = false;
+                if (dependency.baked) {
+                    const auto& lm = GameLightmaps[dependency.handle];
+                    if (lm.square_res && (dependency.u_scale != float(lm.width)/lm.square_res ||
+                        dependency.v_scale != float(lm.height)/lm.square_res)) unchanged = false;
+                }
             }
             if (unchanged) return;
         }
-        // Resolve each image once, but detach room storage only when an image
-        // revision actually changes (dynamic lightmaps included).
+        // Pixel/frame changes never detach storage. A format transition may
+        // change cutout/specular policy, so it explicitly recompiles appearance.
         for (size_t face = 0; face < table.size(); ++face) {
+            const auto& input = table.read()[face];
+            if ((input.bitmap >= 0 && input.color_texture >= 0 &&
+                sample(input.bitmap,false,input.color_texture).asset->format() != input.color_format) ||
+                (input.specular_bitmap >= 0 && input.specular_texture >= 0 &&
+                sample(input.specular_bitmap,false,input.specular_texture).asset->format() != input.specular_format)) {
+                auto& changed = table[face];
+                changed.alpha = changed.authored_alpha;
+                changed.specular_strength = 0; changed.specular_bitmap = -1; changed.specular_texture = -1;
+                resolveMaterial(changed,resolution,model,exterior);
+            }
             const auto& surface = table.read()[face];
-            const auto color = surface.bitmap >= 0 ? image(surface.bitmap,false) : d3scene::ImageAssetRef{};
-            const auto specular = surface.specular_bitmap >= 0 ? image(surface.specular_bitmap,false) : d3scene::ImageAssetRef{};
-            const auto baked = surface.lightmap_bitmap >= 0 ? image(surface.lightmap_bitmap,true) : d3scene::ImageAssetRef{};
+            const auto color = surface.bitmap >= 0 ? sample(surface.bitmap,false,surface.color_texture) : d3scene::FrameData::ImageBinding{};
+            const auto specular = surface.specular_bitmap >= 0 ? sample(surface.specular_bitmap,false,surface.specular_texture) : d3scene::FrameData::ImageBinding{};
+            const auto baked = surface.lightmap_bitmap >= 0 ? sample(surface.lightmap_bitmap,true) : d3scene::FrameData::ImageBinding{};
             const bool wrap = surface.lightmap_bitmap >= 0 && (GameLightmaps[surface.lightmap_bitmap].flags & LF_WRAP);
-            if (surface.color_image != color || surface.specular_image != specular || surface.baked_image != baked || surface.lightmap_wrap != wrap) {
-                auto& changed = table[face]; changed.color_image = color; changed.specular_image = specular;
-                changed.baked_image = baked; changed.lightmap_wrap = wrap;
+            const uint32_t color_slot = color.binding;
+            const uint32_t specular_slot = specular.binding;
+            const uint32_t baked_slot = baked.binding;
+            const auto format = color.asset ? color.asset->format() : d3scene::ImageFormat::ARGB1555;
+            const auto specular_format = specular.asset ? specular.asset->format() : d3scene::ImageFormat::ARGB1555;
+            const auto* lm = surface.lightmap_bitmap >= 0 ? &GameLightmaps[surface.lightmap_bitmap] : nullptr;
+            const bool resized = lm && lm->square_res && (surface.lightmap_u_scale != float(lm->width)/lm->square_res ||
+                surface.lightmap_v_scale != float(lm->height)/lm->square_res);
+            if (surface.color_image != color_slot || surface.specular_image != specular_slot || surface.baked_image != baked_slot ||
+                surface.color_format != format || surface.specular_format != specular_format || surface.lightmap_wrap != wrap || resized) {
+                auto& changed = table[face]; changed.color_image = color_slot; changed.specular_image = specular_slot;
+                changed.baked_image = baked_slot; changed.color_format = format; changed.lightmap_wrap = wrap;
+                changed.specular_format = specular_format;
                 if (changed.lightmap_bitmap >= 0 && GameLightmaps[changed.lightmap_bitmap].square_res) {
                     const auto& lightmap = GameLightmaps[changed.lightmap_bitmap];
                     changed.lightmap_u_scale = float(lightmap.width)/lightmap.square_res;
@@ -227,8 +271,8 @@ void prepareImages(d3scene::FrameData& data) {
             }
         }
     };
-    for (auto& room : data.rooms) prepareTable(room.surfaces);
-    for (auto& object : data.model_instances) for (auto& model : object.models) for (auto& part : model.parts) prepareTable(part.surfaces);
+    for (auto& room : data.rooms) prepareTable(room.surfaces,false,room.exterior);
+    for (auto& object : data.model_instances) for (auto& model : object.models) for (auto& part : model.parts) prepareTable(part.surfaces,true,false);
     for (auto& surface : data.terrain.materials) prepare(surface);
     for (auto& mesh : data.meshes) prepare(mesh.surface);
 }
@@ -302,7 +346,7 @@ void logPreparedModels(const d3scene::FrameData& data) {
 // One material resolver for all prepared mesh surfaces. Source-domain rules
 // are explicit authoring conventions, not state inferred from a draw call.
 void resolveMaterial(d3scene::SurfaceBinding& surface, MaterialResolution& resolution, bool model, bool exterior = false) {
-    const float time = resolution.time;
+    surface.authored_alpha = surface.alpha;
     if (surface.texture >= 0) { // flat/baked-only surfaces are not tied to a source geometry domain
     if (surface.texture >= MAX_TEXTURES || !GameTextures[surface.texture].used)
         Error("Scene material references missing texture %d", surface.texture);
@@ -316,8 +360,9 @@ void resolveMaterial(d3scene::SurfaceBinding& surface, MaterialResolution& resol
         Error("Scene material references missing base texture %d", base_texture);
     const auto& texture = GameTextures[base_texture];
     surface.bitmap = resolution.bitmap(base_texture);
-    surface.u_offset = authored.slide_u ? std::fmod(time / authored.slide_u, 1.f) : 0;
-    surface.v_offset = authored.slide_v ? std::fmod(time / authored.slide_v, 1.f) : 0;
+    surface.color_texture = base_texture;
+    surface.scroll_period = {authored.slide_u,authored.slide_v};
+    surface.u_offset = surface.v_offset = 0;
     surface.alpha *= texture.alpha;
     surface.blend = (texture.flags & TF_SATURATE) ? d3scene::BlendMode::Additive : d3scene::BlendMode::Solid;
     // Room 4444 textures historically carry specular masks, while model alpha
@@ -340,6 +385,7 @@ void resolveMaterial(d3scene::SurfaceBinding& surface, MaterialResolution& resol
                 (Render_preferred_state.per_pixel_lighting && Render_per_pixel_field_static_specular));
             if (authored_path || generated_path) {
             surface.specular_bitmap = specular_bitmap;
+            surface.specular_texture = specular_texture;
             const float exponent = (specular.flags & TF_PLASTIC) ? 14.f : ((specular.flags & TF_MARBLE) ? 4.f : 6.f);
             surface.specular_exponent = (std::max)(1.f,(std::min)(128.f,std::floor(exponent*ConfigNormalizePerPixelSpecularSharpness(Render_per_pixel_specular_sharpness)+.5f)));
             surface.specular_strength = Render_per_pixel_specular_strength*specular.reflectivity*1.5f;
@@ -392,7 +438,7 @@ void PrepareGameInspectionBanner(d3scene::FrameData& data) {
 d3scene::PresentationRef PrepareGamePresentation() {
     PERF_MARKER_SCOPE("Scene.PreparePresentation");
     static d3scene::PresentationRef previous_models;
-    const bool retain_rooms = roomMaterialInputsUnchanged();
+    const bool retain_rooms = [&] { PERF_MARKER_SCOPE("Scene.MaterialInputs"); return roomMaterialInputsUnchanged(); }();
     if (!retain_rooms) ResetSplitSpecularTexturePairCache();
     const unsigned int simulation_random = ps_rand_get_state();
     auto data = [&] { PERF_MARKER_SCOPE("Scene.Extract"); return ExtractGameFrame(Gametime, Frametime, Game_paused,true,

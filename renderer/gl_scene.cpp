@@ -1178,12 +1178,14 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::Presentat
         record[47] = float(surface.directional_ambient);
         record[65] = float(!item.model && !item.mesh && !item.terrain &&
             presentation.data().rooms[item.room_index].uses_room_illumination ? presentation.data().rooms[item.room_index].light_scalar : surface.lighting_modulation);
-        record[73] = float(surface.color_image != nullptr || surface.view_image_slot != 0);
-        record[74] = float(surface.baked_image != nullptr);
+        record[73] = float(surface.color_image != 0 || surface.view_image_slot != 0);
+        record[74] = float(surface.baked_image != 0);
         record[75] = float(surface.material.texture_alpha != d3scene::TextureAlpha::Ignore);
         record[76] = float(surface.material.alpha_cutoff);
         record[60] = float(surface.lightmap_u_scale); record[61] = float(surface.lightmap_v_scale);
-        record[58] = float(surface.u_offset); record[59] = float(surface.v_offset);
+        const float time = float(presentation.data().simulation_time);
+        record[58] = surface.u_offset+(surface.scroll_period.x ? std::fmod(time/surface.scroll_period.x,1.f) : 0.f);
+        record[59] = surface.v_offset+(surface.scroll_period.y ? std::fmod(time/surface.scroll_period.y,1.f) : 0.f);
         record[56] = float(surface.texture_scale.x); record[57] = float(surface.texture_scale.y);
         { const auto value = surface.raster_stripe; record[48] = value.x; record[49] = value.y; record[50] = value.z; }
         record[51] = float(surface.alpha);
@@ -1405,7 +1407,7 @@ void main() {
         if ((surface.bitmap >= 0 && !surface.color_image) || (surface.lightmap_bitmap >= 0 && !surface.baked_image) ||
             (surface.specular_bitmap >= 0 && !surface.specular_image))
             Error("Scene surface reached execution without prepared image assets");
-        if (surface.color_image) BindSceneImage(*surface.color_image,0,surface.texture_wrap,false);
+        if (surface.color_image) BindSceneImage(presentation.image(surface.color_image),0,surface.texture_wrap,false);
         const auto bind_view_image = [&](uint64_t slot,int unit) -> const SceneViewImageGpu& {
             const auto found = scene_view_images.find(d3scene::viewImageSource(view,slot));
             if (found == scene_view_images.end() || found->second.sequence != presentation.data().sequence)
@@ -1430,8 +1432,8 @@ void main() {
             scene_shader.Use();
             glUniformMatrix4fv(scene_shader.FindUniform("planar_projection"),1,GL_FALSE,image.matrices.view_projection.data());
         }
-        if (surface.baked_image) BindSceneImage(*surface.baked_image,1,surface.lightmap_wrap,true);
-        if (surface.specular_image) BindSceneImage(*surface.specular_image,8,surface.texture_wrap,false);
+        if (surface.baked_image) BindSceneImage(presentation.image(surface.baked_image),1,surface.lightmap_wrap,true);
+        if (surface.specular_image) BindSceneImage(presentation.image(surface.specular_image),8,surface.texture_wrap,false);
         scene_shader.Use();
         glBindBufferRange(GL_UNIFORM_BUFFER,7,scene_draw_buffer,item_index*record_bytes,22*16);
         if(surface.material.blended()) {

@@ -33,6 +33,9 @@ void ClearObjectLightmaps (object *obj);
 // Returns false when an object's authored lightmap layout no longer matches
 // the polymodel currently assigned to it.
 bool ObjectLightmapsMatchPolymodel(const object *obj);
+// Authored UV/layout mutations, not dynamic changes to lightmap pixels.
+uint64_t ObjectLightmapLayoutRevision();
+void InvalidateObjectLightmapLayouts();
 
 // Sets up the memory to be used by an object for lightmaps
 void SetupObjectLightmapMemory (object *obj);

@@ -60,10 +60,10 @@ int runSceneImageTests() {
     MeshPolygon polygon; polygon.corners.resize(3);
     auto policy = compileMaterialPolicy(surface,polygon);
     check(!policy.blended() && policy.writesSolidDepth() && !policy.allowsBehind(),"Opaque material policy");
-    surface.texture_alpha = true; surface.color_image = image;
+    surface.texture_alpha = true; surface.color_image = image->id().slot+1; surface.color_format = image->format();
     policy = compileMaterialPolicy(surface,polygon);
     check(policy.texture_alpha == TextureAlpha::Cutout && policy.writesSolidDepth() && policy.allowsBehind(),"Cutout lost solid-depth participation");
-    surface.color_image = truecolor;
+    surface.color_image = truecolor->id().slot+1; surface.color_format = truecolor->format();
     policy = compileMaterialPolicy(surface,polygon);
     check(policy.texture_alpha == TextureAlpha::Continuous && policy.blend == BlendMode::Alpha && !policy.writesSolidDepth(),"Fractional texture alpha classified opaque");
     surface.texture_alpha = false;
@@ -75,7 +75,7 @@ int runSceneImageTests() {
     surface.blend = BlendMode::Multiply;
     policy = compileMaterialPolicy(surface,polygon);
     check(policy.blend == BlendMode::Multiply && policy.blended() && !policy.writesSolidDepth(),"Multiply material lost compositing/depth semantics");
-    surface.blend = BlendMode::Alpha; surface.color_image.reset();
+    surface.blend = BlendMode::Alpha; surface.color_image = 0;
     check(compileMaterialPolicy(surface,polygon).blended(),"Explicit alpha compositor became a depth-writing opaque material");
     surface.blend = BlendMode::Solid; surface.alpha = .9999f;
     check(compileMaterialPolicy(surface,polygon).blended(),"Almost-opaque alpha incorrectly wrote solid depth");
@@ -93,7 +93,44 @@ int runSceneImageTests() {
     policy = compileMaterialPolicy(surface,polygon);
     check(!policy.blended() && !policy.testsDepth() && !policy.writesDepth() && policy.requiresLatePass(),
         "Foreground no-depth policy was inferred from color blending");
+    // Pixel revisions belong to frames, not to retained surface storage.
+    FrameData frame;
+    frame.sequence = 1; frame.scene_lifetime = assets.lifetime(); frame.images = {{44,truecolor}};
+    MeshGeometry triangle;
+    triangle.vertices = {{0,0,0},{1,0,0},{0,1,0}};
+    MeshPolygon face; face.normal = {0,0,1}; face.corners = {{0},{1},{2}};
+    triangle.polygons.push_back(face);
+    RoomState room; room.number = 0; room.asset = assets.publishRoom(0,std::move(triangle));
+    room.surfaces.resize(1); room.surfaces[0].color_image = 44;
+    room.surfaces[0].color_format = truecolor->format(); room.surfaces[0].bitmap = 43;
+    frame.rooms.push_back(std::move(room));
+    const auto first = Presentation::freeze(frame);
+    rgba[0] = 99;
+    const auto updated_pixels = assets.publishImage(43,source);
+    auto next = first->data(); next.sequence = 2; next.images = {{44,updated_pixels}};
+    const auto second = Presentation::publish(std::move(next));
+    check(&first->data().rooms[0].surfaces.read() == &second->data().rooms[0].surfaces.read(),
+        "Pixel update detached stable surface storage");
+    check(first->image(44).mips()[0].pixels[0] == 7 && second->image(44).mips()[0].pixels[0] == 99,
+        "Frame image revisions did not preserve held-frame isolation");
+    auto missing = second->data(); missing.images.clear();
+    rejects([&] { Presentation::freeze(missing); });
+    auto duplicate = second->data(); duplicate.images.push_back({44,updated_pixels});
+    rejects([&] { Presentation::freeze(duplicate); });
+    rejects([&] { first->image(999); });
+    auto animated = second->data();
+    const auto next_image_slot = assets.publishImage(45,source);
+    animated.images = {{44,next_image_slot}};
+    const auto animation_frame = Presentation::freeze(animated);
+    check(animation_frame->image(44).id().slot == 45 &&
+        &animation_frame->data().rooms[0].surfaces.read() == &second->data().rooms[0].surfaces.read(),
+        "Image sequence advancement changed stable material storage");
+    auto wrong_format = animated;
+    wrong_format.rooms[0].surfaces[0].color_format = ImageFormat::ARGB4444;
+    rejects([&] { Presentation::freeze(wrong_format); });
     assets.reset();
+    auto stale = second->data(); stale.scene_lifetime = assets.lifetime();
+    rejects([&] { Presentation::freeze(stale); });
     check(!assets.image(42) && image->mips()[0].width == 2,"Scene reset invalidated held image");
     check(assets.publishImage(43,source)->id().lifetime != truecolor->id().lifetime,"Image slot reuse inherited old lifetime");
     return checks;

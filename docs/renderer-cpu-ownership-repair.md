@@ -1,5 +1,47 @@
 # CPU ownership repair — October 17, 2026
 
+## October 20 continuation
+
+Frame-owned image bindings replace surface-owned pixel revisions. Surface
+tables keep stable resource names; each frame owns the immutable images bound
+to them. Texture animation selects the frame image once per resource; scrolling
+UVs are evaluated only for submitted surfaces. Pixel changes and ordinary
+animation no longer detach/revalidate/recompile whole material tables. Image
+format changes still recompile affected material policy and publication rejects
+stale format metadata. Held-frame/image-sequence isolation tests cover this.
+Authored object lightmap layouts now have a producer revision (setup/free),
+with explicit invalidation for future writers. The geometry audit still compares
+all UVs; ordinary frames retain them. The model/layout compatibility check that
+protects model swaps and the Level 2 regression remains in place.
+
+Fresh paired 720p clean captures, render CPU mean ms over frames 15–84:
+
+| Save | Pre-rewrite | Start of October 20 | Resource separation |
+| --- | ---: | ---: | ---: |
+| 000 | 1.65 | 11.02 | 7.56 |
+| 001 | 1.76 | 9.12 | 5.05 |
+| 002 | 2.61 | 13.63 | 8.85 |
+| 003 | 2.93 | 11.80 | 8.83 |
+| 004 | 0.91 | 2.57 | 2.00 |
+| 005 | 1.15 | 11.90 | 7.09 |
+| 006 | 0.98 | 2.81 | 2.35 |
+| 007 | 1.32 | 11.28 | 8.64 |
+
+No case beats the pre-rewrite CPU baseline. These are whole CPU render times,
+not preparation substages. Evidence: `cpu-baselines-20261020-savegNNN-{old,new}`
+and `cpu-resources-20261020-savegNNN` under the verification directory.
+All eight resource-separation screenshots match the start-of-day rewrite
+screenshots exactly outside the banner. This is not old-renderer visual parity.
+
+5,774 contract checks pass. Eight AO/bloom runs with image and geometry audits
+complete (`cpu-resources-20261020-effects-savegNNN`). Independent-view image,
+deformation and resource-transition fixture completes with both audits
+(`cpu-resources-20261020-viewprobe`); screenshot visually inspected.
+Whole-level model preparation remains expensive. Continuing there; no shadows,
+gameplay qualification, Candidate mutation or main-checkout edits.
+
+The sections below describe the preceding checkpoint.
+
 This is a partial repair, not a claim that the renderer is fast or qualified
 for gameplay. Main checkout, Candidate and Previous Candidate are untouched.
 
