@@ -386,6 +386,7 @@ public:
     bool published() const { return publication_.revision != 0; }
     bool publishedForRoom(AssetId asset,const std::vector<PlanarSurface>& planar) const;
     const std::vector<ImageDependency>& images() const { static const std::vector<ImageDependency> empty; return images_ ? *images_ : empty; }
+    const std::shared_ptr<const std::vector<ImageDependency>>& imageDependencies() const { return images_; }
     const std::vector<uint64_t>& reflections() const { static const std::vector<uint64_t> empty; return reflections_ ? *reflections_ : empty; }
     uint64_t requiredLightCount() const { return required_light_count_; }
     size_t size() const { return read().size(); }
@@ -471,25 +472,25 @@ struct PreparedModelPart {
 class ModelParts {
     using Storage = std::vector<PreparedModelPart>;
     std::shared_ptr<Storage> values_;
-    bool sealed_ = false;
+    AssetId publication_;
     Storage& edit() {
         if (!values_) values_ = std::make_shared<Storage>();
-        else if (sealed_ || values_.use_count() != 1) values_ = std::make_shared<Storage>(*values_);
-        sealed_ = false; return *values_;
+        else if (publication_.revision || values_.use_count() != 1) values_ = std::make_shared<Storage>(*values_);
+        publication_ = {}; return *values_;
     }
-    void seal() { sealed_ = true; }
+    void seal(AssetId asset) { publication_ = asset; }
     friend class Presentation;
 public:
     ModelParts() = default;
-    ModelParts(const ModelParts& other) : values_(!other.values_ || other.sealed_ ? other.values_ :
-        std::make_shared<Storage>(*other.values_)),sealed_(other.sealed_) {}
+    ModelParts(const ModelParts& other) : values_(!other.values_ || other.publication_.revision ? other.values_ :
+        std::make_shared<Storage>(*other.values_)),publication_(other.publication_) {}
     ModelParts& operator=(const ModelParts& other) { if (this != &other) { ModelParts copy(other); *this = std::move(copy); } return *this; }
     ModelParts(ModelParts&&) = default;
     ModelParts& operator=(ModelParts&&) = default;
     const Storage& read() const { static const Storage empty; return values_ ? *values_ : empty; }
     size_t size() const { return read().size(); }
     bool empty() const { return read().empty(); }
-    bool published() const { return sealed_; }
+    bool publishedFor(AssetId asset) const { return publication_.revision && publication_ == asset; }
     const PreparedModelPart& operator[](size_t i) const { return read()[i]; }
     PreparedModelPart& operator[](size_t i) { return edit()[i]; }
     auto begin() const { return read().begin(); }
@@ -497,7 +498,7 @@ public:
     auto begin() { return edit().begin(); }
     auto end() { return edit().end(); }
     const PreparedModelPart* data() const { return read().data(); }
-    void clear() { values_.reset(); sealed_ = false; }
+    void clear() { values_.reset(); publication_ = {}; }
     void reserve(size_t n) { edit().reserve(n); }
     void resize(size_t n) { edit().resize(n); }
     void push_back(PreparedModelPart value) { edit().push_back(std::move(value)); }
@@ -709,6 +710,16 @@ struct FrameData {
     ExteriorFog exterior_fog;
 };
 
+struct SceneIndexSpan {
+    const uint32_t* first = nullptr;
+    size_t count = 0;
+    const uint32_t* begin() const { return first; }
+    const uint32_t* end() const { return count ? first+count : first; }
+};
+struct SceneCollection {
+    SceneIndexSpan models,meshes;
+    bool has_receivers = false;
+};
 class Presentation final {
 public:
     // Copies at the publication boundary so a caller retaining a mutable
@@ -723,6 +734,7 @@ public:
     // from auxiliary views never read game state or depend on the main view.
     const PreparedModel& resolvedModel(size_t instance,size_t variant) const;
     const ForegroundLayer* foreground(uint64_t identity) const;
+    SceneCollection collection(uint64_t identity) const;
     const SceneLookup<int32_t,size_t>& roomIndices() const { return room_indices_; }
     const SceneLookup<uint32_t,size_t>& objectIndices() const { return object_indices_; }
     const SceneLookup<uint64_t,size_t>& modelIndices() const { return model_indices_; }
@@ -736,6 +748,13 @@ private:
     mutable std::vector<std::unique_ptr<PreparedModel>> resolved_models_;
     SceneLookup<uint32_t,size_t> object_indices_;
     SceneLookup<uint64_t,size_t> model_indices_;
+    struct CollectionRange {
+        uint32_t model_begin = 0,model_count = 0,mesh_begin = 0,mesh_count = 0;
+        bool has_receivers = false;
+    };
+    SceneLookup<uint64_t,size_t> collection_indices_;
+    std::vector<CollectionRange> collections_;
+    std::vector<uint32_t> collection_models_,collection_meshes_;
 };
 
 } // namespace d3scene

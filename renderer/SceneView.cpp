@@ -430,7 +430,8 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
     result.history_key = view.history_key;
     const auto& rooms = frame.data().rooms;
     const bool world_content = view.collection == 0;
-    PortalVisibility spatial; spatial.rooms.resize(rooms.size());
+    const auto collection = frame.collection(view.collection);
+    PortalVisibility spatial;
     if (world_content) spatial = queryPortalVisibility(frame,view,result.camera);
     const auto& windows = spatial.rooms;
     const auto& room_indices = frame.roomIndices();
@@ -480,9 +481,10 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
     }
     const auto& owner_indices = frame.objectIndices();
     const auto& instances = frame.modelIndices();
-    std::vector<bool> model_owners(frame.data().objects.size()), visible_owners(frame.data().objects.size());
-    for (const auto& instance : frame.data().model_instances) {
-        if (instance.has_owner && instance.collection == view.collection) model_owners[owner_indices.at(instance.owner)] = true;
+    std::vector<bool> model_owners(world_content ? frame.data().objects.size() : 0), visible_owners(model_owners.size());
+    if (world_content) for (const auto index : collection.models) {
+        const auto& instance = frame.data().model_instances[index];
+        if (instance.has_owner) model_owners[owner_indices.at(instance.owner)] = true;
     }
     const auto eligible = [&](const ModelInstance& instance) {
         return instance.collection == view.collection && instance.visible && (!instance.has_owner || (frame.data().objects[owner_indices.at(instance.owner)].visible &&
@@ -499,7 +501,7 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
         if (sphereIntersects(result.camera,object.current.position,object.radius))
             result.object_indices.push_back(static_cast<uint32_t>(i));
     }
-    for (size_t i = 0; i < frame.data().model_instances.size(); ++i) {
+    for (const auto i : collection.models) {
         const auto& object = frame.data().model_instances[i];
         if (!eligible(object)) continue;
         const auto window = spatialWindow(object.room);
@@ -552,13 +554,16 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
             }
         }
     }
-    std::unordered_set<uint64_t> visible_receivers;
-    for (const auto& surface : result.surfaces) if (!surface.model && !surface.terrain && !surface.mesh)
-        visible_receivers.insert((uint64_t(surface.room_index)<<32)|surface.polygon_index);
-    for (size_t index = 0; index < frame.data().meshes.size(); ++index) {
+    static thread_local std::vector<uint64_t> visible_receivers;
+    visible_receivers.clear();
+    // Room surfaces were emitted in room/polygon order. A compact ordered list
+    // serves receiver membership without allocating a hash node per surface.
+    if (collection.has_receivers) for (const auto& surface : result.surfaces) if (!surface.model && !surface.terrain && !surface.mesh)
+        visible_receivers.push_back((uint64_t(surface.room_index)<<32)|surface.polygon_index);
+    for (const auto index : collection.meshes) {
         const auto& instance = frame.data().meshes[index];
         if (instance.collection != view.collection) continue;
-        if (instance.receiver_polygon >= 0 && !visible_receivers.count(
+        if (instance.receiver_polygon >= 0 && !std::binary_search(visible_receivers.begin(),visible_receivers.end(),
             (uint64_t(room_indices.at(instance.room))<<32)|uint32_t(instance.receiver_polygon))) continue;
         if (instance.has_owner && (excludesObject(view,instance.owner) ||
             !frame.data().objects[owner_indices.at(instance.owner)].visible)) continue;

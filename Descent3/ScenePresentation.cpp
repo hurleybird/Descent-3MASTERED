@@ -240,23 +240,23 @@ void prepareImages(d3scene::FrameData& data) {
             surface.lightmap_wrap = (GameLightmaps[surface.lightmap_bitmap].flags & LF_WRAP) != 0;
         }
     };
-    const auto tableUnchanged = [&](const d3scene::RoomSurfaces& table) {
-        if (table.published()) {
-            bool unchanged = true;
-            for (const auto& dependency : table.images()) {
+    const auto dependencyUnchanged = [&](const d3scene::RoomSurfaces::ImageDependency& dependency) {
                 const bool wrap = dependency.baked && (GameLightmaps[dependency.handle].flags & LF_WRAP);
                 const auto resource = sample(dependency.handle,dependency.baked,dependency.texture);
                 if (resource.binding != dependency.binding || wrap != dependency.wrap ||
-                    (dependency.classify_alpha && resource.asset->format() != dependency.format)) unchanged = false;
+                    (dependency.classify_alpha && resource.asset->format() != dependency.format)) return false;
                 if (dependency.baked) {
                     const auto& lm = GameLightmaps[dependency.handle];
                     if (lm.square_res && (dependency.u_scale != float(lm.width)/lm.square_res ||
-                        dependency.v_scale != float(lm.height)/lm.square_res)) unchanged = false;
+                        dependency.v_scale != float(lm.height)/lm.square_res)) return false;
                 }
-            }
-            return unchanged;
-        }
-        return false;
+        return true;
+    };
+    const auto tableUnchanged = [&](const d3scene::RoomSurfaces& table) {
+        if (!table.published()) return false;
+        bool unchanged = true;
+        for (const auto& dependency : table.images()) unchanged = dependencyUnchanged(dependency) && unchanged;
+        return unchanged;
     };
     const auto prepareTable = [&](d3scene::RoomSurfaces& table,bool model,bool exterior) {
         // Pixel/frame changes never detach storage. A format transition may
@@ -298,12 +298,54 @@ void prepareImages(d3scene::FrameData& data) {
             }
         }
     };
+    // Retain the union of immutable dependency lists, not last frame's images.
+    // Owning the lists prevents address reuse from masquerading as identity.
+    // Unpublished/edited tables are prepared independently below.
+    using Dependency = d3scene::RoomSurfaces::ImageDependency;
+    using Dependencies = std::shared_ptr<const std::vector<Dependency>>;
+    static thread_local std::vector<Dependencies> dependency_owners;
+    static thread_local std::vector<Dependency> dependencies;
+    static thread_local uint64_t dependency_lifetime = 0;
+    const auto eachTable = [&](auto&& consume) {
+        for (const auto& room : data.rooms) consume(room.surfaces);
+        for (const auto& object : data.model_instances) for (const auto& model : object.models)
+            for (const auto& part : model.parts) consume(part.surfaces);
+    };
+    size_t table_count = 0;
+    bool layout_matches = dependency_lifetime == data.scene_lifetime;
+    eachTable([&](const d3scene::RoomSurfaces& table) {
+        const auto* owner = table.published() ? table.imageDependencies().get() : nullptr;
+        if (table_count >= dependency_owners.size() || dependency_owners[table_count].get() != owner) layout_matches = false;
+        ++table_count;
+    });
+    layout_matches = layout_matches && table_count == dependency_owners.size();
+    bool dependencies_current = true;
+    { PERF_MARKER_SCOPE("Scene.Resources.DependencyLayout");
+    if (!layout_matches) {
+        dependency_owners.clear(); dependencies.clear(); dependency_owners.reserve(table_count);
+        eachTable([&](const d3scene::RoomSurfaces& table) {
+            dependency_owners.push_back(table.published() ? table.imageDependencies() : Dependencies{});
+            if (table.published()) dependencies.insert(dependencies.end(),table.images().begin(),table.images().end());
+        });
+        const auto key = [](const Dependency& d) {
+            return std::make_tuple(d.binding,d.handle,d.texture,d.baked,d.format,d.wrap,d.u_scale,d.v_scale,d.classify_alpha);
+        };
+        std::sort(dependencies.begin(),dependencies.end(),[&](const Dependency& a,const Dependency& b) { return key(a)<key(b); });
+        dependencies.erase(std::unique(dependencies.begin(),dependencies.end(),[&](const Dependency& a,const Dependency& b) {
+            return key(a)==key(b);
+        }),dependencies.end());
+        dependency_lifetime = data.scene_lifetime;
+    }
+    for (const auto& dependency : dependencies) dependencies_current = dependencyUnchanged(dependency) && dependencies_current;
+    }
     { PERF_MARKER_SCOPE("Scene.Resources.RoomImages");
-    for (auto& room : data.rooms) if (!tableUnchanged(room.surfaces)) prepareTable(room.surfaces,false,room.exterior);
+    for (auto& room : data.rooms) if (!room.surfaces.published() || (!dependencies_current && !tableUnchanged(room.surfaces)))
+        prepareTable(room.surfaces,false,room.exterior);
     }
     { PERF_MARKER_SCOPE("Scene.Resources.ModelImages");
     for (auto& object : data.model_instances) for (auto& model : object.models) for (size_t p = 0; p < model.parts.size(); ++p)
-        if (!tableUnchanged(model.parts.read()[p].surfaces)) prepareTable(model.parts[p].surfaces,true,false);
+        if (!model.parts.read()[p].surfaces.published() || (!dependencies_current && !tableUnchanged(model.parts.read()[p].surfaces)))
+            prepareTable(model.parts[p].surfaces,true,false);
     }
     { PERF_MARKER_SCOPE("Scene.Resources.OtherImages");
     for (auto& surface : data.terrain.materials) prepare(surface);
@@ -311,8 +353,8 @@ void prepareImages(d3scene::FrameData& data) {
     }
     previous_binding_count = data.images.size();
     if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
-        AutomatedCaptureLog("scene frame resources bindings=%u pixel_sources=%u revised_sources=%u",unsigned(data.images.size()),
-            unsigned(image_requests),unsigned(image_misses));
+        AutomatedCaptureLog("scene frame resources bindings=%u pixel_sources=%u revised_sources=%u dependency_tables=%u unique_dependencies=%u layout_rebuilt=%d",
+            unsigned(data.images.size()),unsigned(image_requests),unsigned(image_misses),unsigned(table_count),unsigned(dependencies.size()),!layout_matches);
 }
 // Field-wise fingerprints diagnose state-vs-pixel variation; never hash padding
 // or use diagnostic hashes as asset identities.

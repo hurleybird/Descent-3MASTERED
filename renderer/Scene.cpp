@@ -486,6 +486,13 @@ const PreparedModel& Presentation::resolvedModel(size_t instance,size_t variant)
     cached = std::move(result);
     return *cached;
 }
+SceneCollection Presentation::collection(uint64_t identity) const {
+    const auto* found = collection_indices_.find(identity);
+    if (!found) return {};
+    const auto& range = collections_[found->second];
+    return {{range.model_count ? collection_models_.data()+range.model_begin : nullptr,range.model_count},
+        {range.mesh_count ? collection_meshes_.data()+range.mesh_begin : nullptr,range.mesh_count},range.has_receivers};
+}
 PresentationRef Presentation::freeze(const FrameData& data) {
     return complete(data);
 }
@@ -709,8 +716,18 @@ PresentationRef Presentation::complete(FrameData data) {
                 for (auto light : model.light_candidates) require(light < data.lights.size(),"Missing deferred model light");
             }
             require(model.parts.size() == model.asset->geometry().parts.size(), "Incomplete object pose");
+            const bool retained_parts = model.parts.publishedFor(model.asset->id());
             for (size_t i = 0; i < model.parts.size(); ++i) {
                 const auto& part = model.parts[i];
+                if (retained_parts) {
+                    // Geometry, poses and binding shape were validated against
+                    // this exact asset at publication. Only frame-owned names
+                    // can change beneath an immutable part table.
+                    for (auto light : part.light_candidates) require(light < data.lights.size(),"Missing model light");
+                    require(part.surfaces.requiredLightCount() <= data.lights.size(),"Surface references missing emitter");
+                    for (const auto& dependency : part.surfaces.images()) validateDependency(dependency);
+                    continue;
+                }
                 require(finite(part.current) && finite(part.previous), "Invalid model instance transform");
                 const size_t vertex_count = model.asset->geometry().parts[i].geometry.vertices.size();
                 for (const auto* positions : {&part.vertices,&part.previous_vertices}) {
@@ -754,6 +771,34 @@ PresentationRef Presentation::complete(FrameData data) {
     prepared->image_slots_ = std::move(image_slots);
     prepared->object_indices_ = std::move(objects);
     prepared->model_indices_ = std::move(model_instances);
+    // Compile domain membership once. Cockpit/HUD/module views must not walk
+    // every world object and effect merely to discard their collection IDs.
+    require(prepared->data_.model_instances.size() <= UINT32_MAX && prepared->data_.meshes.size() <= UINT32_MAX,
+        "Too many scene collection members");
+    const auto domain = [&](uint64_t identity) -> CollectionRange& {
+        const auto found = prepared->collection_indices_.emplace(identity,prepared->collections_.size());
+        if (found.second) prepared->collections_.emplace_back();
+        return prepared->collections_[found.first->second];
+    };
+    for (const auto& model : prepared->data_.model_instances) ++domain(model.collection).model_count;
+    for (const auto& mesh : prepared->data_.meshes) {
+        auto& range = domain(mesh.collection); ++range.mesh_count;
+        range.has_receivers = range.has_receivers || mesh.receiver_polygon >= 0;
+    }
+    uint32_t model_begin = 0,mesh_begin = 0;
+    for (auto& range : prepared->collections_) {
+        range.model_begin = model_begin; model_begin += range.model_count; range.model_count = 0;
+        range.mesh_begin = mesh_begin; mesh_begin += range.mesh_count; range.mesh_count = 0;
+    }
+    prepared->collection_models_.resize(model_begin); prepared->collection_meshes_.resize(mesh_begin);
+    for (uint32_t i = 0; i < prepared->data_.model_instances.size(); ++i) {
+        auto& range = domain(prepared->data_.model_instances[i].collection);
+        prepared->collection_models_[range.model_begin+range.model_count++] = i;
+    }
+    for (uint32_t i = 0; i < prepared->data_.meshes.size(); ++i) {
+        auto& range = domain(prepared->data_.meshes[i].collection);
+        prepared->collection_meshes_[range.mesh_begin+range.mesh_count++] = i;
+    }
     auto& surface_count = prepared->data_.compiled_surface_count;
     surface_count = 0;
     const auto index_surface = [&](SurfaceBinding& surface) { surface.compiled_index = surface_count++; };
@@ -831,7 +876,7 @@ PresentationRef Presentation::complete(FrameData data) {
                 pose.surfaces.seal(model.asset->id(),uint32_t(part),pose.material_palette);
                 }
             }
-            model.parts.seal();
+            model.parts.seal(model.asset->id());
         }
     }
     prepared->resolved_models_.resize(resolved_index);

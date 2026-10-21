@@ -264,6 +264,14 @@ int runModelSceneTests() {
     rejects([&] { Presentation::freeze(malformed); });
     malformed = frame->data(); malformed.model_instances[0].models[0].parts[0].surfaces[0].alpha = std::numeric_limits<float>::quiet_NaN();
     rejects([&] { Presentation::freeze(malformed); });
+    malformed = frame->data(); malformed.model_instances[0].models[0].parts[0].current.position.x = std::numeric_limits<float>::quiet_NaN();
+    rejects([&] { Presentation::freeze(malformed); });
+    auto replacement_geometry = modelGeometry();
+    replacement_geometry.parts[0].geometry.vertices.push_back({2,0,0});
+    replacement_geometry.parts[0].geometry.vertex_normals.push_back({0,0,-1});
+    replacement_geometry.parts[0].geometry.polygons[0].corners.push_back({3});
+    malformed = frame->data(); malformed.model_instances[0].models[0].asset = assets.publishModel(82,replacement_geometry);
+    rejects([&] { Presentation::freeze(malformed); }); // a sealed table is a proof only for its exact asset
     auto motion_data = frame->data();
     malformed = frame->data();
     malformed.model_instances[0].models[0].parts[0].surfaces[0].occlusion_class = static_cast<OcclusionClass>(255);
@@ -513,6 +521,25 @@ int runModelSceneTests() {
         rejects([&] { Presentation::freeze(invalid); });
         invalid = deferred; invalid.model_instances[0].models[0].deformation = std::numeric_limits<float>::infinity();
         rejects([&] { Presentation::freeze(invalid); });
+    }
+    {
+        auto partitioned = frame->data();
+        partitioned.model_instances[0].collection = UINT64_MAX;
+        partitioned.model_instances[1].collection = 13;
+        PreparedMesh mesh; mesh.asset = assets.quadMesh(); mesh.world.position.z = 12;
+        mesh.collection = 13; partitioned.meshes.push_back(mesh);
+        mesh.collection = UINT64_MAX; partitioned.meshes.push_back(mesh);
+        mesh.collection = 13; partitioned.meshes.push_back(mesh);
+        const auto packed = Presentation::freeze(partitioned);
+        const auto first = packed->collection(13), second = packed->collection(UINT64_MAX);
+        check(first.models.count == 1 && first.models.first[0] == 1 && first.meshes.count == 2 &&
+            first.meshes.first[0] == 0 && first.meshes.first[1] == 2,"Collection partition lost original index ordering");
+        check(second.models.count == 1 && second.models.first[0] == 0 && second.meshes.count == 1 &&
+            second.meshes.first[0] == 1,"Collection partition lost a sparse/high-bit identity");
+        check(packed->collection(0).models.count == 0 && packed->collection(7).meshes.count == 0,
+            "Absent collection inherited world content");
+        partitioned.meshes[0].collection = 0;
+        check(packed->collection(13).meshes.count == 2,"Collection membership retained mutable builder state");
     }
     assets.removeModel(3);
     check(!assets.model(3) && frame->data().model_instances[0].models[0].asset == asset, "Model unload invalidated held frame");

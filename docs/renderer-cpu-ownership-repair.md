@@ -2,6 +2,22 @@
 
 ## October 20 continuation
 
+Resource preparation now retains the exact union of immutable dependency lists,
+while still resolving current texture frames and producer revisions every frame.
+The resource-layout corpus is 3.46, 2.35, 4.58, 4.67, 1.06, 3.34, 1.30, 3.56 ms.
+Fresh uninstrumented old/new pairs remain losses: dense 2.61/4.46 ms; small
+0.85/1.01 ms. These are not completion results.
+
+Collection membership is compiled into flat index spans at publication, avoiding
+world scans for cockpit/HUD queries. Decal receiver lookup uses sorted reusable
+storage, not per-face hash nodes. Model part publication proofs are asset-keyed;
+edits detach/invalidate the proof, and current-frame image/light names remain
+validated. Added membership, held-frame, edited-pose and changed-topology tests pass.
+The combined effects/auxiliary/source-audit probe matches the resource-layout
+checkpoint exactly. Collection/proof corpus timings were mixed (3.32, 2.85,
+5.57, 5.38, 1.78, 3.15, 1.38, 3.72 ms); unchanged-build repeats of dense/small
+were 4.66/1.28 ms. No overall performance win is claimed for these latter changes.
+
 Room appearance now consumes a producer epoch rather than comparing every face
 each frame. Tracked writers include texture setters, destruction, script face
 edits, lightmap/specmap clearing and save restoration. Legacy multiplayer DLLs
