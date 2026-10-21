@@ -445,6 +445,7 @@ PlanarViewPlan planPlanarViews(const Presentation& frame,const View& parent,uint
         const auto slot = visibleSurfaceBinding(frame,surface).material.planar_slot;
         if (slot) slots.insert(slot);
     }
+    if (slots.empty()) return plan;
     std::unordered_set<uint64_t> identities;
     identities.insert(parent.history_key);
     for (const auto& room : frame.data().rooms) for (const auto& group : room.mirrors) {

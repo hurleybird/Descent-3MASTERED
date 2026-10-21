@@ -831,6 +831,15 @@ template<class T> struct ModelRange {
 };
 struct FrameStoragePool;
 struct FrameCompilationStorage;
+// Derived execution data borrows part ranges owned by its presentation. It is
+// not a mutable material-authoring table and never detaches ModelParts to pose it.
+struct ResolvedModel {
+    ModelAssetRef asset;
+    SurfaceModulation modulation;
+    ModelRange<const PreparedModelPart> parts;
+    Bounds render_bounds;
+    bool has_render_bounds = false;
+};
 struct FrameData {
     uint32_t compiled_surface_count = 0, compiled_part_count = 0;
     uint64_t sequence = 0, scene_lifetime = 0;
@@ -962,7 +971,7 @@ public:
     const ImageAsset& image(uint32_t binding) const;
     // Pure derived pose, memoized for this immutable presentation. Requests
     // from auxiliary views never read game state or depend on the main view.
-    const PreparedModel& resolvedModel(size_t instance,size_t variant) const;
+    const ResolvedModel& resolvedModel(size_t instance,size_t variant) const;
     const ForegroundLayer* foreground(uint64_t identity) const;
     SceneCollection collection(uint64_t identity) const;
     const SceneLookup<int32_t,size_t>& roomIndices() const;

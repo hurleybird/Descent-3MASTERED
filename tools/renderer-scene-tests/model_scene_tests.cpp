@@ -245,6 +245,16 @@ int runModelSceneTests() {
     check(shape[0].x != other_shape[0].x || shape[1].y != other_shape[1].y,"Deformation lost instance identity");
     check(std::abs(shape[0].x+1) <= .2f && authored.parts[0].geometry.vertices[0].x == -1,"Deformation mutated or escaped authored range");
     check(deformMesh(authored.parts[0].geometry,0,3.5,42,1).empty(),"Rigid instance duplicated authored positions");
+    auto reused_shape = shape;
+    const auto* deformation_storage = reused_shape.data();
+    deformMeshInto(authored.parts[0].geometry,0,3.5,42,1,reused_shape);
+    check(reused_shape.empty(),"Reused rigid deformation retained stale vertices");
+    deformMeshInto(authored.parts[0].geometry,.2f,3.5,42,1,reused_shape);
+    check(reused_shape.data() == deformation_storage && reused_shape.size() == shape.size(),
+        "Deformation discarded reusable vertex storage");
+    for (size_t i = 0; i < shape.size(); ++i)
+        check(reused_shape[i].x == shape[i].x && reused_shape[i].y == shape[i].y && reused_shape[i].z == shape[i].z,
+            "In-place deformation changed the visual recipe");
     std::vector<size_t> corners;
     forEachTriangleCorner(4,[&](size_t corner) { corners.push_back(corner); });
     check(corners == std::vector<size_t>{0,1,2,0,2,3},"UV and position stream topology differs");
@@ -742,6 +752,21 @@ int runModelSceneTests() {
         const auto duplicated_frame = Presentation::freeze(duplicated);
         check(duplicated_frame->data().compiled_part_count == 4 && duplicated_frame->resolvedModel(1,0).parts[1].compiled_index == 3 &&
             held->resolvedModel(0,0).parts[1].compiled_index == 1,"Shared deferred bindings leaked another instance's part address");
+        for (uint64_t i = 0; i < 64; ++i) {
+            auto added = duplicated.model_instances[0]; added.identity = 1000+i; added.model_count = 0;
+            duplicated.appendModel(added,duplicated.modelsFor(0)[0]); duplicated.model_instances.push_back(added);
+        }
+        const auto many_poses = Presentation::freeze(duplicated);
+        const auto* first_pose = &many_poses->resolvedModel(0,0);
+        const auto* first_part = &first_pose->parts[0];
+        check(first_part->surfaces.data() == many_poses->data().modelsFor(0)[0].parts[0].surfaces.data(),
+            "Pose preparation detached immutable material bindings");
+        for (size_t i = 1; i < duplicated.model_instances.size(); ++i) {
+            const auto& resolved = many_poses->resolvedModel(i,0);
+            check(resolved.parts[0].compiled_index == i*2,"Packed pose cache lost instance addresses");
+            check(&many_poses->resolvedModel(0,0) == first_pose,"Resolving another pose invalidated a held model reference");
+            check(&many_poses->resolvedModel(0,0).parts[0] == first_part,"Resolving another pose invalidated a held part range");
+        }
         check(summary && summary->surface_count == 2 && summary->has_geometry && summary->drawn_parts == 3 &&
             next_frame->data().modelsFor(0)[0].parts.summary() == summary,
             "Unchanged bindings rebuilt their compiled model summary");
@@ -771,6 +796,29 @@ int runModelSceneTests() {
         check(attached.position.x == point.x && attached.position.y == point.y && attached.position.z == point.z &&
             attached.right.x == 1 && attached.up.y == 1,"Part attachment rotated its camera-facing sprite basis");
         const auto held_x = held->resolvedModel(0,0).parts[0].vertices[0].x;
+        const auto pooledPose = [&] {
+            auto input = acquireFrameData();
+            input.sequence = deferred.sequence; input.scene_lifetime = deferred.scene_lifetime;
+            input.simulation_time = deferred.simulation_time;
+            input.objects = deferred.objects; input.model_instances = deferred.model_instances;
+            input.model_variants = deferred.model_variants; input.model_pose_inputs = deferred.model_pose_inputs;
+            input.model_ambient_inputs = deferred.model_ambient_inputs;
+            return Presentation::publish(std::move(input));
+        };
+        auto pooled = pooledPose();
+        const auto* pooled_vertices = pooled->resolvedModel(0,0).parts[0].vertices.data();
+        const auto pooled_x = pooled_vertices[0].x;
+        auto other_reader = pooled;
+        pooled.reset();
+        auto concurrent = pooledPose();
+        check(concurrent->resolvedModel(0,0).parts[0].vertices.data() != pooled_vertices &&
+            other_reader->resolvedModel(0,0).parts[0].vertices[0].x == pooled_x,
+            "Pose arena was recycled while another reader held the snapshot");
+        other_reader.reset();
+        auto recycled = pooledPose();
+        check(recycled->resolvedModel(0,0).parts[0].vertices.data() == pooled_vertices &&
+            recycled->resolvedModel(0,0).parts[0].vertices[0].x == pooled_x,
+            "Released pose arena lost reusable deformation storage or retained stale geometry");
         tracks->submodel.clear(); assets.removeModel(80);
         check(held->resolvedModel(0,0).parts[0].vertices[0].x == held_x,"Held pose depended on unloaded animation");
         auto invalid = deferred;

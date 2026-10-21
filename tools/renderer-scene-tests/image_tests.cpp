@@ -331,6 +331,7 @@ int runSceneImageTests() {
     rejects([&] { empty_frame->image(0); });
     for (uint32_t i = 1; i <= 256; ++i) sparse.images.push_back({i*104729u,updated_pixels});
     sparse.images.push_back({UINT32_MAX,truecolor});
+    std::reverse(sparse.images.begin(),sparse.images.end());
     const auto sparse_frame = Presentation::freeze(sparse);
     for (const auto& binding : sparse.images)
         check(&sparse_frame->image(binding.binding) == binding.asset.get(),"Sparse frame image lookup lost a collision or high binding");

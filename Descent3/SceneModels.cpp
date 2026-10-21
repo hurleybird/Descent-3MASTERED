@@ -39,7 +39,12 @@ d3scene::Vec3 value(const vector& v) { return {v.x, v.y, v.z}; }
 d3scene::Transform value(const ModelSubmodelTransform& t) {
     return {value(t.translation), value(t.orientation.rvec), value(t.orientation.uvec), value(t.orientation.fvec)};
 }
-using RoomTable = d3scene::SceneLookup<int,const d3scene::RoomState*>;
+// The game producer's room namespace is bounded. No hash table or heap
+// allocation is needed to translate it to this preparation's owned rooms.
+using RoomTable = std::array<const d3scene::RoomState*,MAX_ROOMS>;
+const d3scene::RoomState* roomAt(const RoomTable& rooms,int number) {
+    return number >= 0 && number < MAX_ROOMS ? rooms[number] : nullptr;
+}
 void prepareFacingPart(d3scene::FrameData& frame,const d3scene::ObjectState* owner,
     const poly_model& model,size_t part_index,const d3scene::Transform& world) {
     const auto& part = model.submodel[part_index];
@@ -157,15 +162,15 @@ d3scene::ModelAmbientInput ambientInput(const object& source,const RoomTable& ro
     } else {
         if (source.lighting_render_type == LRT_STATIC ||
             !(source.lighting_render_type == LRT_GOURAUD || NoLightmaps) || !volume) return input;
-        const auto found = rooms.find(source.roomnum);
-        if (found == rooms.end() || (found->second->authored_flags & RF_EXTERNAL)) return input;
+        const auto* found = roomAt(rooms,source.roomnum);
+        if (!found || (found->authored_flags & RF_EXTERNAL)) return input;
         input.source = Source::RoomVolume;
-        input.volume = found->second->asset; input.volume_scalar = found->second->light_scalar;
+        input.volume = found->asset; input.volume_scalar = found->light_scalar;
         const auto& effect = *source.effect_info;
         if (effect.type_flags & EF_VOLUME_CHANGING) {
             input.blend_previous = true;
-            const auto old = rooms.find(effect.volume_old_room);
-            if (old != rooms.end()) { input.previous_volume = old->second->asset; input.previous_scalar = old->second->light_scalar; }
+            const auto* old = roomAt(rooms,effect.volume_old_room);
+            if (old) { input.previous_volume = old->asset; input.previous_scalar = old->light_scalar; }
             input.previous_position = value(effect.volume_old_pos); input.previous_weight = effect.volume_change_time;
         }
     }
@@ -218,10 +223,15 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::Presenta
     const bool lod_probe = SceneGeometryInspection() && FindArg("-scene-lod-probe");
     const bool deformation_probe = SceneGeometryInspection() && FindArg("-scene-deformation-probe");
     const int player_color_texture = FindTextureName("MultiColor");
-    d3scene::SceneLookup<int, d3scene::ModelAssetRef> frame_assets;
-    RoomTable rooms;
-    rooms.reserve(data.rooms.size());
-    for (const auto& room : data.rooms) rooms.emplace(room.number,&room);
+    // Reuse only lookup capacity. Every transaction discards all old entries
+    // before resolving this frame's model revisions; no mutable source is kept.
+    static thread_local d3scene::SceneLookup<int,d3scene::ModelAssetRef> frame_assets;
+    frame_assets.clear();
+    RoomTable rooms{};
+    for (const auto& room : data.rooms) {
+        if (room.number < 0 || room.number >= MAX_ROOMS) throw std::invalid_argument("Game room outside producer registry");
+        rooms[room.number] = &room;
+    }
     for (auto& owner : data.objects) {
         auto* source = ObjGet(owner.handle);
         if (!source) throw std::logic_error("Object changed during presentation preparation");

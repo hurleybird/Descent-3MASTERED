@@ -1243,7 +1243,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     for (size_t item_index = 0; item_index < visibility.surfaces.size(); ++item_index) {
         const auto& item = visibility.surfaces[item_index];
         const d3scene::SurfaceBinding* binding;
-        const d3scene::PreparedModel* resolved_model = nullptr;
+        const d3scene::ResolvedModel* resolved_model = nullptr;
         const d3scene::PreparedModelPart* resolved_part = nullptr;
         SceneMeshGpu* mesh;
         ElementRange prepared_positions(0,0);

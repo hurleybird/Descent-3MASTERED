@@ -134,9 +134,14 @@ MeshGeometry billboardRing(float inner_ratio,uint8_t inner_alpha,uint8_t outer_a
     return mesh;
 }
 std::vector<Vec3> deformMesh(const MeshGeometry& mesh,float range,double time,uint32_t owner,uint32_t part) {
-    if (!std::isfinite(range) || !std::isfinite(time)) throw std::invalid_argument("Invalid mesh deformation");
     std::vector<Vec3> positions;
-    if (range == 0) return positions;
+    deformMeshInto(mesh,range,time,owner,part,positions);
+    return positions;
+}
+void deformMeshInto(const MeshGeometry& mesh,float range,double time,uint32_t owner,uint32_t part,std::vector<Vec3>& positions) {
+    if (!std::isfinite(range) || !std::isfinite(time)) throw std::invalid_argument("Invalid mesh deformation");
+    positions.clear();
+    if (range == 0) return;
     positions.reserve(mesh.vertices.size());
     for (size_t i = 0; i < mesh.vertices.size(); ++i) {
         const float jitter = (static_cast<int>(visualNoise(time,owner,part*0x9e3779b9u+static_cast<uint32_t>(i))%1000)-500)/500.f;
@@ -144,6 +149,5 @@ std::vector<Vec3> deformMesh(const MeshGeometry& mesh,float range,double time,ui
         const auto v = mesh.vertices[i];
         positions.push_back({v.x*scale,v.y*scale,v.z*scale});
     }
-    return positions;
 }
 }

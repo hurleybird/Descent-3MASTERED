@@ -26,7 +26,10 @@ struct FrameCompilationStorage {
     SceneLookup<uint32_t,size_t> object_indices_;
     SceneLookup<uint64_t,size_t> model_indices_,collection_indices_;
     std::vector<uint32_t> image_slots_;
-    std::vector<std::unique_ptr<PreparedModel>> resolved_models_;
+    std::vector<ResolvedModel> resolved_models_;
+    std::vector<PreparedModelPart> resolved_parts_;
+    size_t resolved_part_count_ = 0;
+    std::vector<uint32_t> resolved_model_indices_;
     struct CollectionRange {
         uint32_t model_begin = 0,model_count = 0,mesh_begin = 0,mesh_count = 0;
         bool has_receivers = false;
@@ -35,8 +38,18 @@ struct FrameCompilationStorage {
     std::vector<uint32_t> collection_models_,collection_meshes_;
     void clear() {
         room_indices_.clear(); object_indices_.clear(); model_indices_.clear(); collection_indices_.clear();
-        image_slots_.clear(); resolved_models_.clear(); collections_.clear();
+        image_slots_.clear(); resolved_models_.clear(); releasePoses(); resolved_model_indices_.clear(); collections_.clear();
         collection_models_.clear(); collection_meshes_.clear();
+    }
+    void releasePoses() {
+        // Only dead snapshots enter the pool. Retain vertex buffer capacity,
+        // but never retain the frame's material owners in its spare slots.
+        for (size_t i = 0; i < resolved_part_count_; ++i) {
+            auto& part = resolved_parts_[i];
+            part.surfaces.clear();
+            part.vertices.clear(); part.previous_vertices.clear();
+        }
+        resolved_part_count_ = 0;
     }
 };
 const SceneLookup<int32_t,size_t>& Presentation::roomIndices() const { return storage_->room_indices_; }
@@ -515,13 +528,22 @@ const ForegroundLayer* Presentation::foreground(uint64_t identity) const {
 }
 
 namespace {
-void compileModelBounds(const Transform& placement,PreparedModel& model) {
-    const auto include = [](Bounds& bounds,bool& valid,Vec3 point) {
+void includeModelPoint(Bounds& bounds,bool& valid,Vec3 point) {
         require(finite(point),"Non-finite posed model position");
         if (!valid) { bounds = {point,point}; valid = true; return; }
         bounds.minimum = {std::min(bounds.minimum.x,point.x),std::min(bounds.minimum.y,point.y),std::min(bounds.minimum.z,point.z)};
         bounds.maximum = {std::max(bounds.maximum.x,point.x),std::max(bounds.maximum.y,point.y),std::max(bounds.maximum.z,point.z)};
-    };
+}
+void compilePartBounds(const Transform& placement,const ModelPart& part,PreparedModelPart& pose) {
+    pose.has_render_bounds = false;
+    if (!pose.draw || part.geometry.polygons.empty()) return;
+    const auto world = compose(placement,pose.current);
+    if (pose.vertices.empty()) {
+        pose.render_bounds = transformBounds(world,part.local_bounds); pose.has_render_bounds = true;
+    } else for (const auto vertex : pose.vertices)
+        includeModelPoint(pose.render_bounds,pose.has_render_bounds,transformPoint(world,vertex));
+}
+void compileModelBounds(const Transform& placement,PreparedModel& model) {
     model.has_render_bounds = false;
     if (model.deferred_pose) {
         const auto* summary = model.parts.publishedFor(model.asset->id()) ? model.parts.summary() : nullptr;
@@ -547,66 +569,82 @@ void compileModelBounds(const Transform& placement,PreparedModel& model) {
     }
     for (size_t index = 0; index < model.parts.size(); ++index) {
         auto& pose = model.parts[index];
-        const auto& part = model.asset->geometry().parts[index];
-        pose.has_render_bounds = false;
-        if (!pose.draw || part.geometry.polygons.empty()) continue;
-        {
-            const auto world = compose(placement,pose.current);
-            if (pose.vertices.empty()) {
-                pose.render_bounds = transformBounds(world,part.local_bounds); pose.has_render_bounds = true;
-            } else for (const auto vertex : pose.vertices)
-                include(pose.render_bounds,pose.has_render_bounds,transformPoint(world,vertex));
-        }
+        compilePartBounds(placement,model.asset->geometry().parts[index],pose);
         if (pose.has_render_bounds) {
-            include(model.render_bounds,model.has_render_bounds,pose.render_bounds.minimum);
-            include(model.render_bounds,model.has_render_bounds,pose.render_bounds.maximum);
+            includeModelPoint(model.render_bounds,model.has_render_bounds,pose.render_bounds.minimum);
+            includeModelPoint(model.render_bounds,model.has_render_bounds,pose.render_bounds.maximum);
         }
     }
 }
 }
-const PreparedModel& Presentation::resolvedModel(size_t instance,size_t variant) const {
+const ResolvedModel& Presentation::resolvedModel(size_t instance,size_t variant) const {
     const auto& object = data_.model_instances.at(instance);
     const auto& source = data_.variants(object).at(variant);
     const auto& ambient = data_.ambientFor(object);
-    if (!source.deferred_pose && ambient.source == ModelAmbientInput::Source::Constant) return source;
-    auto& cached = storage_->resolved_models_.at(source.resolved_index);
-    if (cached) return *cached;
-    auto result = std::make_unique<PreparedModel>(source);
-    result->modulation.ambient = resolveModelAmbient(ambient,object.current.position,source.modulation.ambient);
+    auto& cached = storage_->resolved_model_indices_.at(source.resolved_index);
+    if (cached != UINT32_MAX) return storage_->resolved_models_[cached];
+    ResolvedModel resolved;
+    resolved.asset = source.asset; resolved.modulation = source.modulation;
+    resolved.parts = {source.parts.data(),source.parts.size()};
+    resolved.render_bounds = source.render_bounds; resolved.has_render_bounds = source.has_render_bounds;
+    resolved.modulation.ambient = resolveModelAmbient(ambient,object.current.position,source.modulation.ambient);
     if (source.deferred_pose) {
-    const auto& animation = *source.asset->geometry().animation;
-    const auto input = [&](PoseInputRange range) { return data_.poseInputs(range).data(); };
-    const auto& rest = source.asset->geometry().rest_pose;
-    const bool current_rest = source.pose_inputs.empty() && !rest.empty();
-    const bool previous_rest = source.previous_pose_inputs.empty() && !rest.empty();
-    ModelTransforms current,previous;
-    if (!current_rest) current = ComposeModelPose(animation,EvaluateModelPose(animation,input(source.pose_inputs),float(data_.simulation_time)));
-    if (source.previous_pose_valid && !previous_rest)
-        previous = ComposeModelPose(animation,EvaluateModelPose(animation,input(source.previous_pose_inputs),float(source.previous_pose_time)));
-    const auto value = [](const ModelSubmodelTransform& t) {
-        const auto v = [](const vector& p) { return Vec3{p.x,p.y,p.z}; };
-        return Transform{v(t.translation),v(t.orientation.rvec),v(t.orientation.uvec),v(t.orientation.fvec)};
-    };
-    uint32_t surface_base = source.surface_base;
-    for (size_t i = 0; i < result->parts.size(); ++i) {
-        auto& part = result->parts[i];
-        part.compiled_index = source.part_base+uint32_t(i);
-        part.surface_base = surface_base; surface_base += uint32_t(part.surfaces.size());
-        part.has_previous = source.previous_pose_valid && (source.previous_draw_mask & (uint32_t(1)<<i));
-        part.light_influences_prepared = source.light_influences_prepared;
-        part.light_candidates = source.light_candidates;
-        part.current = current_rest ? rest[i] : value(current.submodels[i]);
-        part.previous = !source.previous_pose_valid ? part.current : previous_rest ? rest[i] : value(previous.submodels[i]);
-        const auto& geometry = source.asset->geometry().parts[i].geometry;
-        part.vertices = deformMesh(geometry,source.deformation,data_.simulation_time,source.deformation_owner,uint32_t(i));
-        part.previous_vertices = source.previous_pose_valid ?
-            deformMesh(geometry,source.previous_deformation,source.previous_pose_time,source.deformation_owner,uint32_t(i)) : part.vertices;
+        const auto& animation = *source.asset->geometry().animation;
+        const auto input = [&](PoseInputRange range) { return data_.poseInputs(range).data(); };
+        const auto& rest = source.asset->geometry().rest_pose;
+        const bool current_rest = source.pose_inputs.empty() && !rest.empty();
+        const bool previous_rest = source.previous_pose_inputs.empty() && !rest.empty();
+        ModelTransforms current,previous;
+        if (!current_rest) current = ComposeModelPose(animation,EvaluateModelPose(animation,input(source.pose_inputs),float(data_.simulation_time)));
+        if (source.previous_pose_valid && !previous_rest)
+            previous = ComposeModelPose(animation,EvaluateModelPose(animation,input(source.previous_pose_inputs),float(source.previous_pose_time)));
+        const auto value = [](const ModelSubmodelTransform& t) {
+            const auto v = [](const vector& p) { return Vec3{p.x,p.y,p.z}; };
+            return Transform{v(t.translation),v(t.orientation.rvec),v(t.orientation.uvec),v(t.orientation.fvec)};
+        };
+        auto& poses = storage_->resolved_parts_;
+        const auto begin = storage_->resolved_part_count_;
+        try {
+            const auto end = begin+source.parts.size();
+            if (poses.size() < end) poses.resize(end);
+            std::copy(source.parts.begin(),source.parts.end(),poses.begin()+begin);
+            resolved.has_render_bounds = false;
+            uint32_t surface_base = source.surface_base;
+            for (size_t i = 0; i < source.parts.size(); ++i) {
+                auto& part = poses[begin+i];
+                part.compiled_index = source.part_base+uint32_t(i);
+                part.surface_base = surface_base; surface_base += uint32_t(part.surfaces.size());
+                part.has_previous = source.previous_pose_valid && (source.previous_draw_mask & (uint32_t(1)<<i));
+                part.light_influences_prepared = source.light_influences_prepared;
+                part.light_candidates = source.light_candidates;
+                part.current = current_rest ? rest[i] : value(current.submodels[i]);
+                part.previous = !source.previous_pose_valid ? part.current : previous_rest ? rest[i] : value(previous.submodels[i]);
+                const auto& geometry = source.asset->geometry().parts[i].geometry;
+                deformMeshInto(geometry,source.deformation,data_.simulation_time,source.deformation_owner,uint32_t(i),part.vertices);
+                if (source.previous_pose_valid)
+                    deformMeshInto(geometry,source.previous_deformation,source.previous_pose_time,source.deformation_owner,uint32_t(i),part.previous_vertices);
+                else part.previous_vertices = part.vertices;
+                compilePartBounds(object.current,source.asset->geometry().parts[i],part);
+                if (part.has_render_bounds) {
+                    includeModelPoint(resolved.render_bounds,resolved.has_render_bounds,part.render_bounds.minimum);
+                    includeModelPoint(resolved.render_bounds,resolved.has_render_bounds,part.render_bounds.maximum);
+                }
+            }
+            resolved.parts = {source.parts.empty() ? nullptr : poses.data()+begin,source.parts.size()};
+            storage_->resolved_part_count_ = end;
+        } catch (...) {
+            for (size_t i = begin; i < poses.size(); ++i) {
+                poses[i].surfaces.clear();
+                poses[i].vertices.clear(); poses[i].previous_vertices.clear();
+            }
+            throw;
+        }
     }
-    result->deferred_pose = false;
-    compileModelBounds(object.current,*result);
-    }
-    cached = std::move(result);
-    return *cached;
+    // Publication reserves the maximum number of resolvable variants. Appending
+    // demanded values therefore never moves an earlier view's returned model.
+    storage_->resolved_models_.push_back(std::move(resolved));
+    cached = uint32_t(storage_->resolved_models_.size()-1);
+    return storage_->resolved_models_.back();
 }
 SceneCollection Presentation::collection(uint64_t identity) const {
     const auto* found = storage_->collection_indices_.find(identity);
@@ -654,6 +692,7 @@ Presentation::~Presentation() {
     // Drop frame-owned pose/asset references now; retain only allocation
     // capacity. Indices are reset once when the next builder compiles.
     storage_->resolved_models_.clear();
+    storage_->releasePoses();
     clean.compilation_storage_ = std::move(storage_);
     pool->spare[pool->count++] = std::move(clean);
 }
@@ -737,7 +776,8 @@ PresentationRef Presentation::complete(FrameData data) {
     unique(emitters,"Duplicate scene emitter identity");
     for (const auto& image : data.images)
         require(image.binding && image.asset && image.asset->id().lifetime == data.scene_lifetime,"Stale image asset in frame");
-    std::sort(data.images.begin(),data.images.end(),[](const FrameData::ImageBinding& a,const FrameData::ImageBinding& b) { return a.binding < b.binding; });
+    // The compiled hash index validates uniqueness and serves every lookup;
+    // canonicalizing producer order would sort the same inventory every frame.
     require(data.images.size() < UINT32_MAX/2,"Too many frame images");
     size_t image_capacity = 1;
     while (image_capacity < data.images.size()*2) image_capacity *= 2;
@@ -1025,24 +1065,6 @@ PresentationRef Presentation::complete(FrameData data) {
         patch.surface_base = surface_count; surface_count += uint32_t(count);
     }
     for (auto& mesh : prepared->data_.meshes) index_surface(mesh.surface);
-    for (auto& model : prepared->data_.model_variants) {
-        model.surface_base = surface_count;
-        model.part_base = prepared->data_.compiled_part_count;
-        require(model.parts.size() <= UINT32_MAX-model.part_base,"Too many scene model parts");
-        prepared->data_.compiled_part_count += uint32_t(model.parts.size());
-        if (model.deferred_pose && model.parts.publishedFor(model.asset->id())) {
-            require(model.parts.summary()->surface_count <= UINT32_MAX-surface_count,"Too many scene surfaces");
-            surface_count += uint32_t(model.parts.summary()->surface_count);
-            continue;
-        }
-        for (size_t p = 0; p < model.parts.size(); ++p) {
-            if (!model.deferred_pose) {
-                model.parts[p].surface_base = surface_count;
-                model.parts[p].compiled_index = model.part_base+uint32_t(p);
-            }
-            surface_count += uint32_t(model.parts.read()[p].surfaces.size());
-        }
-    }
     std::sort(prepared->data_.foregrounds.begin(),prepared->data_.foregrounds.end(),
         [](const PreparedForeground& a,const PreparedForeground& b) {
             return a.phase != b.phase ? a.phase < b.phase : a.order < b.order;
@@ -1089,6 +1111,22 @@ PresentationRef Presentation::complete(FrameData data) {
             bounds.maximum = {(std::max)(bounds.maximum.x,point.x),(std::max)(bounds.maximum.y,point.y),(std::max)(bounds.maximum.z,point.z)};
         };
         for (auto& model : prepared->data_.variants(object)) {
+            // Assign submission addresses in the same ordered walk that
+            // compiles bounds and material tables, not another whole-model pass.
+            model.surface_base = surface_count;
+            model.part_base = prepared->data_.compiled_part_count;
+            require(model.parts.size() <= UINT32_MAX-model.part_base,"Too many scene model parts");
+            prepared->data_.compiled_part_count += uint32_t(model.parts.size());
+            if (model.deferred_pose && model.parts.publishedFor(model.asset->id())) {
+                require(model.parts.summary()->surface_count <= UINT32_MAX-surface_count,"Too many scene surfaces");
+                surface_count += uint32_t(model.parts.summary()->surface_count);
+            } else for (size_t p = 0; p < model.parts.size(); ++p) {
+                if (!model.deferred_pose) {
+                    model.parts[p].surface_base = surface_count;
+                    model.parts[p].compiled_index = model.part_base+uint32_t(p);
+                }
+                surface_count += uint32_t(model.parts.read()[p].surfaces.size());
+            }
             model.resolved_index = resolved_index++;
             compileModelBounds(object.current,model);
             if (model.has_render_bounds) {
@@ -1111,7 +1149,9 @@ PresentationRef Presentation::complete(FrameData data) {
             model.parts.seal(*model.asset);
         }
     }
-    prepared->storage_->resolved_models_.resize(resolved_index);
+    prepared->storage_->resolved_models_.reserve(resolved_index);
+    prepared->storage_->resolved_parts_.reserve(prepared->data_.compiled_part_count);
+    prepared->storage_->resolved_model_indices_.assign(resolved_index,UINT32_MAX);
     return prepared;
 }
 void Presentation::requireExecutable() const {

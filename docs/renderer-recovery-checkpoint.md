@@ -2,6 +2,27 @@
 
 ## October 21 resumed work — supersedes restart pause below
 
+Latest binary pose-reuse.exe separates ResolvedModel execution data from the
+PreparedModel authoring table. Demanded parts occupy one frame-owned arena;
+dead snapshots release material owners but retain deformation buffer capacity.
+No per-demand model allocation or material-table COW clone. Tests cover stable
+model/part ranges, shared immutable bindings, buffer reuse and held-reader
+isolation. Tests/build pass; all eight images plus combined probe, mirror and
+SSAA2/MSAA4/AO/bloom EXACT to lights-*; quality image visually inspected.
+Includes bounded source room lookup/reused model lookup, unsorted image hash
+publication, combined model address/bounds walk, empty planar schedule return.
+Performance NOT a general win: reuse ABBA long render means parent/new:
+003 (1.94,1.87)/(1.91,1.97); 005 (1.47,1.30)/(1.26,1.58);
+007 (1.71,1.43)/(1.39,1.41). Substantial temporal noise remains.
+Intermediate compact/pose-values/pose-arena binaries retained for comparison;
+no separate legacy implementation in source. Current raw reuse-* and
+pose-reuse-* captures. No active captures/sampler at this checkpoint.
+Continue CPU work; do not treat this checkpoint as completion or a yield.
+
+Latest normal old/current recheck (bitmap-metadata, three90-frame rounds):
+003 new1.994 old2.512; 005 new1.194 old.960; 007 new1.389 old1.121 ms render.
+Both former misses remain misses. Raw meta-base-*. Main/Candidate untouched.
+
 Newest binary bitmap-metadata.exe. Bitmap allocation/free/format producers own
 a material revision; all 21 direct format assignments migrated to bm_SetFormat.
 Normal preparation scans the bitmap registry only after revision changes;
