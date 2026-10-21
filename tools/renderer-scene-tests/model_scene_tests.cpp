@@ -34,6 +34,8 @@ d3scene::ModelGeometry modelGeometry() {
 int runModelSceneTests() {
     using namespace d3scene;
     checks = 0;
+    check(sizeof(RoomSurfaces) == sizeof(std::shared_ptr<void>) && sizeof(ModelParts) == sizeof(std::shared_ptr<void>),
+        "Retained binding handles duplicated ownership of table metadata");
     {
         uint32_t seed = 0x42b07u;
         const auto random = [&]() { seed = seed*1664525u+1013904223u; return (int(seed>>8)-8388608)/8388608.f; };

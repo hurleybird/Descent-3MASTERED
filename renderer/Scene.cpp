@@ -20,16 +20,17 @@
 namespace d3scene {
 bool RoomSurfaces::publishedForRoom(AssetId asset,const std::vector<PlanarSurface>& planar) const {
     if (!publishedFor(asset)) return false;
-    if (!planar_) return planar.empty();
-    if (planar_->size() != planar.size()) return false;
+    if (table_->planar.size() != planar.size()) return false;
     for (size_t i = 0; i < planar.size(); ++i) {
-        const auto& a = (*planar_)[i]; const auto& b = planar[i];
+        const auto& a = table_->planar[i]; const auto& b = planar[i];
         if (a.plane.normal.x != b.plane.normal.x || a.plane.normal.y != b.plane.normal.y ||
             a.plane.normal.z != b.plane.normal.z || a.plane.constant != b.plane.constant || a.polygons != b.polygons) return false;
     }
     return true;
 }
 void RoomSurfaces::seal(AssetId asset,uint32_t part,bool palette,const std::vector<PlanarSurface>* planar) {
+    if (!table_) table_ = std::make_shared<Table>();
+    else if (table_.use_count() != 1) table_ = std::make_shared<Table>(table_->values);
     // Publication is a bulk operation. Reuse contiguous scratch storage rather
     // than allocating one tree node per image/reflection on the render thread.
     // Published tables own copies; subsequent calls cannot mutate held frames.
@@ -43,26 +44,31 @@ void RoomSurfaces::seal(AssetId asset,uint32_t part,bool palette,const std::vect
         if (at == unique.end() || std::make_tuple(at->handle,at->baked,at->texture) != key) unique.insert(at,std::move(dependency));
         else if (dependency.classify_alpha) *at = dependency;
     };
-    required_light_count_ = 0;
+    uint64_t required_light_count = 0;
     for (const auto& surface : read()) {
-        for (auto light : surface.light_indices) required_light_count_ = (std::max)(required_light_count_,uint64_t(light)+1);
+        for (auto light : surface.light_indices) required_light_count = (std::max)(required_light_count,uint64_t(light)+1);
         if (surface.reflection && surface.specular_strength > 0) reflections.push_back(surface.reflection->id().revision);
         if (surface.bitmap >= 0) image({surface.bitmap,false,surface.color_image,surface.color_format,false,1,1,true,surface.color_texture});
         if (surface.specular_bitmap >= 0) image({surface.specular_bitmap,false,surface.specular_image,surface.specular_format,false,1,1,true,surface.specular_texture});
         if (surface.lightmap_bitmap >= 0) image({surface.lightmap_bitmap,true,surface.baked_image,ImageFormat::ARGB1555,surface.lightmap_wrap,surface.lightmap_u_scale,surface.lightmap_v_scale});
     }
-    images_ = std::make_shared<const std::vector<ImageDependency>>(unique);
+    auto images = std::make_shared<const std::vector<ImageDependency>>(unique);
     // Dependency scratch contains names/metadata, never frame image ownership.
     unique.clear();
-    publication_ = asset; publication_part_ = part; publication_palette_ = palette;
     std::sort(reflections.begin(),reflections.end());
     reflections.erase(std::unique(reflections.begin(),reflections.end()),reflections.end());
-    reflections_ = std::make_shared<const std::vector<uint64_t>>(reflections.begin(),reflections.end());
-    planar_ = planar && !planar->empty() ? std::make_shared<const std::vector<PlanarSurface>>(*planar) : nullptr;
+    auto reflected = std::make_shared<const std::vector<uint64_t>>(reflections.begin(),reflections.end());
+    auto planes = planar ? *planar : std::vector<PlanarSurface>{};
+    table_->images = std::move(images); table_->reflections = std::move(reflected);
+    table_->planar = std::move(planes); table_->required_light_count = required_light_count;
+    table_->part = part; table_->palette = palette; table_->publication = asset;
 }
 void ModelParts::seal(const ModelAsset& asset) {
     if (publishedFor(asset.id())) return;
-    auto summary = std::make_shared<Summary>();
+    if (!table_) table_ = std::make_shared<Table>();
+    else if (table_.use_count() != 1) table_ = std::make_shared<Table>(table_->values);
+    Summary compiled;
+    auto* summary = &compiled;
     summary->asset = asset.id();
     std::vector<RoomSurfaces::ImageDependency> images;
     for (size_t i = 0; i < size(); ++i) {
@@ -94,7 +100,7 @@ void ModelParts::seal(const ModelAsset& asset) {
     std::sort(images.begin(),images.end(),[&](const auto& a,const auto& b) { return key(a)<key(b); });
     images.erase(std::unique(images.begin(),images.end(),[&](const auto& a,const auto& b) { return key(a)==key(b); }),images.end());
     summary->images = std::make_shared<const std::vector<RoomSurfaces::ImageDependency>>(std::move(images));
-    publication_ = std::move(summary);
+    table_->publication = std::move(compiled); table_->sealed = true;
 }
 namespace {
 std::atomic<uint64_t> NextLifetime{1};

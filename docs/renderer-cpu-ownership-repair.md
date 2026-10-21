@@ -2,6 +2,19 @@
 
 ## October 20 continuation
 
+October 21: RoomSurfaces and ModelParts now each carry one shared table owner;
+values and publication metadata have the same lifetime. Handles shrink to 16
+bytes, with no repeated metadata resets on unpublished builder access. Existing
+copy-on-write/held-frame tests pass. Build/test logs: `cpu-table-edit-*`.
+Dense/wall, combined audited multi-view probe, and SSAA2/MSAA4 outdoor images
+are pixel-exact to the preceding checkpoint. Binary: `table-edit.exe`.
+This is an ownership simplification, NOT a demonstrated timing improvement.
+Initial interleaved dense parent/current means: 2.805/2.723 ms; wall:
+1.583/1.697 ms. Follow-up after removing redundant builder invalidation:
+dense 2.668/2.670 ms; wall 1.676/1.730 ms, with substantial within-pair spread.
+Raw runs: `cpu-table-ab-*` and `cpu-table-edit-ab-*` under verification.
+Do not claim that smaller handles alone meet the performance goal.
+
 October 21: 1,800-frame wall diagnostic uncovered a pre-existing pulse-wrap
 exception at frame 859 (`Invalid room illumination`, Scene.cpp). The authored
 floating-point triangle-wave calculation can round slightly outside [0,1].

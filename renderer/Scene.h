@@ -403,61 +403,73 @@ public:
     struct ImageDependency { int handle; bool baked; uint32_t binding; ImageFormat format; bool wrap; float u_scale, v_scale; bool classify_alpha = false; int texture = -1; };
 private:
     using Storage = std::vector<SurfaceBinding>;
-    std::shared_ptr<Storage> values_;
-    AssetId publication_;
-    uint32_t publication_part_ = UINT32_MAX;
-    bool publication_palette_ = false;
-    std::shared_ptr<const std::vector<ImageDependency>> images_;
-    std::shared_ptr<const std::vector<uint64_t>> reflections_;
-    std::shared_ptr<const std::vector<PlanarSurface>> planar_;
-    uint64_t required_light_count_ = 0;
-    void edit() {
-        if (!values_) values_ = std::make_shared<Storage>();
-        if (publication_.revision || values_.use_count() != 1) values_ = std::make_shared<Storage>(*values_);
-        publication_ = {};
-        images_.reset();
-        reflections_.reset(); required_light_count_ = 0;
-        planar_.reset();
+    struct Table {
+        Storage values;
+        AssetId publication;
+        uint32_t part = UINT32_MAX;
+        bool palette = false;
+        std::shared_ptr<const std::vector<ImageDependency>> images;
+        std::shared_ptr<const std::vector<uint64_t>> reflections;
+        std::vector<PlanarSurface> planar;
+        uint64_t required_light_count = 0;
+        Table() = default;
+        explicit Table(const Storage& source) : values(source) {}
+    };
+    // One table identity owns values and their compiled metadata. Copying a
+    // published binding no longer increments a separate refcount per metadata
+    // list. Dependency collectors may still independently retain those lists.
+    std::shared_ptr<Table> table_;
+    Storage& edit() {
+        if (!table_) table_ = std::make_shared<Table>();
+        else if (published() || table_.use_count() != 1) table_ = std::make_shared<Table>(table_->values);
+        // A new/detached table contains values only. An unpublished builder
+        // never has compiled metadata to invalidate on each element access.
+        return table_->values;
     }
     void seal(AssetId asset,uint32_t part = UINT32_MAX,bool palette = false,const std::vector<PlanarSurface>* planar = nullptr);
     friend class Presentation;
 public:
     RoomSurfaces() = default;
-    RoomSurfaces(const RoomSurfaces& other) : values_(!other.values_ || other.publication_.revision ? other.values_ :
-        std::make_shared<Storage>(*other.values_)), publication_(other.publication_), publication_part_(other.publication_part_),
-        publication_palette_(other.publication_palette_), images_(other.images_), reflections_(other.reflections_), planar_(other.planar_), required_light_count_(other.required_light_count_) {}
+    RoomSurfaces(const RoomSurfaces& other) : table_(!other.table_ || other.published() ? other.table_ :
+        std::make_shared<Table>(other.table_->values)) {}
     RoomSurfaces& operator=(const RoomSurfaces& other) {
         if (this != &other) { RoomSurfaces copy(other); *this = std::move(copy); } return *this;
     }
     RoomSurfaces(RoomSurfaces&&) = default;
     RoomSurfaces& operator=(RoomSurfaces&&) = default;
     bool publishedFor(AssetId asset,uint32_t part = UINT32_MAX,bool palette = false) const {
-        return publication_.revision && publication_ == asset && publication_part_ == part && publication_palette_ == palette;
+        return published() && table_->publication == asset && table_->part == part && table_->palette == palette;
     }
-    bool published() const { return publication_.revision != 0; }
+    bool published() const { return table_ && table_->publication.revision != 0; }
     bool publishedForRoom(AssetId asset,const std::vector<PlanarSurface>& planar) const;
-    const std::vector<ImageDependency>& images() const { static const std::vector<ImageDependency> empty; return images_ ? *images_ : empty; }
-    const std::shared_ptr<const std::vector<ImageDependency>>& imageDependencies() const { return images_; }
-    const std::vector<uint64_t>& reflections() const { static const std::vector<uint64_t> empty; return reflections_ ? *reflections_ : empty; }
-    const std::shared_ptr<const std::vector<uint64_t>>& reflectionDependencies() const { return reflections_; }
-    uint64_t requiredLightCount() const { return required_light_count_; }
+    const std::vector<ImageDependency>& images() const { static const std::vector<ImageDependency> empty; const auto& images = imageDependencies(); return images ? *images : empty; }
+    const std::shared_ptr<const std::vector<ImageDependency>>& imageDependencies() const {
+        static const std::shared_ptr<const std::vector<ImageDependency>> empty;
+        return table_ ? table_->images : empty;
+    }
+    const std::vector<uint64_t>& reflections() const { static const std::vector<uint64_t> empty; const auto& reflections = reflectionDependencies(); return reflections ? *reflections : empty; }
+    const std::shared_ptr<const std::vector<uint64_t>>& reflectionDependencies() const {
+        static const std::shared_ptr<const std::vector<uint64_t>> empty;
+        return table_ ? table_->reflections : empty;
+    }
+    uint64_t requiredLightCount() const { return table_ ? table_->required_light_count : 0; }
     size_t size() const { return read().size(); }
     bool empty() const { return read().empty(); }
-    const Storage& read() const { static const Storage empty; return values_ ? *values_ : empty; }
+    const Storage& read() const { static const Storage empty; return table_ ? table_->values : empty; }
     const SurfaceBinding& operator[](size_t i) const { return read()[i]; }
-    SurfaceBinding& operator[](size_t i) { edit(); return (*values_)[i]; }
+    SurfaceBinding& operator[](size_t i) { return edit()[i]; }
     const SurfaceBinding& at(size_t i) const { return read().at(i); }
-    SurfaceBinding& at(size_t i) { edit(); return values_->at(i); }
+    SurfaceBinding& at(size_t i) { return edit().at(i); }
     Storage::const_iterator begin() const { return read().begin(); }
     Storage::const_iterator end() const { return read().end(); }
-    Storage::iterator begin() { edit(); return values_->begin(); }
-    Storage::iterator end() { edit(); return values_->end(); }
+    Storage::iterator begin() { return edit().begin(); }
+    Storage::iterator end() { return edit().end(); }
     const SurfaceBinding* data() const { return read().data(); }
-    SurfaceBinding* data() { edit(); return values_->data(); }
-    void clear() { values_.reset(); images_.reset(); reflections_.reset(); planar_.reset(); required_light_count_ = 0; publication_ = {}; }
-    void reserve(size_t n) { edit(); values_->reserve(n); }
-    void resize(size_t n) { edit(); values_->resize(n); }
-    void push_back(const SurfaceBinding& value) { edit(); values_->push_back(value); }
+    SurfaceBinding* data() { return edit().data(); }
+    void clear() { table_.reset(); }
+    void reserve(size_t n) { edit().reserve(n); }
+    void resize(size_t n) { edit().resize(n); }
+    void push_back(const SurfaceBinding& value) { edit().push_back(value); }
 };
 struct RoomState {
     int32_t number = -1;
@@ -536,27 +548,33 @@ public:
     };
 private:
     using Storage = std::vector<PreparedModelPart>;
-    std::shared_ptr<Storage> values_;
-    std::shared_ptr<const Summary> publication_;
+    struct Table {
+        Storage values;
+        Summary publication;
+        bool sealed = false;
+        Table() = default;
+        explicit Table(const Storage& source) : values(source) {}
+    };
+    std::shared_ptr<Table> table_;
     Storage& edit() {
-        if (!values_) values_ = std::make_shared<Storage>();
-        else if (publication_ || values_.use_count() != 1) values_ = std::make_shared<Storage>(*values_);
-        publication_ = {}; return *values_;
+        if (!table_) table_ = std::make_shared<Table>();
+        else if (table_->sealed || table_.use_count() != 1) table_ = std::make_shared<Table>(table_->values);
+        return table_->values;
     }
     void seal(const ModelAsset& asset);
     friend class Presentation;
 public:
     ModelParts() = default;
-    ModelParts(const ModelParts& other) : values_(!other.values_ || other.publication_ ? other.values_ :
-        std::make_shared<Storage>(*other.values_)),publication_(other.publication_) {}
+    ModelParts(const ModelParts& other) : table_(!other.table_ || other.table_->sealed ? other.table_ :
+        std::make_shared<Table>(other.table_->values)) {}
     ModelParts& operator=(const ModelParts& other) { if (this != &other) { ModelParts copy(other); *this = std::move(copy); } return *this; }
     ModelParts(ModelParts&&) = default;
     ModelParts& operator=(ModelParts&&) = default;
-    const Storage& read() const { static const Storage empty; return values_ ? *values_ : empty; }
+    const Storage& read() const { static const Storage empty; return table_ ? table_->values : empty; }
     size_t size() const { return read().size(); }
     bool empty() const { return read().empty(); }
-    bool publishedFor(AssetId asset) const { return publication_ && publication_->asset == asset; }
-    const Summary* summary() const { return publication_.get(); }
+    bool publishedFor(AssetId asset) const { return table_ && table_->sealed && table_->publication.asset == asset; }
+    const Summary* summary() const { return table_ && table_->sealed ? &table_->publication : nullptr; }
     const PreparedModelPart& operator[](size_t i) const { return read()[i]; }
     PreparedModelPart& operator[](size_t i) { return edit()[i]; }
     auto begin() const { return read().begin(); }
@@ -564,7 +582,7 @@ public:
     auto begin() { return edit().begin(); }
     auto end() { return edit().end(); }
     const PreparedModelPart* data() const { return read().data(); }
-    void clear() { values_.reset(); publication_ = {}; }
+    void clear() { table_.reset(); }
     void reserve(size_t n) { edit().reserve(n); }
     void resize(size_t n) { edit().resize(n); }
     void push_back(PreparedModelPart value) { edit().push_back(std::move(value)); }
