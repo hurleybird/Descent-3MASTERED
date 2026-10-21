@@ -18,6 +18,7 @@ struct ViewStoragePool {
         std::vector<VisibleSurface> surfaces;
         std::vector<Transform> placements;
         std::vector<uint32_t> objects,rooms;
+        ViewGeometryDemand geometry;
     };
     std::array<Buffers,4> spare;
     size_t count = 0;
@@ -30,6 +31,7 @@ ViewVisibility::ViewVisibility() {
         auto& buffers = pool->spare[--pool->count];
         surfaces.swap(buffers.surfaces); object_indices.swap(buffers.objects); room_indices.swap(buffers.rooms);
         placements.swap(buffers.placements);
+        std::swap(geometry,buffers.geometry);
     }
 }
 ViewVisibility::~ViewVisibility() {
@@ -41,6 +43,7 @@ ViewVisibility::~ViewVisibility() {
     surfaces.clear(); object_indices.clear(); room_indices.clear();
     placements.clear(); placements.swap(buffers.placements);
     surfaces.swap(buffers.surfaces); object_indices.swap(buffers.objects); room_indices.swap(buffers.rooms);
+    geometry.clear(); std::swap(geometry,buffers.geometry);
 }
 static ViewVisibility queryResolvedView(const Presentation&,const View&);
 PreparedView prepareView(const Presentation& frame,const View& request) {
@@ -542,10 +545,12 @@ static ViewVisibility queryResolvedView(const Presentation& frame,const View& vi
         const auto& room = rooms[r];
         const auto& geometry = room.asset->geometry();
         ProjectedMesh projected(result.camera,MeshView(geometry),{},windows[r],projection_scratch);
+        const auto first_surface = result.surfaces.size();
         for (size_t f = 0; f < geometry.polygons.size(); ++f) {
             if (excludesSurface(view,{room.asset->id(),static_cast<uint32_t>(f)})) continue;
             consider(MeshView(geometry),projected,{},room.surfaces[f],{static_cast<uint32_t>(r),static_cast<uint32_t>(f)});
         }
+        if (result.surfaces.size() != first_surface) result.geometry.rooms.push_back(uint32_t(r));
     }
     static thread_local std::vector<bool> model_owners,visible_owners;
     model_owners.assign(world_content ? frame.data().objects.size() : 0,false);
@@ -584,12 +589,14 @@ static ViewVisibility queryResolvedView(const Presentation& frame,const View& vi
         }
         // Publication compiled these bounds from the same pose/deformation as
         // execution. The simulation radius is not a rendering visibility bound.
+        const auto model_surface_begin = result.surfaces.size();
         for (size_t part = 0; part < model.parts.size(); ++part) {
             if (!model.parts[part].draw) continue;
             if (!model.parts[part].has_render_bounds || boundsOutside(result.camera,model.parts[part].render_bounds,window)) continue;
             const auto world = compose(object.current,model.parts[part].current);
             if (result.placements.size() >= UINT32_MAX) throw std::length_error("Too many view placements");
             const uint32_t placement = uint32_t(result.placements.size());
+            const auto part_surface_begin = result.surfaces.size();
             result.placements.push_back(world);
             const auto& geometry = model.asset->geometry().parts[part].geometry;
             const MeshView mesh(geometry,model.parts[part].vertices);
@@ -630,7 +637,10 @@ static ViewVisibility queryResolvedView(const Presentation& frame,const View& vi
                 item.placement = placement;
                 consider(mesh,projected,world,model.parts[part].surface(model.asset->geometry().parts[part],face),item,model.modulation.alpha);
             }
+            if (result.surfaces.size() != part_surface_begin)
+                result.geometry.parts.push_back(model.parts[part].compiled_index);
         }
+        if (result.surfaces.size() != model_surface_begin) result.geometry.models.emplace_back(uint32_t(i),variant);
     }
     {
         if (exterior_window.visible && frame.data().terrain.asset) {
@@ -648,6 +658,7 @@ static ViewVisibility queryResolvedView(const Presentation& frame,const View& vi
                     item.blended = surface.material.blended();
                     item.late = surface.material.requiresLatePass();
                     item.depth = static_cast<float>(dot(view.camera.forward,subtract(center,view.camera.position)));
+                    result.geometry.terrain.emplace_back(uint32_t(patch_index),uint32_t(batch));
                     result.surfaces.push_back(item);
                 }
             }
@@ -711,6 +722,7 @@ static ViewVisibility queryResolvedView(const Presentation& frame,const View& vi
         item.blended = instance.surface.material.blended();
         item.late = instance.surface.material.requiresLatePass();
         item.depth = static_cast<float>(dot(view.camera.forward,subtract(world.position,view.camera.position)));
+        result.geometry.meshes.push_back(uint32_t(index));
         result.surfaces.push_back(item);
     }
     std::sort(result.object_indices.begin(),result.object_indices.end());

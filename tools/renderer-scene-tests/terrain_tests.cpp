@@ -82,6 +82,10 @@ int runTerrainTests() {
     const auto visible = queryView(*frozen,view);
     check(!visible.surfaces.empty() && visible.surfaces.size() < changed->patches().size());
     for (const auto& item : visible.surfaces) check(item.terrain);
+    check(visible.geometry.terrain.size() == visible.surfaces.size());
+    for (const auto& item : visible.surfaces)
+        check(std::find(visible.geometry.terrain.begin(),visible.geometry.terrain.end(),
+            std::make_pair(item.terrain_patch,item.terrain_batch)) != visible.geometry.terrain.end());
     {
         TerrainOcclusionData blocked; blocked.width = blocked.depth = 16;
         blocked.visibility.resize(256*32,0);

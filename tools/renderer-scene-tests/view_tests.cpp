@@ -87,9 +87,12 @@ int runSceneViewTests() {
         check(held.surfaces[0].polygon_index == 71,"Subsequent query changed a held view");
         {
             ViewVisibility warm; warm.surfaces.reserve(16384); storage = warm.surfaces.data();
+            warm.geometry.rooms.push_back(42); warm.geometry.meshes.push_back(19);
         }
         { ViewVisibility reused;
           check(reused.surfaces.empty() && reused.surfaces.data() == storage,"Released visibility capacity was not reused"); }
+        { ViewVisibility reused;
+          check(reused.geometry.rooms.empty() && reused.geometry.meshes.empty(),"Recycled view retained geometry demand"); }
         std::thread release([owned = std::move(held)]() mutable { owned.surfaces.clear(); });
         release.join();
     }
@@ -731,6 +734,11 @@ int runSceneViewTests() {
     const auto a=d3scene::queryView(*frame,view());
     check(a.frame_sequence==1&&a.scene_lifetime==data.scene_lifetime&&a.history_key==1,"Query lost scene identity");
     check(a.surfaces.size()==6,"Conservative polygon query rejected crossing/tangent/covering geometry");
+    auto demanded_rooms = std::vector<uint32_t>{};
+    for (const auto& item : a.surfaces) demanded_rooms.push_back(item.room_index);
+    std::sort(demanded_rooms.begin(),demanded_rooms.end());
+    demanded_rooms.erase(std::unique(demanded_rooms.begin(),demanded_rooms.end()),demanded_rooms.end());
+    check(a.geometry.rooms == demanded_rooms,"Room demand lost source order or included invisible geometry");
     check(a.stats.surfaces_backfacing==1&&a.stats.surfaces_outside==3,"Query rejection counters incorrect");
     check(a.surfaces[0].room_index==6&&a.surfaces[1].room_index==7,"Opaque near-to-far ordering changed");
     check(a.surfaces[4].room_index==8&&a.surfaces[5].room_index==9,"Transparent far-to-near ordering changed");

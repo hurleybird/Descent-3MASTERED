@@ -57,6 +57,8 @@ int runModelSceneTests() {
         const auto grouped = Presentation::freeze(input);
         const auto visible = queryView(*grouped,request);
         check(visible.surfaces.size() == 2,"Opaque model was not submitted as material groups");
+        check(visible.geometry.models == std::vector<std::pair<uint32_t,uint32_t>>({{0,0}}) &&
+            visible.geometry.parts == std::vector<uint32_t>({0}),"Model demand was duplicated per material group");
         size_t polygons = 0;
         for (const auto& item : visible.surfaces) {
             check(item.model && item.model_material_group,"Model group lost its primitive extent");

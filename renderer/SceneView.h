@@ -72,6 +72,12 @@ struct ViewQueryStats {
     uint32_t surfaces_backfacing = 0, surfaces_outside = 0;
 };
 struct ViewStoragePool;
+struct ViewGeometryDemand {
+    // Source inventory order, independent of the depth-sorted draw list.
+    std::vector<uint32_t> rooms, meshes, parts;
+    std::vector<std::pair<uint32_t,uint32_t>> models, terrain; // instance/variant, patch/batch
+    void clear() { rooms.clear(); meshes.clear(); parts.clear(); models.clear(); terrain.clear(); }
+};
 struct ViewVisibility {
     ViewVisibility();
     ~ViewVisibility();
@@ -90,6 +96,7 @@ struct ViewVisibility {
     }
     std::vector<uint32_t> object_indices;
     std::vector<uint32_t> room_indices;
+    ViewGeometryDemand geometry;
     ViewQueryStats stats;
     bool exterior_visible = false;
 private:

@@ -687,40 +687,42 @@ void GL4Renderer::PrepareSceneViewTables(const d3scene::PreparedView& prepared) 
     // Every view owns its submission tables. Binding restores below do not
     // rebuild them; auxiliary views supply their own visibility, never the main view's.
     {
-        static thread_local std::vector<uint8_t> rooms, meshes, surfaces, parts, models;
-        static thread_local std::vector<std::pair<uint32_t,uint32_t>> visible_models;
-        rooms.assign(frame.data().rooms.size(),0);
-        meshes.assign(frame.data().meshes.size(),0);
+        static thread_local std::vector<uint8_t> surfaces, parts;
+        const auto& visible_rooms = demand.geometry.rooms;
+        const auto& visible_meshes = demand.geometry.meshes;
+        const auto& visible_terrain = demand.geometry.terrain;
+        const auto& visible_models = demand.geometry.models;
+        if (FindArg("-scene-demand-audit")) {
+            d3scene::ViewGeometryDemand reference;
+            for (const auto& item : demand.surfaces) {
+                if (item.model) {
+                    const auto& instance = frame.data().model_instances[item.model_instance_index];
+                    const auto& model = frame.data().model_variants[instance.model_begin+item.model_variant];
+                    reference.models.emplace_back(item.model_instance_index,item.model_variant);
+                    reference.parts.push_back(model.part_base+item.part_index);
+                } else if (item.mesh) reference.meshes.push_back(item.mesh_index);
+                else if (item.terrain) reference.terrain.emplace_back(item.terrain_patch,item.terrain_batch);
+                else reference.rooms.push_back(item.room_index);
+            }
+            const auto canonicalize = [](auto& values) {
+                std::sort(values.begin(),values.end());
+                values.erase(std::unique(values.begin(),values.end()),values.end());
+            };
+            canonicalize(reference.rooms); canonicalize(reference.meshes); canonicalize(reference.parts);
+            canonicalize(reference.models); canonicalize(reference.terrain);
+            if (reference.rooms != demand.geometry.rooms || reference.meshes != demand.geometry.meshes ||
+                reference.parts != demand.geometry.parts || reference.models != demand.geometry.models ||
+                reference.terrain != demand.geometry.terrain) Error("Prepared geometry demand differs from draw references");
+        }
         surfaces.assign(frame.data().compiled_surface_count,0);
         parts.assign(frame.data().compiled_part_count,0);
-        models.assign(frame.data().model_variants.size(),0);
-        visible_models.clear();
+        for (auto part : demand.geometry.parts) parts[part] = 1;
         bool optical_frustum = prepared.view().projection == d3scene::ViewProjection::Perspective;
-        for (const auto& item : demand.surfaces) {
-            if (item.model) {
-                const auto& instance = frame.data().model_instances[item.model_instance_index];
-                const auto& model = frame.data().model_variants[instance.model_begin+item.model_variant];
-                parts[model.part_base+item.part_index] = 1;
-                if (!models[model.resolved_index]) {
-                    models[model.resolved_index] = 1;
-                    visible_models.emplace_back(item.model_instance_index,item.model_variant);
-                }
-            }
-            else if (item.mesh) {
-                meshes[item.mesh_index] = 1;
-                // Pixel-expanded geometry can shade an off-frustum world point.
-                // Its optical segment is not bounded by the ordinary camera cone.
-                if (!frame.data().meshes[item.mesh_index].asset->geometry().raster_offsets.empty()) optical_frustum = false;
-            }
-            else if (item.terrain) surfaces[frame.data().terrain.patches[item.terrain_patch].surface_base+item.terrain_batch] = 1;
-            else {
-                rooms[item.room_index] = 1;
-                surfaces[frame.data().rooms[item.room_index].surface_base+item.polygon_index] = 1;
-            }
-        }
-        // Demand is an instance/part property, not one entry per visible face.
-        // Preserve frame order for uploads without sorting duplicate face keys.
-        std::sort(visible_models.begin(),visible_models.end());
+        for (const auto& item : demand.surfaces) if (!item.model && !item.mesh && !item.terrain)
+            surfaces[frame.data().rooms[item.room_index].surface_base+item.polygon_index] = 1;
+        // Pixel-expanded geometry can shade an off-frustum world point.
+        for (auto mesh : visible_meshes)
+            if (!frame.data().meshes[mesh].asset->geometry().raster_offsets.empty()) optical_frustum = false;
         const auto wantsPart = [&](const d3scene::PreparedModelPart& part) {
             return parts[part.compiled_index] != 0;
         };
@@ -839,8 +841,8 @@ void GL4Renderer::PrepareSceneViewTables(const d3scene::PreparedView& prepared) 
             ranges.uv = ElementRange(start,static_cast<uint32_t>(uvs.size())-start);
         };
         const std::vector<uint32_t> no_lights;
-        for (const auto& room : frame.data().rooms) {
-            if (!rooms[&room-frame.data().rooms.data()]) continue;
+        for (const auto room_index : visible_rooms) {
+            const auto& room = frame.data().rooms[room_index];
             if (scene_room_bindings.size() <= size_t(room.number)) scene_room_bindings.resize(size_t(room.number)+1);
             auto& cached = scene_room_bindings[room.number];
             const bool reuse = cached.reusable && &cached.surfaces.read() == &room.surfaces.read();
@@ -870,21 +872,19 @@ void GL4Renderer::PrepareSceneViewTables(const d3scene::PreparedView& prepared) 
             }
         }
         const auto& terrain = frame.data().terrain;
-        for (size_t p = 0; p < terrain.patches.size(); ++p) {
+        for (const auto& key : visible_terrain) {
+            const auto p = key.first,b = key.second;
             const auto& patch = terrain.patches[p];
-            for (size_t b = 0; b < terrain.asset->patches()[p].batches.size(); ++b) {
-                const auto index = patch.surface_base+uint32_t(b);
-                if (!surfaces[index]) continue;
-                const auto& surface = terrain.surface(p,b);
-                if (terrain.light_influences_prepared) add(surface,index,frame.data().lightCandidates(patch.light_candidates));
-                else add(surface,index,surface.light_indices);
-            }
+            const auto index = patch.surface_base+uint32_t(b);
+            const auto& surface = terrain.surface(p,b);
+            if (terrain.light_influences_prepared) add(surface,index,frame.data().lightCandidates(patch.light_candidates));
+            else add(surface,index,surface.light_indices);
         }
         d3scene::LightCandidateRange last_mesh_candidates;
         ElementRange last_mesh_lights;
         bool mesh_candidates_uploaded = false;
-        for (const auto& mesh : frame.data().meshes) {
-            if (!meshes[&mesh-frame.data().meshes.data()]) continue;
+        for (const auto mesh_index : visible_meshes) {
+            const auto& mesh = frame.data().meshes[mesh_index];
             add(mesh.surface,mesh.surface.compiled_index,mesh.light_influences_prepared ? no_lights : mesh.surface.light_indices);
             if (dynamic_lighting && !mesh.surface.unlit && mesh.light_influences_prepared && !mesh.light_candidates.empty()) {
                 const auto range = mesh.light_candidates;
@@ -937,9 +937,9 @@ void GL4Renderer::PrepareSceneViewTables(const d3scene::PreparedView& prepared) 
         static thread_local std::vector<d3scene::PositionPair> positions;
         positions.clear();
         scene_mesh_position_ranges.resize(frame.data().meshes.size());
-        for (const auto& mesh : frame.data().meshes) {
-            if (!meshes[&mesh-frame.data().meshes.data()]) continue;
-            auto& range = scene_mesh_position_ranges[&mesh-frame.data().meshes.data()];
+        for (const auto mesh_index : visible_meshes) {
+            const auto& mesh = frame.data().meshes[mesh_index];
+            auto& range = scene_mesh_position_ranges[mesh_index];
             range = {};
             // Transient meshes have no declared temporal identity yet. Publish
             // current/current positions without inventing valid object motion.

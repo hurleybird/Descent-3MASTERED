@@ -2,6 +2,56 @@
 
 ## Active 2026-10-21 flare regression investigation
 
+LATEST: upstream ViewGeometryDemand qualified by geometry-demand-tests.log,
+geometry-demand-build.log and geometry-demand-audit-build.log. Optional
+-scene-demand-audit reconstructs resource demand from the draw list and compares
+all five source-ordered lists. Audit passed save000 500 frames, including pinned
+core2 (geometry-demand-audit000-pinned). Current non-audit capture
+geometry-demand-current000-pinned matches geometry-control000-long exactly.
+Save005/007 and heavy multi-view save002 (SSAA2/MSAA4/AO/bloom plus resource,
+deformation and image audits) also exact. Short save000 control exact.
+Earlier pre-audit binary geometry-demand000 and repeat had different door/bot
+poses at frame500; audit build and control match. Unpinned audit/plain captures
+have the same tiny bot pose difference. Cause of long simulation variation is
+NOT proven; do not call it a shading change or silently suppress it. The fixed
+capture seed controls ps_rand, not necessarily script DLL rand state.
+Pinned700-frame save005 ABBA demand-pair005-{control,demand,demand-repeat,control-repeat}
+CPU roughly1.29/1.25/1.22/1.26ms, GPU~.17ms throughout, images exact.
+This is a small improvement, not completion of the performance goal.
+Owned runtime now contains out/geometry-demand-auditable.exe; v3.1 unchanged.
+Latest usage36% consumed; credits unchanged62451.4387600000.
+Next: remaining preparation/execution costs in005, then GPU006/007.
+
+CURRENT HEAD66591e2 (sine stamps committed). Fresh eight-save pinned-core2,
+500frame rows100..449 comparison in refresh-baseline-{old,new}000..007:
+CPU old/new:0002.059/1.488,0012.220/1.081,0023.081/1.835,0032.547/1.869,
+0041.008/.546,0051.184/1.250,0061.090/.645,0071.472/1.393ms.
+GPU old/new:000.731/.546,0011.107/.922,0021.681/.771,0031.265/.507,
+004.429/.200,005.334/.172,006.462/.525,007.556/.770ms.
+Old runtime verified hash DED4E006BBD00AC30E58E7E0ABF38DCB008A46D68A16F76F1B17B9717176B44A
+matches prior baseline. CPU005 still regresses;007 small win only. Six clear CPU
+wins, not all-scene goal complete. GPU006/007 remain worse. Timing drifts.
+
+REJECTED fog-field screen rectangle experiment: volume AABB crosses eye plane in
+007, requiring full320x180 grid; no work reduction and shader mask overhead.
+Removed ALL source changes; patch retained out/rejected-fog-window.patch.
+fog-window007 initial capture FAILED shader reserved word active; corrected to
+in_field for v2. Own failed process55832 stopped after validating exact capture
+path. v2 image exact, optical audit max5.84e-5, GPU~.806 vs previous~.770.
+Do not resurrect or claim cropping improvement. Deliveredv3.1 unaffected.
+
+CURRENT UNCOMMITTED: ViewGeometryDemand in SceneView.h is produced in source
+order by queryResolvedView (room/model/part/terrain/mesh inventories), pooled
+with ViewVisibility, consumed by PrepareSceneViewTables. Removes whole-level
+room/mesh/terrain scans for each cockpit/HUD/world view and removes backend
+resource rediscovery/sorting. Initial backend-only version visible-submission005
+and000 images exact; CPU noisy1.30/1.42. Upstream version currently building via
+geometry-demand-tests.log/geometry-demand-build.log; NOT yet runtime verified.
+Tests added for grouped model demand, terrain demand, room source order, pooled
+storage clearing. Owned runtime currently contains backend-only version, not
+latest upstream source. No other source experiments active. lib/gitinfo.h remains
+untracked/unrelated. Continue until user stops or included usage reaches zero.
+
 LATEST HEAD698aadb commits validated owner hints. New sine-stamp change compiled
 and tested: authored water sine disturbances compile integer additions once per
 source element/radius/height; positions/ticks remain execution inputs. Kernels
