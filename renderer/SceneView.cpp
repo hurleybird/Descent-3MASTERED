@@ -447,7 +447,7 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
         return PortalWindow{-1,-1,1,1,true};
     };
     static thread_local ProjectionScratch projection_scratch;
-    auto consider = [&](MeshView geometry,ProjectedMesh& projected, const SurfaceBinding& surface, VisibleSurface item) {
+    auto consider = [&](MeshView geometry,ProjectedMesh& projected, const SurfaceBinding& surface, VisibleSurface item,float alpha = 1) {
         if (!surface.draw_surface) return;
         ++result.stats.surfaces_considered;
         const auto& polygon = geometry.topology.polygons[item.polygon_index];
@@ -461,8 +461,9 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
             ++result.stats.surfaces_outside;
             return;
         }
-        item.blended = surface.material.blended();
-        item.late = surface.material.requiresLatePass();
+        const auto policy = modulatedMaterialPolicy(surface,alpha);
+        item.blended = policy.blended();
+        item.late = policy.requiresLatePass();
         item.depth = static_cast<float>(dot(view.camera.forward,subtract(point,view.camera.position)));
         result.surfaces.push_back(item);
     };
@@ -529,7 +530,7 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
                 item.model_variant = variant;
                 item.part_index = static_cast<uint32_t>(part); item.polygon_index = static_cast<uint32_t>(face);
                 item.world = world;
-                consider(mesh,projected,model.parts[part].surface(model.asset->geometry().parts[part],face),item);
+                consider(mesh,projected,model.parts[part].surface(model.asset->geometry().parts[part],face),item,model.modulation.alpha);
             }
         }
     }
@@ -633,13 +634,17 @@ const SurfaceBinding& visibleSurfaceBinding(const Presentation& frame,const Visi
     }
     return data.rooms[item.room_index].surfaces[item.polygon_index];
 }
+MaterialPolicy visibleSurfacePolicy(const Presentation& frame,const VisibleSurface& item) {
+    return modulatedMaterialPolicy(visibleSurfaceBinding(frame,item),item.model ?
+        frame.data().modelsFor(item.model_instance_index)[item.model_variant].modulation.alpha : 1);
+}
 std::vector<ViewPass> buildViewPasses(const Presentation& frame,const ViewVisibility& view,ViewProducts products) {
     if (view.ordering == ViewOrdering::Compositing) {
         if (products.opaque_scene || products.occlusion)
             throw std::invalid_argument("Compositing surfaces cannot export opaque world products");
         for (const auto& item : view.surfaces) {
             const auto& surface = visibleSurfaceBinding(frame,item);
-            if (surface.material.testsDepth() || surface.soft_depth_range > 0 || item.layer == RenderLayer::Background)
+            if (visibleSurfacePolicy(frame,item).testsDepth() || surface.soft_depth_range > 0 || item.layer == RenderLayer::Background)
                 throw std::invalid_argument("Compositing surfaces require explicit depth-independent coverage");
         }
         if (view.surfaces.empty()) return {};

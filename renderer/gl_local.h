@@ -175,7 +175,7 @@ class GL4Renderer : public IRenderer
 	} scene_uniforms;
 	GLuint scene_light_buffer = 0, scene_light_texture = 0;
 	GLuint scene_draw_buffer = 0;
-	struct SceneDrawPacket { const d3scene::SurfaceBinding* binding; GLuint vao; ElementRange range; };
+	struct SceneDrawPacket { const d3scene::SurfaceBinding* binding; GLuint vao; ElementRange range; d3scene::MaterialPolicy policy; };
 	std::vector<SceneDrawPacket> scene_draw_packets;
 	std::vector<float> scene_draw_records;
 	GLuint scene_influence_buffer = 0, scene_influence_texture = 0;

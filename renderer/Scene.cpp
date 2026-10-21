@@ -412,6 +412,19 @@ MeshAssetRef SceneAssets::publishMesh(uint32_t slot,MeshGeometry geometry) {
     meshes_[slot] = replacement; ++revision_;
     return replacement;
 }
+SurfaceModulation modulatedSurface(const SurfaceBinding& surface,const SurfaceModulation& instance) {
+    const auto multiply = [](Vec3 a,Vec3 b) { return Vec3{a.x*b.x,a.y*b.y,a.z*b.z}; };
+    return {multiply(surface.ambient_color,instance.ambient),multiply(surface.color_modulation,instance.color),surface.alpha*instance.alpha};
+}
+MaterialPolicy modulatedMaterialPolicy(const SurfaceBinding& surface,float alpha) {
+    auto policy = surface.material;
+    if (alpha < 1 && !policy.blended()) {
+        policy.blend = BlendMode::Alpha;
+        if (surface.depth == DepthMode::Automatic)
+            policy.depth = surface.layer == RenderLayer::Background ? DepthMode::Disabled : DepthMode::ReadOnly;
+    }
+    return policy;
+}
 MaterialPolicy compileMaterialPolicy(const SurfaceBinding& surface, const MeshPolygon& polygon) {
     MaterialPolicy result;
     result.layer = surface.layer;
@@ -734,6 +747,9 @@ PresentationRef Presentation::complete(FrameData data) {
             require(index < variants.size(),"LOD references an absent model variant");
         for (const auto& model : variants) {
             require(model.asset && model.asset->id().lifetime == data.scene_lifetime, "Stale model asset in frame");
+            require(finite(model.modulation.ambient) && finite(model.modulation.color) &&
+                std::isfinite(model.modulation.alpha) && model.modulation.alpha >= 0 && model.modulation.alpha <= 1,
+                "Invalid model instance modulation");
             if (model.deferred_pose) {
                 require(model.parts.size() <= MAX_SUBOBJECTS,"Too many deferred model parts");
                 require(model.asset->geometry().animation != nullptr,"Deferred pose has no owned animation");

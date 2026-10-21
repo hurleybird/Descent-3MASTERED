@@ -86,6 +86,7 @@ struct ViewPass {
     uint32_t begin = 0, end = 0; // half-open range in this view's visible surfaces
 };
 const SurfaceBinding& visibleSurfaceBinding(const Presentation&,const VisibleSurface&);
+MaterialPolicy visibleSurfacePolicy(const Presentation&,const VisibleSurface&);
 uint32_t selectModelVariant(const ModelInstance&,const Camera&);
 std::vector<ViewPass> buildViewPasses(const Presentation&,const ViewVisibility&,ViewProducts products = {});
 

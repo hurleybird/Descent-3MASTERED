@@ -34,6 +34,25 @@ d3scene::ModelGeometry modelGeometry() {
 int runModelSceneTests() {
     using namespace d3scene;
     checks = 0;
+    // Instance opacity must produce the same pipeline as baking it into each
+    // surface, without changing the immutable binding table.
+    for (auto blend : {BlendMode::Solid,BlendMode::Alpha,BlendMode::Additive,BlendMode::Multiply})
+    for (auto depth : {DepthMode::Automatic,DepthMode::ReadWrite,DepthMode::ReadOnly,DepthMode::Disabled})
+    for (float authored_alpha : {0.f,.4f,1.f}) for (float instance_alpha : {0.f,.25f,1.f}) {
+        SurfaceBinding surface; surface.alpha = authored_alpha; surface.blend = blend; surface.depth = depth;
+        surface.material = compileMaterialPolicy(surface,MeshPolygon{});
+        auto baked = surface; baked.alpha *= instance_alpha;
+        const auto expected = compileMaterialPolicy(baked,MeshPolygon{});
+        const auto actual = modulatedMaterialPolicy(surface,instance_alpha);
+        check(actual.blend == expected.blend && actual.depth == expected.depth && actual.texture_alpha == expected.texture_alpha,
+            "Instance opacity changed authored compositing policy");
+    }
+    {
+        SurfaceBinding surface; surface.ambient_color = {.2f,.4f,.8f}; surface.color_modulation = {.5f,1,.25f}; surface.alpha = .5f;
+        const auto values = modulatedSurface(surface,{{.5f,.25f,1},{.2f,.4f,.8f},.4f});
+        check(values.ambient.x == .1f && values.ambient.y == .1f && values.color.x == .1f && values.color.z == .2f && values.alpha == .2f,
+            "Instance radiance modulation lost a material or instance factor");
+    }
     check(ResolveSceneModelPartRole(0,1,0,false) == SceneModelPartRole::Surface,"Ordinary model part lost surface role");
     check(ResolveSceneModelPartRole(SOF_FACING,1,0,false) == SceneModelPartRole::Facing,"Facing part became ordinary geometry");
     check(ResolveSceneModelPartRole(SOF_FACING|SOF_GLOW,1,0,false) == SceneModelPartRole::Glow,"Glow role lost legacy precedence");
@@ -528,6 +547,22 @@ int runModelSceneTests() {
         check(next_frame->data().modelsFor(0)[0].parts.data() ==
             held->data().modelsFor(0)[0].parts.data(),"Unchanged bindings were copied for a new pose");
         const auto* summary = held->data().modelsFor(0)[0].parts.summary();
+        auto faded_inputs = held->data();
+        faded_inputs.modelsFor(0)[0].modulation = {{.4f,.5f,.6f},{.7f,.8f,.9f},.25f};
+        const auto faded_frame = Presentation::freeze(faded_inputs);
+        check(faded_frame->data().modelsFor(0)[0].parts.summary() == summary && held->data().modelsFor(0)[0].modulation.alpha == 1,
+            "Instance shading rebuilt materials or mutated a held frame");
+        const auto faded_view = queryView(*faded_frame,camera);
+        check(!faded_view.surfaces.empty(),"Modulation fixture is not visible");
+        for (const auto& item : faded_view.surfaces)
+            check(item.late && item.blended && visibleSurfacePolicy(*faded_frame,item).blend == BlendMode::Alpha,
+                "Fading instance entered the opaque pass");
+        faded_inputs.modelsFor(0)[0].modulation.alpha = 1;
+        const auto restored_frame = Presentation::freeze(faded_inputs);
+        for (const auto& item : queryView(*restored_frame,camera).surfaces)
+            check(!item.late,"Ending fade retained stale translucent policy");
+        faded_inputs.modelsFor(0)[0].modulation.alpha = 2;
+        rejects([&] { Presentation::freeze(faded_inputs); });
         auto duplicated = held->data();
         auto duplicate = duplicated.model_instances[0]; duplicate.identity = 92; duplicate.model_count = 0;
         duplicated.appendModel(duplicate,duplicated.modelsFor(0)[0]); duplicated.model_instances.push_back(duplicate);

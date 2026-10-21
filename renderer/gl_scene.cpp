@@ -1198,9 +1198,13 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::Presentat
         const auto& surface = *binding;
 
         const auto& gpu = *mesh;
-        const bool planar_image = surface.material.planar_slot && view.reflections == d3scene::ReflectionPolicy::Images;
+        const auto instance_modulation = item.model ?
+            presentation.data().modelsFor(item.model_instance_index)[item.model_variant].modulation : d3scene::SurfaceModulation{};
+        const auto modulation = d3scene::modulatedSurface(surface,instance_modulation);
+        const auto policy = d3scene::modulatedMaterialPolicy(surface,instance_modulation.alpha);
+        const bool planar_image = policy.planar_slot && view.reflections == d3scene::ReflectionPolicy::Images;
         auto* record = records.data()+item_index*(record_bytes/sizeof(float));
-        record[79] = float(surface.material.planar_slot != 0);
+        record[79] = float(policy.planar_slot != 0);
         record[80] = float(planar_image);
         uint32_t surface_index = binding->compiled_index;
         if (item.model) {
@@ -1227,10 +1231,10 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::Presentat
         record[63] = float(view.dynamic_lighting && !surface.unlit ? influences.count : 0);
         record[68] = float(surface.unlit);
         record[66] = float(static_cast<unsigned>(surface.occlusion_class));
-        record[67] = float(surface.material.layer == d3scene::RenderLayer::World ? surface.soft_depth_range : 0);
-        record[69] = float(surface.material.layer == d3scene::RenderLayer::World);
-        record[70] = float(surface.material.blend == d3scene::BlendMode::Additive);
-        record[71] = float(surface.material.blend == d3scene::BlendMode::Multiply);
+        record[67] = float(policy.layer == d3scene::RenderLayer::World ? surface.soft_depth_range : 0);
+        record[69] = float(policy.layer == d3scene::RenderLayer::World);
+        record[70] = float(policy.blend == d3scene::BlendMode::Additive);
+        record[71] = float(policy.blend == d3scene::BlendMode::Multiply);
         const bool exterior = item.terrain || (item.model ? exteriorRoom(presentation.data().model_instances[item.model_instance_index].room) :
             (item.mesh ? exteriorRoom(presentation.data().meshes[item.mesh_index].room) : presentation.data().rooms[item.room_index].exterior));
         record[72] = float(view.collection == 0 && exterior && exterior_fog.enabled);
@@ -1242,22 +1246,22 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::Presentat
         { const uint32_t value = uint32_t(motion.identity); std::memcpy(record+84,&value,sizeof(value)); }
         { const uint32_t value = uint32_t(motion.valid); std::memcpy(record+85,&value,sizeof(value)); }
         { const auto value = surface.base_color; record[40] = value.x; record[41] = value.y; record[42] = value.z; }
-        { const auto value = surface.color_modulation; record[44] = value.x; record[45] = value.y; record[46] = value.z; }
-        { const auto value = surface.ambient_color; record[32] = value.x; record[33] = value.y; record[34] = value.z; } { const auto value = surface.ambient_direction; record[36] = value.x; record[37] = value.y; record[38] = value.z; }
+        { const auto value = modulation.color; record[44] = value.x; record[45] = value.y; record[46] = value.z; }
+        { const auto value = modulation.ambient; record[32] = value.x; record[33] = value.y; record[34] = value.z; } { const auto value = surface.ambient_direction; record[36] = value.x; record[37] = value.y; record[38] = value.z; }
         record[47] = float(surface.directional_ambient);
         record[65] = float(!item.model && !item.mesh && !item.terrain &&
             presentation.data().rooms[item.room_index].uses_room_illumination ? presentation.data().rooms[item.room_index].light_scalar : surface.lighting_modulation);
         record[73] = float(surface.color_image != 0 || surface.view_image_slot != 0);
         record[74] = float(surface.baked_image != 0);
-        record[75] = float(surface.material.texture_alpha != d3scene::TextureAlpha::Ignore);
-        record[76] = float(surface.material.alpha_cutoff);
+        record[75] = float(policy.texture_alpha != d3scene::TextureAlpha::Ignore);
+        record[76] = float(policy.alpha_cutoff);
         record[60] = float(surface.lightmap_u_scale); record[61] = float(surface.lightmap_v_scale);
         const float time = float(presentation.data().simulation_time);
         record[58] = surface.u_offset+(surface.scroll_period.x ? std::fmod(time/surface.scroll_period.x,1.f) : 0.f);
         record[59] = surface.v_offset+(surface.scroll_period.y ? std::fmod(time/surface.scroll_period.y,1.f) : 0.f);
         record[56] = float(surface.texture_scale.x); record[57] = float(surface.texture_scale.y);
         { const auto value = surface.raster_stripe; record[48] = value.x; record[49] = value.y; record[50] = value.z; }
-        record[51] = float(surface.alpha);
+        record[51] = modulation.alpha;
         record[3] = float(surface.effect_depth_offset);
         const auto range = item.terrain || item.mesh ? ElementRange(0,gpu.polygons.back().offset+gpu.polygons.back().count) : gpu.polygons[item.polygon_index];
         const auto uv_range = ranges.uv;
@@ -1275,7 +1279,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::Presentat
         record[7] = float(prepared_positions.count != 0);
         record[11] = float(prepared_positions.offset);
 
-        packets[item_index] = {binding,gpu.vao,range};
+        packets[item_index] = {binding,gpu.vao,range,policy};
     }
     if (!scene_draw_buffer) glGenBuffers(1,&scene_draw_buffer);
     glBindBuffer(GL_UNIFORM_BUFFER,scene_draw_buffer);
@@ -1479,6 +1483,7 @@ void main() {
         const auto* binding = packet.binding;
         const auto& surface = *binding;
         const auto range = packet.range;
+        const auto& policy = packet.policy;
         if ((surface.bitmap >= 0 && !surface.color_image) || (surface.lightmap_bitmap >= 0 && !surface.baked_image) ||
             (surface.specular_bitmap >= 0 && !surface.specular_image))
             Error("Scene surface reached execution without prepared image assets");
@@ -1501,9 +1506,9 @@ void main() {
             return found->second;
         };
         if (surface.view_image_slot) bind_view_image(surface.view_image_slot,0);
-        const bool planar_image = surface.material.planar_slot && view.reflections == d3scene::ReflectionPolicy::Images;
+        const bool planar_image = policy.planar_slot && view.reflections == d3scene::ReflectionPolicy::Images;
         if (planar_image) {
-            const auto& image = bind_view_image(surface.material.planar_slot,10);
+            const auto& image = bind_view_image(policy.planar_slot,10);
             scene_shader.Use();
             glUniformMatrix4fv(scene_uniforms.planar_projection,1,GL_FALSE,image.matrices.view_projection.data());
         }
@@ -1513,17 +1518,17 @@ void main() {
         glBindBufferRange(GL_UNIFORM_BUFFER,7,scene_draw_buffer,item_index*record_bytes,22*16);
         const bool cull = item.terrain || (item.mesh && !surface.two_sided);
         const bool clockwise = cull && (d3scene::reversesWinding(camera) != d3scene::reversesWinding(item.world));
-        const RasterKey raster_key{surface.material.layer,surface.material.blend,surface.material.depth,cull,clockwise};
+        const RasterKey raster_key{policy.layer,policy.blend,policy.depth,cull,clockwise};
         if (!raster_bound || raster_key != previous_raster) {
-        if(surface.material.blended()) {
+        if(policy.blended()) {
             glEnablei(GL_BLEND,0);
-            if (surface.material.blend == d3scene::BlendMode::Multiply) glBlendFuncSeparatei(0,GL_DST_COLOR,GL_ZERO,GL_ZERO,GL_ONE);
-            else if (surface.material.blend == d3scene::BlendMode::Additive) glBlendFuncSeparatei(0,GL_SRC_ALPHA,GL_ONE,GL_ZERO,GL_ONE);
+            if (policy.blend == d3scene::BlendMode::Multiply) glBlendFuncSeparatei(0,GL_DST_COLOR,GL_ZERO,GL_ZERO,GL_ONE);
+            else if (policy.blend == d3scene::BlendMode::Additive) glBlendFuncSeparatei(0,GL_SRC_ALPHA,GL_ONE,GL_ZERO,GL_ONE);
             else glBlendFuncSeparatei(0,GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA,GL_ONE,GL_ONE_MINUS_SRC_ALPHA);
         } else glDisablei(GL_BLEND,0);
         // Metadata belongs to the solid depth sample. Blended radiance changes
         // color/remaining opaque coverage, never the hidden surface's class.
-        const GLboolean solid = surface.material.writesSolidDepth() ? GL_TRUE : GL_FALSE;
+        const GLboolean solid = policy.writesSolidDepth() ? GL_TRUE : GL_FALSE;
         glDisablei(GL_BLEND,2);
         glColorMaski(2,solid,solid,solid,solid);
         const GLboolean motion_write = solid && writes_motion ? GL_TRUE : GL_FALSE;
@@ -1533,15 +1538,15 @@ void main() {
         // Translucent surfaces do not have their own depth AO, so only transmit
         // the already-visible opaque radiance; additive light leaves it alone.
         glColorMaski(3,GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);
-        if (solid || surface.material.layer == d3scene::RenderLayer::Background) glDisablei(GL_BLEND,3);
+        if (solid || policy.layer == d3scene::RenderLayer::Background) glDisablei(GL_BLEND,3);
         else {
             glEnablei(GL_BLEND,3);
-            if (surface.material.blend == d3scene::BlendMode::Multiply) glBlendFunci(3,GL_DST_COLOR,GL_ZERO);
-            else if (surface.material.blend == d3scene::BlendMode::Additive) glBlendFunci(3,GL_ZERO,GL_ONE);
+            if (policy.blend == d3scene::BlendMode::Multiply) glBlendFunci(3,GL_DST_COLOR,GL_ZERO);
+            else if (policy.blend == d3scene::BlendMode::Additive) glBlendFunci(3,GL_ZERO,GL_ONE);
             else glBlendFunci(3,GL_ZERO,GL_ONE_MINUS_SRC_ALPHA);
         }
-        glDepthMask(surface.material.writesDepth() ? GL_TRUE : GL_FALSE);
-        if (surface.material.testsDepth()) glEnable(GL_DEPTH_TEST); else glDisable(GL_DEPTH_TEST);
+        glDepthMask(policy.writesDepth() ? GL_TRUE : GL_FALSE);
+        if (policy.testsDepth()) glEnable(GL_DEPTH_TEST); else glDisable(GL_DEPTH_TEST);
         if (cull) {
             glEnable(GL_CULL_FACE);
             glFrontFace(clockwise ? GL_CW : GL_CCW);

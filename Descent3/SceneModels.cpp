@@ -316,6 +316,7 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::Presenta
             // Explicit inspection fixture: exercises prepared-position uploads even
             // when a saved scene has no active cloak/deformation. Never mutates game state.
             if (deformation_probe) effect.deformation = .2f;
+            variant.modulation = {ambient,effect.color,effect.alpha};
             const bool directional = source->lighting_render_type != LRT_STATIC &&
                 (source->lighting_render_type == LRT_GOURAUD || NoLightmaps);
             // The saved per-object UV layout is not the shared model's topology.
@@ -369,8 +370,7 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::Presenta
                 }
                 part.material_palette = !baked;
                 part.baked_layout_revision = baked ? ObjectLightmapLayoutRevision() : 0;
-                part.appearance_inputs = {{ambient.x,ambient.y,ambient.z,effect.alpha,effect.color.x,effect.color.y,effect.color.z,
-                    float(directional),float(source->rtype.pobj_info.tmap_override),float(effect.custom_texture),float(effect.has_player_color),
+                part.appearance_inputs = {{float(directional),float(source->rtype.pobj_info.tmap_override),float(effect.custom_texture),float(effect.has_player_color),
                     effect.player_color.x,effect.player_color.y,effect.player_color.z,float(player_color_texture),float(part.draw)}};
                 const auto* old_part = history ? &history->parts[i] : nullptr;
                 bool reuse_materials = retain_materials && old_part && old_part->material_palette == part.material_palette &&
@@ -400,10 +400,7 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::Presenta
                     // Normal authored polymodel transparency writes late raster
                     // depth for self-occlusion, but never enters opaque products.
                     binding.depth = d3scene::DepthMode::ReadWrite;
-                    binding.ambient_color = ambient;
                     binding.directional_ambient = directional;
-                    binding.alpha = effect.alpha;
-                    binding.color_modulation = effect.color;
                     const int slot = asset_part.polygon_materials[j];
                     if (slot >= 0) binding.texture = variant.asset->geometry().textures[slot];
                     else binding.base_color = asset_part.polygon_colors[j];
@@ -414,8 +411,7 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::Presenta
                         // Authored team-color panels use flat ambient response,
                         // not the directional shading of the surrounding hull.
                         binding.directional_ambient = false;
-                        binding.color_modulation = {effect.color.x*effect.player_color.x,
-                            effect.color.y*effect.player_color.y,effect.color.z*effect.player_color.z};
+                        binding.color_modulation = effect.player_color;
                     }
                     if (baked && part.draw) {
                         const auto& face = source->lm_object.lightmap_faces[i][j];

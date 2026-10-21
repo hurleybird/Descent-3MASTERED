@@ -301,6 +301,10 @@ struct SurfaceBinding {
     uint8_t light_multiple = 0;
 };
 MaterialPolicy compileMaterialPolicy(const SurfaceBinding&, const MeshPolygon&);
+// Instance radiance/opacity never changes immutable material identity.
+struct SurfaceModulation { Vec3 ambient{1,1,1}, color{1,1,1}; float alpha = 1; };
+SurfaceModulation modulatedSurface(const SurfaceBinding&,const SurfaceModulation&);
+MaterialPolicy modulatedMaterialPolicy(const SurfaceBinding&,float alpha);
 struct TerrainState {
     TerrainAssetRef asset;
     TerrainOcclusionRef occlusion; // null means authored table is unavailable/invalidated
@@ -517,6 +521,7 @@ public:
 };
 struct PreparedModel {
     ModelAssetRef asset;
+    SurfaceModulation modulation;
     uint64_t pose_source_revision = 0;
     std::shared_ptr<const std::vector<float>> pose_inputs;
     std::shared_ptr<const std::vector<float>> previous_pose_inputs;

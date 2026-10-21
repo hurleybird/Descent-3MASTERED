@@ -2,6 +2,20 @@
 
 ## October 20 continuation
 
+Instance ambient light, tint and opacity are now separate from immutable model
+materials. Effective blend/depth policy is derived for visibility/submission,
+not baked into a fresh surface table whenever an instance fades. All eight
+captures and the combined probe match the preceding checkpoint exactly.
+Contract tests cover 144 blend/depth/opacity combinations, modulation factors,
+held-frame immutability, fade completion and invalid alpha rejection.
+Full corpus was noisy (3.209, 2.107, 3.924, 4.211, 1.154, 3.678, 1.304, 3.598 ms),
+so both binaries were retained under `out/perf-checkpoints` and interleaved with
+the original renderer, with detailed markers disabled. Two trials, parent/new:
+dense 4.052/3.896 and 4.405/3.836; save005 2.964/2.764 and 2.845/2.762;
+small 0.971/0.996 and 0.946/0.944 ms. This supports keeping the separation but
+does not establish an all-baseline win. Concurrent legacy trials: dense
+2.992/3.406, save005 1.053/1.010, small 0.837/0.815 ms. Save005 remains a large gap.
+
 October 21: GL raster state is shared across consecutive identical policies within
 each pass (ordering is unchanged, and external/image passes cannot poison the
 cache). Shader uniform locations and fixed sampler bindings are resolved at link
