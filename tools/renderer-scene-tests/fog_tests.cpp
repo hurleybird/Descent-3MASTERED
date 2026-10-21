@@ -67,6 +67,18 @@ int runFogTests() {
         check(!fogFieldFitsHalf(-1,1) && !fogFieldFitsHalf(std::numeric_limits<double>::infinity(),1) &&
             !fogFieldFitsHalf(std::numeric_limits<double>::quiet_NaN(),1),"Invalid compact storage bound accepted");
         check(!fogFieldFitsHalf(1,1000000),"Accumulation bound overflow accepted");
+        std::vector<FogVolume> volumes(3);
+        volumes[0].color = volumes[1].color = {.25f,.5f,.75f};
+        volumes[0].depth = 10; volumes[1].depth = 100;
+        volumes[2].color = {.25f,.5f,.5f};
+        Vec3 color{1,1,1};
+        check(!fogFieldCommonColor(volumes,{},color) && color.x == 0,"Empty field has a common color");
+        check(fogFieldCommonColor(volumes,{0,1},color) && color.x == .25f && color.z == .75f,
+            "Density differences prevent exact color factorization");
+        check(!fogFieldCommonColor(volumes,{0,2},color) && color.z == 0,"Mixed colors collapsed into scalar field");
+        check(fogFieldCommonColor(volumes,{2},color) && color.z == .5f,"Invisible colors affect field classification");
+        volumes[1].color.x = std::nextafter(.25f,1.f);
+        check(!fogFieldCommonColor(volumes,{0,1},color),"Approximate color equality changed field appearance");
     }
     {
         using namespace d3scene;

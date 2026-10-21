@@ -156,6 +156,7 @@ class GL4Renderer : public IRenderer
 		GLint specular_texture = -1;
 		GLint scene_fog = -1;
 		GLint fog_field_range = -1;
+		GLint fog_field_color = -1;
 		GLint fog_debug = -1;
 		GLint surface_prepass = -1;
 		GLint scene_occlusion_enabled = -1;
@@ -200,7 +201,7 @@ class GL4Renderer : public IRenderer
 	d3scene::RetainedDependencies<uint64_t> scene_reflection_dependencies;
 	GLuint scene_fog_buffer = 0, scene_fog_texture = 0;
 	struct FogFieldProgram { ShaderProgram shader; GLint range = -1; };
-	std::array<FogFieldProgram,2> scene_fog_field_programs;
+	std::array<FogFieldProgram,4> scene_fog_field_programs;
 	GLuint scene_fog_field_texture = 0;
 	GLenum scene_fog_field_format = GL_RGBA32F;
 	int scene_fog_field_width = 0, scene_fog_field_height = 0;

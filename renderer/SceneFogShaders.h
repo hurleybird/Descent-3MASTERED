@@ -128,8 +128,13 @@ void main() {
             float occupied=winding*interval+slope_events[address]*high_z-depth_events[address];
             if (interval>0.0) integrated_length+=clamp(occupied,0.0,high_z-low_z);
             ivec3 output_cell=ivec3(pixel,slice+1);
+#if SCENE_FOG_SCALAR_FIELD
+            float prior=first_volume ? 0.0 : imageLoad(fog_field_output,output_cell).r;
+            imageStore(fog_field_output,output_cell,vec4(prior+density.a*integrated_length));
+#else
             vec4 prior=first_volume ? vec4(0) : imageLoad(fog_field_output,output_cell);
             imageStore(fog_field_output,output_cell,prior+density*integrated_length);
+#endif
             winding+=slope_events[address];
         }
         first_volume=false;

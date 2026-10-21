@@ -2,6 +2,29 @@
 
 ## Active 2026-10-21 flare regression investigation
 
+LATEST after e868ed3: common-color fog fields now store scalar optical depth
+(R16F/R32F), reconstructing weighted RGB from the common color. Mixed-color
+visible volumes retain RGBA. Exact equality only; different densities are valid.
+No sampling resolution, edge refinement, topology or fog equation change.
+-scene-fog-vector-field is the diagnostic control. Contract tests cover empty,
+mixed, density-varied, subset and nearly-equal colors. Release/tests pass.
+scalar-fog007 is pixel-exact against vector; scalar-fog-multiview max RGB2,
+mean0.00167; scalar-roof comparison max1. Heavy and roof images inspected.
+Full-precision scalar audit max error6.33e-8. Half audit max0.000474 in heavy.
+ABBA scalar-pair007 vector/scalar/scalar/vector GPU .7394/.6739/.6719/.7000;
+heavy002 at1920x1080 SSAA2 MSAA4 AO+bloom GPU6.9209/6.8218/6.8078/6.8593.
+This is a modest roughly0.05-0.08ms saving, not a dramatic overall speedup.
+Field storage/bandwidth per texel reduced75% for common-color media. CPU does
+not show a gain. out/scalar-fog-verified-candidate.exe is current owned runtime.
+No delivered preview, Candidate or Previous Candidate changed.
+
+Fresh packed-baseline005 ABBA old/new/new/old CPU1.2586/1.1893/1.211/1.22
+(last two rounded); 007 about1.473/1.276/1.25/1.44. CPU005 still barely ahead,
+007 GPU still regresses versus old. Current sampler cpu-packed-stack005-fixed
+has294 preparation /505 total render samples: preparation resources74,
+publication71, models60; view preparation76. Earlier slash-path sample captured
+nothing; only the -fixed report is usable. Sampled timings are NOT benchmarks.
+
 LATEST after 0b166cb: explicit scene shader interface packing, requested for
 portability. 14 smooth vec4 slots + one flat ivec2 slot, reserving a sixteenth
 slot for clip distance. All original values/qualifiers preserved. Reflection

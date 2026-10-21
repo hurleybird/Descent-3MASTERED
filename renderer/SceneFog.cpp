@@ -9,6 +9,17 @@
 #include <stdexcept>
 #include <unordered_set>
 namespace d3scene {
+bool fogFieldCommonColor(const std::vector<FogVolume>& volumes,const std::vector<uint32_t>& candidates,Vec3& color) {
+    color = {};
+    if (candidates.empty()) return false;
+    const auto first = volumes.at(candidates.front()).color;
+    for (auto index : candidates) {
+        const auto c = volumes.at(index).color;
+        if (c.x != first.x || c.y != first.y || c.z != first.z) return false;
+    }
+    color = first;
+    return true;
+}
 bool fogFieldFitsHalf(double optical_bound,size_t volume_count) {
     if (!std::isfinite(optical_bound) || optical_bound < 0) return false;
     return optical_bound*std::pow(1.0+1.0/1024.0,double(volume_count)) < 32768;

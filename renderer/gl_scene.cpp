@@ -234,6 +234,7 @@ layout(location=4) out uint surface_identity;
 uniform samplerBuffer scene_fog;
 uniform sampler3D scene_fog_field;
 uniform float fog_field_range;
+uniform vec4 fog_field_color; // W selects scalar optical depth; RGB is shared fog color.
 uniform int fog_debug;
 
 uniform sampler2D opaque_depth;
@@ -318,6 +319,7 @@ vec3 applySceneFog(vec3 radiance,out float transmission) {
         vec4 integrated = vec4(0), minimum = vec4(1.e30), maximum = vec4(-1.e30);
         for (int y = 0; y < 2; ++y) for (int x = 0; x < 2; ++x) {
             vec4 column = texture(scene_fog_field,vec3((base+vec2(x,y)+0.5)/dimensions,layer));
+            if (fog_field_color.w != 0.0) column = vec4(fog_field_color.rgb,1.0)*column.r;
             integrated += column*(x == 0 ? 1.0-blend.x : blend.x)*(y == 0 ? 1.0-blend.y : blend.y);
             vec4 visible = column/max(1.0,column.a);
             minimum = min(minimum,visible); maximum = max(maximum,visible);
@@ -486,10 +488,15 @@ void main() {
 // double-precision CPU boundary integrator. Never part of a timing capture.
 static void AuditSceneFogField(const d3scene::View& view,const d3scene::Camera& camera,
     const std::vector<d3scene::FogVolume>& volumes,const std::vector<uint32_t>& candidates,
-    int width,int height,float range) {
+    int width,int height,float range,bool scalar_field,const d3scene::Vec3& color) {
     std::vector<float> texels(size_t(width)*height*(SceneFogFieldSlices+1)*4);
     glMemoryBarrier(GL_TEXTURE_UPDATE_BARRIER_BIT);
     glGetTexImage(GL_TEXTURE_3D,0,GL_RGBA,GL_FLOAT,texels.data());
+    if (scalar_field) for (size_t i = 0; i < texels.size(); i += 4) {
+        const float depth = texels[i];
+        texels[i] = depth*color.x; texels[i+1] = depth*color.y;
+        texels[i+2] = depth*color.z; texels[i+3] = depth;
+    }
     std::vector<int> winding;
     for (auto index : candidates) winding.push_back(d3scene::fogWinding(volumes[index],camera.transform.position));
     uint32_t random = 12345;
@@ -1279,6 +1286,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         scene_uniforms.specular_texture = scene_shader.FindUniform("specular_texture");
         scene_uniforms.scene_fog = scene_shader.FindUniform("scene_fog");
         scene_uniforms.fog_field_range = scene_shader.FindUniform("fog_field_range");
+        scene_uniforms.fog_field_color = scene_shader.FindUniform("fog_field_color");
         scene_uniforms.fog_debug = scene_shader.FindUniform("fog_debug");
         scene_uniforms.surface_prepass = scene_shader.FindUniform("surface_prepass");
         scene_uniforms.scene_occlusion_enabled = scene_shader.FindUniform("scene_occlusion_enabled");
@@ -1500,9 +1508,15 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     // Experimental view-owned optical field. Resolution is deliberately
     // independent of SSAA/MSAA; all surface depths sample the same integral.
     float field_range = 0;
+    d3scene::Vec3 field_color{};
+    bool scalar_field = false;
     if (field_fog) {
         PERF_MARKER_SCOPE("Scene.FogField");
         field_range = 1;
+        // A shared color factors out of the optical integral. Store only depth
+        // for this medium, regardless of volume count or differing densities.
+        scalar_field = !FindArg("-scene-fog-vector-field") &&
+            d3scene::fogFieldCommonColor(fog_volumes,scene_view_fog_volumes,field_color);
         double density_bound = 0;
         for (auto index : scene_view_fog_volumes) {
             const auto& volume = fog_volumes[index];
@@ -1520,8 +1534,8 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         const double storage_bound = density_bound*field_range;
         const bool half_field = !FindArg("-scene-fog-full-precision") &&
             d3scene::fogFieldFitsHalf(storage_bound,scene_view_fog_volumes.size());
-        const GLenum field_format = half_field ? GL_RGBA16F : GL_RGBA32F;
-        auto& program = scene_fog_field_programs[half_field ? 1 : 0];
+        const GLenum field_format = scalar_field ? (half_field ? GL_R16F : GL_R32F) : (half_field ? GL_RGBA16F : GL_RGBA32F);
+        auto& program = scene_fog_field_programs[(scalar_field ? 2 : 0)+(half_field ? 1 : 0)];
         auto& scene_fog_field_shader = program.shader;
         auto& scene_fog_field_range = program.range;
         if (!scene_fog_field_shader.Handle()) {
@@ -1531,7 +1545,9 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
             source += SceneFogIntersectionShader;
             source += "\n#define SCENE_FOG_SLICES "+std::to_string(SceneFogFieldSlices)+"\n";
             source += "\n#define SCENE_FOG_LANES "+std::to_string(SceneFogFieldLanes)+"\n";
-            source += half_field ? "\n#define SCENE_FOG_FIELD_FORMAT rgba16f\n" : "\n#define SCENE_FOG_FIELD_FORMAT rgba32f\n";
+            source += scalar_field ? "\n#define SCENE_FOG_SCALAR_FIELD 1\n" : "\n#define SCENE_FOG_SCALAR_FIELD 0\n";
+            source += "\n#define SCENE_FOG_FIELD_FORMAT ";
+            source += scalar_field ? (half_field ? "r16f\n" : "r32f\n") : (half_field ? "rgba16f\n" : "rgba32f\n");
             source += SceneFogFieldComputeShader;
             scene_fog_field_shader.AttachComputeSource(source.c_str());
             glUniformBlockBinding(scene_fog_field_shader.Handle(),glGetUniformBlockIndex(scene_fog_field_shader.Handle(),"SceneViewBlock"),8);
@@ -1571,12 +1587,13 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         glBindImageTexture(0,0,0,GL_FALSE,0,GL_WRITE_ONLY,GL_RGBA32F);
         glActiveTexture(GL_TEXTURE12); glBindTexture(GL_TEXTURE_3D,scene_fog_field_texture);
         if (AutomatedCapturePending() && FindArg("-scene-fog-field-audit"))
-            AuditSceneFogField(view,visibility.camera,fog_volumes,scene_view_fog_volumes,width,height,field_range);
-        if (AutomatedCapturePending()) AutomatedCaptureLog("scene fog field %dx%dx%d range=%.6g storage=%d bound=%.9g",
-            width,height,SceneFogFieldSlices,field_range,half_field ? 16 : 32,storage_bound);
+            AuditSceneFogField(view,visibility.camera,fog_volumes,scene_view_fog_volumes,width,height,field_range,scalar_field,field_color);
+        if (AutomatedCapturePending()) AutomatedCaptureLog("scene fog field %dx%dx%d range=%.6g storage=%d channels=%d bound=%.9g",
+            width,height,SceneFogFieldSlices,field_range,half_field ? 16 : 32,scalar_field ? 1 : 4,storage_bound);
     }
     scene_shader.Use();
     glUniform1f(scene_uniforms.fog_field_range,field_range);
+    glUniform4f(scene_uniforms.fog_field_color,field_color.x,field_color.y,field_color.z,scalar_field ? 1.f : 0.f);
     glUniform1i(scene_uniforms.fog_debug,FindArg("-scene-fog-debug") != 0);
     const auto exteriorRoom = [&](int room) {
         if (room < 0) return true;

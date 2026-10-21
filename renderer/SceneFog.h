@@ -6,6 +6,8 @@ struct Camera;
 // Conservative storage eligibility, including repeated store-rounding growth.
 // This is an overflow guard, not an image-quality guarantee.
 bool fogFieldFitsHalf(double optical_bound,size_t volume_count);
+// Exact common-color factorization; densities may differ. False leaves color zero.
+bool fogFieldCommonColor(const std::vector<FogVolume>&,const std::vector<uint32_t>& candidates,Vec3& color);
 // Fog integrates camera-to-surface rays, not just the geometry clipping range.
 // Never apply the geometry near plane or mirror plane to optical candidates.
 bool fogMayIntersectView(const Bounds&,const Camera&,bool perspective);
