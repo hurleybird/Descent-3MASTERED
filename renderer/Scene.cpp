@@ -19,6 +19,29 @@
 #include <thread>
 
 namespace d3scene {
+// Compilation storage follows the snapshot lifetime, just like its input
+// arrays. Recycle only after the last reader releases the presentation.
+struct FrameCompilationStorage {
+    SceneLookup<int32_t,size_t> room_indices_;
+    SceneLookup<uint32_t,size_t> object_indices_;
+    SceneLookup<uint64_t,size_t> model_indices_,collection_indices_;
+    std::vector<uint32_t> image_slots_;
+    std::vector<std::unique_ptr<PreparedModel>> resolved_models_;
+    struct CollectionRange {
+        uint32_t model_begin = 0,model_count = 0,mesh_begin = 0,mesh_count = 0;
+        bool has_receivers = false;
+    };
+    std::vector<CollectionRange> collections_;
+    std::vector<uint32_t> collection_models_,collection_meshes_;
+    void clear() {
+        room_indices_.clear(); object_indices_.clear(); model_indices_.clear(); collection_indices_.clear();
+        image_slots_.clear(); resolved_models_.clear(); collections_.clear();
+        collection_models_.clear(); collection_meshes_.clear();
+    }
+};
+const SceneLookup<int32_t,size_t>& Presentation::roomIndices() const { return storage_->room_indices_; }
+const SceneLookup<uint32_t,size_t>& Presentation::objectIndices() const { return storage_->object_indices_; }
+const SceneLookup<uint64_t,size_t>& Presentation::modelIndices() const { return storage_->model_indices_; }
 bool RoomSurfaces::publishedForRoom(AssetId asset,const std::vector<PlanarSurface>& planar) const {
     if (!publishedFor(asset)) return false;
     if (table_->planar.size() != planar.size()) return false;
@@ -546,7 +569,7 @@ const PreparedModel& Presentation::resolvedModel(size_t instance,size_t variant)
     const auto& source = data_.variants(object).at(variant);
     const auto& ambient = data_.ambientFor(object);
     if (!source.deferred_pose && ambient.source == ModelAmbientInput::Source::Constant) return source;
-    auto& cached = resolved_models_.at(source.resolved_index);
+    auto& cached = storage_->resolved_models_.at(source.resolved_index);
     if (cached) return *cached;
     auto result = std::make_unique<PreparedModel>(source);
     result->modulation.ambient = resolveModelAmbient(ambient,object.current.position,source.modulation.ambient);
@@ -586,11 +609,11 @@ const PreparedModel& Presentation::resolvedModel(size_t instance,size_t variant)
     return *cached;
 }
 SceneCollection Presentation::collection(uint64_t identity) const {
-    const auto* found = collection_indices_.find(identity);
+    const auto* found = storage_->collection_indices_.find(identity);
     if (!found) return {};
-    const auto& range = collections_[found->second];
-    return {{range.model_count ? collection_models_.data()+range.model_begin : nullptr,range.model_count},
-        {range.mesh_count ? collection_meshes_.data()+range.mesh_begin : nullptr,range.mesh_count},range.has_receivers};
+    const auto& range = storage_->collections_[found->second];
+    return {{range.model_count ? storage_->collection_models_.data()+range.model_begin : nullptr,range.model_count},
+        {range.mesh_count ? storage_->collection_meshes_.data()+range.mesh_begin : nullptr,range.mesh_count},range.has_receivers};
 }
 struct FrameStoragePool {
     std::array<FrameData,2> spare;
@@ -628,6 +651,10 @@ Presentation::~Presentation() {
     reclaim(data_.foregrounds,clean.foregrounds);
     reclaim(data_.terrain.materials,clean.terrain.materials);
     reclaim(data_.terrain.patches,clean.terrain.patches);
+    // Drop frame-owned pose/asset references now; retain only allocation
+    // capacity. Indices are reset once when the next builder compiles.
+    storage_->resolved_models_.clear();
+    clean.compilation_storage_ = std::move(storage_);
     pool->spare[pool->count++] = std::move(clean);
 }
 PresentationRef Presentation::freeze(const FrameData& data) {
@@ -649,7 +676,7 @@ size_t imageSlot(const std::vector<FrameData::ImageBinding>& images,
 }
 const ImageAsset& Presentation::image(uint32_t binding) const {
     if (!binding) throw std::invalid_argument("Absent scene image binding");
-    const auto index = image_slots_[imageSlot(data_.images,image_slots_,binding)];
+    const auto index = storage_->image_slots_[imageSlot(data_.images,storage_->image_slots_,binding)];
     if (!index)
         throw std::invalid_argument("Missing frame image binding");
     return *data_.images[index-1].asset;
@@ -658,6 +685,9 @@ PresentationRef Presentation::publish(FrameData&& data) {
     return complete(std::move(data));
 }
 PresentationRef Presentation::complete(FrameData data) {
+    auto storage = std::move(data.compilation_storage_);
+    if (!storage || !storage.unique()) storage = std::make_shared<FrameCompilationStorage>();
+    storage->clear();
     require(data.sequence != 0 && data.scene_lifetime != 0, "Unidentified presentation frame");
     require(std::isfinite(data.simulation_time) && std::isfinite(data.delta_time) && data.delta_time >= 0,
         "Invalid presentation clock");
@@ -711,7 +741,7 @@ PresentationRef Presentation::complete(FrameData data) {
     require(data.images.size() < UINT32_MAX/2,"Too many frame images");
     size_t image_capacity = 1;
     while (image_capacity < data.images.size()*2) image_capacity *= 2;
-    std::vector<uint32_t> image_slots(image_capacity,0);
+    auto& image_slots = storage->image_slots_; image_slots.assign(image_capacity,0);
     for (size_t i = 0; i < data.images.size(); ++i) {
         auto& slot = image_slots[imageSlot(data.images,image_slots,data.images[i].binding)];
         require(!slot,"Duplicate frame image slot");
@@ -796,7 +826,7 @@ PresentationRef Presentation::complete(FrameData data) {
         require(data.terrain.patches.size() == data.terrain.asset->patches().size(),"Incomplete terrain patch bindings");
         for (const auto& patch : data.terrain.patches) data.lightCandidates(patch.light_candidates);
     } else require(data.terrain.materials.empty() && data.terrain.patches.empty(),"Terrain materials have no grid");
-    SceneLookup<int32_t,size_t> rooms;
+    auto& rooms = storage->room_indices_;
     rooms.reserve(data.rooms.size());
     for (const auto& room : data.rooms) {
         require(room.number >= 0 && rooms.emplace(room.number,size_t(&room-data.rooms.data())).second, "Duplicate or invalid scene room");
@@ -837,7 +867,7 @@ PresentationRef Presentation::complete(FrameData data) {
         require(room != rooms.end() && static_cast<size_t>(mesh.receiver_polygon) < data.rooms[room->second].surfaces.size() &&
             mesh.collection == 0 && mesh.surface.layer == RenderLayer::World,"Mesh receiver is not a world surface");
     }
-    SceneLookup<uint32_t,size_t> objects;
+    auto& objects = storage->object_indices_;
     objects.reserve(data.objects.size());
     for (const auto& object : data.objects) {
         require(objects.emplace(object.handle,size_t(&object-data.objects.data())).second, "Duplicate object lifetime in scene");
@@ -851,7 +881,7 @@ PresentationRef Presentation::complete(FrameData data) {
                 "Invalid simulation observation volume");
         }
     }
-    SceneLookup<uint64_t,size_t> model_instances;
+    auto& model_instances = storage->model_indices_;
     model_instances.reserve(data.model_instances.size());
     for (const auto& object : data.objects)
         for (const auto hidden : object.camera_hidden_objects)
@@ -951,19 +981,15 @@ PresentationRef Presentation::complete(FrameData data) {
             size_t(mesh.model_part) < data.modelsFor(model_instances.at(mesh.model_instance))[mesh.model_variant].parts.size())),
             "Model attachment references an absent pose part");
     }
-    std::shared_ptr<Presentation> prepared(new Presentation(std::move(data)));
-    prepared->room_indices_ = std::move(rooms);
-    prepared->image_slots_ = std::move(image_slots);
-    prepared->object_indices_ = std::move(objects);
-    prepared->model_indices_ = std::move(model_instances);
+    std::shared_ptr<Presentation> prepared(new Presentation(std::move(data),std::move(storage)));
     // Compile domain membership once. Cockpit/HUD/module views must not walk
     // every world object and effect merely to discard their collection IDs.
     require(prepared->data_.model_instances.size() <= UINT32_MAX && prepared->data_.meshes.size() <= UINT32_MAX,
         "Too many scene collection members");
-    const auto domain = [&](uint64_t identity) -> CollectionRange& {
-        const auto found = prepared->collection_indices_.emplace(identity,prepared->collections_.size());
-        if (found.second) prepared->collections_.emplace_back();
-        return prepared->collections_[found.first->second];
+    const auto domain = [&](uint64_t identity) -> FrameCompilationStorage::CollectionRange& {
+        const auto found = prepared->storage_->collection_indices_.emplace(identity,prepared->storage_->collections_.size());
+        if (found.second) prepared->storage_->collections_.emplace_back();
+        return prepared->storage_->collections_[found.first->second];
     };
     for (const auto& model : prepared->data_.model_instances) ++domain(model.collection).model_count;
     for (const auto& mesh : prepared->data_.meshes) {
@@ -971,18 +997,18 @@ PresentationRef Presentation::complete(FrameData data) {
         range.has_receivers = range.has_receivers || mesh.receiver_polygon >= 0;
     }
     uint32_t model_begin = 0,mesh_begin = 0;
-    for (auto& range : prepared->collections_) {
+    for (auto& range : prepared->storage_->collections_) {
         range.model_begin = model_begin; model_begin += range.model_count; range.model_count = 0;
         range.mesh_begin = mesh_begin; mesh_begin += range.mesh_count; range.mesh_count = 0;
     }
-    prepared->collection_models_.resize(model_begin); prepared->collection_meshes_.resize(mesh_begin);
+    prepared->storage_->collection_models_.resize(model_begin); prepared->storage_->collection_meshes_.resize(mesh_begin);
     for (uint32_t i = 0; i < prepared->data_.model_instances.size(); ++i) {
         auto& range = domain(prepared->data_.model_instances[i].collection);
-        prepared->collection_models_[range.model_begin+range.model_count++] = i;
+        prepared->storage_->collection_models_[range.model_begin+range.model_count++] = i;
     }
     for (uint32_t i = 0; i < prepared->data_.meshes.size(); ++i) {
         auto& range = domain(prepared->data_.meshes[i].collection);
-        prepared->collection_meshes_[range.mesh_begin+range.mesh_count++] = i;
+        prepared->storage_->collection_meshes_[range.mesh_begin+range.mesh_count++] = i;
     }
     auto& surface_count = prepared->data_.compiled_surface_count;
     surface_count = 0;
@@ -1085,7 +1111,7 @@ PresentationRef Presentation::complete(FrameData data) {
             model.parts.seal(*model.asset);
         }
     }
-    prepared->resolved_models_.resize(resolved_index);
+    prepared->storage_->resolved_models_.resize(resolved_index);
     return prepared;
 }
 void Presentation::requireExecutable() const {

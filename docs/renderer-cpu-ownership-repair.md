@@ -2,6 +2,19 @@
 
 ## October 20 continuation
 
+October 21: publication compilation storage (identity maps, image lookup,
+collection ranges/members, resolved-pose pointer array) now follows snapshot
+ownership and is recycled with released frame arrays. Shared builder copies get
+independent compilation storage; foreign-thread release never touches the pool.
+Maps clear old identities without discarding capacity. Tests cover reuse,
+copied-builder aliases, held snapshots, source-thread exit and new identities.
+Build/tests pass (`cpu-compiled-storage-*`); binary compiled-storage.exe.
+Dense/wall/save007 500-frame images, combined probe and mirror-surface capture
+are exact to controls. CPU measurements are mixed/noisy, not a demonstrated
+speed win: dense parent 1.897/1.852 vs new 2.010/1.952 ms; wall parent
+1.412/1.818 vs new 1.452/1.498; save007 parent 1.640/1.715 vs new 1.702/1.605.
+This removes repeated allocations, but does NOT close the remaining baselines.
+
 October 21: released view-result vectors now retain bounded, thread-owned
 capacity; copied/held views remain independent, foreign-thread release does not
 touch publisher storage. Surface ordering sorts compact keys and applies one

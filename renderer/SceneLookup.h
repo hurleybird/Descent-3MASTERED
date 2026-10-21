@@ -30,6 +30,10 @@ template<class Key,class Value> class SceneLookup {
         return index;
     }
 public:
+    void clear() {
+        for (auto& slot : slots_) slot = Slot{};
+        count_ = 0;
+    }
     void reserve(size_t entries) {
         if (entries <= slots_.size()/2) return;
         if (entries > (std::numeric_limits<size_t>::max)()/4) throw std::length_error("Scene lookup overflow");

@@ -56,7 +56,10 @@ void storageTests() {
     check(reused.objects.capacity() >= 128 && reused.objects.empty() && !reused.sequence && !reused.scene_lifetime,
         "Released snapshot did not return empty capacity with fresh scalar state");
     reused.sequence = 2; reused.scene_lifetime = assets.lifetime();
+    reused.objects.resize(1); reused.objects[0].handle = 42;
     auto foreign = Presentation::publish(std::move(reused));
+    check(foreign->objectIndices().count(42) == 1 && foreign->objectIndices().count(0) == 0,
+        "Recycled compilation retained the previous frame's object identities");
     std::thread release([frame = std::move(foreign)]() mutable { frame.reset(); });
     release.join();
     check(acquireFrameData().objects.capacity() == 0,"Foreign thread modified publisher's spare storage");
@@ -68,6 +71,20 @@ void storageTests() {
     publish.join();
     check(outlives_publisher->data().sequence == 3,"Snapshot did not outlive publishing thread");
     outlives_publisher.reset();
+    {
+        auto input = acquireFrameData(); input.sequence = 4; input.scene_lifetime = assets.lifetime();
+        input.objects.resize(1); input.objects[0].handle = 61;
+        auto seed = Presentation::publish(std::move(input)); seed.reset();
+        auto reused = acquireFrameData(); reused.sequence = 5; reused.scene_lifetime = assets.lifetime();
+        reused.objects.resize(1); reused.objects[0].handle = 71;
+        auto alias = reused;
+        const auto first = Presentation::publish(std::move(reused));
+        alias.objects[0].handle = 81;
+        const auto second = Presentation::freeze(alias);
+        check(first->objectIndices().count(71) && !first->objectIndices().count(61) && !first->objectIndices().count(81) &&
+            second->objectIndices().count(81) && !second->objectIndices().count(71),
+            "Copied builder scratch storage aliased published compilation");
+    }
 }
 void assetTests() {
     // Plane membership is owned by the frozen scene, not recovered from mutable rooms.
@@ -491,6 +508,13 @@ int main() {
             bool absent = false;
             try { signed_index.at(0); } catch (const std::out_of_range&) { absent = true; }
             check(absent,"Missing identity did not reject lookup");
+            const auto address = signed_index.find(-1);
+            signed_index.clear();
+            check(signed_index.size() == 0 && !signed_index.count(INT32_MIN) && !signed_index.count(INT32_MAX),
+                "Cleared identity lookup retained old keys");
+            signed_index.emplace(-1,7);
+            check(signed_index.find(-1) == address && signed_index.at(-1) == 7,
+                "Identity lookup clear discarded reusable storage");
         }
         storageTests(); assetTests(); frameTests(); extractionTests();
         Checks += runSceneViewTests();

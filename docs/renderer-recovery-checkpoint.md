@@ -2,6 +2,12 @@
 
 ## October 21 resumed work — supersedes restart pause below
 
+Newest: compiled-storage.exe built/tested; dense/wall/save007 long captures,
+combined probe and mirror surface all exact. CPU gains NOT demonstrated (mixed
+timings); goal still unmet. All capture/sampler sessions finished at checkpoint.
+Next investigation: per-view pruning of fog's threaded boundary acceleration
+tree, not just whole-volume rejection. Preserve exact geometry/integration.
+
 Newest verification binary: fog-view-final.exe. All eight images, combined probe,
 SSAA2/MSAA4/AO/bloom exact to water-owned. View storage/order and fog source/camera
 candidate work tested; CPU timings mixed, not a claimed win. Fog GPU remains slow

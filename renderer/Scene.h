@@ -830,6 +830,7 @@ template<class T> struct ModelRange {
     T& at(size_t index) const { if (index >= count) throw std::out_of_range("Model variant"); return first[index]; }
 };
 struct FrameStoragePool;
+struct FrameCompilationStorage;
 struct FrameData {
     uint32_t compiled_surface_count = 0, compiled_part_count = 0;
     uint64_t sequence = 0, scene_lifetime = 0;
@@ -931,6 +932,7 @@ private:
     friend FrameData acquireFrameData();
     friend class Presentation;
     std::shared_ptr<FrameStoragePool> storage_pool_;
+    std::shared_ptr<FrameCompilationStorage> compilation_storage_;
 };
 // Empty builder backed by released snapshot storage. No storage is reclaimed
 // until its presentation's last reader releases it; at most two spare sets
@@ -963,26 +965,16 @@ public:
     const PreparedModel& resolvedModel(size_t instance,size_t variant) const;
     const ForegroundLayer* foreground(uint64_t identity) const;
     SceneCollection collection(uint64_t identity) const;
-    const SceneLookup<int32_t,size_t>& roomIndices() const { return room_indices_; }
-    const SceneLookup<uint32_t,size_t>& objectIndices() const { return object_indices_; }
-    const SceneLookup<uint64_t,size_t>& modelIndices() const { return model_indices_; }
+    const SceneLookup<int32_t,size_t>& roomIndices() const;
+    const SceneLookup<uint32_t,size_t>& objectIndices() const;
+    const SceneLookup<uint64_t,size_t>& modelIndices() const;
     void requireExecutable() const;
 private:
-    explicit Presentation(FrameData&& data) : data_(std::move(data)) {}
+    Presentation(FrameData&& data,std::shared_ptr<FrameCompilationStorage> storage)
+        : data_(std::move(data)),storage_(std::move(storage)) {}
     static PresentationRef complete(FrameData data);
     FrameData data_;
-    SceneLookup<int32_t,size_t> room_indices_;
-    std::vector<uint32_t> image_slots_; // packed frame-owned name -> image index, zero means empty
-    mutable std::vector<std::unique_ptr<PreparedModel>> resolved_models_;
-    SceneLookup<uint32_t,size_t> object_indices_;
-    SceneLookup<uint64_t,size_t> model_indices_;
-    struct CollectionRange {
-        uint32_t model_begin = 0,model_count = 0,mesh_begin = 0,mesh_count = 0;
-        bool has_receivers = false;
-    };
-    SceneLookup<uint64_t,size_t> collection_indices_;
-    std::vector<CollectionRange> collections_;
-    std::vector<uint32_t> collection_models_,collection_meshes_;
+    std::shared_ptr<FrameCompilationStorage> storage_;
 };
 
 } // namespace d3scene
