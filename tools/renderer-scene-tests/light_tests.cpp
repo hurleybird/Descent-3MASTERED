@@ -1,5 +1,6 @@
 // Descent 3MASTERED - GPL-3.0-or-later
 #include "../../renderer/SceneLighting.h"
+#include "../../renderer/SceneGeometry.h"
 #include <stdexcept>
 #include <cmath>
 namespace {
@@ -69,10 +70,19 @@ int runLightTests() {
     }
     data.rooms[0].portals.push_back({0,1,0}); data.rooms[1].portals.push_back({0,0,0});
     prepareLightInfluences(data);
-    check(data.rooms[0].light_influences[0] == std::vector<uint32_t>{0},"Source room lost emitter reference");
-    check(data.rooms[1].light_influences[0] == std::vector<uint32_t>{0},"Connected room lost emitter reference");
-    check(data.rooms[2].light_influences.empty(),"Light leaked into disconnected room");
+    check(data.rooms[0].light_candidates == std::vector<uint32_t>{0},"Source room lost emitter reference");
+    check(data.rooms[1].light_candidates == std::vector<uint32_t>{0},"Connected room lost emitter reference");
+    check(data.rooms[2].light_candidates.empty(),"Light leaked into disconnected room");
     auto frame = Presentation::freeze(data);
+    std::vector<int32_t> submitted{17};
+    appendSurfaceLightIndices(frame->data(),frame->data().rooms[0].light_candidates,
+        MeshView(mesh),mesh.polygons[0],{},submitted);
+    check(submitted == std::vector<int32_t>({17,0}),"View refinement changed emitter order or overwrote prior ranges");
+    Transform distant; distant.position = {1000,0,0};
+    submitted.clear();
+    appendSurfaceLightIndices(frame->data(),frame->data().rooms[0].light_candidates,
+        MeshView(mesh),mesh.polygons[0],distant,submitted);
+    check(submitted.empty(),"View refinement ignored posed polygon position");
     data.lights[0].color.x = 99;
     check(frame->data().lights[0].color.x == 1,"Published emitter was mutated");
     data = frame->data();
@@ -88,6 +98,10 @@ int runLightTests() {
     rejects([&] { Presentation::freeze(data); });
     data = frame->data(); data.lights[0].position.x = 1000;
     prepareLightInfluences(data);
-    check(data.rooms[0].light_influences.empty() || data.rooms[0].light_influences[0].empty(),"Influence compiler ignored source radius");
+    check(data.rooms[0].light_candidates.empty(),"Influence compiler ignored source radius");
+    submitted.clear();
+    appendSurfaceLightIndices(frame->data(),frame->data().rooms[0].light_candidates,
+        MeshView(mesh),mesh.polygons[0],{},submitted);
+    check(submitted == std::vector<int32_t>{0},"Later frame preparation changed held-frame light refinement");
     return checks;
 }

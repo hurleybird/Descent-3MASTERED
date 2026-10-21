@@ -514,8 +514,7 @@ PresentationRef Presentation::complete(FrameData data) {
             require(room.surfaces.requiredLightCount() <= data.lights.size(),"Surface references missing emitter");
             for (const auto& dependency : room.surfaces.images()) validateDependency(dependency);
         }
-        require(room.light_influences.empty() || room.light_influences.size() == room.surfaces.size(),"Incomplete room influences");
-        for (const auto& indices : room.light_influences) for (auto index : indices)
+        for (auto index : room.light_candidates)
             require(index < data.lights.size(),"Room references missing emitter");
         require(finite(room.fog_color) && std::isfinite(room.fog_depth), "Invalid room fog");
         require(std::isfinite(room.light_scalar) && room.light_scalar >= 0, "Invalid room illumination");
@@ -572,8 +571,7 @@ PresentationRef Presentation::complete(FrameData data) {
                 const auto& asset_part = model.asset->geometry().parts[i];
                 require(part.surfaces.size() == (part.material_palette ? asset_part.surface_polygons.size() : asset_part.geometry.polygons.size()),
                     "Incomplete model instance materials");
-                require(part.polygon_lights.empty() || part.polygon_lights.size() == asset_part.geometry.polygons.size(),"Incomplete model light assignment");
-                for (const auto& lights : part.polygon_lights) for (auto light : lights) require(light < data.lights.size(),"Missing model light");
+                for (auto light : part.light_candidates) require(light < data.lights.size(),"Missing model light");
                 if (!part.surfaces.publishedFor(model.asset->id(),uint32_t(i),part.material_palette)) {
                 for (const auto& surface : part.surfaces) validateSurface(surface);
                 for (const auto& surface : part.surfaces) validateIndices(surface);

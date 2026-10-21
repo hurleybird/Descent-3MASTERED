@@ -86,6 +86,11 @@ bool touches(const Light& light, MeshView mesh, const MeshPolygon& polygon, cons
     return x*x+y*y+z*z <= light.radius*light.radius;
 }
 }
+void appendSurfaceLightIndices(const FrameData& data,const std::vector<uint32_t>& candidates,
+    MeshView mesh,const MeshPolygon& polygon,const Transform& transform,std::vector<int32_t>& output) {
+    for (const auto index : candidates)
+        if (touches(data.lights[index],mesh,polygon,transform)) output.push_back(static_cast<int32_t>(index));
+}
 void prepareLightInfluences(FrameData& data) {
     // Camera-anchored meshes cannot be spatially culled during view-independent
     // preparation. Keep the canonical light table; the shader evaluates range.
@@ -115,34 +120,22 @@ void prepareLightInfluences(FrameData& data) {
     }
     for (auto& room : data.rooms) {
         room.light_influences_prepared = true;
-        room.light_influences.clear();
-        std::vector<uint32_t> candidates;
+        auto& candidates = room.light_candidates;
+        candidates.clear();
         for (size_t i = 0; i < data.lights.size(); ++i) if (reachable[i].count(room.number) &&
             touchesBounds(data.lights[i],room.asset->bounds())) candidates.push_back(uint32_t(i));
-        if (candidates.empty()) continue;
-        const auto& geometry = room.asset->geometry();
-        room.light_influences.resize(geometry.polygons.size());
-        for (size_t face = 0; face < geometry.polygons.size(); ++face)
-            for (auto i : candidates) if (touches(data.lights[i],MeshView(geometry),geometry.polygons[face],{}))
-                room.light_influences[face].push_back(i);
     }
     for (auto& object : data.model_instances) for (auto& model : object.models) for (size_t part = 0; part < model.parts.size(); ++part) {
         auto& pose = model.parts[part];
-        const auto& geometry = model.asset->geometry().parts[part].geometry;
         pose.light_influences_prepared = true;
-        pose.polygon_lights.clear();
+        auto& candidates = pose.light_candidates;
+        candidates.clear();
         if (!pose.draw) continue;
-        std::vector<uint32_t> candidates;
         const auto transform = compose(object.current,pose.current);
         const auto bounds = transformBounds(transform,model.asset->geometry().parts[part].local_bounds);
         for (size_t i = 0; i < data.lights.size(); ++i)
             if ((object.room < 0 || reachable[i].count(object.room)) &&
                 (!pose.vertices.empty() || touchesBounds(data.lights[i],bounds))) candidates.push_back(uint32_t(i));
-        if (candidates.empty()) continue;
-        pose.polygon_lights.resize(geometry.polygons.size());
-        for (size_t face = 0; face < geometry.polygons.size(); ++face)
-            for (auto i : candidates) if (touches(data.lights[i],MeshView(geometry,pose.vertices),geometry.polygons[face],transform))
-                pose.polygon_lights[face].push_back(i);
     }
     if (data.terrain.asset) for (size_t patch = 0; patch < data.terrain.patches.size(); ++patch) {
         const auto& bounds = data.terrain.asset->patches()[patch].bounds;

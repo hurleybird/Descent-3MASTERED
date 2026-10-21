@@ -222,7 +222,12 @@ int runModelSceneTests() {
     Light light; light.id.owner = 1; light.radius = 15; light.position = {0,0,10}; light.color = {1,1,1};
     lit_shape.lights.push_back(light); lit_shape.model_instances[0].room = -1;
     prepareLightInfluences(lit_shape);
-    check(lit_shape.model_instances[0].models[0].parts[0].polygon_lights[0].size() == 1,"Light query used undeformed geometry");
+    const auto& lit_part = lit_shape.model_instances[0].models[0].parts[0];
+    const auto& lit_geometry = lit_shape.model_instances[0].models[0].asset->geometry().parts[0].geometry;
+    std::vector<int32_t> lit_indices;
+    appendSurfaceLightIndices(lit_shape,lit_part.light_candidates,MeshView(lit_geometry,lit_part.vertices),
+        lit_geometry.polygons[0],compose(lit_shape.model_instances[0].current,lit_part.current),lit_indices);
+    check(lit_indices.size() == 1,"Light query used undeformed geometry");
     auto invalid = modelGeometry(); invalid.parts[0].parent = 0;
     rejects([&] { assets.publishModel(4,invalid); });
     invalid = modelGeometry(); invalid.parts[0].polygon_materials[0] = 0;

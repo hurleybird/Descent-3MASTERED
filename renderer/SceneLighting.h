@@ -2,9 +2,12 @@
 #pragma once
 #include "Scene.h"
 namespace d3scene {
-// Source effects are evaluated once. Surfaces retain indices into one emitter
-// table; neither light identity nor fields are reconstructed from draw uniforms.
+// Source effects and conservative spatial membership are evaluated once.
+// Polygon refinement belongs to view submission, not whole-level preparation.
 void prepareLightInfluences(FrameData&);
+struct MeshView;
+void appendSurfaceLightIndices(const FrameData&,const std::vector<uint32_t>& candidates,
+    MeshView,const MeshPolygon&,const Transform&,std::vector<int32_t>& output);
 float lightAttenuation(const Light&, Vec3 world);
 uint32_t visualNoise(double time, uint32_t key, uint32_t salt);
 Vec3 sampleVolume(const VolumeGrid&,Vec3 position);

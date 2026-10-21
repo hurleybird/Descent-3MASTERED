@@ -405,7 +405,7 @@ struct RoomState {
     uint32_t surface_base = 0;
     bool uses_room_illumination = false;
     bool light_influences_prepared = false;
-    std::vector<std::vector<uint32_t>> light_influences;
+    std::vector<uint32_t> light_candidates; // conservative room set; refined after visibility
     std::vector<Portal> portals;
     uint32_t authored_flags = 0;
     float fog_depth = 0;
@@ -450,7 +450,7 @@ struct PreparedModelPart {
     bool light_influences_prepared = false;
     std::array<float,16> appearance_inputs{};
     uint64_t baked_layout_revision = 0;
-    std::vector<std::vector<uint32_t>> polygon_lights;
+    std::vector<uint32_t> light_candidates; // conservative part set; refined after visibility
     const SurfaceBinding& surface(const ModelPart& asset,size_t polygon) const {
         return surfaces[material_palette ? asset.surface_for_polygon[polygon] : polygon];
     }

@@ -19,8 +19,16 @@ bloom also completes (`cpu-sky-viewprobe-20261020`). Dense total render CPU is
 7.83 ms in the latest clean capture, still far above the 2.93 ms old baseline.
 Detailed markers are not the root cause: disabled-marker paired runs measured
 8.33 ms new / 2.63 ms old before the sky change. Contract suite passes.
-Next: remove whole-level per-polygon light assignment from frame preparation;
-retain conservative candidates and refine only demanded geometry per view.
+Light assignment now retains conservative room/part candidates and refines
+polygons at submission, instead of allocating per-polygon lists throughout the
+level. Dense light preparation drops about 0.59 to 0.26 ms; view upload remains
+about 0.39 ms. `cpu-demand-lights-20261020-savegNNN` CPU totals are 5.63, 4.23,
+7.26, 7.73, 1.70, 6.97, 2.02, 6.44 ms. Still no baseline victories. Images match
+the pre-change rewrite (save002 matches the repeat/original rather than the
+alternate pickup capture). The AO/bloom auxiliary-view/deformation/resource
+probe is pixel-identical. Tests cover held-frame light refinement, output range
+append behavior and deformed/posed positions. Whole-level model assembly,
+resource bindings, extraction and publication remain too expensive.
 
 Frame-owned image bindings replace surface-owned pixel revisions. Surface
 tables keep stable resource names; each frame owns the immutable images bound

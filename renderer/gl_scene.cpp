@@ -3,6 +3,7 @@
 #include "gl_mesh.h"
 #include "SceneView.h"
 #include "SceneGeometry.h"
+#include "SceneLighting.h"
 #include "SceneImages.h"
 #include "SceneTerrain.h"
 #include "SceneFog.h"
@@ -569,7 +570,10 @@ void GL4Renderer::UploadSceneFrame(const d3scene::Presentation& frame, const d3s
             if (item.model) parts.push_back(&frame.data().model_instances[item.model_instance_index].models[item.model_variant].parts[item.part_index]);
             else if (item.mesh) meshes[item.mesh_index] = 1;
             else if (item.terrain) surfaces[frame.data().terrain.patches[item.terrain_patch][item.terrain_batch].compiled_index] = 1;
-            else rooms[item.room_index] = 1;
+            else {
+                rooms[item.room_index] = 1;
+                surfaces[frame.data().rooms[item.room_index].surface_base+item.polygon_index] = 1;
+            }
         }
         const std::less<const d3scene::PreparedModelPart*> pointer_order;
         std::sort(parts.begin(),parts.end(),pointer_order);
@@ -692,11 +696,13 @@ void GL4Renderer::UploadSceneFrame(const d3scene::Presentation& frame, const d3s
                     scene_surface_ranges.begin()+room.surface_base+room.surfaces.size());
             }
             }
-            for (size_t face = 0; face < room.light_influences.size(); ++face) {
-                const auto& lights = room.light_influences[face];
-                auto& range = scene_surface_ranges[room.surface_base+face].lights;
-                range = ElementRange(uint32_t(indices.size()),uint32_t(lights.size()));
-                for (auto light : lights) indices.push_back(int32_t(light));
+            if (room.light_influences_prepared) for (size_t face = 0; face < room.surfaces.size(); ++face) {
+                if (!surfaces[room.surface_base+face]) continue;
+                const uint32_t start = uint32_t(indices.size());
+                const auto& geometry = room.asset->geometry();
+                d3scene::appendSurfaceLightIndices(frame.data(),room.light_candidates,
+                    d3scene::MeshView(geometry),geometry.polygons[face],{},indices);
+                scene_surface_ranges[room.surface_base+face].lights = ElementRange(start,uint32_t(indices.size())-start);
             }
         }
         for (const auto& patch : frame.data().terrain.patches) for (const auto& surface : patch) if (surfaces[surface.compiled_index]) add(surface,surface.compiled_index,surface.light_indices);
@@ -714,11 +720,15 @@ void GL4Renderer::UploadSceneFrame(const d3scene::Presentation& frame, const d3s
             if (!wantsPart(part)) continue;
             for (size_t surface = 0; surface < part.surfaces.size(); ++surface)
                 add(part.surfaces[surface],part.surface_base+uint32_t(surface),part.surfaces[surface].light_indices);
-            if (!part.polygon_lights.empty()) {
-                auto& ranges = scene_model_influences[&part]; ranges.reserve(part.polygon_lights.size());
-                for (const auto& lights : part.polygon_lights) {
-                    ranges.emplace_back(uint32_t(indices.size()),uint32_t(lights.size()));
-                    for (auto light : lights) indices.push_back(int32_t(light));
+            if (!part.light_candidates.empty()) {
+                const auto& geometry = model.asset->geometry().parts[&part-model.parts.data()].geometry;
+                const auto transform = d3scene::compose(object.current,part.current);
+                auto& ranges = scene_model_influences[&part]; ranges.reserve(geometry.polygons.size());
+                for (const auto& polygon : geometry.polygons) {
+                    const uint32_t start = uint32_t(indices.size());
+                    d3scene::appendSurfaceLightIndices(frame.data(),part.light_candidates,
+                        d3scene::MeshView(geometry,part.vertices),polygon,transform,indices);
+                    ranges.emplace_back(start,uint32_t(indices.size())-start);
                 }
             }
         }
