@@ -722,7 +722,11 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance) {
         // Explicit authoring preview: copy optical properties before compilation,
         // not a view-dependent patch to the finished image or mutable level data.
         const int option = FindArg("-scene-fog-room-source");
-        if (option) {
+        // Room numbers are local to a level. Never carry this inspection edit
+        // into another scene allocation after loading/travelling/restarting.
+        static uint64_t preview_lifetime = 0;
+        if (option && !preview_lifetime) preview_lifetime = data.scene_lifetime;
+        if (option && preview_lifetime == data.scene_lifetime) {
             const auto roomNumber = [&](int offset) {
                 const char* text = GetArg(option+offset);
                 char* end = nullptr;
