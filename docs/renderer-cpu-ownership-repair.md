@@ -2,6 +2,25 @@
 
 ## October 20 continuation
 
+October 21, `bitmap-metadata.exe`: material-visible bitmap lifetime/format
+changes now have a producer-owned revision. All 21 format writers use
+bm_SetFormat (also advances pixel revision when format actually changes).
+Allocation, free, registry reset, resize and overlay lifetime changes notify
+the material revision. Pixel-only procedural updates do NOT invalidate it.
+Normal room/material reuse no longer scans MAX_BITMAPS every frame. The
+existing image-revision audit still scans and rejects missed notifications.
+Small settings comparison uses a fixed array instead of a per-frame vector.
+Eight audited save captures + combined probe and three unaudited long captures
+are EXACT to light-surface; build passes. Paired 500-frame means (100-449):
+dense parent 2.315/2.313 vs new 2.238/2.325; 005 1.509/1.628 vs 1.558/1.368;
+007 1.685/1.887 vs 1.782/1.522 ms. Modest mean improvement, substantial temporal
+noise; fresh legacy recheck required. Raw metadata-* and bitmap-meta-*.
+CPU2 pinning trial retained significant drift; no default/shipping affinity
+change. Latest completed external sample: cpu-light-surface-stack-005.txt;
+770 preparation /1430 inclusive render samples, major preparation scopes:
+publication204, resources192, models174. These sampled captures are NOT timing
+evidence. No sampler active after completion.
+
 October 21 continuation, `light-surface.exe`:
 
 - Camera/environment uniforms are one 240-byte std140 view block, bound again

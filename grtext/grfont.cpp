@@ -822,7 +822,7 @@ void grfont_TranslateToBitmaps(int handle)
 	if (fnt->bmps[surf_index] == -1 || fnt->bmps[surf_index] == BAD_BITMAP_HANDLE) 
 		Error("TranslateToBitmaps <Bitmap allocation error>");
 	if (fntfile->flags & FT_FMT4444)
-		GameBitmaps[fnt->bmps[surf_index]].format = BITMAP_FORMAT_4444;
+		bm_SetFormat(fnt->bmps[surf_index],BITMAP_FORMAT_4444);
 
 	grfont_ClearBitmap(fnt->bmps[surf_index]); 
 	surf_index++;
@@ -844,7 +844,7 @@ void grfont_TranslateToBitmaps(int handle)
 				if (fnt->bmps[surf_index] == -1 || fnt->bmps[surf_index] == BAD_BITMAP_HANDLE) 
 					Error("TranslateToBitmaps <Bitmap allocation error>");
 				if (fntfile->flags & FT_FMT4444)
-					GameBitmaps[fnt->bmps[surf_index]].format = BITMAP_FORMAT_4444;
+					bm_SetFormat(fnt->bmps[surf_index],BITMAP_FORMAT_4444);
 				
 				grfont_ClearBitmap(fnt->bmps[surf_index]); 
 				surf_index++;

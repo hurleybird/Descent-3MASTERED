@@ -82,6 +82,9 @@ extern bms_bitmap GameBitmaps[MAX_BITMAPS];
 // renderer and are not an image identity. Revisions survive slot recycling.
 void bm_MarkChanged(int handle);
 uint64_t bm_ContentRevision(int handle);
+// Material-visible slot/format changes, independent of per-frame pixel updates.
+uint64_t bm_MaterialRevision();
+void bm_SetFormat(int handle,ubyte format);
 // Single-level packed pixel values. Deferred values remain readable through
 // bm_data; freeing/reusing a bitmap never changes an already-held snapshot.
 ImmutablePixelsRef bm_SnapshotPixels(int handle);

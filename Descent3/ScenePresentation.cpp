@@ -62,24 +62,33 @@ d3scene::OcclusionClass SceneRoomOcclusionClass(int texture, bool exterior) {
 namespace {
 bool roomMaterialInputsUnchanged() {
     static std::vector<texture> previous;
-    static std::vector<float> settings;
+    static std::array<float,15> settings{};
     static uint64_t reflection_revision = 0;
     static std::array<int,MAX_BITMAPS> bitmap_formats{};
-    const std::vector<float> current{float(Detail_settings.Specular_lighting),float(Detail_settings.Mirrored_surfaces),
+    static uint64_t bitmap_material_revision = 0;
+    const std::array<float,15> current{{float(Detail_settings.Specular_lighting),float(Detail_settings.Mirrored_surfaces),
         float(Render_preferred_state.per_pixel_lighting),float(Render_split_specular_textures),float(Render_per_pixel_field_static_specular),
         Render_per_pixel_specular_sharpness,Render_per_pixel_specular_strength,Render_per_pixel_static_specular_strength,
         Render_per_pixel_specular_lightmap_mix,Render_per_pixel_specular_alpha_strength,float(UseHardware),float(Render_hires_textures),
-        Terrain_sky.satellite_vectors[0].x,Terrain_sky.satellite_vectors[0].y,Terrain_sky.satellite_vectors[0].z};
+        Terrain_sky.satellite_vectors[0].x,Terrain_sky.satellite_vectors[0].y,Terrain_sky.satellite_vectors[0].z}};
     bool same = settings == current && previous.size() == MAX_TEXTURES;
     const auto revision = SceneReflectionBakeRevision();
     same = same && reflection_revision == revision;
     reflection_revision = revision;
     // Pixel revisions are resolved by prepareImages. A format change also
     // changes alpha/specular material policy, so it must recompile appearance.
-    for (int i = 0; i < MAX_BITMAPS; ++i) {
+    const auto bitmap_revision = bm_MaterialRevision();
+    const bool bitmap_metadata_current = bitmap_material_revision == bitmap_revision;
+    const bool audit_bitmaps = FindArg("-scene-image-revision-audit") != 0;
+    bool bitmap_metadata_equal = true;
+    if (!bitmap_metadata_current || audit_bitmaps) for (int i = 0; i < MAX_BITMAPS; ++i) {
         const int format = GameBitmaps[i].used ? int(GameBitmaps[i].format)+1 : 0;
-        if (bitmap_formats[i] != format) { same = false; bitmap_formats[i] = format; }
+        if (bitmap_formats[i] != format) { bitmap_metadata_equal = false; bitmap_formats[i] = format; }
     }
+    if (bitmap_metadata_current && !bitmap_metadata_equal && audit_bitmaps)
+        throw std::logic_error("Bitmap format/lifetime changed without producer invalidation");
+    bitmap_material_revision = bitmap_revision;
+    same = same && bitmap_metadata_equal;
     if (previous.size() != MAX_TEXTURES) previous.resize(MAX_TEXTURES);
     for (int i = 0; i < MAX_TEXTURES; ++i) {
         const auto& a = GameTextures[i]; auto& b = previous[i];

@@ -2014,7 +2014,7 @@ static bool VisEffectBuildSharedAtlas(int source_width, int source_height, int b
 
 	GameBitmaps[atlas_handle].flags |= BF_TRANSPARENT | BF_CHANGED;
 	bm_MarkChanged(atlas_handle);
-	GameBitmaps[atlas_handle].format = bitmap_format;
+	bm_SetFormat(atlas_handle,bitmap_format);
 	snprintf(GameBitmaps[atlas_handle].name, BITMAP_NAME_LEN, "vfx%dx%d_%d",
 		source_width, source_height, bitmap_format);
 

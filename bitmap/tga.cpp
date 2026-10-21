@@ -402,7 +402,7 @@ int bm_tga_alloc_file(CFILE* infile, char* name, int format)
 	n = bm_AllocBitmap(width, height, mipped * ((width * height * 2) / 3));
 
 	if (format == BITMAP_FORMAT_4444 || image_type == OUTRAGE_4444_COMPRESSED_MIPPED)
-		GameBitmaps[n].format = BITMAP_FORMAT_4444;
+		bm_SetFormat(n,BITMAP_FORMAT_4444);
 
 	// Copy the name
 	strcpy(GameBitmaps[n].name, name);
@@ -651,9 +651,9 @@ int bm_page_in_file(int n)
 
 
 	if ((GameBitmaps[n].flags & BF_WANTS_4444) || image_type == OUTRAGE_4444_COMPRESSED_MIPPED)
-		GameBitmaps[n].format = BITMAP_FORMAT_4444;
+		bm_SetFormat(n,BITMAP_FORMAT_4444);
 	else
-		GameBitmaps[n].format = BITMAP_FORMAT_STANDARD;
+		bm_SetFormat(n,BITMAP_FORMAT_STANDARD);
 
 	GameBitmaps[n].width = width;
 	GameBitmaps[n].height = height;

@@ -41,6 +41,17 @@
 int Num_of_bitmaps = 0;
 bms_bitmap GameBitmaps[MAX_BITMAPS];
 static uint64_t Bitmap_content_revisions[MAX_BITMAPS] = {};
+static uint64_t Bitmap_material_revision = 1;
+static void bm_MarkMaterialChanged() {
+    if (++Bitmap_material_revision == 0) Error("Bitmap material revision exhausted");
+}
+uint64_t bm_MaterialRevision() { return Bitmap_material_revision; }
+void bm_SetFormat(int handle,ubyte format) {
+    ASSERT(handle >= 0 && handle < MAX_BITMAPS);
+    if (GameBitmaps[handle].format == format) return;
+    GameBitmaps[handle].format = format;
+    bm_MarkMaterialChanged(); bm_MarkChanged(handle);
+}
 static ImmutablePixelsRef Bitmap_deferred_pixels[MAX_BITMAPS], Bitmap_pixel_snapshots[MAX_BITMAPS];
 void bm_MarkChanged(int handle) {
 	ASSERT(handle >= 0 && handle < MAX_BITMAPS);
@@ -286,6 +297,7 @@ void bm_FreeBitmapMain(int handle);
 // Sets all the bitmaps to unused
 void bm_InitBitmaps()
 {
+    bm_MarkMaterialChanged();
 	int i, ret;
 	bm_InitHashTable();
 	Bitmaps_initted = 1;
@@ -293,7 +305,7 @@ void bm_InitBitmaps()
 	{
 		GameBitmaps[i].used = 0;
 		GameBitmaps[i].data16 = NULL;
-		GameBitmaps[i].format = BITMAP_FORMAT_STANDARD;
+		bm_SetFormat(i,BITMAP_FORMAT_STANDARD);
 		GameBitmaps[i].cache_slot = -1;
 		GameBitmaps[i].flags = 0;
 		Bitmap_truecolor_data[i] = NULL;
@@ -346,7 +358,7 @@ int bm_AllocateMemoryForIndex(int n, int w, int h, int add_mem)
 	Bitmap_memory_used += (size);
 	memset(GameBitmaps[n].data16, 0xAA, size);
 
-	GameBitmaps[n].format = BITMAP_FORMAT_STANDARD;
+	bm_SetFormat(n,BITMAP_FORMAT_STANDARD);
 	GameBitmaps[n].width = w;
 	GameBitmaps[n].height = h;
 	GameBitmaps[n].flags = BF_CHANGED | BF_BRAND_NEW;
@@ -397,6 +409,7 @@ int bm_AllocBitmap(int w, int h, int add_mem)
 	{
 		GameBitmaps[n].used = 1;
 		GameBitmaps[n].cache_slot = -1;
+		bm_MarkMaterialChanged();
 	}
 	return ret;
 }
@@ -434,7 +447,8 @@ int bm_AllocNoMemBitmap(int w, int h)
 	GameBitmaps[n].width = w;
 	GameBitmaps[n].height = h;
 	GameBitmaps[n].used = 1;
-	GameBitmaps[n].format = BITMAP_FORMAT_STANDARD;
+	bm_SetFormat(n,BITMAP_FORMAT_STANDARD);
+	bm_MarkMaterialChanged();
 	GameBitmaps[n].flags = BF_NOT_RESIDENT | BF_CHANGED | BF_BRAND_NEW;
 	bm_MarkChanged(n);
 	GameBitmaps[n].cache_slot = -1;
@@ -513,6 +527,7 @@ void bm_FreeBitmapMain(int handle)
 	GameBitmaps[handle].data16 = NULL;
 	GameBitmaps[handle].cache_slot = -1;
 	GameBitmaps[handle].used = 0;
+	bm_MarkMaterialChanged();
 	Num_of_bitmaps--;
 }
 
@@ -643,6 +658,7 @@ int bm_AllocLoadFileBitmap(const char* fname, int mipped, int format)
 		GameBitmaps[n].used = 1;
 		bm_FreeBitmap(n);
 		GameBitmaps[n].used = old_used + 1;
+		bm_MarkMaterialChanged();
 
 		overlay = 1;
 	}
@@ -705,12 +721,12 @@ int bm_AllocLoadFileBitmap(const char* fname, int mipped, int format)
 			if (overlay)
 			{
 				bm_AllocateMemoryForIndex(n, w, h, mipped * (((w * h * 2) / 3)));
-				GameBitmaps[n].format = GameBitmaps[src_bm].format;
+				bm_SetFormat(n,GameBitmaps[src_bm].format);
 			}
 			else
 			{
 				n = bm_AllocBitmap(w, h, mipped * (((w * h * 2) / 3)));
-				GameBitmaps[n].format = GameBitmaps[src_bm].format;
+				bm_SetFormat(n,GameBitmaps[src_bm].format);
 			}
 
 			ASSERT(n >= 0);
@@ -729,7 +745,7 @@ int bm_AllocLoadFileBitmap(const char* fname, int mipped, int format)
 				int h = bm_h(src_bm, 0);
 				bm_AllocateMemoryForIndex(n, w, h, mipped * (((w * h * 2) / 3)));
 				GameBitmaps[n].flags |= BF_MIPMAPPED;
-				GameBitmaps[n].format = GameBitmaps[src_bm].format;
+				bm_SetFormat(n,GameBitmaps[src_bm].format);
 				bm_ScaleBitmapToBitmap(n, src_bm);
 				bm_FreeBitmap(src_bm);
 			}
@@ -746,7 +762,7 @@ int bm_AllocLoadFileBitmap(const char* fname, int mipped, int format)
 				int w = bm_w(src_bm, 0);
 				int h = bm_h(src_bm, 0);
 				bm_AllocateMemoryForIndex(n, w, h, mipped * (((w * h * 2) / 3)));
-				GameBitmaps[n].format = GameBitmaps[src_bm].format;
+				bm_SetFormat(n,GameBitmaps[src_bm].format);
 				bm_ScaleBitmapToBitmap(n, src_bm);
 				bm_FreeBitmap(src_bm);
 			}
@@ -760,12 +776,12 @@ int bm_AllocLoadFileBitmap(const char* fname, int mipped, int format)
 			if (overlay)
 			{
 				bm_AllocateMemoryForIndex(n, w, h, mipped * (((w * h * 2) / 3)));
-				GameBitmaps[n].format = GameBitmaps[src_bm].format;
+				bm_SetFormat(n,GameBitmaps[src_bm].format);
 			}
 			else
 			{
 				n = bm_AllocBitmap(w, h, mipped * (((w * h * 2) / 3)));
-				GameBitmaps[n].format = GameBitmaps[src_bm].format;
+				bm_SetFormat(n,GameBitmaps[src_bm].format);
 			}
 			ASSERT(n >= 0);
 			src_data = (ushort*)bm_data(src_bm, 0);
@@ -919,7 +935,7 @@ int bm_AllocLoadBitmap(CFILE* infile, int mipped, int format)
 			n = bm_AllocBitmap(w, h, mipped * (((w * h * 2) / 3)));
 
 			ASSERT(n >= 0);
-			GameBitmaps[n].format = GameBitmaps[src_bm].format;
+			bm_SetFormat(n,GameBitmaps[src_bm].format);
 			bm_ScaleBitmapToBitmap(n, src_bm);
 			bm_FreeBitmap(src_bm);
 
@@ -1960,7 +1976,7 @@ void bm_ChangeSize(int handle, int new_w, int new_h)
 	if (mipped)
 		GameBitmaps[n].flags |= BF_MIPMAPPED;
 	if (GameBitmaps[handle].format == BITMAP_FORMAT_4444)
-		GameBitmaps[n].format = BITMAP_FORMAT_4444;
+		bm_SetFormat(n,BITMAP_FORMAT_4444);
 
 	bm_ScaleBitmapToBitmap(n, handle);
 	Bitmap_memory_used -= mem_used + (mipped * (mem_used / 3));
@@ -1969,6 +1985,7 @@ void bm_ChangeSize(int handle, int new_w, int new_h)
 	GameBitmaps[handle].width = new_w;
 	GameBitmaps[handle].height = new_h;
 	GameBitmaps[n].used = 0;
+	bm_MarkMaterialChanged();
 	Num_of_bitmaps--;
 }
 

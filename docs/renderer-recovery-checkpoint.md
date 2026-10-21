@@ -2,6 +2,18 @@
 
 ## October 21 resumed work — supersedes restart pause below
 
+Newest binary bitmap-metadata.exe. Bitmap allocation/free/format producers own
+a material revision; all 21 direct format assignments migrated to bm_SetFormat.
+Normal preparation scans the bitmap registry only after revision changes;
+image-audit mode scans every frame and rejects missed notifications. Eight
+audited saves + combined probe and three unaudited long images EXACT. Build
+passes. Long paired parent/new CPU means: dense 2.314/2.282, 005 1.569/1.463,
+007 1.786/1.652 ms; temporal noise remains, not a full baseline win claim.
+Raw metadata-* and bitmap-meta-*; normal old/current recheck of 003/005/007 next.
+CPU2 pinning did not eliminate drift; NOT a shipping change, default harness
+remains unpinned. Last sampler finished (cpu-light-surface-stack-005.txt), no
+samplers or captures active at this checkpoint. Last usage 18% remaining.
+
 Latest continuation: view-block-only.exe replaces separate camera/environment
 uniform calls with one 240-byte std140 block. Three long scene images EXACT;
 block+canvas experiment also matched combined probe/mirror/quality. No reliable

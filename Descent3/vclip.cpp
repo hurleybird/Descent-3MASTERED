@@ -307,7 +307,7 @@ void PageInVClip(int vcnum)
 			ASSERT(dest_bm >= 0);
 			if (mipped)
 				GameBitmaps[dest_bm].flags |= BF_MIPMAPPED;
-			GameBitmaps[dest_bm].format = GameBitmaps[n].format;
+			bm_SetFormat(dest_bm,GameBitmaps[n].format);
 
 			bm_ScaleBitmapToBitmap(dest_bm, n);
 			strcpy(GameBitmaps[dest_bm].name, GameBitmaps[n].name);
@@ -527,7 +527,7 @@ int AllocLoadIFLVClip(char* filename, int texture_size, int mipped, int format)
 				ASSERT(dest_bm >= 0);
 				if (mipped)
 					GameBitmaps[dest_bm].flags |= BF_MIPMAPPED;
-				GameBitmaps[dest_bm].format = GameBitmaps[bm].format;
+				bm_SetFormat(dest_bm,GameBitmaps[bm].format);
 
 				bm_ScaleBitmapToBitmap(dest_bm, bm);
 				strcpy(GameBitmaps[dest_bm].name, GameBitmaps[bm].name);

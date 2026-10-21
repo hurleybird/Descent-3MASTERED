@@ -496,7 +496,7 @@ int LoadTextureImage(char* filename, int* type, int texture_size, int mipped, in
 
 			if (mipped)
 				GameBitmaps[dest_bm].flags |= BF_MIPMAPPED;
-			GameBitmaps[dest_bm].format = format;
+			bm_SetFormat(dest_bm,format);
 
 			bm_ScaleBitmapToBitmap(dest_bm, bm_handle);
 			strcpy(GameBitmaps[dest_bm].name, GameBitmaps[bm_handle].name);
@@ -618,7 +618,7 @@ void PageInTexture(int n, bool resize)
 				if (mipped)
 					GameBitmaps[dest_bm].flags |= BF_MIPMAPPED;
 
-				GameBitmaps[dest_bm].format = GameBitmaps[bm_handle].format;
+				bm_SetFormat(dest_bm,GameBitmaps[bm_handle].format);
 
 				bm_ScaleBitmapToBitmap(dest_bm, bm_handle);
 				strcpy(GameBitmaps[dest_bm].name, GameBitmaps[bm_handle].name);
