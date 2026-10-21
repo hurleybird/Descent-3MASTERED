@@ -23,9 +23,10 @@ public static class FogResidual {
     }
     static bool Boundary(byte[] p,int x,int y,int w,int h) {
         int low=255,high=0;
-        // A reference-owned four-pixel cross includes BOTH the clear and foggy
+        // A reference-owned cross includes BOTH the clear and foggy
         // sides of the transition. HUD/geometry edges can also enter this mask.
-        for(int offset=-4;offset<=4;++offset) {
+        int radius=Math.Max(1,(int)Math.Round(4.0*h/720));
+        for(int offset=-radius;offset<=radius;++offset) {
             int a=p[(y*w+Math.Max(0,Math.Min(w-1,x+offset)))*4];
             int b=p[(Math.Max(0,Math.Min(h-1,y+offset))*w+x)*4];
             low=Math.Min(low,Math.Min(a,b)); high=Math.Max(high,Math.Max(a,b));
@@ -38,7 +39,9 @@ public static class FogResidual {
         var p0=Read(c,out w2,out h2); var p1=Read(d,out w3,out h3);
         if(w!=w1||w!=w2||w!=w3||h!=h1||h!=h2||h!=h3) throw new Exception("Size mismatch");
         double count=0,error=0,flicker=0,energy=0,above=0,maximum=0;
-        for(int y=100;y<Math.Min(430,h);++y) for(int x=0;x<w;++x) {
+        // Keep the same angular region/band at different output resolutions.
+        int firstRow=(int)Math.Round(100.0*h/720),lastRow=(int)Math.Round(430.0*h/720);
+        for(int y=firstRow;y<Math.Min(lastRow,h);++y) for(int x=0;x<w;++x) {
             int i=(y*w+x)*4;
             // Low optical depth includes the hard fog/clear transition and
             // excludes fully clear space. This mask is reference-owned.

@@ -2,6 +2,20 @@
 
 ## Current handoff state — view-level fog pipelines verified
 
+Native4K roof qualification completed (3840x2160). Full64frame rotating series
+fog-series-roof4k-motion-{ref,field320,field640}. Scaled diagnostic ROI/band by
+image height;720p results unchanged. 4K boundary meanerror/flicker320 .668850/.769273,
+640 .412680/.465575: ~38%/39% reductions. Not elimination; clear ceiling remains.
+Metrics out/fog-roof4k-field{320,640}-metrics.csv. Normal4K640 AO/bloom screenshot
+visually inspected, also actual pre-rewrite roof screenshot (small cockpit text
+is shared by this fixture/config, not evidence of a new regression).
+Dedicated500frame save002 native4K AO+bloom GPU:32011.35ms,64012.62ms,
+old12.58ms,exactrewrite23.42ms. CPU2.29/2.36/3.69/2.30. Single runs; effect
+differences limit strict old/new comparison. Series timings never used.
+Raw fog4k-effects{320,640,-old,-exact}; normal fog-roof4k-{normal640,old-normal}.
+No new preview/package/settings changes. C:free29GB after full-resolution series;
+avoid unnecessary duplicate series. No captures/builds/metrics processes active.
+
 ProjectedMesh now omits duplicate lateral camera-plane checks when its aperture
 is contained in[-1,1]. Near and mirror/world planes remain, and wider apertures
 retain all planes. This can only admit additional conservative edge candidates,
