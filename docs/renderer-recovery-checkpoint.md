@@ -2,6 +2,23 @@
 
 ## Active 2026-10-21 flare regression investigation
 
+LATEST after 0b166cb: explicit scene shader interface packing, requested for
+portability. 14 smooth vec4 slots + one flat ivec2 slot, reserving a sixteenth
+slot for clip distance. All original values/qualifiers preserved. Reflection
+payload is seven vec4 rather than nine vec3; normal/alpha, UV pairs and surface
+lighting/position payloads also packed. packed-interface006 vs its control and
+packed-interface-multiview vs ipo-default-multiview are pixel-exact; heavy image
+visually inspected. Runtime shader compilation passed. RX6600 reports 64 varying
+components, 128 vertex outputs and 128 fragment inputs; these are API limits,
+not measured hardware register allocation. Mobile hardware remains untested.
+Reflection-only packing ABBA showed no measurable RX6600 GPU gain, including
+1920x1080 SSAA2 MSAA4. Retained for the explicit portability requirement.
+Shelved shader feature specialization and empty-reflection-lobe masking: no
+repeatable improvement (masking regressed CPU). Their rejected patches/binaries
+remain under out/; neither experiment is in source. No delivered preview changed.
+Current packed binary: out/packed-interface-candidate.exe; original IPO control:
+out/ipo-verified-candidate.exe. Usage 43% consumed, credit balance unchanged.
+
 LATEST after6fa4372: supported Windows Release IPO now defaults on through CMake
 CheckIPOSupported, with D3_ENABLE_RELEASE_IPO=OFF or explicit CMake IPO override
 available. Debug unaffected. ipo-default-build.log passes; /GL verified.

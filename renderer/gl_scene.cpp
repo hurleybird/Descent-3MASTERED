@@ -146,20 +146,21 @@ uniform samplerBuffer instance_positions;
 uniform samplerBuffer scene_reflections;
 
 
-out vec3 reflection_normal;
-out vec3 field_centers[4], field_colors[4];
-out vec3 field_modulation;
+// Explicit interface budget: 14 smooth vec4 slots + one flat integer slot.
+// Reserve the sixteenth interpolator slot for gl_ClipDistance[0]. Keep integer
+// indices flat; packing must not change any value's interpolation qualifier.
+out vec4 normal_alpha;
+// Seven full vectors carry the same 27 scalar values as nine vec3 outputs.
+// Centers occupy XYZ; color R fills W, with G/B pairs packed afterward.
+out vec4 reflection_payload[7];
 
 
 
 
 out vec4 current_clip, previous_clip;
-out vec2 texcoord, lightcoord;
-out float vertex_alpha;
-out vec3 world_position;
-out vec3 ambient;
-out vec3 vertex_dynamic;
-out vec3 authored_color;
+out vec4 texture_coordinates;
+// XYZ world position + ambient RGB + dynamic RGB + authored RGB (12 scalars).
+out vec4 surface_payload[3];
 flat out ivec2 primitive_influences;
 void main() {
     primitive_influences = ivec2(influence_offset,influence_count);
@@ -172,10 +173,8 @@ void main() {
     vec3 previous_prepared = use_instance_positions != 0 ? texelFetch(instance_positions,position_record+1).rgb : position;
     vec3 world = model_position + model_right*prepared.x + model_up*prepared.y + model_forward*prepared.z;
     vec3 relative = world-eye;
-    world_position = world;
     gl_ClipDistance[0] = dot(vec4(world,1),world_clip_plane);
-    authored_color = vertex_color;
-    vertex_dynamic = lighting_per_pixel != 0 ? vec3(0) : sceneDynamicLighting(world,primitive_influences);
+    vec3 vertex_dynamic = lighting_per_pixel != 0 ? vec3(0) : sceneDynamicLighting(world,primitive_influences);
     float z = dot(relative,camera_forward);
     gl_Position = vec4(dot(relative,camera_right)*projection.x + z*projection.z,
                        dot(relative,camera_up)*projection.y + z*projection.w, z-2.0*near_distance,z);
@@ -190,12 +189,13 @@ void main() {
     vec3 previous_world = previous_position+previous_right*previous_prepared.x+
         previous_up*previous_prepared.y+previous_forward*previous_prepared.z;
     previous_clip = previous_view_projection*vec4(previous_world,1);
-    texcoord=uv; lightcoord=light_uv; vertex_alpha=alpha;
-    if (use_instance_uvs != 0) lightcoord = texelFetch(instance_uvs,gl_VertexID+instance_uv_offset).rg;
-    if (use_texture_uvs != 0) texcoord = texelFetch(instance_uvs,gl_VertexID+texture_uv_offset).rg;
+    texture_coordinates = vec4(uv,light_uv); normal_alpha.w = alpha;
+    if (use_instance_uvs != 0) texture_coordinates.zw = texelFetch(instance_uvs,gl_VertexID+instance_uv_offset).rg;
+    if (use_texture_uvs != 0) texture_coordinates.xy = texelFetch(instance_uvs,gl_VertexID+texture_uv_offset).rg;
     vec3 world_normal = model_right*normal.x + model_up*normal.y + model_forward*normal.z;
-    reflection_normal = use_reflection_normals != 0 ? texelFetch(scene_reflections,gl_VertexID+reflection_normal_offset).rgb : world_normal;
-    field_modulation = vec3(1);
+    normal_alpha.xyz = use_reflection_normals != 0 ? texelFetch(scene_reflections,gl_VertexID+reflection_normal_offset).rgb : world_normal;
+    vec3 field_centers[4], field_colors[4];
+    vec3 field_modulation = vec3(1);
     for (int lobe = 0; lobe < 4; ++lobe) { field_centers[lobe] = vec3(0); field_colors[lobe] = vec3(0); }
     if (use_reflection_field != 0) {
         int record = reflection_field_offset+gl_VertexID*9;
@@ -205,8 +205,16 @@ void main() {
         }
         field_modulation = texelFetch(scene_reflections,record+8).rgb;
     }
+    for (int lobe = 0; lobe < 4; ++lobe)
+        reflection_payload[lobe] = vec4(field_centers[lobe],field_colors[lobe].r);
+    reflection_payload[4] = vec4(field_colors[0].gb,field_colors[1].gb);
+    reflection_payload[5] = vec4(field_colors[2].gb,field_colors[3].gb);
+    reflection_payload[6] = vec4(field_modulation,0);
     float shade = directional_ambient != 0 && lighting_per_pixel == 0 ? clamp((1.0-dot(world_normal,ambient_direction))*0.5,0.0,1.0) : 1.0;
-    ambient = ambient_color*shade;
+    vec3 ambient = ambient_color*shade;
+    surface_payload[0] = vec4(world,ambient.x);
+    surface_payload[1] = vec4(ambient.yz,vertex_dynamic.xy);
+    surface_payload[2] = vec4(vertex_dynamic.z,vertex_color);
 }
 )GLSL";
 const std::string SceneFragmentShader = std::string(SceneLightingShader) + R"GLSL(
@@ -244,17 +252,20 @@ uniform sampler2D specular_texture;
 
 
 
-in vec3 reflection_normal;
+in vec4 normal_alpha;
+#define reflection_normal (normal_alpha.xyz)
+#define vertex_alpha (normal_alpha.w)
 
-in vec3 field_centers[4], field_colors[4];
-in vec3 field_modulation;
-in vec3 world_position;
-in vec3 ambient;
-in vec3 vertex_dynamic;
-in vec3 authored_color;
+in vec4 reflection_payload[7];
+in vec4 surface_payload[3];
+#define world_position (surface_payload[0].xyz)
+#define ambient vec3(surface_payload[0].w,surface_payload[1].xy)
+#define vertex_dynamic vec3(surface_payload[1].zw,surface_payload[2].x)
+#define authored_color (surface_payload[2].yzw)
 flat in ivec2 primitive_influences;
-in vec2 texcoord, lightcoord;
-in float vertex_alpha;
+in vec4 texture_coordinates;
+#define texcoord (texture_coordinates.xy)
+#define lightcoord (texture_coordinates.zw)
 layout(location=0) out vec4 color;
 // G retains the current bloom-protection contract. Surface class is part of
 // the depth-selected surface record, never this averaged coverage product.
@@ -404,10 +415,17 @@ void main() {
         vec3 v = view_delta/max(length(view_delta),1.e-8);
         vec3 reflected = vec3(0);
         const float weights[4] = float[4](1.0,.66,.33,.25);
-        if (use_reflection_field != 0) for (int lobe = 0; lobe < 4; ++lobe) {
-            vec3 delta = field_centers[lobe]-world_position;
+        if (use_reflection_field != 0) {
+        vec3 field_colors[4] = vec3[4](
+            vec3(reflection_payload[0].w,reflection_payload[4].xy),
+            vec3(reflection_payload[1].w,reflection_payload[4].zw),
+            vec3(reflection_payload[2].w,reflection_payload[5].xy),
+            vec3(reflection_payload[3].w,reflection_payload[5].zw));
+        for (int lobe = 0; lobe < 4; ++lobe) {
+            vec3 delta = reflection_payload[lobe].xyz-world_position;
             vec3 direction = delta/max(length(delta),1.e-8);
             reflected += field_colors[lobe]*pow(max(0.0,dot(v,direction)),specular_response.y);
+        }
         }
         // Four ranked authored lobes are a content convention, not a limit on
         // the shared dynamic emitter list.
@@ -426,7 +444,7 @@ void main() {
             float response = pow(max(0.0,dot(v,reflect(incident,n))),specular_response.y);
             reflected += texelFetch(scene_lights,light+1).rgb*attenuation*response*texelFetch(scene_lights,light+3).z;
         }
-        reflected *= mix(vec3(1),clamp(use_reflection_field != 0 ? field_modulation : baked,vec3(0),vec3(1)),specular_response.z);
+        reflected *= mix(vec3(1),clamp(use_reflection_field != 0 ? reflection_payload[6].xyz : baked,vec3(0),vec3(1)),specular_response.z);
         float mask = texture(specular_texture,material_uv).a;
         color.rgb += clamp(reflected*specular_response.x,vec3(0),vec3(1))*
             clamp(mask*specular_response.w*vertex_alpha,0.0,1.0);
@@ -1238,6 +1256,14 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     auto& scene_shader = scene_programs[fog_mode].shader;
     auto& scene_uniforms = scene_programs[fog_mode].uniforms;
     if (!scene_shader.Handle()) {
+        if (AutomatedCaptureFrameIndex() >= 0) {
+            GLint varying = 0, vertex = 0, fragment = 0;
+            glGetIntegerv(GL_MAX_VARYING_COMPONENTS,&varying);
+            glGetIntegerv(GL_MAX_VERTEX_OUTPUT_COMPONENTS,&vertex);
+            glGetIntegerv(GL_MAX_FRAGMENT_INPUT_COMPONENTS,&fragment);
+            AutomatedCaptureLog("scene shader device=%s varying_components=%d vertex_outputs=%d fragment_inputs=%d",
+                reinterpret_cast<const char*>(glGetString(GL_RENDERER)),varying,vertex,fragment);
+        }
         auto fragment = SceneFragmentShader;
         fragment.insert(fragment.find('\n')+1,"#define SCENE_FOG_MODE "+std::to_string(fog_mode)+"\n");
         scene_shader.AttachSource(SceneVertexShader.c_str(), fragment.c_str());
