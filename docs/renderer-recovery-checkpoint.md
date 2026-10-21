@@ -2,6 +2,21 @@
 
 ## October 21 resumed work — supersedes restart pause below
 
+Last small demand-only MultiColor lookup experiment REJECTED; source restored.
+color-demand.exe and cd-* are evidence only, NOT the checkpoint/runtime.
+Long ABBA parent/new005(1.242,1.196)/(1.305,1.215),
+007(1.298,1.330)/(1.447,1.388). Images/probe exact but no measured improvement.
+Post-arena sampler out/cpu-geometry-arena-stack005.txt completed normally:
+515 preparation/1155 rendering samples;resources132,models123,publication112,
+procedurals81,extraction37. Driver-inclusive185; VAO-binding leaf4 vs prior30.
+The sampler perturbs timing; use sample distribution, not sampled frame times.
+Remaining upstream direction: producer-owned persistent presentation state for
+unchanged room/model metadata, with explicit mutation/generation ownership and
+lazy view-dependent evaluation. Current whole-level frame reconstruction is a
+fixed tax in sparse views. This is a reasoned direction, NOT an implemented or
+performance-proven solution; do not start it without checking the current state.
+Latest included usage1% remaining. No shadows or cockpit geometry work resumed.
+
 Newest source replaces one-VBO/VAO-per-geometry with shared geometry pages.
 SceneGeometryAllocator owns free vertex ranges, coalesces retirements and uses
 size classes for oversized allocations. GL owns one VAO/VBO per page; mesh GPU
