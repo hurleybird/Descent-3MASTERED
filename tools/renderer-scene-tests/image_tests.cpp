@@ -66,6 +66,28 @@ int runSceneImageTests() {
             imageRgbaPixel(ImageFormat::ARGB4444,static_cast<uint16_t>(pixel)) == rgba4444;
     }
     check(packed_matches,"Image conversion changed authored color/alpha masks");
+    for (const auto format : {ImageFormat::ARGB1555,ImageFormat::ARGB4444}) {
+        std::vector<uint8_t> packed(65536*2+2,0x67), expanded(65536*4+2,0x91);
+        for (uint32_t i = 0; i < 65536; ++i) {
+            const uint16_t pixel = uint16_t(i); std::memcpy(packed.data()+1+i*2,&pixel,2);
+        }
+        expandImageRgba(format,packed.data()+1,65536,expanded.data()+1);
+        bool exact = expanded.front() == 0x91 && expanded.back() == 0x91;
+        for (uint32_t i = 0; i < 65536; ++i) {
+            const auto expected = imageRgbaPixel(format,uint16_t(i));
+            exact = exact && std::memcmp(expanded.data()+1+i*4,expected.data(),4) == 0;
+        }
+        check(exact,"Bulk unaligned image expansion differs from scalar or overwrites guards");
+    }
+    {
+        const uint8_t source[] = {1,2,3,4,5,6,7,8};
+        uint8_t output[10] = {91,0,0,0,0,0,0,0,0,92};
+        expandImageRgba(ImageFormat::RGBA8,source,2,output+1);
+        check(std::memcmp(source,output+1,8) == 0 && output[0] == 91 && output[9] == 92,"Truecolor expansion changed bytes");
+        expandImageRgba(ImageFormat::RGBA8,nullptr,0,nullptr);
+        expandImageRgba(ImageFormat::ARGB1555,nullptr,0,nullptr);
+        rejects([&] { expandImageRgba(static_cast<ImageFormat>(255),nullptr,0,nullptr); });
+    }
     SceneAssets assets;
     uint16_t pixels[] = {0x8000,0xffff,0xf800,0x83e0};
     ImageSource source; source.mips = {{2,2,reinterpret_cast<const uint8_t*>(pixels),sizeof(pixels)}};

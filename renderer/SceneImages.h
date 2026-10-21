@@ -20,4 +20,7 @@ struct ImageSource {
 };
 // Preserve D3's float-to-byte truncation, not driver-specific 5-bit expansion.
 std::array<uint8_t,4> imageRgbaPixel(ImageFormat,uint16_t);
+// Non-overlapping rows; caller supplies count*4 destination bytes. Accepts
+// unaligned packed sources and preserves the scalar conversion exactly.
+void expandImageRgba(ImageFormat,const uint8_t* source,size_t count,uint8_t* destination);
 }

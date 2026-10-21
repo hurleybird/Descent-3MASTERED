@@ -204,8 +204,13 @@ class GL4Renderer : public IRenderer
 	uint64_t scene_frame_sequence = 0;
 	std::vector<ElementRange> scene_mesh_position_ranges;
 	void UploadSceneFrame(const d3scene::Presentation&, const d3scene::ViewVisibility* demand = nullptr);
-	struct SceneImageGpu { d3scene::AssetId id; GLuint texture = 0; };
+	struct SceneImageGpu {
+		d3scene::AssetId id;
+		GLuint texture = 0;
+		uint32_t width = 0, height = 0, levels = 0;
+	};
 	std::unordered_map<uint32_t,SceneImageGpu> scene_images;
+	std::vector<uint8_t> scene_image_upload;
 	struct SceneSamplerGpu { GLuint sampler = 0; float anisotropy = -1; };
 	std::array<SceneSamplerGpu,8> scene_samplers;
 	struct SceneViewImageGpu {

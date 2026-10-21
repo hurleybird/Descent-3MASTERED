@@ -2,6 +2,13 @@
 
 ## October 20 continuation
 
+October 21: image revisions update existing GPU storage when dimensions/mip
+count match, rather than deleting/recreating textures. Packed conversion uses
+reusable staging and exact channel tables; exhaustive 1555/4444, unaligned/guard,
+empty and RGBA8 tests pass. Dense/save005/resource-reset probe are pixel-exact
+to samplers. Single-run totals 3.344/2.440 ms do not establish a CPU improvement.
+Captures: `cpu-image-storage-{saveg003,saveg005,probe}-20261021`.
+
 October 21: scene sampling policies now use eight shared sampler objects rather
 than mutating image storage. Consecutive identical image bindings are reused
 within a geometry pass; samplers are unbound before image-space/canvas consumers.

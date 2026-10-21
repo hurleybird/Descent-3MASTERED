@@ -508,37 +508,37 @@ void GL4Renderer::BindSceneImage(const d3scene::ImageAsset& image,int unit,bool 
     auto& gpu = scene_images[image.id().slot];
     glActiveTexture(GL_TEXTURE0+unit);
     if (gpu.id != image.id()) {
-        if (gpu.texture) glDeleteTextures(1,&gpu.texture);
-        glGenTextures(1,&gpu.texture); gpu.id = image.id();
+        PERF_MARKER_SCOPE("Scene.UploadImage");
+        if (!gpu.texture) glGenTextures(1,&gpu.texture);
         glBindTexture(GL_TEXTURE_2D,gpu.texture);
+        const auto width = image.paddedExtent() ? image.paddedExtent() : image.mips()[0].width;
+        const auto height = image.paddedExtent() ? image.paddedExtent() : image.mips()[0].height;
+        const auto levels = image.generatedLevels() ? image.generatedLevels() : uint32_t(image.mips().size());
+        const bool same_storage = gpu.width == width && gpu.height == height && gpu.levels == levels;
         glPixelStorei(GL_UNPACK_ALIGNMENT,1);
         for (size_t level = 0; level < image.mips().size(); ++level) {
             const auto& mip = image.mips()[level];
             const uint32_t width = image.paddedExtent() ? image.paddedExtent() : mip.width;
             const uint32_t height = image.paddedExtent() ? image.paddedExtent() : mip.height;
-            if (image.format() == d3scene::ImageFormat::RGBA8) {
-                std::vector<uint8_t> padded;
-                const auto* pixels = mip.pixels.data();
-                if (image.paddedExtent()) {
-                    padded.resize(size_t(width)*height*4,0);
-                    for (uint32_t y = 0; y < mip.height; ++y)
-                        std::memcpy(padded.data()+size_t(y)*width*4,pixels+size_t(y)*mip.width*4,size_t(mip.width)*4);
-                    pixels = padded.data();
-                }
-                glTexImage2D(GL_TEXTURE_2D,static_cast<GLint>(level),GL_RGBA8,width,height,0,GL_RGBA,GL_UNSIGNED_BYTE,pixels);
-            } else {
-                std::vector<uint8_t> pixels(size_t(width)*height*4,0);
-                for (uint32_t y = 0; y < mip.height; ++y) for (uint32_t x = 0; x < mip.width; ++x) {
-                    uint16_t pixel; std::memcpy(&pixel,mip.pixels.data()+(size_t(y)*mip.width+x)*2,2);
-                    const auto rgba = d3scene::imageRgbaPixel(image.format(),pixel);
-                    std::memcpy(pixels.data()+(size_t(y)*width+x)*4,rgba.data(),4);
-                }
-                glTexImage2D(GL_TEXTURE_2D,static_cast<GLint>(level),GL_RGBA8,width,height,0,GL_RGBA,GL_UNSIGNED_BYTE,pixels.data());
+            const auto* pixels = mip.pixels.data();
+            if (image.format() != d3scene::ImageFormat::RGBA8 || image.paddedExtent()) {
+                scene_image_upload.resize(size_t(width)*height*4);
+                if (image.paddedExtent()) std::fill(scene_image_upload.begin(),scene_image_upload.end(),0);
+                const size_t source_bytes = image.format() == d3scene::ImageFormat::RGBA8 ? 4 : 2;
+                for (uint32_t y = 0; y < mip.height; ++y)
+                    d3scene::expandImageRgba(image.format(),pixels+size_t(y)*mip.width*source_bytes,
+                        mip.width,scene_image_upload.data()+size_t(y)*width*4);
+                pixels = scene_image_upload.data();
             }
+            if (same_storage)
+                glTexSubImage2D(GL_TEXTURE_2D,static_cast<GLint>(level),0,0,width,height,GL_RGBA,GL_UNSIGNED_BYTE,pixels);
+            else
+                glTexImage2D(GL_TEXTURE_2D,static_cast<GLint>(level),GL_RGBA8,width,height,0,GL_RGBA,GL_UNSIGNED_BYTE,pixels);
         }
-        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAX_LEVEL,image.generatedLevels() ? image.generatedLevels()-1 : static_cast<GLint>(image.mips().size())-1);
+        if (!same_storage) glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAX_LEVEL,levels-1);
         if (image.generatedLevels()) glGenerateMipmap(GL_TEXTURE_2D);
         glPixelStorei(GL_UNPACK_ALIGNMENT,2);
+        gpu.id = image.id(); gpu.width = width; gpu.height = height; gpu.levels = levels;
     } else glBindTexture(GL_TEXTURE_2D,gpu.texture);
     const bool filter = baked || OpenGL_preferred_state.filtering;
     const bool mip = !baked && OpenGL_preferred_state.mipping && (image.generatedLevels() > 1 || image.mips().size() > 1);

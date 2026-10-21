@@ -15,6 +15,40 @@ std::array<uint8_t,4> imageRgbaPixel(ImageFormat format,uint16_t pixel) {
         return {{expand((pixel>>8)&15,15),expand((pixel>>4)&15,15),expand(pixel&15,15),expand(pixel>>12,15)}};
     throw std::invalid_argument("RGBA8 has no 16-bit conversion");
 }
+void expandImageRgba(ImageFormat format,const uint8_t* source,size_t count,uint8_t* destination) {
+    if (format == ImageFormat::RGBA8) {
+        if (count) std::memcpy(destination,source,count*4);
+        return;
+    }
+    // Tiny channel tables keep D3's float truncation without a floating-point
+    // conversion (or an out-of-line call) for every uploaded texel.
+    static const auto five = [] {
+        std::array<uint8_t,32> values{};
+        for (size_t i = 0; i < values.size(); ++i) values[i] = static_cast<uint8_t>(255*(float(i)/31.f));
+        return values;
+    }();
+    static const auto four = [] {
+        std::array<uint8_t,16> values{};
+        for (size_t i = 0; i < values.size(); ++i) values[i] = static_cast<uint8_t>(255*(float(i)/15.f));
+        return values;
+    }();
+    if (format != ImageFormat::ARGB1555 && format != ImageFormat::ARGB4444)
+        throw std::invalid_argument("Unknown packed image format");
+    if (format == ImageFormat::ARGB1555) {
+        for (size_t i = 0; i < count; ++i) {
+            uint16_t pixel; std::memcpy(&pixel,source+i*2,2);
+            auto* rgba = destination+i*4;
+            if (!(pixel & 0x8000)) { std::memset(rgba,0,4); continue; }
+            rgba[0] = five[(pixel>>10)&31]; rgba[1] = five[(pixel>>5)&31]; rgba[2] = five[pixel&31]; rgba[3] = 255;
+        }
+    } else {
+        for (size_t i = 0; i < count; ++i) {
+            uint16_t pixel; std::memcpy(&pixel,source+i*2,2);
+            auto* rgba = destination+i*4;
+            rgba[0] = four[(pixel>>8)&15]; rgba[1] = four[(pixel>>4)&15]; rgba[2] = four[pixel&15]; rgba[3] = four[pixel>>12];
+        }
+    }
+}
 ImageAsset::ImageAsset(AssetId id,const ImageSource& source)
     : id_(id),format_(source.format),generated_levels_(source.generated_levels),padded_extent_(source.padded_extent) {
     for (const auto& mip : source.mips) {
