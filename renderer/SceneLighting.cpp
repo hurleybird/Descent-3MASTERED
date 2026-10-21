@@ -139,18 +139,27 @@ void prepareLightInfluences(FrameData& data) {
     }
     for (auto& object : data.model_instances) {
       const auto* room = rooms.find(object.room);
-      for (auto& model : object.models) for (size_t part = 0; part < model.parts.size(); ++part) {
+      for (auto& model : object.models) {
+        if (model.deferred_pose) {
+            model.light_influences_prepared = true;
+            model.light_candidates.clear();
+            for (size_t i = 0; i < data.lights.size(); ++i)
+                if (object.room < 0 || (room && reachable[i*room_count+room->second])) model.light_candidates.push_back(uint32_t(i));
+            continue;
+        }
+        for (size_t part = 0; part < model.parts.size(); ++part) {
         auto& pose = model.parts[part];
         pose.light_influences_prepared = true;
         auto& candidates = pose.light_candidates;
         candidates.clear();
         if (!pose.draw) continue;
         Bounds bounds;
-        if (!model.deferred_pose && pose.vertices.empty())
+        if (pose.vertices.empty())
             bounds = transformBounds(compose(object.current,pose.current),model.asset->geometry().parts[part].local_bounds);
         for (size_t i = 0; i < data.lights.size(); ++i)
             if ((object.room < 0 || (room && reachable[i*room_count+room->second])) &&
-                (model.deferred_pose || !pose.vertices.empty() || touchesBounds(data.lights[i],bounds))) candidates.push_back(uint32_t(i));
+                (!pose.vertices.empty() || touchesBounds(data.lights[i],bounds))) candidates.push_back(uint32_t(i));
+    }
     }
     }
     if (data.terrain.asset) for (size_t patch = 0; patch < data.terrain.patches.size(); ++patch) {

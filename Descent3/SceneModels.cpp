@@ -340,12 +340,16 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::Presenta
             variant.previous_deformation = history ? history->deformation : effect.deformation;
             variant.deformation_owner = owner.handle;
             PerfMarkersEnd("Scene.Models.Pose");
-            const auto roles = ResolveSceneModelRoles(variant.asset->geometry(),source->rtype.pobj_info.subobj_flags,effect.custom_texture >= 0);
+            const auto roles = ResolveSceneModelRoles(*variant.asset,source->rtype.pobj_info.subobj_flags,effect.custom_texture >= 0);
+            if (history) variant.parts = history->parts;
+            else variant.parts.resize(variant.asset->geometry().parts.size());
+            variant.previous_draw_mask = 0;
             PERF_MARKER_SCOPE("Scene.Models.Parts");
             for (size_t i = 0; i < variant.asset->geometry().parts.size(); ++i) {
                 const auto& asset_part = variant.asset->geometry().parts[i];
                 d3scene::PreparedModelPart part;
                 part.has_previous = history && history->parts[i].draw && instance.has_previous;
+                if (part.has_previous) variant.previous_draw_mask |= uint32_t(1)<<i;
                 const auto role = roles[i];
                 part.draw = role == SceneModelPartRole::Surface;
                 const auto attachment_begin = data.meshes.size();
@@ -380,8 +384,6 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::Presenta
                     if (!reuse_materials) throw std::logic_error("Object lightmap layout changed without producer invalidation");
                 }
                 if (reuse_materials) {
-                    part.surfaces = old_part->surfaces;
-                    variant.parts.push_back(std::move(part));
                     continue;
                 }
                 const size_t surface_count = part.material_palette ? asset_part.surface_polygons.size() : asset_part.geometry.polygons.size();
@@ -418,7 +420,7 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::Presenta
                     }
                     part.surfaces.push_back(binding);
                 }
-                variant.parts.push_back(std::move(part));
+                variant.parts[i] = std::move(part);
             }
             instance.models.push_back(std::move(variant));
         }
@@ -459,7 +461,7 @@ void PrepareGameStaticModel(d3scene::FrameData& data,int number,const d3scene::T
     const auto& animation = *model.asset->geometry().animation;
     const auto pose = EvaluateModelPose(animation,nullptr,static_cast<float>(data.simulation_time));
     const auto transforms = ComposeModelPose(animation,pose);
-    const auto roles = ResolveSceneModelRoles(model.asset->geometry(),0xffffffffu,false);
+    const auto roles = ResolveSceneModelRoles(*model.asset,0xffffffffu,false);
     for (size_t index = 0; index < model.asset->geometry().parts.size(); ++index) {
         const auto& geometry = model.asset->geometry().parts[index];
         d3scene::PreparedModelPart part;

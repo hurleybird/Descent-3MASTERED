@@ -20,8 +20,9 @@ SceneModelPartRole ResolveSceneModelPartRole(uint32_t flags,uint32_t mask,size_t
     if (flags&SOF_FACING) return SceneModelPartRole::Facing;
     return SceneModelPartRole::Surface;
 }
-std::vector<SceneModelPartRole> ResolveSceneModelRoles(const d3scene::ModelGeometry& model,uint32_t mask,bool has_custom_texture) {
-    std::vector<SceneModelPartRole> result;
+SceneModelRoles ResolveSceneModelRoles(const d3scene::ModelGeometry& model,uint32_t mask,bool has_custom_texture) {
+    if (model.parts.size() > MAX_SUBOBJECTS) throw std::invalid_argument("Too many model role parts");
+    SceneModelRoles result{};
     for (size_t i = 0; i < model.parts.size(); ++i) {
         auto role = ResolveSceneModelPartRole(model.parts[i].authored_flags,mask,i,has_custom_texture);
         int current = static_cast<int>(i);
@@ -36,8 +37,17 @@ std::vector<SceneModelPartRole> ResolveSceneModelRoles(const d3scene::ModelGeome
                 role = SceneModelPartRole::Hidden;
             current = ancestor.parent;
         }
-        result.push_back(role);
+        result[i] = role;
     }
+    return result;
+}
+SceneModelRoles ResolveSceneModelRoles(const d3scene::ModelAsset& asset,uint32_t mask,bool has_custom_texture) {
+    const auto& parts = asset.geometry().parts;
+    if (parts.size() > MAX_SUBOBJECTS) throw std::invalid_argument("Too many model role parts");
+    SceneModelRoles result{};
+    for (size_t i = 0; i < parts.size(); ++i)
+        result[i] = parts[i].hierarchy_hidden ? SceneModelPartRole::Hidden :
+            ResolveSceneModelPartRole(parts[i].authored_flags,mask,i,has_custom_texture);
     return result;
 }
 d3scene::ModelGeometry CompileSceneModelAsset(const poly_model& model, size_t* repaired_normals) {

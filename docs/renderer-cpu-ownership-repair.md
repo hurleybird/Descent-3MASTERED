@@ -2,6 +2,26 @@
 
 ## October 20 continuation
 
+Model part bindings now have a publication lifetime independent of frame pose,
+light candidates and surface-table offsets. Unchanged tables are shared across
+frames; editing detaches them. Deferred models carry current light candidates,
+surface base and previous draw mask separately, applying them only to demanded
+poses. Asset publication compiles hierarchy exclusion; role selection no longer
+allocates a vector or walks the authored hierarchy per instance per frame.
+Tests cover shared table identity across pose changes, detachment/held frames,
+frame-local indices, visibility history and sprite attachments; the full suite
+passes 20,143 checks (many are packed-index test cases).
+
+`cpu-model-bindings-corpus-20261020-savegNNN` clean CPU means are 4.04, 3.02,
+5.93, 5.40, 1.12, 4.46, 1.49, 4.09 ms. Dense model preparation falls to 0.77 ms
+(parts 0.27), light preparation to 0.05, total presentation preparation to 3.10.
+These are whole-frame means, not a claim that old has been beaten: it has not.
+Seven corpus images match the packed-relations captures exactly; save000 matches
+the unchanged-build repeat rather than its earlier moving-object variant.
+All eight final source audits pass. Seven final-audit images match that corpus;
+save002 has the previously reproduced pickup-animation delta (mean 0.030214,
+maximum 157). The auxiliary/deformation/resource/AO/bloom probe matches exactly.
+
 Identity lookup uses packed, frame-owned tables rather than per-entry hash nodes.
 Extraction/model history reuse the previous presentation's indices. Light/room
 reachability uses one dense relation and a reusable traversal queue; exterior

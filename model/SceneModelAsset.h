@@ -6,7 +6,9 @@
 
 enum class SceneModelPartRole { Hidden, Surface, Facing, Glow };
 SceneModelPartRole ResolveSceneModelPartRole(uint32_t flags,uint32_t mask,size_t part,bool has_custom_texture);
-std::vector<SceneModelPartRole> ResolveSceneModelRoles(const d3scene::ModelGeometry&,uint32_t mask,bool has_custom_texture);
+using SceneModelRoles = std::array<SceneModelPartRole,MAX_SUBOBJECTS>;
+SceneModelRoles ResolveSceneModelRoles(const d3scene::ModelGeometry&,uint32_t mask,bool has_custom_texture);
+SceneModelRoles ResolveSceneModelRoles(const d3scene::ModelAsset&,uint32_t mask,bool has_custom_texture);
 
 // Asset compiler: owned topology and validated shading data, no game globals.
 d3scene::ModelGeometry CompileSceneModelAsset(const poly_model&, size_t* repaired_normals = nullptr);

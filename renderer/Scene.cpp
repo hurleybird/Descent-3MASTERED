@@ -294,8 +294,12 @@ ModelAsset::ModelAsset(AssetId id, ModelGeometry geometry) : id_(id), geometry_(
     for (size_t i = 0; i < geometry_.parts.size(); ++i) {
         auto& part = geometry_.parts[i];
         float radius = 0;
+        part.hierarchy_hidden = false;
         for (const auto vertex : part.geometry.vertices) radius = std::max(radius,length(vertex));
         for (int parent = int(i); parent != -1; parent = geometry_.parts[parent].parent) {
+            const auto& ancestor = geometry_.parts[parent];
+            part.hierarchy_hidden = part.hierarchy_hidden || ancestor.geometry.polygons.empty() ||
+                (ancestor.authored_flags & (SOF_SHELL|SOF_FRONTFACE));
             radius += length(geometry_.parts[parent].offset);
             float translation = 0;
             if (geometry_.animation) for (const auto key : geometry_.animation->submodel[parent].keyframe_pos)
@@ -404,16 +408,25 @@ void compileModelBounds(const Transform& placement,PreparedModel& model) {
         bounds.maximum = {std::max(bounds.maximum.x,point.x),std::max(bounds.maximum.y,point.y),std::max(bounds.maximum.z,point.z)};
     };
     model.has_render_bounds = false;
+    if (model.deferred_pose) {
+        float radius = 0;
+        for (size_t i = 0; i < model.parts.size(); ++i) {
+            const auto& pose = model.parts.read()[i];
+            const auto& part = model.asset->geometry().parts[i];
+            if (!pose.draw || part.geometry.polygons.empty()) continue;
+            radius = std::max(radius,part.motion_radius*(1+std::abs(model.deformation)));
+            model.has_render_bounds = true;
+        }
+        if (model.has_render_bounds)
+            model.render_bounds = transformBounds(placement,{{-radius,-radius,-radius},{radius,radius,radius}});
+        return;
+    }
     for (size_t index = 0; index < model.parts.size(); ++index) {
         auto& pose = model.parts[index];
         const auto& part = model.asset->geometry().parts[index];
         pose.has_render_bounds = false;
         if (!pose.draw || part.geometry.polygons.empty()) continue;
-        if (model.deferred_pose) {
-            const float radius = part.motion_radius*(1+std::abs(model.deformation));
-            pose.render_bounds = transformBounds(placement,{{-radius,-radius,-radius},{radius,radius,radius}});
-            pose.has_render_bounds = true;
-        } else {
+        {
             const auto world = compose(placement,pose.current);
             if (pose.vertices.empty()) {
                 pose.render_bounds = transformBounds(world,part.local_bounds); pose.has_render_bounds = true;
@@ -443,8 +456,13 @@ const PreparedModel& Presentation::resolvedModel(size_t instance,size_t variant)
         const auto v = [](const vector& p) { return Vec3{p.x,p.y,p.z}; };
         return Transform{v(t.translation),v(t.orientation.rvec),v(t.orientation.uvec),v(t.orientation.fvec)};
     };
+    uint32_t surface_base = source.surface_base;
     for (size_t i = 0; i < result->parts.size(); ++i) {
         auto& part = result->parts[i];
+        part.surface_base = surface_base; surface_base += uint32_t(part.surfaces.size());
+        part.has_previous = source.previous_pose_valid && (source.previous_draw_mask & (uint32_t(1)<<i));
+        part.light_influences_prepared = source.light_influences_prepared;
+        part.light_candidates = source.light_candidates;
         part.current = value(current.submodels[i]); part.previous = value(previous.submodels[i]);
         const auto& geometry = source.asset->geometry().parts[i].geometry;
         part.vertices = deformMesh(geometry,source.deformation,data_.simulation_time,source.deformation_owner,uint32_t(i));
@@ -668,6 +686,7 @@ PresentationRef Presentation::complete(FrameData data) {
         for (const auto& model : object.models) {
             require(model.asset && model.asset->id().lifetime == data.scene_lifetime, "Stale model asset in frame");
             if (model.deferred_pose) {
+                require(model.parts.size() <= MAX_SUBOBJECTS,"Too many deferred model parts");
                 require(model.asset->geometry().animation != nullptr,"Deferred pose has no owned animation");
                 require(std::isfinite(model.deformation) && std::isfinite(model.previous_deformation) &&
                     std::isfinite(model.previous_pose_time),"Invalid deferred pose inputs");
@@ -675,6 +694,7 @@ PresentationRef Presentation::complete(FrameData data) {
                     require((*input)->size() == model.asset->geometry().parts.size(),"Incomplete animation inputs");
                     for (float value : **input) require(std::isfinite(value) && value >= 0 && value <= 1,"Invalid animation input");
                 }
+                for (auto light : model.light_candidates) require(light < data.lights.size(),"Missing deferred model light");
             }
             require(model.parts.size() == model.asset->geometry().parts.size(), "Incomplete object pose");
             for (size_t i = 0; i < model.parts.size(); ++i) {
@@ -732,11 +752,13 @@ PresentationRef Presentation::complete(FrameData data) {
     for (auto& surface : prepared->data_.terrain.materials) index_surface(surface);
     for (auto& patch : prepared->data_.terrain.patches) for (auto& surface : patch) index_surface(surface);
     for (auto& mesh : prepared->data_.meshes) index_surface(mesh.surface);
-    for (auto& object : prepared->data_.model_instances) for (auto& model : object.models)
-        for (auto& part : model.parts) {
-            part.surface_base = surface_count;
-            surface_count += uint32_t(part.surfaces.size());
+    for (auto& object : prepared->data_.model_instances) for (auto& model : object.models) {
+        model.surface_base = surface_count;
+        for (size_t p = 0; p < model.parts.size(); ++p) {
+            if (!model.deferred_pose) model.parts[p].surface_base = surface_count;
+            surface_count += uint32_t(model.parts.read()[p].surfaces.size());
         }
+    }
     std::sort(prepared->data_.foregrounds.begin(),prepared->data_.foregrounds.end(),
         [](const PreparedForeground& a,const PreparedForeground& b) {
             return a.phase != b.phase ? a.phase < b.phase : a.order < b.order;
@@ -786,9 +808,10 @@ PresentationRef Presentation::complete(FrameData data) {
                 include(object.render_bounds,object.has_render_bounds,model.render_bounds.maximum);
             }
             for (size_t part = 0; part < model.parts.size(); ++part) {
-                auto& pose = model.parts[part];
+                const auto& input = model.parts.read()[part];
                 const auto& geometry = model.asset->geometry().parts[part].geometry;
-                if (!pose.surfaces.publishedFor(model.asset->id(),uint32_t(part),pose.material_palette)) {
+                if (!input.surfaces.publishedFor(model.asset->id(),uint32_t(part),input.material_palette)) {
+                auto& pose = model.parts[part];
                 for (size_t face = 0; face < pose.surfaces.size(); ++face) {
                     const auto polygon = pose.material_palette ? model.asset->geometry().parts[part].surface_polygons[face] : uint32_t(face);
                     pose.surfaces[face].material = compileMaterialPolicy(pose.surfaces[face],geometry.polygons[polygon]);
@@ -796,6 +819,7 @@ PresentationRef Presentation::complete(FrameData data) {
                 pose.surfaces.seal(model.asset->id(),uint32_t(part),pose.material_palette);
                 }
             }
+            model.parts.seal();
         }
     }
     prepared->resolved_models_.resize(resolved_index);

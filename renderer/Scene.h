@@ -103,6 +103,7 @@ struct ModelPart {
     std::vector<uint32_t> surface_for_polygon, surface_polygons;
     Bounds local_bounds;
     float motion_radius = 0; // conservative root-space radius across all animation tracks
+    bool hierarchy_hidden = false; // authored traversal exclusion, compiled with the asset
 };
 struct ModelGeometry {
     std::shared_ptr<const ModelAnimation> animation;
@@ -460,6 +461,42 @@ struct PreparedModelPart {
         return surfaces[material_palette ? asset.surface_for_polygon[polygon] : polygon];
     }
 };
+// Stable part bindings can outlive a frame. Publication seals the table;
+// mutation detaches it, so held presentations never observe a later edit.
+class ModelParts {
+    using Storage = std::vector<PreparedModelPart>;
+    std::shared_ptr<Storage> values_;
+    bool sealed_ = false;
+    Storage& edit() {
+        if (!values_) values_ = std::make_shared<Storage>();
+        else if (sealed_ || values_.use_count() != 1) values_ = std::make_shared<Storage>(*values_);
+        sealed_ = false; return *values_;
+    }
+    void seal() { sealed_ = true; }
+    friend class Presentation;
+public:
+    ModelParts() = default;
+    ModelParts(const ModelParts& other) : values_(!other.values_ || other.sealed_ ? other.values_ :
+        std::make_shared<Storage>(*other.values_)),sealed_(other.sealed_) {}
+    ModelParts& operator=(const ModelParts& other) { if (this != &other) { ModelParts copy(other); *this = std::move(copy); } return *this; }
+    ModelParts(ModelParts&&) = default;
+    ModelParts& operator=(ModelParts&&) = default;
+    const Storage& read() const { static const Storage empty; return values_ ? *values_ : empty; }
+    size_t size() const { return read().size(); }
+    bool empty() const { return read().empty(); }
+    bool published() const { return sealed_; }
+    const PreparedModelPart& operator[](size_t i) const { return read()[i]; }
+    PreparedModelPart& operator[](size_t i) { return edit()[i]; }
+    auto begin() const { return read().begin(); }
+    auto end() const { return read().end(); }
+    auto begin() { return edit().begin(); }
+    auto end() { return edit().end(); }
+    const PreparedModelPart* data() const { return read().data(); }
+    void clear() { values_.reset(); sealed_ = false; }
+    void reserve(size_t n) { edit().reserve(n); }
+    void resize(size_t n) { edit().resize(n); }
+    void push_back(PreparedModelPart value) { edit().push_back(std::move(value)); }
+};
 struct PreparedModel {
     ModelAssetRef asset;
     uint64_t pose_source_revision = 0;
@@ -468,8 +505,11 @@ struct PreparedModel {
     bool deferred_pose = false, previous_pose_valid = false;
     double previous_pose_time = 0;
     float deformation = 0, previous_deformation = 0;
-    uint32_t deformation_owner = 0, resolved_index = 0;
-    std::vector<PreparedModelPart> parts;
+    uint32_t deformation_owner = 0, resolved_index = 0, surface_base = 0;
+    uint32_t previous_draw_mask = UINT32_MAX;
+    bool light_influences_prepared = false;
+    std::vector<uint32_t> light_candidates;
+    ModelParts parts;
     Bounds render_bounds;
     bool has_render_bounds = false;
 };

@@ -237,7 +237,7 @@ void prepareImages(d3scene::FrameData& data) {
             surface.lightmap_wrap = (GameLightmaps[surface.lightmap_bitmap].flags & LF_WRAP) != 0;
         }
     };
-    const auto prepareTable = [&](d3scene::RoomSurfaces& table,bool model,bool exterior) {
+    const auto tableUnchanged = [&](const d3scene::RoomSurfaces& table) {
         if (table.published()) {
             bool unchanged = true;
             for (const auto& dependency : table.images()) {
@@ -251,8 +251,11 @@ void prepareImages(d3scene::FrameData& data) {
                         dependency.v_scale != float(lm.height)/lm.square_res)) unchanged = false;
                 }
             }
-            if (unchanged) return;
+            return unchanged;
         }
+        return false;
+    };
+    const auto prepareTable = [&](d3scene::RoomSurfaces& table,bool model,bool exterior) {
         // Pixel/frame changes never detach storage. A format transition may
         // change cutout/specular policy, so it explicitly recompiles appearance.
         for (size_t face = 0; face < table.size(); ++face) {
@@ -292,8 +295,9 @@ void prepareImages(d3scene::FrameData& data) {
             }
         }
     };
-    for (auto& room : data.rooms) prepareTable(room.surfaces,false,room.exterior);
-    for (auto& object : data.model_instances) for (auto& model : object.models) for (auto& part : model.parts) prepareTable(part.surfaces,true,false);
+    for (auto& room : data.rooms) if (!tableUnchanged(room.surfaces)) prepareTable(room.surfaces,false,room.exterior);
+    for (auto& object : data.model_instances) for (auto& model : object.models) for (size_t p = 0; p < model.parts.size(); ++p)
+        if (!tableUnchanged(model.parts.read()[p].surfaces)) prepareTable(model.parts[p].surfaces,true,false);
     for (auto& surface : data.terrain.materials) prepare(surface);
     for (auto& mesh : data.meshes) prepare(mesh.surface);
     previous_binding_count = data.images.size();
@@ -436,8 +440,9 @@ void PrepareGameSceneResources(d3scene::FrameData& data) {
     MaterialResolution resolution(static_cast<float>(data.simulation_time));
     for (auto& surface : data.terrain.materials) resolveMaterial(surface,resolution,false,true);
     for (auto& object : data.model_instances) for (auto& model : object.models) for (size_t p = 0; p < model.parts.size(); ++p) {
+        const auto& input = model.parts.read()[p];
+        if (input.surfaces.publishedFor(model.asset->id(),uint32_t(p),input.material_palette)) continue;
         auto& part = model.parts[p];
-        if (part.surfaces.publishedFor(model.asset->id(),uint32_t(p),part.material_palette)) continue;
         for (auto& surface : part.surfaces) resolveMaterial(surface,resolution,true);
     }
     prepareImages(data);

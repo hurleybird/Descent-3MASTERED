@@ -895,7 +895,7 @@ void PrepareGameCockpit(d3scene::FrameData& frame, bool advance,const d3scene::F
                     instance.models[0].pose_source_revision == prepared.pose_source_revision)
                     history = &instance.models[0];
         prepared.parts.reserve(asset->geometry().parts.size());
-        const auto roles = ResolveSceneModelRoles(asset->geometry(),masks[layer],false);
+        const auto roles = ResolveSceneModelRoles(*asset,masks[layer],false);
         for (size_t i = 0; i < asset->geometry().parts.size(); ++i) {
             const auto& geometry = asset->geometry().parts[i];
             d3scene::PreparedModelPart part;

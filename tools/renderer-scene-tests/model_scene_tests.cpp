@@ -92,6 +92,19 @@ int runModelSceneTests() {
     check(compiled.parts[0].geometry.polygons[0].corners[1].alpha == 127, "Authored model alpha lost");
     check(compiled.parts[0].polygon_colors[0].x == 128/255.f, "Flat model color lost");
     SceneAssets assets;
+    {
+        auto roles_geometry = modelGeometry();
+        roles_geometry.parts.push_back(roles_geometry.parts[0]);
+        roles_geometry.parts[1].parent = 0;
+        for (uint32_t flags : {uint32_t(0),uint32_t(SOF_SHELL),uint32_t(SOF_FRONTFACE),uint32_t(SOF_CUSTOM),uint32_t(SOF_GLOW)}) {
+            roles_geometry.parts[0].authored_flags = flags;
+            const auto roles_asset = assets.publishModel(81,roles_geometry);
+            for (uint32_t mask = 0; mask < 4; ++mask) for (bool custom : {false,true})
+                check(ResolveSceneModelRoles(*roles_asset,mask,custom) == ResolveSceneModelRoles(roles_geometry,mask,custom),
+                    "Compiled role hierarchy differs from authored traversal");
+            roles_geometry = roles_asset->geometry(); // derived fields must be recomputed after edits
+        }
+    }
     auto animation_geometry = compiled;
     auto mutable_animation = std::make_shared<ModelAnimation>(*compiled.animation);
     animation_geometry.animation = mutable_animation;
@@ -469,6 +482,29 @@ int runModelSceneTests() {
             check(queryView(*published,camera).surfaces.size() == first.surfaces.size(),"Auxiliary query changed main model demand");
             if (!held) held = published;
         }
+        auto next_inputs = held->data();
+        next_inputs.simulation_time += .1;
+        next_inputs.model_instances[0].models[0].previous_draw_mask = 1;
+        const auto next_frame = Presentation::freeze(next_inputs);
+        check(next_frame->data().model_instances[0].models[0].parts.data() ==
+            held->data().model_instances[0].models[0].parts.data(),"Unchanged bindings were copied for a new pose");
+        const auto& next_pose = next_frame->resolvedModel(0,0);
+        check(next_pose.parts[0].has_previous && !next_pose.parts[1].has_previous,
+            "Shared bindings leaked a prior frame's part visibility history");
+        check(next_pose.parts[0].surface_base == next_frame->data().model_instances[0].models[0].surface_base &&
+            next_pose.parts[1].surface_base == next_pose.parts[0].surface_base+1,"Deferred binding indices were not frame-local");
+        next_inputs.model_instances[0].models[0].parts[0].surfaces[0].alpha = .25f;
+        const auto changed = Presentation::freeze(next_inputs);
+        check(changed->data().model_instances[0].models[0].parts[0].surfaces[0].alpha == .25f &&
+            held->data().model_instances[0].models[0].parts[0].surfaces[0].alpha == 1,
+            "Model binding edit mutated a held frame");
+        PreparedMesh attachment; attachment.alignment = MeshAlignment::Camera;
+        attachment.world.position = {2,3,4};
+        const auto parent = compose(instance.current,next_pose.parts[1].current);
+        const auto attached = resolveMeshTransform(attachment,prepareCamera(camera),&parent);
+        const auto point = transformPoint(parent,attachment.world.position);
+        check(attached.position.x == point.x && attached.position.y == point.y && attached.position.z == point.z &&
+            attached.right.x == 1 && attached.up.y == 1,"Part attachment rotated its camera-facing sprite basis");
         const auto held_x = held->resolvedModel(0,0).parts[0].vertices[0].x;
         tracks->submodel.clear(); assets.removeModel(80);
         check(held->resolvedModel(0,0).parts[0].vertices[0].x == held_x,"Held pose depended on unloaded animation");
