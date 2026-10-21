@@ -554,6 +554,8 @@ void GL4Renderer::DestroySceneResources() {
         sampler = {};
     }
     scene_rooms.clear();
+    for (auto& model : scene_models) for (auto& part : model)
+        if (part.material_indices) glDeleteBuffers(1,&part.material_indices);
     scene_models.clear();
     scene_terrain.clear();
     scene_meshes.clear([](SceneMeshGpu&) {});
@@ -1021,10 +1023,11 @@ void GL4Renderer::BindSceneTables() {
 }
 
 void GL4Renderer::ReleaseSceneMesh(SceneMeshGpu& gpu) {
+    if (gpu.material_indices) glDeleteBuffers(1,&gpu.material_indices);
     scene_geometry_allocator.release(gpu.vertices);
     gpu = {};
 }
-void GL4Renderer::UploadSceneMesh(SceneMeshGpu& gpu, d3scene::AssetId id, const d3scene::MeshGeometry& geometry) {
+void GL4Renderer::UploadSceneMesh(SceneMeshGpu& gpu, d3scene::AssetId id, const d3scene::MeshGeometry& geometry,const d3scene::ModelPart* model) {
     if (gpu.id == id) return;
     ReleaseSceneMesh(gpu);
     std::vector<SceneVertex> vertices;
@@ -1041,6 +1044,26 @@ void GL4Renderer::UploadSceneMesh(SceneMeshGpu& gpu, d3scene::AssetId id, const 
         gpu.polygons.emplace_back(first,static_cast<uint32_t>(vertices.size())-first);
     }
     if (vertices.size() > INT32_MAX) throw std::overflow_error("Scene geometry exceeds draw address range");
+    if (model) {
+        std::vector<uint32_t> indices;
+        indices.reserve(vertices.size());
+        for (const auto& faces : model->surface_groups) {
+            const auto first = uint32_t(indices.size());
+            for (const auto face : faces) {
+                const auto range = gpu.polygons[face];
+                for (uint32_t vertex = range.offset; vertex < range.offset+range.count; ++vertex)
+                    indices.push_back(vertex);
+            }
+            gpu.material_groups.emplace_back(first,uint32_t(indices.size())-first);
+        }
+        if (!indices.empty()) {
+            glGenBuffers(1,&gpu.material_indices);
+            // Upload without changing the element binding of an unrelated VAO.
+            glBindBuffer(GL_COPY_WRITE_BUFFER,gpu.material_indices);
+            glBufferData(GL_COPY_WRITE_BUFFER,indices.size()*sizeof(uint32_t),indices.data(),GL_STATIC_DRAW);
+            glBindBuffer(GL_COPY_WRITE_BUFFER,0);
+        }
+    }
     if (!vertices.empty()) {
         gpu.vertices = scene_geometry_allocator.allocate(uint32_t(vertices.size()));
         if (scene_geometry_pages.size() <= gpu.vertices.page) scene_geometry_pages.resize(gpu.vertices.page+1);
@@ -1579,7 +1602,8 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
             auto& parts = scene_models[id.slot];
             if (parts.size() <= item.part_index) parts.resize(static_cast<size_t>(item.part_index)+1);
             mesh = &parts[item.part_index];
-            UploadSceneMesh(*mesh,id,model.asset->geometry().parts[item.part_index].geometry);
+            const auto& asset_part = model.asset->geometry().parts[item.part_index];
+            UploadSceneMesh(*mesh,id,asset_part.geometry,&asset_part);
             binding = &model.parts[item.part_index].surface(model.asset->geometry().parts[item.part_index],item.polygon_index);
             prepared_positions = scene_part_ranges[model.parts[item.part_index].compiled_index].positions;
         } else {
@@ -1666,9 +1690,10 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         record[51] = modulation.alpha;
         record[3] = float(surface.effect_depth_offset);
         auto range = item.terrain || item.mesh ? ElementRange(0,gpu.vertices.count) : gpu.polygons[item.polygon_index];
-        if (item.model && item.polygon_count > 1) {
-            const auto last = gpu.polygons[item.polygon_index+item.polygon_count-1];
-            range.count = last.offset+last.count-range.offset;
+        ElementRange material_indices;
+        if (item.model_material_group) {
+            const auto group = resolved_model->asset->geometry().parts[item.part_index].surface_for_polygon[item.polygon_index];
+            material_indices = gpu.material_groups[group];
         }
         range.offset += gpu.vertices.offset;
         const auto uv_range = ranges.uv;
@@ -1690,7 +1715,8 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         for (const auto pair : {std::pair<int,int>{15,19},{23,27},{31,35},{39,43},{7,11},{63,62},{78,77}})
             if (!record[pair.first]) record[pair.second] = 0;
 
-        packets[item_index] = {binding,gpu.vao,range,policy};
+        packets[item_index] = {binding,gpu.vao,range,policy,
+            item.model_material_group ? gpu.material_indices : 0,material_indices,GLint(gpu.vertices.offset)};
     }
     if (!scene_draw_buffer) glGenBuffers(1,&scene_draw_buffer);
     glBindBuffer(GL_UNIFORM_BUFFER,scene_draw_buffer);
@@ -1906,10 +1932,10 @@ void main() {
               return std::make_tuple(s.color_image,s.baked_image,s.specular_image,s.texture_wrap,s.lightmap_wrap);
           };
           const auto raster = [](const d3scene::MaterialPolicy& p) { return std::make_tuple(p.layer,p.blend,p.depth); };
-          return a.vao == b.vao && images(x) == images(y) && raster(a.policy) == raster(b.policy) &&
+          return !a.index_buffer && !b.index_buffer && a.vao == b.vao && images(x) == images(y) && raster(a.policy) == raster(b.policy) &&
               ia.model == ib.model &&
-              (ia.terrain || (ia.model && ia.polygon_count > 1) || (ia.mesh && !x.two_sided)) ==
-                  (ib.terrain || (ib.model && ib.polygon_count > 1) || (ib.mesh && !y.two_sided)) &&
+              (ia.terrain || ia.model_material_group || (ia.mesh && !x.two_sided)) ==
+                  (ib.terrain || ib.model_material_group || (ib.mesh && !y.two_sided)) &&
               !x.view_image_slot && !y.view_image_slot && !a.policy.planar_slot && !b.policy.planar_slot &&
               std::memcmp(records.data()+first*(record_bytes/sizeof(float)),
                   records.data()+next*(record_bytes/sizeof(float)),88*sizeof(float)) == 0;
@@ -1957,7 +1983,7 @@ void main() {
         bind_image(surface.specular_image,8,surface.texture_wrap,false);
         scene_shader.Use();
         glBindBufferRange(GL_UNIFORM_BUFFER,7,scene_draw_buffer,item_index*record_bytes,22*16);
-        const bool cull = item.terrain || (item.model && item.polygon_count > 1) || (item.mesh && !surface.two_sided);
+        const bool cull = item.terrain || item.model_material_group || (item.mesh && !surface.two_sided);
         // Authored polymodel fronts use clockwise winding, unlike the
         // terrain batches. CPU face-normal culling previously hid this
         // distinction; grouped model draws must preserve it explicitly.
@@ -2002,7 +2028,12 @@ void main() {
         if (packet.vao != previous_vao) { glBindVertexArray(packet.vao); previous_vao = packet.vao; }
         uint32_t end = item_index+1;
         while (end < pass.end && compatible(item_index,end)) ++end;
-        if (end == item_index+1) glDrawArrays(GL_TRIANGLES,range.offset,range.count);
+        if (packet.index_buffer) {
+            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,packet.index_buffer);
+            glDrawElementsBaseVertex(GL_TRIANGLES,packet.indices.count,GL_UNSIGNED_INT,
+                reinterpret_cast<void*>(size_t(packet.indices.offset)*sizeof(uint32_t)),packet.base_vertex);
+        }
+        else if (end == item_index+1) glDrawArrays(GL_TRIANGLES,range.offset,range.count);
         else {
             // Same shader, UBO, textures, raster state and geometry allocation.
             // Keep primitive order exactly; only eliminate redundant submissions.

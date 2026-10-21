@@ -919,15 +919,22 @@ void PrepareGameCockpit(d3scene::FrameData& frame, bool advance,const d3scene::F
             const auto& geometry = asset->geometry().parts[i];
             d3scene::PreparedModelPart part;
             part.draw = roles[i] == SceneModelPartRole::Surface;
+            // The alternate arm filter can distinguish faces by original
+            // floating-point alpha. Only that authored filter needs face
+            // bindings; ordinary cockpit materials share the model palette.
+            const bool filtered_faces = Cockpit_alt_mode && (Cockpit_info.transparent_arm_mask & (uint32_t(1)<<i));
+            part.material_palette = !filtered_faces;
             part.appearance_inputs = {{float(layer),float(Cockpit_alt_mode),float((Cockpit_info.transparent_arm_mask >> i)&1u)}};
             if (history && history->parts[i].appearance_inputs == part.appearance_inputs &&
-                history->parts[i].surfaces.publishedFor(asset->id(),uint32_t(i),false)) {
+                history->parts[i].surfaces.publishedFor(asset->id(),uint32_t(i),part.material_palette)) {
                 part.surfaces = history->parts[i].surfaces;
                 prepared.parts.push_back(std::move(part));
                 continue;
             }
-            part.surfaces.reserve(geometry.geometry.polygons.size());
-            for (size_t face = 0; face < geometry.geometry.polygons.size(); ++face) {
+            const size_t surfaces = part.material_palette ? geometry.surface_polygons.size() : geometry.geometry.polygons.size();
+            part.surfaces.reserve(surfaces);
+            for (size_t material = 0; material < surfaces; ++material) {
+                const size_t face = part.material_palette ? geometry.surface_polygons[material] : material;
                 d3scene::SurfaceBinding surface;
                 surface.depth = layer < 2 ? d3scene::DepthMode::ReadWrite : d3scene::DepthMode::Disabled;
                 surface.directional_ambient = true;
@@ -936,7 +943,7 @@ void PrepareGameCockpit(d3scene::FrameData& frame, bool advance,const d3scene::F
                 else surface.base_color = geometry.polygon_colors[face];
                 // Preserve the existing alternate-cockpit material filter; no
                 // new geometry or styling is introduced by this extraction.
-                if (Cockpit_alt_mode && (Cockpit_info.transparent_arm_mask & (uint32_t(1)<<i))) {
+                if (filtered_faces) {
                     bool transparent = false;
                     if (surface.texture >= 0) {
                         const auto& material = GameTextures[surface.texture];

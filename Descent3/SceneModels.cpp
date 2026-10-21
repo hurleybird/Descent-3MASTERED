@@ -536,6 +536,7 @@ void PrepareGameStaticModel(d3scene::FrameData& data,int number,const d3scene::T
         d3scene::PreparedModelPart part;
         part.current = part.previous = value(transforms.submodels[index]);
         part.draw = roles[index] == SceneModelPartRole::Surface;
+        part.material_palette = true;
         const auto attachment_begin = data.meshes.size();
         const auto world = d3scene::compose(placement,part.current);
         if (roles[index] == SceneModelPartRole::Facing) prepareFacingPart(data,nullptr,*source,index,world);
@@ -545,7 +546,7 @@ void PrepareGameStaticModel(d3scene::FrameData& data,int number,const d3scene::T
             data.meshes[attachment].model_instance = identity;
             data.meshes[attachment].model_variant = 0;
         }
-        for (size_t polygon = 0; polygon < geometry.geometry.polygons.size(); ++polygon) {
+        for (const auto polygon : geometry.surface_polygons) {
             d3scene::SurfaceBinding surface; surface.unlit = true;
             const int material = geometry.polygon_materials[polygon];
             if (material >= 0) surface.texture = model.asset->geometry().textures[material];

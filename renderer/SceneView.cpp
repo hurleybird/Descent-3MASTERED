@@ -595,31 +595,40 @@ static ViewVisibility queryResolvedView(const Presentation& frame,const View& vi
             const MeshView mesh(geometry,model.parts[part].vertices);
             ProjectedMesh projected(result.camera,mesh,world,window,projection_scratch);
             const auto& asset_part = model.asset->geometry().parts[part];
-            for (const auto& run : asset_part.surface_runs) {
-              const auto& surface = model.parts[part].surface(asset_part,run.first);
+            static thread_local std::vector<uint8_t> grouped;
+            grouped.assign(asset_part.surface_groups.size(),0);
+            bool individual = false;
+            for (size_t group = 0; group < asset_part.surface_groups.size(); ++group) {
+              const auto& faces = asset_part.surface_groups[group];
+              const auto first = faces.front();
+              const auto& surface = model.parts[part].surface(asset_part,first);
               const auto policy = modulatedMaterialPolicy(surface,model.modulation.alpha);
               const bool per_corner = surface.reflection && (!surface.reflection->data().corner_normals.empty() ||
                   !surface.reflection->data().field_corners.empty());
-              if (run.count > 1 && model.parts[part].material_palette && model.parts[part].vertices.empty() &&
-                  surface.draw_surface && !policy.blended() && !policy.requiresLatePass() && !per_corner) {
+              if (faces.size() > 1 && model.parts[part].material_palette && model.parts[part].vertices.empty() &&
+                  surface.draw_surface && policy.depth == DepthMode::ReadWrite &&
+                  !policy.blended() && !policy.requiresLatePass() && !per_corner) {
                 VisibleSurface item;
                 item.model = true; item.model_instance_index = static_cast<uint32_t>(i);
                 item.model_variant = variant; item.part_index = static_cast<uint32_t>(part);
-                item.polygon_index = run.first; item.polygon_count = uint16_t(run.count); item.placement = placement;
+                item.polygon_index = first; item.model_material_group = true; item.placement = placement;
                 item.depth = static_cast<float>(dot(view.camera.forward,subtract(
-                    projected.vertex(geometry.polygons[run.first].corners[0].vertex).world,view.camera.position)));
-                result.stats.surfaces_considered += run.count;
+                    projected.vertex(geometry.polygons[first].corners[0].vertex).world,view.camera.position)));
+                result.stats.surfaces_considered += faces.size();
                 result.surfaces.push_back(item);
-                continue;
-              }
-              for (size_t face = run.first; face < size_t(run.first)+run.count; ++face) {
+                grouped[group] = 1;
+              } else individual = true;
+            }
+            // Non-batchable faces retain authored order, including equal-depth
+            // transparent faces interleaved between distinct materials.
+            if (individual) for (size_t face = 0; face < geometry.polygons.size(); ++face) {
+                if (grouped[asset_part.surface_for_polygon[face]]) continue;
                 VisibleSurface item;
                 item.model = true; item.model_instance_index = static_cast<uint32_t>(i);
                 item.model_variant = variant;
                 item.part_index = static_cast<uint32_t>(part); item.polygon_index = static_cast<uint32_t>(face);
                 item.placement = placement;
                 consider(mesh,projected,world,model.parts[part].surface(model.asset->geometry().parts[part],face),item,model.modulation.alpha);
-              }
             }
         }
     }

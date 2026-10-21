@@ -105,8 +105,7 @@ struct ModelPart {
     // Compiled once with the model. Equivalent face appearances share one
     // instance record; geometry and per-face lighting remain independent.
     std::vector<uint32_t> surface_for_polygon, surface_polygons;
-    struct SurfaceRun { uint32_t first = 0, count = 0; };
-    std::vector<SurfaceRun> surface_runs;
+    std::vector<std::vector<uint32_t>> surface_groups; // authored face order within each material
     Bounds local_bounds;
     float motion_radius = 0; // conservative root-space radius across all animation tracks
     bool hierarchy_hidden = false; // authored traversal exclusion, compiled with the asset

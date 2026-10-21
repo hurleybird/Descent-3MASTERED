@@ -65,7 +65,7 @@ struct VisibleSurface {
     bool blended = false;
     bool late = false; // pass membership is independent of color blending
     bool model = false, terrain = false, mesh = false;
-    uint16_t polygon_count = 1; // contiguous opaque model material run
+    bool model_material_group = false; // polygon_index identifies the group's representative face
 };
 struct ViewQueryStats {
     uint32_t rooms_considered = 0, surfaces_considered = 0;

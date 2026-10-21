@@ -2,6 +2,26 @@
 
 ## Active 2026-10-21 flare regression investigation
 
+LATEST UPDATE: image ownership committed24628d2 (supersedes uncommitted text
+below). Whole opaque material groups replace contiguous runs, with static GPU
+index buffers and glDrawElementsBaseVertex; per-primitive light addressing
+retained. Depth-disabled/read-only, transparent, deformed and per-corner
+reflection paths retain individual face ordering. Cockpit/static producers now
+publish palettes too; alternate cockpit original-alpha filter retains face
+bindings. No geometry/style change. Cockpit base submissions149->19.
+Final tests/build: model-palettes-final-tests.log/model-palettes-final-build.log.
+Captures model-palettes005/007/006/vertexlight/final001 exact against matching
+controls;003 retains earlier one-pixel max5 delta. model-palettes-multiview
+SSAA2/MSAA4/AO/bloom/audits differs max1, visually inspected. Roof flare capture
+model-palettes-roof-flare EXACT against flare-fixed-closeup; ordinary flare
+model-palettes-flare visually correct too. Sparse multidraw experiment rejected
+for GPU regression, not retained. Static indices released on asset retirement
+and renderer teardown. No per-frame index construction.
+500-frame rows100..449: model-palettes005 CPU~1.33 GPU~.17ms;007 CPU~1.50
+GPU~.75ms. Old CPU1.334/1.508ms: around parity, NOT marked improvement.
+Delivered v3.1, Candidate and Previous Candidate untouched. Owned scene-view-test
+contains current performance experiment. Usage32%, credits unchanged.
+
 LATEST: model batching committed18db51c. Final tests pass; final001 and
 vertexlight images exact. New uncommitted image ownership cleanup separates
 ImageExtent metadata from pixels(level); deferred ImageAsset now returns recipe

@@ -131,6 +131,8 @@ class GL4Renderer : public IRenderer
 		GLuint vao = 0;
 		d3scene::SceneGeometryAllocator::Allocation vertices;
 		std::vector<ElementRange> polygons;
+		GLuint material_indices = 0;
+		std::vector<ElementRange> material_groups;
 	};
 	struct SceneGeometryPage { GLuint vao = 0, buffer = 0; };
 	d3scene::SceneGeometryAllocator scene_geometry_allocator;
@@ -139,7 +141,7 @@ class GL4Renderer : public IRenderer
 	std::vector<std::vector<SceneMeshGpu>> scene_models;
 	std::vector<std::vector<SceneMeshGpu>> scene_terrain;
 	d3scene::SceneGpuCache<d3scene::MeshAsset,SceneMeshGpu> scene_meshes;
-	void UploadSceneMesh(SceneMeshGpu&, d3scene::AssetId, const d3scene::MeshGeometry&);
+	void UploadSceneMesh(SceneMeshGpu&, d3scene::AssetId, const d3scene::MeshGeometry&, const d3scene::ModelPart* = nullptr);
 	void ReleaseSceneMesh(SceneMeshGpu&);
 	uint64_t scene_asset_lifetime = 0;
 	struct SceneUniformLocations {
@@ -172,7 +174,7 @@ class GL4Renderer : public IRenderer
 	GLuint scene_draw_buffer = 0;
     GLuint scene_view_buffer = 0;
 	size_t scene_draw_record_bytes = 0;
-	struct SceneDrawPacket { const d3scene::SurfaceBinding* binding; GLuint vao; ElementRange range; d3scene::MaterialPolicy policy; };
+	struct SceneDrawPacket { const d3scene::SurfaceBinding* binding; GLuint vao; ElementRange range; d3scene::MaterialPolicy policy; GLuint index_buffer = 0; ElementRange indices; GLint base_vertex = 0; };
 	std::vector<SceneDrawPacket> scene_draw_packets;
 	std::vector<float> scene_draw_records;
 	GLuint scene_influence_buffer = 0, scene_influence_texture = 0;
