@@ -17,7 +17,9 @@ void ResetGamePresentationScene();
 // Geometry/volume writers invalidate at their mutation boundary. Material,
 // light intensity and visibility changes are not geometry mutations.
 void InvalidateGameSceneGeometry();
+uint64_t GameSceneGeometryRevision();
 void PrepareGameModelInstances(d3scene::FrameData&, const d3scene::FrameData* previous,bool retain_materials = false);
+d3scene::ModelAssetRef PrepareGameModelAsset(int number,bool audit_geometry = false);
 void PrepareGameStaticModel(d3scene::FrameData&,int model,const d3scene::Transform&,uint64_t identity,uint64_t collection = 0);
 void PrepareGameSceneResources(d3scene::FrameData&);
 void PrepareGameInspectionBanner(d3scene::FrameData&);
@@ -41,7 +43,7 @@ constexpr uint64_t SceneViewImageProbe = 0x56494557494d4701ull;
 constexpr uint64_t SceneInspectionBanner = 0x5445535442414e01ull;
 constexpr float SceneCockpitZoom = .56f;
 void PrepareGameCockpitGauges(d3scene::FrameData&,const ModelTransforms&,const d3scene::Transform&,bool moving);
-void PrepareGameCockpit(d3scene::FrameData&, bool advance);
+void PrepareGameCockpit(d3scene::FrameData&, bool advance,const d3scene::FrameData* previous = nullptr,bool retain_materials = false);
 void PrepareGameReticle(d3scene::FrameData&,const HUDCanvasLayout&);
 void PrepareGameHUD(d3scene::FrameData&,const HUDCanvasLayout&,bool advance);
 void RenderPreparedReticle(const d3scene::Presentation&);

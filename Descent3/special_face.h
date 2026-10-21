@@ -20,6 +20,7 @@
 #define SPECIAL_FACE_H
 
 #include "pstypes.h"
+#include <cstdint>
 #include "pserror.h"
 #include "vecmat.h"
 
@@ -53,6 +54,11 @@ struct special_face
 
 extern special_face SpecialFaces[];
 extern int Num_of_special_faces;
+
+// Authored reflection data writers must invalidate after in-place edits.
+// Dynamic per-frame lighting bookkeeping is not an authored input.
+uint64_t SpecialFaceSourceRevision();
+void InvalidateSpecialFaceSource();
 
 // Sets all the special faces to unused
 void InitSpecialFaces();

@@ -2,6 +2,25 @@
 
 ## October 20 continuation
 
+Latest checkpoint: authored special-face reflection data and lightmap-info
+assignments have producer revisions; the material-input scan falls from about
+0.49 to 0.03 ms. Geometry audit retains the full comparison and completed all
+eight saves. Frame-resource lookup borrows images instead of reference-counting
+every dependency, and publication builds one packed name index for validation
+and draw lookup (including sparse/high names and collisions in tests).
+
+World/cockpit/preview model assets now use one revision-aware acquisition path.
+Cockpit no longer recompiles its complete topology every frame or reconstructs
+unchanged material tables; animation/placement still update. This does not edit
+cockpit geometry. `cpu-shared-model-corpus-20261020-savegNNN` total CPU means:
+4.98, 4.28, 6.73, 6.89, 1.37, 5.30, 1.61, 5.85 ms. All remain slower than old.
+Seven images match start-of-day exactly; save002 matches the known alternate
+pickup capture. The AO/bloom/deformation/resource/auxiliary-view probe matches
+exactly and was visually inspected. `cpu-shared-model-assets-audit-20261020`
+also verifies the newly shared cockpit asset path. Contract suite passes.
+Dense preparation remains about 4.5 ms; whole-level model assembly is still
+the largest substage. Do not claim completion or old-renderer visual parity.
+
 Second checkpoint: model assets retain rest poses; unchanged instance inputs
 reuse previous poses, and identical animated inputs share one evaluation within
 a frame. Geometry audit independently evaluates every pose. Immutable fog

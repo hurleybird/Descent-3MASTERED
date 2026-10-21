@@ -821,14 +821,14 @@ void RenderCockpit()
 // Publish the authored cockpit through the same model/pose contract as world
 // models. It has no fake gameplay owner and uses camera-local coordinates.
 // Geometry inspection deliberately does not claim gauge or HUD completion.
-void PrepareGameCockpit(d3scene::FrameData& frame, bool advance)
+void PrepareGameCockpit(d3scene::FrameData& frame, bool advance,const d3scene::FrameData* previous,bool retain_materials)
 {
     if (Cockpit_info.model_num < 0 || !Cockpit_info.model || !Player_object) return;
     auto* viewer = CockpitGetMonitorSubmodel(SOF_VIEWER);
     if (!viewer) throw std::logic_error("Cockpit presentation has no authored viewer");
     const auto value = [](const vector& v) { return d3scene::Vec3{v.x,v.y,v.z}; };
     const auto& model = *Cockpit_info.model;
-    const auto asset = d3scene::assets().publishModel(Cockpit_info.model_num,CompileSceneModelAsset(model));
+    const auto asset = PrepareGameModelAsset(Cockpit_info.model_num,FindArg("-scene-geometry-revision-audit") != 0);
     // Capture before advancing: the old cockpit used the current buffet sample
     // for this exposure and advanced it for the following exposure.
     const float buffet = Cockpit_info.buffet_amp*Cockpit_info.buffet_wave;
@@ -886,6 +886,15 @@ void PrepareGameCockpit(d3scene::FrameData& frame, bool advance)
         instance.identity = instance.collection = collections[layer];
         instance.current = instance.previous = placement;
         d3scene::PreparedModel prepared; prepared.asset = asset;
+        prepared.pose_source_revision = SceneModelSourceEpoch();
+        const d3scene::PreparedModel* history = nullptr;
+        if (retain_materials && previous && previous->scene_lifetime == frame.scene_lifetime)
+            for (const auto& instance : previous->model_instances)
+                if (instance.identity == collections[layer] && instance.models.size() == 1 &&
+                    instance.models[0].asset->id() == asset->id() &&
+                    instance.models[0].pose_source_revision == prepared.pose_source_revision)
+                    history = &instance.models[0];
+        prepared.parts.reserve(asset->geometry().parts.size());
         const auto roles = ResolveSceneModelRoles(asset->geometry(),masks[layer],false);
         for (size_t i = 0; i < asset->geometry().parts.size(); ++i) {
             const auto& geometry = asset->geometry().parts[i];
@@ -895,6 +904,15 @@ void PrepareGameCockpit(d3scene::FrameData& frame, bool advance)
                 value(transform.orientation.uvec),value(transform.orientation.fvec)};
             part.previous = part.current;
             part.draw = roles[i] == SceneModelPartRole::Surface;
+            part.appearance_inputs = {{ambient.x,ambient.y,ambient.z,float(layer),float(Cockpit_alt_mode),
+                float((Cockpit_info.transparent_arm_mask >> i)&1u)}};
+            if (history && history->parts[i].appearance_inputs == part.appearance_inputs &&
+                history->parts[i].surfaces.publishedFor(asset->id(),uint32_t(i),false)) {
+                part.surfaces = history->parts[i].surfaces;
+                prepared.parts.push_back(std::move(part));
+                continue;
+            }
+            part.surfaces.reserve(geometry.geometry.polygons.size());
             for (size_t face = 0; face < geometry.geometry.polygons.size(); ++face) {
                 d3scene::SurfaceBinding surface;
                 surface.depth = layer < 2 ? d3scene::DepthMode::ReadWrite : d3scene::DepthMode::Disabled;

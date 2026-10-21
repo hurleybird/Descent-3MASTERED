@@ -1937,6 +1937,7 @@ void ClearDynamicLightmaps()
 	for (i = 0; i < Num_specular_faces; i++)
 	{
 		int n = Specular_face_list[i];
+		if (SpecialFaces[n].flags & SFF_SPEC_SMOOTH) InvalidateSpecialFaceSource();
 		SpecialFaces[n].flags = 0;
 		//LightmapInfo[n].spec_map=-1;
 	}

@@ -27,14 +27,21 @@
 #include <string.h>
 #include "mem.h"
 #include "dedicated_server.h"
+#include <stdexcept>
 
 int Num_of_lightmap_info = 0;
 lightmap_info* LightmapInfo = NULL;
 
 static ushort* Free_lmi_list = NULL;
+static uint64_t SourceRevision = 1;
+uint64_t LightmapInfoSourceRevision() { return SourceRevision; }
+void InvalidateLightmapInfoSource() {
+    if (++SourceRevision == 0) throw std::overflow_error("Lightmap info source revision exhausted");
+}
 
 void CloseLightmapInfos()
 {
+    InvalidateLightmapInfoSource();
 	bool final_lightmap = true;
 
 	if (LightmapInfo)
@@ -50,6 +57,7 @@ void CloseLightmapInfos()
 // Sets all the lightmaps to unused
 void InitLightmapInfo(int nummaps)
 {
+    InvalidateLightmapInfoSource();
 	int i;
 
 	if (Dedicated_server)
@@ -132,12 +140,14 @@ int AllocLightmapInfo(int w, int h, int type, bool alloc_lightmap)
 	LightmapInfo[n].x1 = 0;
 	LightmapInfo[n].y1 = 0;
 
+    InvalidateLightmapInfoSource();
 	return n;
 }
 
 // Given a handle, frees the lightmap memory and flags this lightmap as unused
 void FreeLightmapInfo(int handle)
 {
+    InvalidateLightmapInfoSource();
 	ASSERT(handle >= 0 && handle <= MAX_LIGHTMAP_INFOS);
 
 	if (Dedicated_server)

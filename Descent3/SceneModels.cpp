@@ -223,12 +223,32 @@ d3scene::Vec3 ambientColor(const object& source, const RoomTable& rooms, const d
 }
 }
 
+d3scene::ModelAssetRef PrepareGameModelAsset(int number,bool audit_geometry) {
+    if (number < 0 || number >= MAX_POLY_MODELS || !Poly_models[number].used)
+        throw std::invalid_argument("Scene model is unavailable");
+    const auto* model = GetPolymodelPointer(number);
+    if (!model->new_style) throw std::logic_error("Unprepared legacy model format in scene variant");
+    static std::array<uint64_t,MAX_POLY_MODELS> published_epochs{};
+    auto asset = d3scene::assets().model(number);
+    const auto epoch = SceneModelSourceEpoch();
+    if (asset && published_epochs[number] == epoch && audit_geometry &&
+        !MatchesSceneModelAsset(asset->geometry(),*model))
+        throw std::logic_error("Model geometry changed without producer invalidation");
+    if (!asset || (published_epochs[number] != epoch && !MatchesSceneModelAsset(asset->geometry(),*model))) {
+        size_t repaired = 0;
+        auto geometry = CompileSceneModelAsset(*model,&repaired);
+        if (repaired && !asset) AutomatedCaptureLog("scene model=%s repaired shading normals=%u",model->name,static_cast<unsigned>(repaired));
+        asset = d3scene::assets().publishModel(number,std::move(geometry));
+    }
+    published_epochs[number] = epoch;
+    return asset;
+}
+
 void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::FrameData* previous,bool retain_materials) {
     unsigned pose_reused = 0, pose_clock = 0, pose_changed = 0;
     const bool audit_geometry = FindArg("-scene-geometry-revision-audit") != 0;
     const bool lod_probe = SceneGeometryInspection() && FindArg("-scene-lod-probe");
     const bool deformation_probe = SceneGeometryInspection() && FindArg("-scene-deformation-probe");
-    static std::array<uint64_t,MAX_POLY_MODELS> published_epochs{};
     const int player_color_texture = FindTextureName("MultiColor");
     std::unordered_map<int, d3scene::ModelAssetRef> frame_assets;
     RoomTable rooms;
@@ -307,19 +327,7 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::FrameDat
             auto found = frame_assets.find(model_number);
             if (found == frame_assets.end()) {
                 PERF_MARKER_SCOPE("Scene.Models.Asset");
-                auto asset = d3scene::assets().model(model_number);
-                const auto epoch = SceneModelSourceEpoch();
-                if (asset && published_epochs[model_number] == epoch && audit_geometry &&
-                    !MatchesSceneModelAsset(asset->geometry(),*model))
-                    throw std::logic_error("Model geometry changed without producer invalidation");
-                if (!asset || (published_epochs[model_number] != epoch && !MatchesSceneModelAsset(asset->geometry(),*model))) {
-                    size_t repaired = 0;
-                    auto geometry = CompileSceneModelAsset(*model,&repaired);
-                    if (repaired && !asset) AutomatedCaptureLog("scene model=%s repaired shading normals=%u",model->name,static_cast<unsigned>(repaired));
-                    asset = d3scene::assets().publishModel(model_number,std::move(geometry));
-                }
-                published_epochs[model_number] = epoch;
-                found = frame_assets.emplace(model_number, std::move(asset)).first;
+                found = frame_assets.emplace(model_number,PrepareGameModelAsset(model_number,audit_geometry)).first;
             }
             d3scene::PreparedModel variant;
             variant.asset = found->second;
@@ -471,7 +479,7 @@ void PrepareGameStaticModel(d3scene::FrameData& data,int number,const d3scene::T
     d3scene::ModelInstance instance;
     instance.identity = identity; instance.collection = collection; instance.current = instance.previous = placement;
     d3scene::PreparedModel model;
-    model.asset = d3scene::assets().publishModel(number,CompileSceneModelAsset(*source));
+    model.asset = PrepareGameModelAsset(number,FindArg("-scene-geometry-revision-audit") != 0);
     const auto pose = EvaluateModelPose(*source,nullptr,static_cast<float>(data.simulation_time));
     const auto transforms = ComposeModelPose(*source,pose);
     const auto roles = ResolveSceneModelRoles(model.asset->geometry(),0xffffffffu,false);

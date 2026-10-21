@@ -23,15 +23,22 @@
 #include <stdlib.h>
 #include <string.h>
 #include "mem.h"
+#include <stdexcept>
 
 int Num_of_special_faces = 0;
 special_face SpecialFaces[MAX_SPECIAL_FACES];
 
 static ushort Free_special_face_list[MAX_SPECIAL_FACES];
+static uint64_t SourceRevision = 1;
+uint64_t SpecialFaceSourceRevision() { return SourceRevision; }
+void InvalidateSpecialFaceSource() {
+    if (++SourceRevision == 0) throw std::overflow_error("Special face source revision exhausted");
+}
 
 // Sets all the special faces to unused
 void InitSpecialFaces()
 {
+    InvalidateSpecialFaceSource();
 	for (int i = 0; i < MAX_SPECIAL_FACES; i++)
 	{
 		SpecialFaces[i].used = 0;
@@ -74,6 +81,7 @@ int AllocSpecialFace(int type, int num, bool vertnorms, int num_vertnorms)
 		SpecialFaces[n].flags |= SFF_SPEC_SMOOTH;
 	}
 
+    InvalidateSpecialFaceSource();
 	return n;
 }
 
@@ -86,6 +94,7 @@ void FreeSpecialFace(int handle)
 		return;
 
 	SpecialFaces[handle].used--;
+    InvalidateSpecialFaceSource();
 
 	if (SpecialFaces[handle].used == 0)
 	{

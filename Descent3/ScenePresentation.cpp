@@ -93,6 +93,13 @@ bool roomMaterialInputsUnchanged() {
     struct ReflectionInput { unsigned flags=0,type=0,used=0; std::vector<specular_instance> sources; std::vector<vector> normals; };
     static std::vector<ReflectionInput> reflection_inputs(MAX_SPECIAL_FACES);
     static std::vector<int> lightmap_handles(MAX_LIGHTMAP_INFOS,-2);
+    static uint64_t special_revision = 0, lightmap_revision = 0, geometry_revision = 0, metadata_lifetime = 0;
+    const bool metadata_current = special_revision == SpecialFaceSourceRevision() &&
+        lightmap_revision == LightmapInfoSourceRevision() && geometry_revision == GameSceneGeometryRevision() &&
+        metadata_lifetime == d3scene::assets().lifetime();
+    const bool audit_metadata = FindArg("-scene-geometry-revision-audit") != 0;
+    bool metadata_equal = true;
+    if (!metadata_current || audit_metadata) {
     for (int room = 0; room < MAX_ROOMS; ++room) if (Rooms[room].used) {
         const auto& source_room = Rooms[room];
         for (int face = 0; face < source_room.num_faces; ++face) {
@@ -100,14 +107,15 @@ bool roomMaterialInputsUnchanged() {
             if ((source_face.flags & FF_LIGHTMAP) && source_face.lmi_handle >= 0 && source_face.lmi_handle < MAX_LIGHTMAP_INFOS) {
                 auto& previous_handle = lightmap_handles[source_face.lmi_handle];
                 const int current_handle = LightmapInfo[source_face.lmi_handle].lm_handle;
-                if (previous_handle != current_handle) { same = false; previous_handle = current_handle; }
+                if (previous_handle != current_handle) { metadata_equal = false; previous_handle = current_handle; }
             }
             const int index = source_face.special_handle;
             if (index < 0 || index >= MAX_SPECIAL_FACES) continue;
             const auto& input = SpecialFaces[index]; auto& old = reflection_inputs[index];
             const size_t count = input.used && input.spec_instance ? input.num : 0;
             const size_t normals = input.used && (input.flags & SFF_SPEC_SMOOTH) && input.vertnorms ? source_face.num_verts : 0;
-            bool equal = old.flags == input.flags && old.type == input.type && old.used == input.used &&
+            const unsigned authored_flags = input.flags & SFF_SPEC_SMOOTH;
+            bool equal = old.flags == authored_flags && old.type == input.type && old.used == input.used &&
                 old.sources.size() == count && old.normals.size() == normals;
             for (size_t i = 0; equal && i < count; ++i) {
                 const auto& a = input.spec_instance[i]; const auto& b = old.sources[i];
@@ -119,13 +127,19 @@ bool roomMaterialInputsUnchanged() {
                 equal = a.x == b.x && a.y == b.y && a.z == b.z;
             }
             if (!equal) {
-                same = false; old.flags = input.flags; old.type = input.type; old.used = input.used;
+                metadata_equal = false; old.flags = authored_flags; old.type = input.type; old.used = input.used;
                 old.sources.resize(count); old.normals.resize(normals);
                 for (size_t i = 0; i < count; ++i) old.sources[i] = input.spec_instance[i];
                 for (size_t i = 0; i < normals; ++i) old.normals[i] = input.vertnorms[i];
             }
         }
     }
+    if (metadata_current && !metadata_equal && audit_metadata)
+        throw std::logic_error("Reflection/lightmap metadata changed without producer invalidation");
+    special_revision = SpecialFaceSourceRevision(); lightmap_revision = LightmapInfoSourceRevision();
+    geometry_revision = GameSceneGeometryRevision(); metadata_lifetime = d3scene::assets().lifetime();
+    }
+    same = same && metadata_equal;
     return same;
 }
 // Texture animation and procedural evaluation are presentation inputs, not
@@ -157,11 +171,12 @@ void prepareImages(d3scene::FrameData& data) {
     pixels.fill(-1); bindings.fill(-1);
     data.images.reserve(previous_binding_count);
     MaterialResolution resolution(static_cast<float>(data.simulation_time));
+    const bool audit_images = FindArg("-scene-image-revision-audit") != 0;
     const auto image = [&](int handle,bool baked) -> d3scene::ImageAssetRef {
         const int slot = handle+(baked ? MAX_BITMAPS : 0);
         const auto revision = baked ? lm_ContentRevision(handle) : bm_ContentRevision(handle);
         const auto resident = d3scene::assets().image(slot,revision);
-        if (resident && !FindArg("-scene-image-revision-audit")) {
+        if (resident && !audit_images) {
             return resident;
         }
         d3scene::ImageSource source;
@@ -194,16 +209,19 @@ void prepareImages(d3scene::FrameData& data) {
             Error("Image content changed without a producer revision: slot %d",slot);
         return asset;
     };
-    const auto sample = [&](int handle,bool baked,int texture = -1) -> d3scene::FrameData::ImageBinding {
+    // The frame owns images; dependency lookups borrow the immutable asset.
+    // Avoid an atomic reference-count pair for every face-table dependency.
+    struct ImageBindingView { uint32_t binding = 0; const d3scene::ImageAsset* asset = nullptr; };
+    const auto sample = [&](int handle,bool baked,int texture = -1) -> ImageBindingView {
         const uint32_t key = texture >= 0 ? uint32_t(MAX_BITMAPS+MAX_LIGHTMAPS+texture+1) : uint32_t(handle+(baked ? MAX_BITMAPS : 0)+1);
         if (key >= bindings.size()) Error("Image resource outside source registry");
-        if (bindings[key] >= 0) return data.images[bindings[key]];
+        if (bindings[key] >= 0) return {key,data.images[bindings[key]].asset.get()};
         const int bitmap = texture >= 0 ? resolution.bitmap(texture) : handle;
         const int pixel_slot = bitmap+(baked ? MAX_BITMAPS : 0);
         if (bitmap < 0 || pixel_slot >= int(pixels.size())) Error("Image pixels outside source registry");
         auto asset = pixels[pixel_slot] >= 0 ? data.images[pixels[pixel_slot]].asset : image(bitmap,baked);
-        bindings[key] = pixels[pixel_slot] = int(data.images.size()); data.images.push_back({key,asset});
-        return {key,std::move(asset)};
+        bindings[key] = pixels[pixel_slot] = int(data.images.size()); data.images.push_back({key,std::move(asset)});
+        return {key,data.images.back().asset.get()};
     };
     const auto prepare = [&](d3scene::SurfaceBinding& surface) {
         if (surface.bitmap >= 0) {
@@ -249,9 +267,9 @@ void prepareImages(d3scene::FrameData& data) {
                 resolveMaterial(changed,resolution,model,exterior);
             }
             const auto& surface = table.read()[face];
-            const auto color = surface.bitmap >= 0 ? sample(surface.bitmap,false,surface.color_texture) : d3scene::FrameData::ImageBinding{};
-            const auto specular = surface.specular_bitmap >= 0 ? sample(surface.specular_bitmap,false,surface.specular_texture) : d3scene::FrameData::ImageBinding{};
-            const auto baked = surface.lightmap_bitmap >= 0 ? sample(surface.lightmap_bitmap,true) : d3scene::FrameData::ImageBinding{};
+            const auto color = surface.bitmap >= 0 ? sample(surface.bitmap,false,surface.color_texture) : ImageBindingView{};
+            const auto specular = surface.specular_bitmap >= 0 ? sample(surface.specular_bitmap,false,surface.specular_texture) : ImageBindingView{};
+            const auto baked = surface.lightmap_bitmap >= 0 ? sample(surface.lightmap_bitmap,true) : ImageBindingView{};
             const bool wrap = surface.lightmap_bitmap >= 0 && (GameLightmaps[surface.lightmap_bitmap].flags & LF_WRAP);
             const uint32_t color_slot = color.binding;
             const uint32_t specular_slot = specular.binding;
@@ -558,7 +576,8 @@ d3scene::PresentationRef PrepareGamePresentation() {
     { PERF_MARKER_SCOPE("Scene.PrepareObjectEffects"); PrepareGameObjectEffects(data); }
     { PERF_MARKER_SCOPE("Scene.PrepareScorches"); PrepareGameScorches(data); }
     if (SceneGeometryInspection() && FindArg("-scene-cockpit-probe")) {
-        PrepareGameCockpit(data,true);
+        PERF_MARKER_SCOPE("Scene.PrepareCockpit");
+        PrepareGameCockpit(data,true,previous_models ? &previous_models->data() : nullptr,retain_rooms);
         PrepareCockpitComposition(data,{Game_window_x,Game_window_y,Game_window_w,Game_window_h},SceneCockpitZoom);
     }
     if (SceneGeometryInspection() && (FindArg("-scene-reticle-probe") || FindArg("-scene-hud-probe"))) {

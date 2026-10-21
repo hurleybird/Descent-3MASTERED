@@ -118,6 +118,16 @@ int runSceneImageTests() {
     auto duplicate = second->data(); duplicate.images.push_back({44,updated_pixels});
     rejects([&] { Presentation::freeze(duplicate); });
     rejects([&] { first->image(999); });
+    FrameData sparse; sparse.sequence = 1; sparse.scene_lifetime = assets.lifetime();
+    const auto empty_frame = Presentation::freeze(sparse);
+    rejects([&] { empty_frame->image(1); });
+    rejects([&] { empty_frame->image(0); });
+    for (uint32_t i = 1; i <= 256; ++i) sparse.images.push_back({i*104729u,updated_pixels});
+    sparse.images.push_back({UINT32_MAX,truecolor});
+    const auto sparse_frame = Presentation::freeze(sparse);
+    for (const auto& binding : sparse.images)
+        check(&sparse_frame->image(binding.binding) == binding.asset.get(),"Sparse frame image lookup lost a collision or high binding");
+    rejects([&] { sparse_frame->image(2); });
     auto animated = second->data();
     const auto next_image_slot = assets.publishImage(45,source);
     animated.images = {{44,next_image_slot}};

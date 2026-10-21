@@ -21,6 +21,7 @@
 // Lightmap info header
 
 #include "pstypes.h"
+#include <cstdint>
 #include "pserror.h"
 #include "vecmat.h"
 
@@ -53,6 +54,10 @@ struct lightmap_info
 extern lightmap_info *LightmapInfo;
 extern int Num_of_lightmap_info;
 extern int Num_lightmap_infos_read;
+
+// Slot-to-image assignment is distinct from mutable image pixel content.
+uint64_t LightmapInfoSourceRevision();
+void InvalidateLightmapInfoSource();
 
 #define MAX_LIGHTMAP_INFOS		(65534)
 

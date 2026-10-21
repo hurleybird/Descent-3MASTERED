@@ -370,13 +370,26 @@ const ForegroundLayer* Presentation::foreground(uint64_t identity) const {
 PresentationRef Presentation::freeze(const FrameData& data) {
     return complete(data);
 }
+namespace {
+size_t imageHash(uint32_t binding) {
+    binding ^= binding >> 16; binding *= 0x7feb352du;
+    binding ^= binding >> 15; binding *= 0x846ca68bu;
+    return binding ^ (binding >> 16);
+}
+size_t imageSlot(const std::vector<FrameData::ImageBinding>& images,
+    const std::vector<uint32_t>& slots,uint32_t binding) {
+    size_t slot = imageHash(binding) & (slots.size()-1);
+    while (slots[slot] && images[slots[slot]-1].binding != binding)
+        slot = (slot+1) & (slots.size()-1);
+    return slot;
+}
+}
 const ImageAsset& Presentation::image(uint32_t binding) const {
     if (!binding) throw std::invalid_argument("Absent scene image binding");
-    const auto found = std::lower_bound(data_.images.begin(),data_.images.end(),binding,
-        [](const FrameData::ImageBinding& image,uint32_t slot) { return image.binding < slot; });
-    if (found == data_.images.end() || found->binding != binding)
+    const auto index = image_slots_[imageSlot(data_.images,image_slots_,binding)];
+    if (!index)
         throw std::invalid_argument("Missing frame image binding");
-    return *found->asset;
+    return *data_.images[index-1].asset;
 }
 PresentationRef Presentation::publish(FrameData&& data) {
     return complete(std::move(data));
@@ -419,14 +432,20 @@ PresentationRef Presentation::complete(FrameData data) {
     for (const auto& image : data.images)
         require(image.binding && image.asset && image.asset->id().lifetime == data.scene_lifetime,"Stale image asset in frame");
     std::sort(data.images.begin(),data.images.end(),[](const FrameData::ImageBinding& a,const FrameData::ImageBinding& b) { return a.binding < b.binding; });
-    for (size_t i = 1; i < data.images.size(); ++i)
-        require(data.images[i-1].binding != data.images[i].binding,"Duplicate frame image slot");
+    require(data.images.size() < UINT32_MAX/2,"Too many frame images");
+    size_t image_capacity = 1;
+    while (image_capacity < data.images.size()*2) image_capacity *= 2;
+    std::vector<uint32_t> image_slots(image_capacity,0);
+    for (size_t i = 0; i < data.images.size(); ++i) {
+        auto& slot = image_slots[imageSlot(data.images,image_slots,data.images[i].binding)];
+        require(!slot,"Duplicate frame image slot");
+        slot = uint32_t(i+1);
+    }
     const auto validateImage = [&](uint32_t binding) -> const ImageAsset* {
         if (!binding) return nullptr;
-        const auto found = std::lower_bound(data.images.begin(),data.images.end(),binding,
-            [](const FrameData::ImageBinding& image,uint32_t slot) { return image.binding < slot; });
-        require(found != data.images.end() && found->binding == binding,"Missing frame image binding");
-        return found->asset.get();
+        const auto index = image_slots[imageSlot(data.images,image_slots,binding)];
+        require(index != 0,"Missing frame image binding");
+        return data.images[index-1].asset.get();
     };
     const auto validateDependency = [&](const RoomSurfaces::ImageDependency& dependency) {
         const auto* image = validateImage(dependency.binding);
@@ -599,6 +618,7 @@ PresentationRef Presentation::complete(FrameData data) {
     }
     std::shared_ptr<Presentation> prepared(new Presentation(std::move(data)));
     prepared->room_indices_ = std::move(rooms);
+    prepared->image_slots_ = std::move(image_slots);
     prepared->object_indices_ = std::move(objects);
     prepared->model_indices_ = std::move(model_instances);
     auto& surface_count = prepared->data_.compiled_surface_count;

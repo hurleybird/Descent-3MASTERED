@@ -85,6 +85,7 @@ void ResetGamePresentationScene() {
 void InvalidateGameSceneGeometry() {
     if (++GeometryEpoch == 0) throw std::overflow_error("Room geometry epoch exhausted");
 }
+uint64_t GameSceneGeometryRevision() { return GeometryEpoch; }
 
 d3scene::FrameData ExtractGameFrame(double time, float delta, bool paused, bool advance_history,
     const d3scene::FrameData* retained_rooms,bool audit_geometry) {

@@ -674,6 +674,7 @@ private:
     static PresentationRef complete(FrameData data);
     FrameData data_;
     std::unordered_map<int32_t,size_t> room_indices_;
+    std::vector<uint32_t> image_slots_; // packed frame-owned name -> image index, zero means empty
     std::unordered_map<uint32_t,size_t> object_indices_;
     std::unordered_map<uint64_t,size_t> model_indices_;
 };

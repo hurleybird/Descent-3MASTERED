@@ -1007,6 +1007,7 @@ int ReadFace(CFILE* ifile, face* fp, int version)
 						SpecialFaces[fp->special_handle].vertnorms[i] = vertnorm;
 					}
 				}
+                InvalidateSpecialFaceSource();
 
 			}
 		}
@@ -1664,6 +1665,7 @@ void ReadNewLightmapChunk(CFILE* fp, int version)
 			ASSERT(lmi != BAD_LMI_INDEX);
 			LightmapInfoRemap[i] = lmi;
 			LightmapInfo[lmi].lm_handle = lightmap_remap[remap_handle];
+            InvalidateLightmapInfoSource();
 		}
 
 		if (version >= 91)
