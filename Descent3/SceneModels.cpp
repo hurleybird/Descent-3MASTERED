@@ -227,6 +227,10 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::Presenta
     // before resolving this frame's model revisions; no mutable source is kept.
     static thread_local d3scene::SceneLookup<int,d3scene::ModelAssetRef> frame_assets;
     frame_assets.clear();
+    // A published palette belongs to an asset/appearance, not an object pose.
+    // Borrow one canonical table per asset during this transaction. Distinct
+    // appearances keep their own history; per-object baked UVs never share.
+    std::array<const d3scene::PreparedModel*,MAX_POLY_MODELS> material_sources{};
     RoomTable rooms{};
     for (const auto& room : data.rooms) {
         if (room.number < 0 || room.number >= MAX_ROOMS) throw std::invalid_argument("Game room outside producer registry");
@@ -370,9 +374,19 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::Presenta
             variant.binding_inputs.subobject_mask = source->rtype.pobj_info.subobj_flags;
             variant.binding_inputs.material_palette = !baked;
             variant.binding_inputs.valid = true;
-            const bool reuse_materials = retain_materials && history &&
-                history->binding_inputs == variant.binding_inputs && history->parts.publishedFor(variant.asset->id());
-            if (reuse_materials) variant.parts = history->parts;
+            const auto matches_material = [&](const d3scene::PreparedModel* source) {
+                return source && source->binding_inputs == variant.binding_inputs &&
+                    source->parts.publishedFor(variant.asset->id());
+            };
+            const d3scene::PreparedModel* material = nullptr;
+            if (retain_materials) {
+                const auto* shared = baked ? nullptr : material_sources[model_number];
+                if (matches_material(shared)) material = shared;
+                else if (matches_material(history)) material = history;
+                if (!baked && material && !material_sources[model_number]) material_sources[model_number] = material;
+            }
+            const bool reuse_materials = material != nullptr;
+            if (reuse_materials) variant.parts = material->parts;
             else variant.parts.resize(variant.asset->geometry().parts.size());
             variant.previous_draw_mask = 0;
             PERF_MARKER_SCOPE("Scene.Models.Parts");

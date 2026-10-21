@@ -2,6 +2,24 @@
 
 ## October 21 resumed work — supersedes restart pause below
 
+Newest source shares a published model material palette between instances of
+the same asset/appearance. Transaction-local borrowed canonical source; baked
+per-object UV layouts are excluded. Pose/history/modulation/light candidates
+remain per instance. Other appearances retain their own material history.
+Tests cover shared bindings with independent animation/color and edit detachment.
+Temporary runtime material-share-log.exe; tests/build pass. No active captures.
+Storage counts at capture: 003506 variants/278 tables,005467/234,007495/263.
+005 unique material surfaces8905 vs12301 before sharing. This is consolidation,
+not a claim that all CPU baselines now win. NoMarkers long ABBA msn-* current
+parent/new:003(1.851,1.874)/(1.866,2.099),005(1.256,1.298)/(1.243,1.277),
+007(1.369,1.472)/(1.318,1.326). GPU unchanged. Raw marked ms-* also retained;
+unit-test compilation overlapped that initial series, so prefer clean msn-*.
+Eight short ms-saveg* images, ms-probe, ms-quality and ms-mirror match references
+on repeat. First000 differed and logged different Buddybot position/pose;
+ms-repeat000 from unchanged binary matches exactly, including its pose hash.
+Latest included usage5% remaining. Continue; stop at zero, no deliberate credits.
+Main checkout and Candidate/Previous Candidate remain untouched.
+
 Upload allocator experiment REMOVED from source. ring-* wrapped within frames.
 epoch-* and local-* had inflated GPU elapsed intervals because the retirement
 fence was inserted after the next frame's GPU timer started. Moving retirement

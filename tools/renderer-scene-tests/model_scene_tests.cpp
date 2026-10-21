@@ -725,6 +725,32 @@ int runModelSceneTests() {
         }
         auto next_inputs = held->data();
         {
+            auto shared = held->data();
+            auto second = shared.model_instances[0];
+            second.identity = 92; second.model_count = 0; second.current.position.x += 10;
+            auto variant = shared.modelsFor(0)[0];
+            const float keys[] = {.75f,.75f};
+            variant.pose_inputs = shared.appendPoseInputs(keys,2);
+            variant.modulation.color = {.25f,.5f,.75f}; variant.modulation.alpha = .5f;
+            shared.appendModel(second,std::move(variant)); shared.model_instances.push_back(second);
+            const auto frame = Presentation::freeze(shared);
+            check(frame->data().modelsFor(0)[0].parts.summary() == frame->data().modelsFor(1)[0].parts.summary(),
+                "Identical published model bindings were copied per instance");
+            const auto& first_pose = frame->resolvedModel(0,0);
+            const auto& second_pose = frame->resolvedModel(1,0);
+            check(first_pose.parts[0].current.position.x != second_pose.parts[0].current.position.x &&
+                first_pose.modulation.alpha == 1 && second_pose.modulation.alpha == .5f &&
+                second_pose.modulation.color.y == .5f,
+                "Sharing immutable model bindings shared pose or instance modulation");
+            auto edited = frame->data();
+            edited.modelsFor(1)[0].parts[0].surfaces[0].alpha = .25f;
+            const auto changed = Presentation::freeze(edited);
+            check(changed->data().modelsFor(0)[0].parts.summary() == frame->data().modelsFor(0)[0].parts.summary() &&
+                changed->data().modelsFor(1)[0].parts.summary() != frame->data().modelsFor(1)[0].parts.summary() &&
+                frame->data().modelsFor(1)[0].parts[0].surfaces[0].alpha == 1,
+                "Editing one shared model material changed another instance or held frame");
+        }
+        {
             auto reflective = held->data();
             ReflectionData reflection; reflection.sources.push_back({{0,1,0},{1,1,1}});
             const auto asset = assets.publishReflection(19,reflection);

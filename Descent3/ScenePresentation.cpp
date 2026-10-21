@@ -386,6 +386,13 @@ void logPreparedModels(const d3scene::Presentation& frame) {
     if (data.terrain.asset) for (const auto& patch : data.terrain.asset->patches()) terrain_surfaces += patch.batches.size();
     AutomatedCaptureLog("scene inventory rooms=%u models=%u terrain=%u meshes=%u",unsigned(room_surfaces),unsigned(model_surfaces),unsigned(terrain_surfaces),unsigned(data.meshes.size()));
     AutomatedCaptureLog("scene retained room surfaces=%u",unsigned(retained_surfaces));
+    std::unordered_set<const d3scene::ModelParts::Summary*> material_tables;
+    size_t unique_model_surfaces = 0;
+    for (const auto& model : data.model_variants)
+        if (const auto* table = model.parts.summary())
+            if (material_tables.insert(table).second) unique_model_surfaces += table->surface_count;
+    AutomatedCaptureLog("scene model materials variants=%u unique_tables=%u unique_surfaces=%u",
+        unsigned(data.model_variants.size()),unsigned(material_tables.size()),unsigned(unique_model_surfaces));
     unsigned reflection_surfaces = 0, reflection_sources = 0, smooth_reflections = 0;
     for (const auto& room : data.rooms) for (const auto& surface : room.surfaces) if (surface.specular_strength > 0 && surface.reflection) {
         ++reflection_surfaces;
