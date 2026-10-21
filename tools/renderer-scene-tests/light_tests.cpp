@@ -35,6 +35,22 @@ int runLightTests() {
         check(std::fabs(roomLightScalar(time,73,17,0,false,false,false)-expected)<.00001f,"Room pulse differs from source rule");
     }
     Light point;
+    {
+        uint32_t seed = 0xc71f25u; bool exercised_roundoff = false;
+        for (unsigned sample = 0; sample < 200000; ++sample) {
+            seed = seed*1664525u+1013904223u;
+            const float time = float(seed&0xffffffu)*.0625f;
+            const uint8_t pulse = uint8_t(sample%255+1), offset = uint8_t(sample/255);
+            const float half = std::max(pulse*.01f,.04f), clock = time+offset*.01f;
+            const float phase = (clock-static_cast<int>(clock/(half*2))*(half*2))/half;
+            const float old = phase > 1 ? 2-phase : phase;
+            const float actual = roomLightScalar(time,pulse,offset,0,false,false,false);
+            check(std::isfinite(actual) && actual >= 0 && actual <= 1,"Pulse wrap produced invalid radiance");
+            if (old >= 0 && old <= 1) check(actual == old,"Pulse repair changed an in-range authored sample");
+            else exercised_roundoff = true;
+        }
+        check(exercised_roundoff,"Pulse regression test did not exercise boundary roundoff");
+    }
     point.id.owner = 123; point.radius = 20; point.position = {0,0,0}; point.color = {1,0,-0.5f}; point.room = 0;
     check(lightAttenuation(point,{0,0,0}) == 1,"Point light origin attenuation changed");
     check(lightAttenuation(point,{0,0,10}) == .5f,"Point light linear attenuation changed");

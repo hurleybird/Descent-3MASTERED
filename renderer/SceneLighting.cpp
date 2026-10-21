@@ -13,7 +13,10 @@ float roomLightScalar(float time, uint8_t pulse, uint8_t offset, uint32_t room, 
         const float half_period = std::max(pulse*.01f,.04f);
         const float clock = time+offset*.01f;
         const float phase = (clock-static_cast<int>(clock/(half_period*2))*(half_period*2))/half_period;
-        scalar = phase > 1 ? 2-phase : phase;
+        // Preserve authored pulse arithmetic inside its physical range. Near
+        // a period boundary, quotient/product rounding can put phase just
+        // outside [0,2]; radiance must not become negative at the wrap.
+        scalar = std::max(0.f,std::min(1.f,phase > 1 ? 2-phase : phase));
     }
     if (strobe && ((static_cast<int>(time*10)+room)%2)) scalar = 0;
     if (flicker && (visualNoise(time,room,3)&1u)) scalar = 0;

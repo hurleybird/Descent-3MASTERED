@@ -2,6 +2,25 @@
 
 ## October 20 continuation
 
+October 21: 1,800-frame wall diagnostic uncovered a pre-existing pulse-wrap
+exception at frame 859 (`Invalid room illumination`, Scene.cpp). The authored
+floating-point triangle-wave calculation can round slightly outside [0,1].
+The producer now bounds its output to that physical interval, preserving all
+already-in-range values. 200,000 randomized pulse/offset/time samples exercise
+the old failure and verify exact preservation inside range. Two 1,800-frame
+runs subsequently completed; the ordinary 90-frame wall image is pixel-exact.
+Logs `out/pulse-boundary-{tests,build}.log`, binary `out/perf-checkpoints/pulse-boundary.exe`.
+The crashed diagnostic process was terminated after its dump/log were saved.
+
+Working sampler results (not frametime evidence): `out/cpu-stack-pulse-fixed-wall.txt`
+and `out/cpu-stack-lines-wall.txt`. The helper now filters relative restored
+FrameCount and stops before the long run's final capture. Procedurals and frame
+publication dominate preparation; terrain table construction is no longer a
+hotspot. Line samples include publication ModelParts summaries, model binding
+comparison, and source portal policy checks. No sampler/capture is running at
+this checkpoint; the sampling source/executable remain ignored under out/.
+Last usage check: 35% included remaining.
+
 October 21: terrain patch state no longer duplicates SurfaceBinding tables.
 The immutable terrain asset maps batches to the frame's shared material table;
 compact patch records carry only packed light candidates and GPU surface bases.
