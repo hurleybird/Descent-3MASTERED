@@ -503,9 +503,13 @@ const PreparedModel& Presentation::resolvedModel(size_t instance,size_t variant)
     auto result = std::make_unique<PreparedModel>(source);
     const auto& animation = *source.asset->geometry().animation;
     const auto input = [](const std::shared_ptr<const std::vector<float>>& values) { return values ? values->data() : nullptr; };
-    const auto current = ComposeModelPose(animation,EvaluateModelPose(animation,input(source.pose_inputs),float(data_.simulation_time)));
-    const auto previous = source.previous_pose_valid ?
-        ComposeModelPose(animation,EvaluateModelPose(animation,input(source.previous_pose_inputs),float(source.previous_pose_time))) : current;
+    const auto& rest = source.asset->geometry().rest_pose;
+    const bool current_rest = !source.pose_inputs && !rest.empty();
+    const bool previous_rest = !source.previous_pose_inputs && !rest.empty();
+    ModelTransforms current,previous;
+    if (!current_rest) current = ComposeModelPose(animation,EvaluateModelPose(animation,input(source.pose_inputs),float(data_.simulation_time)));
+    if (source.previous_pose_valid && !previous_rest)
+        previous = ComposeModelPose(animation,EvaluateModelPose(animation,input(source.previous_pose_inputs),float(source.previous_pose_time)));
     const auto value = [](const ModelSubmodelTransform& t) {
         const auto v = [](const vector& p) { return Vec3{p.x,p.y,p.z}; };
         return Transform{v(t.translation),v(t.orientation.rvec),v(t.orientation.uvec),v(t.orientation.fvec)};
@@ -518,7 +522,8 @@ const PreparedModel& Presentation::resolvedModel(size_t instance,size_t variant)
         part.has_previous = source.previous_pose_valid && (source.previous_draw_mask & (uint32_t(1)<<i));
         part.light_influences_prepared = source.light_influences_prepared;
         part.light_candidates = source.light_candidates;
-        part.current = value(current.submodels[i]); part.previous = value(previous.submodels[i]);
+        part.current = current_rest ? rest[i] : value(current.submodels[i]);
+        part.previous = !source.previous_pose_valid ? part.current : previous_rest ? rest[i] : value(previous.submodels[i]);
         const auto& geometry = source.asset->geometry().parts[i].geometry;
         part.vertices = deformMesh(geometry,source.deformation,data_.simulation_time,source.deformation_owner,uint32_t(i));
         part.previous_vertices = source.previous_pose_valid ?

@@ -2,6 +2,16 @@
 
 ## October 20 continuation
 
+October 21: deferred models reuse their compiled rest transforms when a pose has
+no animation inputs. Current and previous samples choose independently; keyed
+and autonomous animated poses retain evaluation. Eight mixed-history/key tests
+plus the existing source-pose audit pass; verified combined probe is pixel-exact.
+Verified dense/save005 trials: 3.437/2.430 ms, no net-total claim. Use only
+`cpu-rest-reuse-verified-*` captures: the first unsuffixed capture set used the
+prior executable after the initial runtime compile rejected C++17 optional.
+The implementation was corrected for the runtime's C++14 standard and rebuilt;
+verified executable SHA256 starts `48FA005D6B23C638`.
+
 October 21: sealed model summaries now retain the draw mask, and model assets
 record whether they contain view-dependent attachments. Unchanged source models
 without attachments skip per-part source traversal entirely. Saved-lightmap

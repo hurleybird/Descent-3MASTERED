@@ -131,6 +131,37 @@ int runModelSceneTests() {
     SceneAssets assets;
     {
         auto geometry = modelGeometry();
+        auto animation = std::make_shared<ModelAnimation>();
+        animation->n_models = 1; animation->num_key_pos = 2; animation->submodel.resize(1);
+        animation->submodel[0].keyframe_pos = {{0,0,0},{4,2,-1}};
+        geometry.animation = animation; geometry.rest_pose.push_back(Transform{});
+        const auto rest_asset = assets.publishModel(97,geometry);
+        for (bool current_keys : {false,true}) for (bool previous_keys : {false,true}) for (bool history : {false,true}) {
+            FrameData input; input.sequence = 1; input.scene_lifetime = assets.lifetime(); input.simulation_time = 19;
+            ModelInstance instance; instance.identity = 100;
+            PreparedModel model; model.asset = rest_asset; model.deferred_pose = true;
+            model.previous_pose_valid = history; model.previous_pose_time = 18;
+            if (current_keys) model.pose_inputs = std::make_shared<const std::vector<float>>(1,.75f);
+            if (previous_keys) model.previous_pose_inputs = std::make_shared<const std::vector<float>>(1,.25f);
+            model.parts.resize(1); model.parts[0].surfaces.resize(1);
+            input.appendModel(instance,std::move(model)); input.model_instances.push_back(instance);
+            const auto frame = Presentation::freeze(input);
+            const auto& pose = frame->resolvedModel(0,0).parts[0];
+            const auto& source = input.modelsFor(0)[0];
+            const auto expected = ComposeModelPose(*animation,EvaluateModelPose(*animation,
+                source.pose_inputs ? source.pose_inputs->data() : nullptr,19));
+            const auto prior = history ? ComposeModelPose(*animation,EvaluateModelPose(*animation,
+                source.previous_pose_inputs ? source.previous_pose_inputs->data() : nullptr,18)) : expected;
+            check(pose.current.position.x == expected.submodels[0].translation.x &&
+                pose.current.position.y == expected.submodels[0].translation.y &&
+                pose.previous.position.x == prior.submodels[0].translation.x &&
+                pose.previous.position.z == prior.submodels[0].translation.z,
+                "Rest-pose reuse confused current/previous keyed and unkeyed animation");
+        }
+        assets.removeModel(97);
+    }
+    {
+        auto geometry = modelGeometry();
         check(!assets.publishModel(98,geometry)->hasViewAttachments(),"Ordinary model requires attachment traversal");
         for (auto flags : {SOF_FACING,SOF_GLOW,SOF_THRUSTER}) {
             geometry.parts[0].authored_flags = flags;
