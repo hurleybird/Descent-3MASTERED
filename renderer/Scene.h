@@ -522,7 +522,7 @@ public:
         uint32_t drawn_parts = 0; // deferred source models have at most 32 parts
         float motion_radius = 0;
         bool has_geometry = false;
-        std::vector<RoomSurfaces::ImageDependency> images;
+        std::shared_ptr<const std::vector<RoomSurfaces::ImageDependency>> images;
     };
 private:
     using Storage = std::vector<PreparedModelPart>;

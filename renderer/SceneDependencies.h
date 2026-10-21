@@ -21,9 +21,12 @@ public:
     explicit RetainedDependencies(Less less = Less{}) : less_(std::move(less)) {}
     void clear() {
         owners_.clear(); direct_.clear(); values_.clear(); scratch_.clear();
+        edited_ = false;
         begin();
     }
-    void begin() { owner_cursor_ = direct_cursor_ = 0; edited_ = false; }
+    // An interrupted collection may already have changed owners. Keep that
+    // dirtiness until finish commits the union, even if a caller throws.
+    void begin() { owner_cursor_ = direct_cursor_ = 0; }
     void add(const List& list) {
         if (!list || list->empty()) return;
         if (owner_cursor_ == owners_.size()) { owners_.push_back(list); edited_ = true; }
@@ -50,6 +53,7 @@ public:
         const bool changed = values_.size() != scratch_.size() ||
             !std::equal(values_.begin(),values_.end(),scratch_.begin(),[&](const T& a,const T& b) { return same(a,b); });
         if (changed) values_.swap(scratch_);
+        edited_ = false;
         return changed;
     }
     const std::vector<T>& values() const { return values_; }

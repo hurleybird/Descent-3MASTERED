@@ -317,18 +317,19 @@ void prepareImages(d3scene::FrameData& data) {
     };
     static thread_local d3scene::RetainedDependencies<Dependency,decltype(order)> dependency_set(order);
     static thread_local uint64_t dependency_lifetime = 0;
-    const auto eachTable = [&](auto&& consume) {
-        for (const auto& room : data.rooms) consume(room.surfaces);
-        for (const auto& model : data.model_variants)
-            for (const auto& part : model.parts) consume(part.surfaces);
-    };
     size_t table_count = 0;
     if (dependency_lifetime != data.scene_lifetime) { dependency_set.clear(); dependency_lifetime = data.scene_lifetime; }
     dependency_set.begin();
-    eachTable([&](const d3scene::RoomSurfaces& table) {
+    const auto add_table = [&](const d3scene::RoomSurfaces& table) {
         if (table.published()) dependency_set.add(table.imageDependencies());
         ++table_count;
-    });
+    };
+    for (const auto& room : data.rooms) add_table(room.surfaces);
+    for (const auto& model : data.model_variants) {
+        if (const auto* summary = model.parts.summary()) {
+            dependency_set.add(summary->images); table_count += model.parts.size();
+        } else for (const auto& part : model.parts) add_table(part.surfaces);
+    }
     const bool layout_matches = !dependency_set.layoutChanged();
     bool dependencies_current = true;
     { PERF_MARKER_SCOPE("Scene.Resources.DependencyLayout");
@@ -343,9 +344,12 @@ void prepareImages(d3scene::FrameData& data) {
         prepareTable(room.surfaces,false,room.exterior);
     }
     { PERF_MARKER_SCOPE("Scene.Resources.ModelImages");
-    for (auto& model : data.model_variants) for (size_t p = 0; p < model.parts.size(); ++p)
+    for (auto& model : data.model_variants) {
+      if (dependencies_current && model.parts.summary()) continue;
+      for (size_t p = 0; p < model.parts.size(); ++p)
         if (!model.parts.read()[p].surfaces.published() || (!dependencies_current && !tableUnchanged(model.parts.read()[p].surfaces)))
             prepareTable(model.parts[p].surfaces,true,false);
+    }
     }
     { PERF_MARKER_SCOPE("Scene.Resources.OtherImages");
     for (auto& surface : data.terrain.materials) prepare(surface);

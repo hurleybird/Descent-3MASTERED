@@ -5,6 +5,7 @@
 #include "SceneTerrain.h"
 #include "SceneFog.h"
 #include "SceneGeometry.h"
+#include "SceneDependencies.h"
 #include <atomic>
 #include <cmath>
 #include <limits>
@@ -64,6 +65,7 @@ void ModelParts::seal(const ModelAsset& asset) {
     if (publishedFor(asset.id())) return;
     auto summary = std::make_shared<Summary>();
     summary->asset = asset.id();
+    std::vector<RoomSurfaces::ImageDependency> images;
     for (size_t i = 0; i < size(); ++i) {
         const auto& part = read()[i];
         const auto& geometry = asset.geometry().parts[i];
@@ -76,12 +78,14 @@ void ModelParts::seal(const ModelAsset& asset) {
             summary->has_geometry = true;
             summary->motion_radius = std::max(summary->motion_radius,geometry.motion_radius);
         }
-        summary->images.insert(summary->images.end(),part.surfaces.images().begin(),part.surfaces.images().end());
+        images.insert(images.end(),part.surfaces.images().begin(),part.surfaces.images().end());
     }
-    const auto key = [](const RoomSurfaces::ImageDependency& d) { return std::make_tuple(d.binding,d.classify_alpha,d.format); };
-    auto& images = summary->images;
+    const auto key = [](const RoomSurfaces::ImageDependency& d) {
+        return std::make_tuple(d.binding,d.handle,d.texture,d.baked,d.format,d.wrap,d.u_scale,d.v_scale,d.classify_alpha);
+    };
     std::sort(images.begin(),images.end(),[&](const auto& a,const auto& b) { return key(a)<key(b); });
     images.erase(std::unique(images.begin(),images.end(),[&](const auto& a,const auto& b) { return key(a)==key(b); }),images.end());
+    summary->images = std::make_shared<const std::vector<RoomSurfaces::ImageDependency>>(std::move(images));
     publication_ = std::move(summary);
 }
 namespace {
@@ -659,6 +663,19 @@ PresentationRef Presentation::complete(FrameData data) {
         const auto* image = validateImage(dependency.binding);
         require(!image || !dependency.classify_alpha || image->format() == dependency.format,"Image format changed without material recompilation");
     };
+    // Frame bindings are validated against the union of retained requirements,
+    // not repeatedly against every instance/part that shares those bindings.
+    // Only immutable requirement lists are retained; actual image ownership and
+    // formats are checked anew for this frame, including held/replayed frames.
+    const auto dependency_order = [](const RoomSurfaces::ImageDependency& a,const RoomSurfaces::ImageDependency& b) {
+        return std::make_tuple(a.binding,a.classify_alpha,a.format) < std::make_tuple(b.binding,b.classify_alpha,b.format);
+    };
+    static thread_local RetainedDependencies<RoomSurfaces::ImageDependency,decltype(dependency_order)> image_requirements(dependency_order);
+    static thread_local uint64_t requirement_lifetime = 0;
+    if (requirement_lifetime != data.scene_lifetime) {
+        image_requirements.clear(); requirement_lifetime = data.scene_lifetime;
+    }
+    image_requirements.begin();
     for (auto index : data.light_candidate_indices)
         require(index < data.lights.size(),"Candidate table references missing emitter");
     const auto validateIndices = [&](const SurfaceBinding& surface) {
@@ -741,7 +758,7 @@ PresentationRef Presentation::complete(FrameData data) {
             // Static asset ownership was validated when this table was sealed.
             // Explicit authored emitter indices still belong to this frame.
             require(room.surfaces.requiredLightCount() <= data.lights.size(),"Surface references missing emitter");
-            for (const auto& dependency : room.surfaces.images()) validateDependency(dependency);
+            image_requirements.add(room.surfaces.imageDependencies());
         }
         data.lightCandidates(room.light_candidates);
         require(finite(room.fog_color) && std::isfinite(room.fog_depth), "Invalid room fog");
@@ -810,7 +827,7 @@ PresentationRef Presentation::complete(FrameData data) {
                 const auto& summary = *model.parts.summary();
                 require(summary.required_light_count <= data.lights.size(),"Model references missing emitter");
                 require(summary.required_candidate_count <= data.light_candidate_indices.size(),"Model references missing candidate range");
-                for (const auto& dependency : summary.images) validateDependency(dependency);
+                image_requirements.add(summary.images);
                 continue;
             }
             for (size_t i = 0; i < model.parts.size(); ++i) {
@@ -837,12 +854,14 @@ PresentationRef Presentation::complete(FrameData data) {
                 }
                 } else {
                     require(part.surfaces.requiredLightCount() <= data.lights.size(),"Surface references missing emitter");
-                    for (const auto& dependency : part.surfaces.images()) validateDependency(dependency);
+                    image_requirements.add(part.surfaces.imageDependencies());
                 }
             }
         }
     }
     require(model_end == data.model_variants.size(),"Unowned model variants in frame storage");
+    image_requirements.finish();
+    for (const auto& dependency : image_requirements.values()) validateDependency(dependency);
     for (const auto& mesh : data.meshes) {
         require(!mesh.has_owner || objects.count(mesh.owner),"Mesh owner is not part of this presentation");
         require(mesh.model_variant >= -1 && (mesh.model_instance == 0 ? mesh.model_variant == -1 :

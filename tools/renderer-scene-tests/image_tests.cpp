@@ -42,6 +42,11 @@ int runSceneImageTests() {
         dependencies.clear(); dependencies.begin(); dependencies.addValue(0);
         check(dependencies.finish() && dependencies.values() == std::vector<uint64_t>({0}),
             "Dependency reset lost the empty-buffer sentinel");
+        dependencies.begin(); dependencies.add(a); dependencies.addValue(7);
+        // Simulate validation throwing between collection and finish.
+        dependencies.begin(); dependencies.add(a); dependencies.addValue(7);
+        check(dependencies.finish() && dependencies.values() == std::vector<uint64_t>({1,3,7}),
+            "Interrupted dependency collection lost pending edits");
     }
     {
     TextureNamePolicy<16> policy;
@@ -204,6 +209,29 @@ int runSceneImageTests() {
     auto wrong_format = animated;
     wrong_format.rooms[0].surfaces[0].color_format = ImageFormat::ARGB4444;
     rejects([&] { Presentation::freeze(wrong_format); });
+    {
+        ModelGeometry geometry; geometry.parts.resize(1);
+        auto& part = geometry.parts[0];
+        part.geometry = second->data().rooms[0].asset->geometry();
+        part.geometry.vertex_normals.assign(part.geometry.vertices.size(),{0,0,1});
+        part.polygon_materials.assign(part.geometry.polygons.size(),-1);
+        part.polygon_colors.assign(part.geometry.polygons.size(),{1,1,1});
+        PreparedModel model; model.asset = assets.publishModel(7,std::move(geometry));
+        model.parts.resize(1); model.parts[0].surfaces = second->data().rooms[0].surfaces;
+        auto model_frame = second->data(); model_frame.rooms.clear();
+        ModelInstance instance; instance.identity = 7;
+        model_frame.appendModel(instance,std::move(model)); model_frame.model_instances.push_back(std::move(instance));
+        const auto sealed = Presentation::publish(std::move(model_frame));
+        check(sealed->data().model_variants[0].parts.summary()->images->size() == 1,
+            "Model summary lost its image requirements");
+        auto missing_model_image = sealed->data(); missing_model_image.images.clear();
+        rejects([&] { Presentation::freeze(missing_model_image); });
+        auto changed_model_format = sealed->data(); changed_model_format.images = {{44,image}};
+        rejects([&] { Presentation::freeze(changed_model_format); });
+        const auto replay = Presentation::freeze(sealed->data());
+        check(replay->image(44).id() == sealed->image(44).id(),
+            "Rejected publication poisoned retained model requirements");
+    }
     assets.reset();
     auto stale = second->data(); stale.scene_lifetime = assets.lifetime();
     rejects([&] { Presentation::freeze(stale); });

@@ -2,6 +2,16 @@
 
 ## October 20 continuation
 
+October 21: complete retained model tables own their image dependency unions;
+source preparation no longer traverses their parts when requirements are stable.
+Publication validates the union of retained image requirements once per frame.
+Missing/format-changed images still reject, including held-frame replay after a
+failed publication. Interrupted union collections retain dirty state until
+finish, so exceptions cannot leave a stale union. Dense/save005/probe captures
+are pixel-exact; save005 preparation ~1.41 ms, freeze ~0.24 ms (was ~0.30),
+total ~2.106 ms; dense ~3.360 ms. Still not an all-baseline win.
+Captures: `cpu-image-requirements-{saveg003,saveg005,probe}-20261021`.
+
 October 21: image revisions update existing GPU storage when dimensions/mip
 count match, rather than deleting/recreating textures. Packed conversion uses
 reusable staging and exact channel tables; exhaustive 1555/4444, unaligned/guard,
