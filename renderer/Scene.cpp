@@ -37,10 +37,13 @@ struct FrameCompilationStorage {
     };
     std::vector<CollectionRange> collections_;
     std::vector<uint32_t> collection_models_,collection_meshes_;
+    // Asset-free layout proofs survive recycling, like the identity indexes.
+    // Payload changes do not change ordered collection membership.
+    std::vector<uint64_t> collection_model_keys_;
+    std::vector<std::pair<uint64_t,bool>> collection_mesh_keys_;
+    bool collections_valid_ = false;
     void clear() {
-        collection_indices_.clear();
-        image_slots_.clear(); resolved_models_.clear(); releasePoses(); resolved_model_indices_.clear(); collections_.clear();
-        collection_models_.clear(); collection_meshes_.clear();
+        image_slots_.clear(); resolved_models_.clear(); releasePoses(); resolved_model_indices_.clear();
     }
     void releasePoses() {
         // Only dead snapshots enter the pool. Retain vertex buffer capacity,
@@ -1083,6 +1086,22 @@ PresentationRef Presentation::complete(FrameData data) {
     // every world object and effect merely to discard their collection IDs.
     require(prepared->data_.model_instances.size() <= UINT32_MAX && prepared->data_.meshes.size() <= UINT32_MAX,
         "Too many scene collection members");
+    auto& membership = *prepared->storage_;
+    bool same_collections = membership.collections_valid_ &&
+        membership.collection_model_keys_.size() == prepared->data_.model_instances.size() &&
+        membership.collection_mesh_keys_.size() == prepared->data_.meshes.size();
+    for (size_t i = 0; same_collections && i < prepared->data_.model_instances.size(); ++i)
+        same_collections = membership.collection_model_keys_[i] == prepared->data_.model_instances[i].collection;
+    for (size_t i = 0; same_collections && i < prepared->data_.meshes.size(); ++i) {
+        const auto& mesh = prepared->data_.meshes[i];
+        same_collections = membership.collection_mesh_keys_[i] == std::make_pair(mesh.collection,mesh.receiver_polygon >= 0);
+    }
+    if (!same_collections) {
+    membership.collections_valid_ = false;
+    membership.collection_indices_.clear(); membership.collections_.clear();
+    membership.collection_model_keys_.clear(); membership.collection_mesh_keys_.clear();
+    membership.collection_model_keys_.reserve(prepared->data_.model_instances.size());
+    membership.collection_mesh_keys_.reserve(prepared->data_.meshes.size());
     const auto domain = [&](uint64_t identity) -> FrameCompilationStorage::CollectionRange& {
         const auto found = prepared->storage_->collection_indices_.emplace(identity,prepared->storage_->collections_.size());
         if (found.second) prepared->storage_->collections_.emplace_back();
@@ -1102,10 +1121,15 @@ PresentationRef Presentation::complete(FrameData data) {
     for (uint32_t i = 0; i < prepared->data_.model_instances.size(); ++i) {
         auto& range = domain(prepared->data_.model_instances[i].collection);
         prepared->storage_->collection_models_[range.model_begin+range.model_count++] = i;
+        membership.collection_model_keys_.push_back(prepared->data_.model_instances[i].collection);
     }
     for (uint32_t i = 0; i < prepared->data_.meshes.size(); ++i) {
         auto& range = domain(prepared->data_.meshes[i].collection);
         prepared->storage_->collection_meshes_[range.mesh_begin+range.mesh_count++] = i;
+        const auto& mesh = prepared->data_.meshes[i];
+        membership.collection_mesh_keys_.emplace_back(mesh.collection,mesh.receiver_polygon >= 0);
+    }
+    membership.collections_valid_ = true;
     }
     auto& surface_count = prepared->data_.compiled_surface_count;
     surface_count = 0;

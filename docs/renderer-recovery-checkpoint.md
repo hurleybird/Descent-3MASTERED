@@ -2,6 +2,18 @@
 
 ## Active 2026-10-21 flare regression investigation
 
+LATEST after a908e90: frame compilation retains collection membership across
+recycled snapshot storage. Exact ordered model collection IDs and mesh
+(collection,has-receiver) pairs prove reuse; payload changes do not rebuild
+membership. Changed layout rebuilds, with validity cleared before allocation.
+Only IDs/ordinals retained, no assets or mutable source pointers. Tests cover
+membership changes, reordering, receiver changes and held snapshots. Tests/build
+pass. collection-pair005 and collection-layout-multiview are pixel-exact.
+ABBA005 CPU1.2898/1.1274/1.0979/1.1070 had strong drift; reverse BAAB1000frames,
+rows400..899: layout1.1024/control1.1318/control1.2326/layout1.1111. Favors
+reuse but control variability prevents a precise percentage claim. GPU~.162ms.
+out/collection-layout-candidate.exe is the owned runtime; no preview modified.
+
 LATEST after fafef18: water height impulses use retained integer disk row spans
 and wrapping SSE2 additions (scalar fallback). No per-frame allocation. Tests
 compare every radius0..255, six clipped/interior centers and strengths0/1/255,

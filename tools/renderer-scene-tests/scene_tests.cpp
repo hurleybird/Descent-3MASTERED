@@ -146,6 +146,35 @@ void storageTests() {
             "Copied builder scratch storage aliased published compilation");
     }
 }
+void collectionReuseTests() {
+    using namespace d3scene;
+    SceneAssets assets;
+    const auto mesh_asset = assets.publishMesh(0,triangle());
+    const auto room_asset = assets.publishRoom(0,triangle());
+    PresentationRef held;
+    for (int step = 0; step < 8; ++step) {
+        auto data = acquireFrameData(); data.sequence = step+1; data.scene_lifetime = assets.lifetime();
+        RoomState room; room.number = 0; room.asset = room_asset; room.surfaces.resize(1);
+        data.rooms.push_back(std::move(room));
+        const uint64_t domain = step < 2 ? 10 : step < 4 ? 20 : 0;
+        PreparedMesh mesh; mesh.asset = mesh_asset; mesh.collection = domain;
+        mesh.world.position.x = float(step);
+        mesh.room = 0; mesh.receiver_polygon = step == 5 ? 0 : -1;
+        data.meshes.push_back(mesh); mesh.collection = 99; mesh.receiver_polygon = -1;
+        data.meshes.push_back(mesh);
+        if (step >= 6) std::swap(data.meshes[0],data.meshes[1]);
+        auto frame = Presentation::publish(std::move(data));
+        const auto collection = frame->collection(domain),other = frame->collection(99);
+        check(collection.meshes.count == 1 && other.meshes.count == 1 &&
+            *collection.meshes.begin() == (step >= 6 ? 1u : 0u) &&
+            *other.meshes.begin() == (step >= 6 ? 0u : 1u),"Recycled collection membership is stale");
+        check(collection.has_receivers == (step == 5),"Recycled collection receiver summary is stale");
+        check(frame->collection(123).meshes.count == 0,"Absent collection retained old membership");
+        if (step == 1) held = frame;
+        if (held) check(held->collection(10).meshes.count == 1 && held->data().meshes[0].world.position.x == 1,
+            "Recycling changed a held collection snapshot");
+    }
+}
 void assetTests() {
     {
         using namespace d3scene;
@@ -620,7 +649,7 @@ int main() {
             check(signed_index.find(-1) == address && signed_index.at(-1) == 7,
                 "Identity lookup clear discarded reusable storage");
         }
-        storageTests(); assetTests(); frameTests(); extractionTests();
+        storageTests(); collectionReuseTests(); assetTests(); frameTests(); extractionTests();
         Checks += runSceneViewTests();
         Checks += runModelPoseTests();
         Checks += runModelSceneTests();
