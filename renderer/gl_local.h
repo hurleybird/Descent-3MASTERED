@@ -184,6 +184,7 @@ class GL4Renderer : public IRenderer
 	std::vector<float> scene_draw_records;
 	GLuint scene_influence_buffer = 0, scene_influence_texture = 0;
 	ElementRange scene_view_fog;
+    std::vector<uint32_t> scene_view_fog_volumes;
 	GLuint scene_uv_buffer = 0, scene_uv_texture = 0;
 	GLuint scene_position_buffer = 0, scene_position_texture = 0;
 	GLuint scene_reflection_buffer = 0, scene_reflection_texture = 0;

@@ -2,6 +2,23 @@
 
 ## October 20 continuation
 
+October 21: fog traversal now prepares a view-local, threaded subset of the
+immutable boundary tree. Initial containment still uses the full tree; near
+and mirror clipping never remove optical prefixes. Tests compare 4000 random
+segments against the full traversal, including inside origins and trimmed rays.
+The fragment intersection uses explicit projected edges instead of dynamically
+indexed local arrays, and prepares inverse ray direction once for all bounds.
+No fog geometry, integration law, or sampling resolution was reduced.
+Paired 500-frame save007 GPU means (frames 100-449): tree pruning alone
+8.485/8.571 -> 8.221/8.218 ms; explicit edges 8.219/8.215 -> 4.702/4.715;
+shared ray setup 4.701/4.691 -> 3.509/3.486. CPU timings remain mixed.
+All eight 90-frame saves, long save007, combined resource/view/deformation
+probe, mirror surface, and SSAA2/MSAA4/AO/bloom images are EXACT to controls.
+Build/tests pass; save007 visually inspected. Binary fog-ray.exe; evidence
+fog-pruned-long-*, fog-edges-*, fog-ray-* under the verification directory.
+This is a substantial GPU repair, NOT a claim of beating legacy (~.53 ms in
+the short save007 baseline), and does not establish the remaining CPU goal.
+
 October 21: publication compilation storage (identity maps, image lookup,
 collection ranges/members, resolved-pose pointer array) now follows snapshot
 ownership and is recycled with released frame arrays. Shared builder copies get

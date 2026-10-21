@@ -28,6 +28,21 @@ bool fogMayIntersectView(const Bounds& bounds,const Camera& camera,bool perspect
     }
     return true;
 }
+void prepareFogViewNodes(const FogVolume& volume,const Camera& camera,bool optical_cone,std::vector<FogViewNode>& output) {
+    output.clear();
+    size_t index = 0;
+    while (index < volume.nodes.size()) {
+        const auto& node = volume.nodes[index];
+        if (!fogMayIntersectView(node.bounds,camera,optical_cone)) { index = node.escape; continue; }
+        output.push_back({uint32_t(index),node.escape}); ++index;
+    }
+    // Source traversal order is unchanged. Remap each skip to the first
+    // retained node at/after its old escape, or the view-local end sentinel.
+    for (auto& node : output) {
+        node.escape = uint32_t(std::lower_bound(output.begin(),output.end(),node.escape,
+            [](const FogViewNode& value,uint32_t source) { return value.source < source; })-output.begin());
+    }
+}
 namespace {
 Vec3 sub(Vec3 a,Vec3 b) { return {a.x-b.x,a.y-b.y,a.z-b.z}; }
 Vec3 cross(Vec3 a,Vec3 b) { return {a.y*b.z-a.z*b.y,a.z*b.x-a.x*b.z,a.x*b.y-a.y*b.x}; }

@@ -49,6 +49,48 @@ int runFogTests() {
     check(frame.fog->volumes().size() == 1 && frame.fog->volumes()[0].boundary.size() == 12,"Fog box boundary is incomplete");
     const auto volume = frame.fog->volumes()[0];
     const auto original_asset = frame.fog;
+    {
+        using namespace d3scene;
+        FogVolume many = volume;
+        for (int x = -4; x <= 4; ++x) for (int z = -4; z <= 4; ++z) {
+            if (!x && !z) continue;
+            for (auto triangle : volume.boundary) {
+                for (auto* point : {&triangle.a,&triangle.b,&triangle.c}) { point->x += x*8.f; point->z += z*8.f; }
+                many.boundary.push_back(triangle);
+            }
+        }
+        buildFogAcceleration(many);
+        View request; request.history_key = 1; request.viewport = request.projection_anchor = {0,0,800,600};
+        std::vector<FogViewNode> nodes;
+        auto camera = prepareCamera(request);
+        prepareFogViewNodes(many,camera,false,nodes);
+        bool identical = nodes.size() == many.nodes.size();
+        for (size_t i = 0; identical && i < nodes.size(); ++i)
+            identical = nodes[i].source == i && nodes[i].escape == many.nodes[i].escape;
+        check(identical,"Unrestricted fog traversal changed tree ordering");
+        uint32_t random = 12345;
+        const auto sample = [&] { random = random*1664525u+1013904223u; return float(random>>8)/16777216.f; };
+        for (const float eye_z : {0.f,3.f}) {
+            request.camera.position.z = eye_z; camera = prepareCamera(request);
+            prepareFogViewNodes(many,camera,true,nodes);
+            check(!nodes.empty() && nodes.size() < many.nodes.size(),"Optical cone did not prune off-view fog branches");
+            auto narrowed = many; narrowed.nodes.clear();
+            for (size_t i = 0; i < nodes.size(); ++i) {
+                check(nodes[i].escape > i && nodes[i].escape <= nodes.size(),"Pruned fog escape is not forward/bounded");
+                auto node = many.nodes[nodes[i].source]; node.escape = nodes[i].escape; narrowed.nodes.push_back(node);
+            }
+            const bool inside = fogContains(many,request.camera.position);
+            for (int i = 0; i < 2000; ++i) {
+                const auto end = unproject(camera,sample()*2-1,sample()*2-1,.5f+sample()*.499f);
+                const float start = sample()*5;
+                check(fogSegmentLength(many,request.camera.position,end,inside,start) ==
+                    fogSegmentLength(narrowed,request.camera.position,end,inside,start),
+                    "Pruned fog traversal changed exact optical integration");
+            }
+        }
+        FogVolume empty; prepareFogViewNodes(empty,camera,true,nodes);
+        check(nodes.empty(),"Empty fog retained old view nodes");
+    }
     check(assets.publishFog(frame.rooms) == original_asset,"Unchanged fog rebuilt its spatial asset");
     {
         auto invalid = frame.rooms;

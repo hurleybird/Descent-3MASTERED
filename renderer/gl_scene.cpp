@@ -246,6 +246,14 @@ uniform sampler2D scene_occlusion;
 uniform float scene_occlusion_intensity, scene_highlight_gamma, scene_highlight_threshold;
 uniform int scene_highlight_suppression;
 uniform vec2 scene_raster_extent;
+vec2 fogProjectedPoint(vec3 p,int drop) {
+    return drop == 0 ? p.yz : (drop == 1 ? p.zx : p.xy);
+}
+bool fogEdge(vec2 start,vec2 finish,vec2 p,float orientation) {
+    vec2 edge = (finish-start)*orientation;
+    float side = edge.x*(p.y-start.y)-edge.y*(p.x-start.x);
+    return side > 0.0 || (side == 0.0 && (edge.y > 0.0 || (edge.y == 0.0 && edge.x < 0.0)));
+}
 bool fogHit(vec3 a,vec3 b,vec3 c,vec3 direction,out float distance) {
     vec3 n = cross(b-a,c-a);
     float denominator = dot(n,direction);
@@ -255,29 +263,23 @@ bool fogHit(vec3 a,vec3 b,vec3 c,vec3 direction,out float distance) {
     vec3 p = eye+direction*distance;
     vec3 magnitude = abs(n);
     int drop = magnitude.x >= magnitude.y && magnitude.x >= magnitude.z ? 0 : (magnitude.y >= magnitude.z ? 1 : 2);
-    int x = (drop+1)%3, y = (drop+2)%3;
-    vec3 corners[3] = vec3[3](a,b,c);
-    float orientation = n[drop] < 0.0 ? -1.0 : 1.0;
-    for (int i = 0; i < 3; ++i) {
-        vec3 start = corners[i], finish = corners[(i+1)%3];
-        vec2 edge = vec2(finish[x]-start[x],finish[y]-start[y])*orientation;
-        float side = edge.x*(p[y]-start[y])-edge.y*(p[x]-start[x]);
-        if (side < 0.0 || (side == 0.0 && !(edge.y > 0.0 || (edge.y == 0.0 && edge.x < 0.0)))) return false;
-    }
-    return true;
+    float component = drop == 0 ? n.x : (drop == 1 ? n.y : n.z);
+    float orientation = component < 0.0 ? -1.0 : 1.0;
+    vec2 pa = fogProjectedPoint(a,drop), pb = fogProjectedPoint(b,drop), pc = fogProjectedPoint(c,drop);
+    vec2 point = fogProjectedPoint(p,drop);
+    // Explicit three-edge half-open coverage: no dynamically indexed local
+    // vertex array or component/modulo loop in the per-fragment hot path.
+    return fogEdge(pa,pb,point,orientation) && fogEdge(pb,pc,point,orientation) && fogEdge(pc,pa,point,orientation);
 }
-bool fogBounds(vec3 low,vec3 high,vec3 direction,float length) {
-    float entry = 0.0, exit = length;
-    for (int axis = 0; axis < 3; ++axis) {
-        if (abs(direction[axis]) < 1.e-8) {
-            if (eye[axis] < low[axis] || eye[axis] > high[axis]) return false;
-        } else {
-            float a = (low[axis]-eye[axis])/direction[axis], b = (high[axis]-eye[axis])/direction[axis];
-            entry = max(entry,min(a,b)); exit = min(exit,max(a,b));
-            if (entry > exit) return false;
-        }
-    }
-    return true;
+bool fogBounds(vec3 low,vec3 high,vec3 inverse_direction,bvec3 parallel,float length) {
+    if (any(bvec3(parallel.x && (eye.x < low.x || eye.x > high.x),
+                  parallel.y && (eye.y < low.y || eye.y > high.y),
+                  parallel.z && (eye.z < low.z || eye.z > high.z)))) return false;
+    vec3 a = (low-eye)*inverse_direction, b = (high-eye)*inverse_direction;
+    vec3 entry = min(a,b), exit = max(a,b);
+    entry = vec3(parallel.x ? 0.0 : entry.x,parallel.y ? 0.0 : entry.y,parallel.z ? 0.0 : entry.z);
+    exit = vec3(parallel.x ? length : exit.x,parallel.y ? length : exit.y,parallel.z ? length : exit.z);
+    return max(0.0,max(entry.x,max(entry.y,entry.z))) <= min(length,min(exit.x,min(exit.y,exit.z)));
 }
 vec3 applySceneFog(vec3 radiance,out float transmission) {
     transmission = 1.0;
@@ -286,6 +288,10 @@ vec3 applySceneFog(vec3 radiance,out float transmission) {
     float distance = length(delta);
     if (distance < 1.e-6) return radiance;
     vec3 direction = delta/distance;
+    // One ray setup for every boundary node; parallel axes never divide by zero.
+    bvec3 parallel = lessThan(abs(direction),vec3(1.e-8));
+    vec3 inverse_direction = 1.0/vec3(parallel.x ? 1.0 : direction.x,
+        parallel.y ? 1.0 : direction.y,parallel.z ? 1.0 : direction.z);
     float start = 0.0;
     float origin_side = dot(vec4(eye,1),fog_path_plane);
     if (origin_side < 0.0) {
@@ -302,17 +308,23 @@ vec3 applySceneFog(vec3 radiance,out float transmission) {
     float optical_depth = 0.0;
     vec3 weighted_color = vec3(0);
     for (int candidate = 0; candidate < fog_volume_count; ++candidate) {
-        int volume = texelFetch(scene_influences,fog_volume_offset+candidate).r;
+        int entry = fog_volume_offset+candidate*3;
+        int volume = texelFetch(scene_influences,entry).r;
+        int view_nodes = texelFetch(scene_influences,entry+1).r;
+        int view_count = texelFetch(scene_influences,entry+2).r;
         vec4 appearance = texelFetch(scene_fog,volume*4);
         vec4 low = texelFetch(scene_fog,volume*4+1), high = texelFetch(scene_fog,volume*4+2);
-        if (!fogBounds(low.xyz,high.xyz,direction,distance)) continue;
+        if (!fogBounds(low.xyz,high.xyz,inverse_direction,parallel,distance)) continue;
         vec4 state = texelFetch(scene_fog,volume*4+3);
         float path = state.x*interval;
         int node = 0;
-        while (node < int(state.y)) {
-            int record = int(low.w)+node*3;
+        while (node < view_count) {
+            int source_node = texelFetch(scene_influences,view_nodes+node*2).r;
+            int record = int(low.w)+source_node*3;
             vec4 node_low = texelFetch(scene_fog,record), node_high = texelFetch(scene_fog,record+1);
-            if (!fogBounds(node_low.xyz,node_high.xyz,direction,distance)) { node = int(node_high.w); continue; }
+            if (!fogBounds(node_low.xyz,node_high.xyz,inverse_direction,parallel,distance)) {
+                node = texelFetch(scene_influences,view_nodes+node*2+1).r; continue;
+            }
             int count = int(texelFetch(scene_fog,record+2).x);
             for (int triangle = 0; triangle < count; ++triangle) {
                 int offset = int(high.w)+(int(node_low.w)+triangle)*4;
@@ -476,6 +488,7 @@ void GL4Renderer::DestroySceneResources() {
     if (scene_fog_texture) glDeleteTextures(1,&scene_fog_texture);
     scene_fog_buffer = scene_fog_texture = 0;
     scene_fog_id = {};
+    scene_view_fog = {}; scene_view_fog_volumes.clear();
     for (auto& depth : scene_depth_snapshots) depth.second.Destroy();
     scene_depth_snapshots.clear();
     if (scene_light_buffer) glDeleteBuffers(1,&scene_light_buffer);
@@ -831,15 +844,26 @@ void GL4Renderer::PrepareSceneViewTables(const d3scene::PreparedView& prepared) 
         }
         glBindBuffer(GL_TEXTURE_BUFFER,scene_position_buffer);
         glBufferData(GL_TEXTURE_BUFFER,positions.size()*sizeof(d3scene::PositionPair),positions.data(),GL_STREAM_DRAW);
-        scene_view_fog = ElementRange(uint32_t(indices.size()),0);
+        scene_view_fog_volumes.clear();
+        static thread_local std::vector<d3scene::FogViewNode> fog_nodes;
+        static thread_local std::vector<int32_t> fog_entries;
+        fog_entries.clear();
+        size_t source_fog_nodes = 0,view_fog_nodes = 0;
         if (prepared.view().collection == 0) {
             const auto& volumes = d3scene::fogVolumes(frame.data());
-            for (size_t i = 0; i < volumes.size(); ++i)
-                if (d3scene::fogMayIntersectView(volumes[i].bounds,demand.camera,optical_frustum)) indices.push_back(int32_t(i));
-            scene_view_fog.count = uint32_t(indices.size())-scene_view_fog.offset;
+            for (size_t i = 0; i < volumes.size(); ++i) {
+                if (!d3scene::fogMayIntersectView(volumes[i].bounds,demand.camera,optical_frustum)) continue;
+                d3scene::prepareFogViewNodes(volumes[i],demand.camera,optical_frustum,fog_nodes);
+                fog_entries.insert(fog_entries.end(),{int32_t(i),int32_t(indices.size()),int32_t(fog_nodes.size())});
+                for (const auto& node : fog_nodes) { indices.push_back(int32_t(node.source)); indices.push_back(int32_t(node.escape)); }
+                scene_view_fog_volumes.push_back(uint32_t(i));
+                source_fog_nodes += volumes[i].nodes.size(); view_fog_nodes += fog_nodes.size();
+            }
         }
-        if (AutomatedCapturePending()) AutomatedCaptureLog("scene optical fog candidates=%u total=%u",
-            scene_view_fog.count,unsigned(d3scene::fogVolumes(frame.data()).size()));
+        scene_view_fog = ElementRange(uint32_t(indices.size()),uint32_t(scene_view_fog_volumes.size()));
+        indices.insert(indices.end(),fog_entries.begin(),fog_entries.end());
+        if (AutomatedCapturePending()) AutomatedCaptureLog("scene optical fog candidates=%u total=%u nodes=%u/%u",
+            scene_view_fog.count,unsigned(d3scene::fogVolumes(frame.data()).size()),unsigned(view_fog_nodes),unsigned(source_fog_nodes));
         if (indices.empty()) indices.push_back(0);
         if (uvs.empty()) uvs.push_back({0,0});
         glBindBuffer(GL_TEXTURE_BUFFER,scene_uv_buffer);
@@ -1187,8 +1211,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     }
     // Only containment depends on the view. Geometry and the traversal index
     // stay resident until their scene asset revision changes.
-    for (size_t index = 0; index < fog_volumes.size(); ++index) {
-        if (view.collection != 0) break;
+    for (const auto index : scene_view_fog_volumes) {
         const float inside = d3scene::fogContains(fog_volumes[index],camera.position) ? 1.f : 0.f;
         glBufferSubData(GL_TEXTURE_BUFFER,(index*16+12)*sizeof(float),sizeof(float),&inside);
     }

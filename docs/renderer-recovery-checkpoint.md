@@ -2,6 +2,14 @@
 
 ## October 21 resumed work — supersedes restart pause below
 
+Newest: fog-ray.exe is built/tested and all eight images, long save007, combined
+probe, mirror and SSAA2/MSAA4/AO/bloom are exact. View-pruned boundary traversal,
+explicit triangle edges and shared inverse-ray setup reduce long save007 GPU
+from ~8.53 to ~3.50 ms (paired component tests documented in CPU ownership repair).
+Still far behind legacy GPU; CPU goal remains unmet. No captures/samplers active
+at this checkpoint. Runtime uses fog-ray.exe. Last included usage: 24% remaining.
+Continue CPU profiling/repair; do not yield unless requested or usage reaches 0.
+
 Newest: compiled-storage.exe built/tested; dense/wall/save007 long captures,
 combined probe and mirror surface all exact. CPU gains NOT demonstrated (mixed
 timings); goal still unmet. All capture/sampler sessions finished at checkpoint.
