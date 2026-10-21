@@ -759,6 +759,7 @@ template<class T> struct ModelRange {
     T& operator[](size_t index) const { return first[index]; }
     T& at(size_t index) const { if (index >= count) throw std::out_of_range("Model variant"); return first[index]; }
 };
+struct FrameStoragePool;
 struct FrameData {
     uint32_t compiled_surface_count = 0, compiled_part_count = 0;
     uint64_t sequence = 0, scene_lifetime = 0;
@@ -825,7 +826,15 @@ struct FrameData {
     Vec3 sky_color;
     FogAssetRef fog;
     ExteriorFog exterior_fog;
+private:
+    friend FrameData acquireFrameData();
+    friend class Presentation;
+    std::shared_ptr<FrameStoragePool> storage_pool_;
 };
+// Empty builder backed by released snapshot storage. No storage is reclaimed
+// until its presentation's last reader releases it; at most two spare sets
+// are retained per publishing thread. Ordinary FrameData builders remain valid.
+FrameData acquireFrameData();
 
 struct SceneIndexSpan {
     const uint32_t* first = nullptr;
@@ -839,6 +848,7 @@ struct SceneCollection {
 };
 class Presentation final {
 public:
+    ~Presentation();
     // Copies at the publication boundary so a caller retaining a mutable
     // reference cannot change an already-published frame.
     static PresentationRef freeze(const FrameData& data);

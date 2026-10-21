@@ -15,6 +15,7 @@
 #include <map>
 #include <tuple>
 #include <algorithm>
+#include <thread>
 
 namespace d3scene {
 bool RoomSurfaces::publishedForRoom(AssetId asset,const std::vector<PlanarSurface>& planar) const {
@@ -532,6 +533,40 @@ SceneCollection Presentation::collection(uint64_t identity) const {
     const auto& range = collections_[found->second];
     return {{range.model_count ? collection_models_.data()+range.model_begin : nullptr,range.model_count},
         {range.mesh_count ? collection_meshes_.data()+range.mesh_begin : nullptr,range.mesh_count},range.has_receivers};
+}
+struct FrameStoragePool {
+    std::array<FrameData,2> spare;
+    size_t count = 0;
+    const std::thread::id publisher = std::this_thread::get_id();
+};
+FrameData acquireFrameData() {
+    static thread_local auto pool = std::make_shared<FrameStoragePool>();
+    FrameData data;
+    if (pool->count) data = std::move(pool->spare[--pool->count]);
+    data.storage_pool_ = pool;
+    return data;
+}
+Presentation::~Presentation() {
+    // The snapshot owns its pool reference, so teardown is safe even if its
+    // publishing thread has exited. Foreign-thread releases free normally;
+    // only the publisher accesses spare storage. Spares never own the pool.
+    const auto pool = data_.storage_pool_;
+    if (!pool || pool->publisher != std::this_thread::get_id() || pool->count == pool->spare.size()) return;
+    FrameData clean;
+    const auto reclaim = [](auto& source,auto& destination) {
+        source.clear(); destination.swap(source);
+    };
+    reclaim(data_.rooms,clean.rooms);
+    reclaim(data_.objects,clean.objects);
+    reclaim(data_.model_instances,clean.model_instances);
+    reclaim(data_.model_variants,clean.model_variants);
+    reclaim(data_.lights,clean.lights);
+    reclaim(data_.light_candidate_indices,clean.light_candidate_indices);
+    reclaim(data_.images,clean.images);
+    reclaim(data_.camera_perturbations,clean.camera_perturbations);
+    reclaim(data_.meshes,clean.meshes);
+    reclaim(data_.foregrounds,clean.foregrounds);
+    pool->spare[pool->count++] = std::move(clean);
 }
 PresentationRef Presentation::freeze(const FrameData& data) {
     return complete(data);

@@ -97,7 +97,7 @@ d3scene::FrameData ExtractGameFrame(double time, float delta, bool paused, bool 
     if (Sequence == std::numeric_limits<uint64_t>::max())
         throw std::overflow_error("Presentation sequence exhausted");
     auto& assets = d3scene::assets();
-    d3scene::FrameData data;
+    auto data = d3scene::acquireFrameData();
     data.sequence = Sequence + 1;
     data.scene_lifetime = assets.lifetime();
     data.simulation_time = time;

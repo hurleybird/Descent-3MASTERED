@@ -2,6 +2,19 @@
 
 ## October 20 continuation
 
+October 21: released presentations now recycle top-level frame-vector capacity,
+with at most two spare sets per publisher. Held snapshots are never reclaimed;
+foreign-thread releases free normally, and a snapshot can outlive its publisher.
+Spare sets own no scene resources or pool reference. Source extraction acquires
+empty builders from this pool. Lifetime/reset/thread tests pass. Initial corpus
+000–007: 2.612, 1.945, 3.501, 4.135, 0.913, 2.698, 1.086, 2.831 ms. Combined
+effects/audit probe and all eight captures match the instance-modulation
+checkpoint pixel-exactly. No all-baseline win claimed.
+Temporary publication-stage instrumentation was removed after measuring save005:
+model validation ~0.12 ms, world validation ~0.08, model bounds/sealing ~0.04,
+material policies ~0.03, other stages ~0.01 each. Raw data is
+`C:/tmp/D3RendererVerification/cpu-freeze-stages-20261021.tsv`.
+
 October 21: conservative emitter lists use ranges in one frame-owned packed
 table. Deferred instances in the same room share one list; resolving a model
 copies only the range into its parts, not a vector per part. Eager posed parts

@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <limits>
 #include <stdexcept>
+#include <thread>
 
 // Minimal simulation fixture, not a renderer mock. Linking the real extractor
 // against only these globals also catches accidental dependencies on draw/RNG
@@ -36,6 +37,37 @@ d3scene::MeshGeometry triangle() {
     polygon.corners = {{0, 0, 0, 0, 0, 255}, {1, 1, 0, 1, 0, 255}, {2, 0, 1, 0, 1, 255}};
     geometry.polygons.push_back(polygon);
     return geometry;
+}
+void storageTests() {
+    using namespace d3scene;
+    SceneAssets assets;
+    auto source = acquireFrameData();
+    source.sequence = 1; source.scene_lifetime = assets.lifetime();
+    source.objects.reserve(128); source.objects.resize(1);
+    source.objects[0].current.position.x = 17;
+    auto held = Presentation::publish(std::move(source));
+    auto reader = held;
+    held.reset();
+    auto while_held = acquireFrameData();
+    check(while_held.objects.capacity() == 0 && reader->data().objects[0].current.position.x == 17,
+        "Live snapshot storage was recycled");
+    reader.reset();
+    auto reused = acquireFrameData();
+    check(reused.objects.capacity() >= 128 && reused.objects.empty() && !reused.sequence && !reused.scene_lifetime,
+        "Released snapshot did not return empty capacity with fresh scalar state");
+    reused.sequence = 2; reused.scene_lifetime = assets.lifetime();
+    auto foreign = Presentation::publish(std::move(reused));
+    std::thread release([frame = std::move(foreign)]() mutable { frame.reset(); });
+    release.join();
+    check(acquireFrameData().objects.capacity() == 0,"Foreign thread modified publisher's spare storage");
+    PresentationRef outlives_publisher;
+    std::thread publish([&] {
+        auto input = acquireFrameData(); input.sequence = 3; input.scene_lifetime = assets.lifetime();
+        outlives_publisher = Presentation::publish(std::move(input));
+    });
+    publish.join();
+    check(outlives_publisher->data().sequence == 3,"Snapshot did not outlive publishing thread");
+    outlives_publisher.reset();
 }
 void assetTests() {
     // Plane membership is owned by the frozen scene, not recovered from mutable rooms.
@@ -417,7 +449,7 @@ int main() {
             try { signed_index.at(0); } catch (const std::out_of_range&) { absent = true; }
             check(absent,"Missing identity did not reject lookup");
         }
-        assetTests(); frameTests(); extractionTests();
+        storageTests(); assetTests(); frameTests(); extractionTests();
         Checks += runSceneViewTests();
         Checks += runModelPoseTests();
         Checks += runModelSceneTests();
