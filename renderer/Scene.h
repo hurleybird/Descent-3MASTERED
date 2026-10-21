@@ -442,6 +442,12 @@ public:
     void resize(size_t n) { edit(); values_->resize(n); }
     void push_back(const SurfaceBinding& value) { edit(); values_->push_back(value); }
 };
+// A range in the presentation's packed emitter-index table. Many instances
+// may share a room's conservative list without owning copies of it.
+struct LightCandidateRange {
+    uint32_t offset = 0, count = 0;
+    bool empty() const { return count == 0; }
+};
 struct RoomState {
     int32_t number = -1;
     uint64_t source_material_revision = 0;
@@ -452,7 +458,7 @@ struct RoomState {
     uint32_t surface_base = 0;
     bool uses_room_illumination = false;
     bool light_influences_prepared = false;
-    std::vector<uint32_t> light_candidates; // conservative room set; refined after visibility
+    LightCandidateRange light_candidates; // conservative room set; refined after visibility
     RoomPortals portals;
     uint32_t authored_flags = 0;
     float fog_depth = 0;
@@ -497,7 +503,7 @@ struct PreparedModelPart {
     uint32_t surface_base = 0;
     bool light_influences_prepared = false;
     std::array<float,16> appearance_inputs{};
-    std::vector<uint32_t> light_candidates; // conservative part set; refined after visibility
+    LightCandidateRange light_candidates; // conservative part set; refined after visibility
     const SurfaceBinding& surface(const ModelPart& asset,size_t polygon) const {
         return surfaces[material_palette ? asset.surface_for_polygon[polygon] : polygon];
     }
@@ -509,6 +515,7 @@ public:
     struct Summary {
         AssetId asset;
         uint64_t surface_count = 0, required_light_count = 0;
+        uint64_t required_candidate_count = 0;
         float motion_radius = 0;
         bool has_geometry = false;
         std::vector<RoomSurfaces::ImageDependency> images;
@@ -574,7 +581,7 @@ struct PreparedModel {
     uint32_t deformation_owner = 0, resolved_index = 0, surface_base = 0, part_base = 0;
     uint32_t previous_draw_mask = UINT32_MAX;
     bool light_influences_prepared = false;
-    std::vector<uint32_t> light_candidates;
+    LightCandidateRange light_candidates;
     ModelParts parts;
     Bounds render_bounds;
     bool has_render_bounds = false;
@@ -800,6 +807,12 @@ struct FrameData {
         model_variants.resize(write);
     }
     std::vector<Light> lights;
+    std::vector<uint32_t> light_candidate_indices;
+    ModelRange<const uint32_t> lightCandidates(LightCandidateRange range) const {
+        if (range.offset > light_candidate_indices.size() || range.count > light_candidate_indices.size()-range.offset)
+            throw std::invalid_argument("Invalid light candidate range");
+        return {range.count ? light_candidate_indices.data()+range.offset : nullptr,range.count};
+    }
     // Per-frame immutable pixel revisions. Surface tables name stable slots,
     // never own a pixel revision that would invalidate their material storage.
     struct ImageBinding { uint32_t binding; ImageAssetRef asset; };

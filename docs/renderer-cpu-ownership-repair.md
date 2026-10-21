@@ -2,6 +2,18 @@
 
 ## October 20 continuation
 
+October 21: conservative emitter lists use ranges in one frame-owned packed
+table. Deferred instances in the same room share one list; resolving a model
+copies only the range into its parts, not a vector per part. Eager posed parts
+retain their finer bounds filtering. Publication validates index contents once
+and validates each range (including retained summaries). Held-frame, missing
+emitter/range and sharing tests pass; save005 and combined probe are pixel-exact.
+Initial save005 was 2.777 ms; no total speedup claimed. Later dense timings became
+unstable even for retained control binaries (5.67–7.66 ms); the 13.35 ms first
+light-range dense run is not useful evidence of a code regression or improvement.
+System sampling was unavailable: xperf rejected the kernel flags and WPR reported
+that performance-profiling policy could not be enabled. WPR confirms no recording.
+
 October 21: world model material inputs now describe the entire binding table,
 not identical records constructed for every part. Unchanged published tables
 reuse directly; changed inputs rebuild without copying the old parts first.

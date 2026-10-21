@@ -6,7 +6,7 @@ namespace d3scene {
 // Polygon refinement belongs to view submission, not whole-level preparation.
 void prepareLightInfluences(FrameData&);
 struct MeshView;
-void appendSurfaceLightIndices(const FrameData&,const std::vector<uint32_t>& candidates,
+void appendSurfaceLightIndices(const FrameData&,LightCandidateRange candidates,
     MeshView,const MeshPolygon&,const Transform&,std::vector<int32_t>& output);
 float lightAttenuation(const Light&, Vec3 world);
 uint32_t visualNoise(double time, uint32_t key, uint32_t salt);

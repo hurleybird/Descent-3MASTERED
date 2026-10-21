@@ -68,8 +68,8 @@ void ModelParts::seal(const ModelAsset& asset) {
         const auto& geometry = asset.geometry().parts[i];
         summary->surface_count += part.surfaces.size();
         summary->required_light_count = std::max(summary->required_light_count,part.surfaces.requiredLightCount());
-        for (auto light : part.light_candidates)
-            summary->required_light_count = std::max(summary->required_light_count,uint64_t(light)+1);
+        summary->required_candidate_count = std::max(summary->required_candidate_count,
+            uint64_t(part.light_candidates.offset)+part.light_candidates.count);
         if (part.draw && !geometry.geometry.polygons.empty()) {
             summary->has_geometry = true;
             summary->motion_radius = std::max(summary->motion_radius,geometry.motion_radius);
@@ -617,6 +617,8 @@ PresentationRef Presentation::complete(FrameData data) {
         const auto* image = validateImage(dependency.binding);
         require(!image || !dependency.classify_alpha || image->format() == dependency.format,"Image format changed without material recompilation");
     };
+    for (auto index : data.light_candidate_indices)
+        require(index < data.lights.size(),"Candidate table references missing emitter");
     const auto validateIndices = [&](const SurfaceBinding& surface) {
         require(!surface.reflection || surface.reflection->id().lifetime == data.scene_lifetime,"Stale reflection asset in frame");
         for (auto index : surface.light_indices) require(index < data.lights.size(), "Surface references missing emitter");
@@ -699,8 +701,7 @@ PresentationRef Presentation::complete(FrameData data) {
             require(room.surfaces.requiredLightCount() <= data.lights.size(),"Surface references missing emitter");
             for (const auto& dependency : room.surfaces.images()) validateDependency(dependency);
         }
-        for (auto index : room.light_candidates)
-            require(index < data.lights.size(),"Room references missing emitter");
+        data.lightCandidates(room.light_candidates);
         require(finite(room.fog_color) && std::isfinite(room.fog_depth), "Invalid room fog");
         require(std::isfinite(room.light_scalar) && room.light_scalar >= 0, "Invalid room illumination");
         for (const auto& portal : room.portals)
@@ -759,13 +760,14 @@ PresentationRef Presentation::complete(FrameData data) {
                     require((*input)->size() == model.asset->geometry().parts.size(),"Incomplete animation inputs");
                     for (float value : **input) require(std::isfinite(value) && value >= 0 && value <= 1,"Invalid animation input");
                 }
-                for (auto light : model.light_candidates) require(light < data.lights.size(),"Missing deferred model light");
             }
             require(model.parts.size() == model.asset->geometry().parts.size(), "Incomplete object pose");
+            data.lightCandidates(model.light_candidates);
             const bool retained_parts = model.parts.publishedFor(model.asset->id());
             if (retained_parts) {
                 const auto& summary = *model.parts.summary();
                 require(summary.required_light_count <= data.lights.size(),"Model references missing emitter");
+                require(summary.required_candidate_count <= data.light_candidate_indices.size(),"Model references missing candidate range");
                 for (const auto& dependency : summary.images) validateDependency(dependency);
                 continue;
             }
@@ -780,7 +782,7 @@ PresentationRef Presentation::complete(FrameData data) {
                 const auto& asset_part = model.asset->geometry().parts[i];
                 require(part.surfaces.size() == (part.material_palette ? asset_part.surface_polygons.size() : asset_part.geometry.polygons.size()),
                     "Incomplete model instance materials");
-                for (auto light : part.light_candidates) require(light < data.lights.size(),"Missing model light");
+                data.lightCandidates(part.light_candidates);
                 if (!part.surfaces.publishedFor(model.asset->id(),uint32_t(i),part.material_palette)) {
                 for (const auto& surface : part.surfaces) validateSurface(surface);
                 for (const auto& surface : part.surfaces) validateIndices(surface);

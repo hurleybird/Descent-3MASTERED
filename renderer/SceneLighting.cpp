@@ -84,12 +84,22 @@ bool touches(const Light& light, MeshView mesh, const MeshPolygon& polygon, cons
     return x*x+y*y+z*z <= light.radius*light.radius;
 }
 }
-void appendSurfaceLightIndices(const FrameData& data,const std::vector<uint32_t>& candidates,
+void appendSurfaceLightIndices(const FrameData& data,LightCandidateRange candidates,
     MeshView mesh,const MeshPolygon& polygon,const Transform& transform,std::vector<int32_t>& output) {
-    for (const auto index : candidates)
+    for (const auto index : data.lightCandidates(candidates))
         if (touches(data.lights[index],mesh,polygon,transform)) output.push_back(static_cast<int32_t>(index));
 }
 void prepareLightInfluences(FrameData& data) {
+    auto& packed = data.light_candidate_indices;
+    packed.clear();
+    const auto startRange = [&] {
+        if (packed.size() > UINT32_MAX) throw std::length_error("Too many light candidates");
+        return LightCandidateRange{uint32_t(packed.size()),0};
+    };
+    const auto finishRange = [&](LightCandidateRange& range) {
+        if (packed.size()-range.offset > UINT32_MAX) throw std::length_error("Too many light candidates");
+        range.count = uint32_t(packed.size()-range.offset);
+    };
     // Camera-anchored meshes cannot be spatially culled during view-independent
     // preparation. Keep the canonical light table; the shader evaluates range.
     for (auto& mesh : data.meshes) {
@@ -105,9 +115,10 @@ void prepareLightInfluences(FrameData& data) {
     const size_t room_count = data.rooms.size();
     if (room_count && data.lights.size() > (std::numeric_limits<size_t>::max)()/room_count)
         throw std::length_error("Light reachability table overflow");
-    std::vector<uint8_t> reachable(data.lights.size()*room_count,0);
-    std::vector<uint8_t> exterior(data.lights.size(),0);
-    std::vector<size_t> queue;
+    static thread_local std::vector<uint8_t> reachable,exterior;
+    reachable.assign(data.lights.size()*room_count,0);
+    exterior.assign(data.lights.size(),0);
+    static thread_local std::vector<size_t> queue;
     queue.reserve(room_count);
     for (size_t i = 0; i < data.lights.size(); ++i) {
         const auto& light = data.lights[i];
@@ -129,36 +140,46 @@ void prepareLightInfluences(FrameData& data) {
             }
         }
     }
+    static thread_local std::vector<LightCandidateRange> room_models;
+    room_models.resize(room_count);
+    auto exterior_models = startRange();
+    for (size_t i = 0; i < data.lights.size(); ++i) packed.push_back(uint32_t(i));
+    finishRange(exterior_models);
     for (size_t r = 0; r < room_count; ++r) {
         auto& room = data.rooms[r];
         room.light_influences_prepared = true;
         auto& candidates = room.light_candidates;
-        candidates.clear();
+        candidates = startRange();
         for (size_t i = 0; i < data.lights.size(); ++i) if (reachable[i*room_count+r] &&
-            touchesBounds(data.lights[i],room.asset->bounds())) candidates.push_back(uint32_t(i));
+            touchesBounds(data.lights[i],room.asset->bounds())) packed.push_back(uint32_t(i));
+        finishRange(candidates);
+        auto& models = room_models[r];
+        models = startRange();
+        for (size_t i = 0; i < data.lights.size(); ++i)
+            if (reachable[i*room_count+r]) packed.push_back(uint32_t(i));
+        finishRange(models);
     }
     for (auto& object : data.model_instances) {
       const auto* room = rooms.find(object.room);
       for (auto& model : data.variants(object)) {
         if (model.deferred_pose) {
             model.light_influences_prepared = true;
-            model.light_candidates.clear();
-            for (size_t i = 0; i < data.lights.size(); ++i)
-                if (object.room < 0 || (room && reachable[i*room_count+room->second])) model.light_candidates.push_back(uint32_t(i));
+            model.light_candidates = object.room < 0 ? exterior_models : room ? room_models[room->second] : LightCandidateRange{};
             continue;
         }
         for (size_t part = 0; part < model.parts.size(); ++part) {
         auto& pose = model.parts[part];
         pose.light_influences_prepared = true;
         auto& candidates = pose.light_candidates;
-        candidates.clear();
+        candidates = startRange();
         if (!pose.draw) continue;
         Bounds bounds;
         if (pose.vertices.empty())
             bounds = transformBounds(compose(object.current,pose.current),model.asset->geometry().parts[part].local_bounds);
         for (size_t i = 0; i < data.lights.size(); ++i)
             if ((object.room < 0 || (room && reachable[i*room_count+room->second])) &&
-                (!pose.vertices.empty() || touchesBounds(data.lights[i],bounds))) candidates.push_back(uint32_t(i));
+                (!pose.vertices.empty() || touchesBounds(data.lights[i],bounds))) packed.push_back(uint32_t(i));
+        finishRange(candidates);
     }
     }
     }

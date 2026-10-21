@@ -308,6 +308,29 @@ int runModelSceneTests() {
     appendSurfaceLightIndices(lit_shape,lit_part.light_candidates,MeshView(lit_geometry,lit_part.vertices),
         lit_geometry.polygons[0],compose(lit_shape.model_instances[0].current,lit_part.current),lit_indices);
     check(lit_indices.size() == 1,"Light query used undeformed geometry");
+    {
+        const auto held = Presentation::freeze(lit_shape);
+        auto changed = held->data();
+        changed.light_candidate_indices.clear();
+        rejects([&] { Presentation::freeze(changed); });
+        changed = held->data(); changed.light_candidate_indices[0] = UINT32_MAX;
+        rejects([&] { Presentation::freeze(changed); });
+        check(held->data().lightCandidates(held->data().modelsFor(0)[0].parts[0].light_candidates)[0] == 0,
+            "Candidate table retained a mutable frame alias");
+        changed = lit_shape;
+        changed.modelsFor(0)[0].deferred_pose = true;
+        ModelInstance sibling = changed.model_instances[0];
+        sibling.identity += 100; sibling.model_count = 0;
+        changed.appendModel(sibling,changed.modelsFor(0)[0]);
+        changed.model_instances.push_back(sibling);
+        prepareLightInfluences(changed);
+        const auto a = changed.modelsFor(0)[0].light_candidates, b = changed.modelsFor(1)[0].light_candidates;
+        check(a.offset == b.offset && a.count == 1 && b.count == 1 && changed.light_candidate_indices.size() == 1,
+            "Equivalent deferred instances duplicated emitter lists");
+        changed.model_instances[1].room = 9999;
+        prepareLightInfluences(changed);
+        check(changed.modelsFor(1)[0].light_candidates.empty(),"Unknown interior inherited exterior emitters");
+    }
     auto invalid = modelGeometry(); invalid.parts[0].parent = 0;
     rejects([&] { assets.publishModel(4,invalid); });
     invalid = modelGeometry(); invalid.parts[0].polygon_materials[0] = 0;

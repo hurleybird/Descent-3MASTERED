@@ -70,8 +70,10 @@ int runLightTests() {
     }
     data.rooms[0].portals.push_back({0,1,0}); data.rooms[1].portals.push_back({0,0,0});
     prepareLightInfluences(data);
-    check(data.rooms[0].light_candidates == std::vector<uint32_t>{0},"Source room lost emitter reference");
-    check(data.rooms[1].light_candidates == std::vector<uint32_t>{0},"Connected room lost emitter reference");
+    check(data.lightCandidates(data.rooms[0].light_candidates).size() == 1 &&
+        data.lightCandidates(data.rooms[0].light_candidates)[0] == 0,"Source room lost emitter reference");
+    check(data.lightCandidates(data.rooms[1].light_candidates).size() == 1 &&
+        data.lightCandidates(data.rooms[1].light_candidates)[0] == 0,"Connected room lost emitter reference");
     check(data.rooms[2].light_candidates.empty(),"Light leaked into disconnected room");
     auto frame = Presentation::freeze(data);
     std::vector<int32_t> submitted{17};
