@@ -2,6 +2,30 @@
 
 ## Current handoff state — view-level fog pipelines verified
 
+October21 continuation after commit1f0bee2: rejected and removed three trials:
+fused diffuse/specular emitter traversal (pixel-exact but006GPU .88->.91ms),
+direct-slot model asset transaction cache (005CPU1.36->1.38,0071.44->1.41;
+no persuasive win), and rasterized65-layer optical integration (002GPU.71->2.10).
+Raster trial used signed exit-entry depths with viewport-layer instancing;
+roof sampled optical maxerror7.43e-5,0078.55e-7, but expensive layered fill.
+All their source changes removed. Raw fused-lighting*,model-slot*,fog-raster*.
+No user preview changed. Runtime restored before next experiment.
+
+Group-width experiments32 and16 gave no consistent cross-scene improvement;
+kept8, now centralized SceneFogFieldLanes for shared indexing and dispatch.
+Raw fog-lanes{16,32}-{clean002,007}; images unchanged. No tuning flag retained.
+
+Current source precomputes triangle cross-product normals once per fog asset
+upload in existing vertex padding (a.w,b.w,c.w); no extra texels/fetches. Both
+exact and field use it. Build fog-plane-build.log and scene tests pass.
+500frame002 GPU field .71->.70ms, exact1.57->1.50ms (single runs; modest/noisy).
+Both benchmark images pixel-exact. Roof audit max1.743e-6; multiview audits
+1.9595e-6/2.4289e-6, CPU references agree. Full64frame rotating roof edge:
+meanerror .6767627 vs .6767604; residualflicker .7776005 vs .7775997. Effectively
+unchanged, NOT a claimed shimmer fix. Final image maxdiff1 on .00059% pixels.
+Raw fog-plane-* and fog-series-edge-motion-plane320. Runtime matches source.
+Lastusage17% used, credits unchanged. User preview still immutable effbe85.
+
 Working source now specializes the scene fragment program at view level into
 no interior fog / exact boundaries / field sampling. No per-material variants.
 Exterior analytic fog remains common. Table upload precedes pipeline selection,

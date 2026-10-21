@@ -2,6 +2,7 @@
 #pragma once
 
 static constexpr int SceneFogFieldSlices = 64;
+static constexpr int SceneFogFieldLanes = 8;
 
 // Shared by the reference surface integrator and the view-field compiler.
 static const char* SceneFogIntersectionShader = R"GLSL(
@@ -13,8 +14,9 @@ bool fogEdge(vec2 start,vec2 finish,vec2 p,float orientation) {
     float side = edge.x*(p.y-start.y)-edge.y*(p.x-start.x);
     return side > 0.0 || (side == 0.0 && (edge.y > 0.0 || (edge.y == 0.0 && edge.x < 0.0)));
 }
-bool fogHit(vec3 a,vec3 b,vec3 c,vec3 direction,out float distance) {
-    vec3 n = cross(b-a,c-a);
+bool fogHit(vec4 packed_a,vec4 packed_b,vec4 packed_c,vec3 direction,out float distance) {
+    vec3 a=packed_a.xyz,b=packed_b.xyz,c=packed_c.xyz;
+    vec3 n = vec3(packed_a.w,packed_b.w,packed_c.w);
     float denominator = dot(n,direction);
     if (abs(denominator) < 1.e-12) return false;
     distance = dot(n,a-eye)/denominator;
@@ -43,16 +45,16 @@ bool fogBounds(vec3 low,vec3 high,vec3 inverse_direction,bvec3 parallel,float le
 // Compile centered optical columns in one pass. Boundary crossings are binned
 // once per ray, analytically integrated per cell, then accumulated in depth.
 static const char* SceneFogFieldComputeShader = R"GLSL(
-layout(local_size_x=8,local_size_y=1) in;
+layout(local_size_x=SCENE_FOG_LANES,local_size_y=1) in;
 layout(rgba32f,binding=0) coherent uniform image3D fog_field_output;
 uniform float fog_field_range;
 const int FOG_SLICES = SCENE_FOG_SLICES;
-shared float slope_events[FOG_SLICES*8];
-shared float depth_events[FOG_SLICES*8];
+shared float slope_events[FOG_SLICES*SCENE_FOG_LANES];
+shared float depth_events[FOG_SLICES*SCENE_FOG_LANES];
 void crossingEvent(float z,float sign,float start) {
     int slice = max(0,int(floor(sqrt(max(0.0,z/fog_field_range))*float(FOG_SLICES))));
     if (slice>=FOG_SLICES) return;
-    int address=slice*8+int(gl_LocalInvocationIndex);
+    int address=slice*SCENE_FOG_LANES+int(gl_LocalInvocationIndex);
     slope_events[address] += sign;
     depth_events[address] += sign*max(z,start);
 }
@@ -89,7 +91,7 @@ void main() {
         if (!first_volume) memoryBarrierImage();
         vec4 density=vec4(appearance.rgb,1.0)/appearance.w;
         for (int i=0;i<FOG_SLICES;++i) {
-            slope_events[i*8+lane]=0.0; depth_events[i*8+lane]=0.0;
+            slope_events[i*SCENE_FOG_LANES+lane]=0.0; depth_events[i*SCENE_FOG_LANES+lane]=0.0;
         }
         int node=0;
         while (node<view_count) {
@@ -103,8 +105,8 @@ void main() {
             for (int triangle=0;triangle<count;++triangle) {
                 int offset=int(high.w)+(int(node_low.w)+triangle)*4;
                 float crossing;
-                if (fogHit(texelFetch(scene_fog,offset).xyz,texelFetch(scene_fog,offset+1).xyz,
-                    texelFetch(scene_fog,offset+2).xyz,direction,crossing) && crossing>1.e-5 && crossing<length) {
+                if (fogHit(texelFetch(scene_fog,offset),texelFetch(scene_fog,offset+1),
+                    texelFetch(scene_fog,offset+2),direction,crossing) && crossing>1.e-5 && crossing<length) {
                     float sign=dot(texelFetch(scene_fog,offset+3).xyz,direction)>0.0 ? 1.0 : -1.0;
                     crossingEvent(crossing*forward_scale,sign,start*forward_scale);
                 }
@@ -115,7 +117,7 @@ void main() {
         float integrated_length=0.0;
         if (first_volume) imageStore(fog_field_output,ivec3(pixel,0),vec4(0));
         for (int slice=0;slice<FOG_SLICES;++slice) {
-            int address=slice*8+lane;
+            int address=slice*SCENE_FOG_LANES+lane;
             float low=float(slice)/float(FOG_SLICES),high=float(slice+1)/float(FOG_SLICES);
             float low_z=low*low*fog_field_range,high_z=high*high*fog_field_range;
             float interval=max(0.0,high_z-max(low_z,start*forward_scale));

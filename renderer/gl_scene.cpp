@@ -316,7 +316,7 @@ vec3 applySceneFog(vec3 radiance,out float transmission) {
             for (int triangle = 0; triangle < count; ++triangle) {
                 int offset = int(high.w)+(int(node_low.w)+triangle)*4;
                 float crossing;
-                if (fogHit(texelFetch(scene_fog,offset).xyz,texelFetch(scene_fog,offset+1).xyz,texelFetch(scene_fog,offset+2).xyz,direction,crossing) &&
+                if (fogHit(texelFetch(scene_fog,offset),texelFetch(scene_fog,offset+1),texelFetch(scene_fog,offset+2),direction,crossing) &&
                     crossing > 1.e-5 && crossing < distance)
                     path += (distance-max(start,crossing))*(dot(texelFetch(scene_fog,offset+3).xyz,direction) > 0.0 ? 1.0 : -1.0);
             }
@@ -1321,8 +1321,15 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
             const auto& a = node.bounds.minimum; const auto& b = node.bounds.maximum;
             fog.insert(fog.end(),{a.x,a.y,a.z,float(node.first),b.x,b.y,b.z,float(node.escape),float(node.count),0,0,0});
         }
-        for (const auto& triangle : volume.boundary) for (const auto& point : {triangle.a,triangle.b,triangle.c,triangle.inward})
-            fog.insert(fog.end(),{point.x,point.y,point.z,0});
+        for (const auto& triangle : volume.boundary) {
+            const auto& a=triangle.a; const auto& b=triangle.b; const auto& c=triangle.c;
+            const d3scene::Vec3 ab{b.x-a.x,b.y-a.y,b.z-a.z},ac{c.x-a.x,c.y-a.y,c.z-a.z};
+            const d3scene::Vec3 normal{ab.y*ac.z-ab.z*ac.y,ab.z*ac.x-ab.x*ac.z,ab.x*ac.y-ab.y*ac.x};
+            // Plane coefficients are asset data, not per-ray arithmetic. Reuse
+            // the padding in the existing three vertex records.
+            fog.insert(fog.end(),{a.x,a.y,a.z,normal.x,b.x,b.y,b.z,normal.y,c.x,c.y,c.z,normal.z,
+                triangle.inward.x,triangle.inward.y,triangle.inward.z,0});
+        }
     }
     if (fog.empty()) fog.resize(4,0);
     glBufferData(GL_TEXTURE_BUFFER,fog.size()*sizeof(float),fog.data(),GL_DYNAMIC_DRAW);
@@ -1418,6 +1425,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
             source += "\nuniform samplerBuffer scene_fog;\n";
             source += SceneFogIntersectionShader;
             source += "\n#define SCENE_FOG_SLICES "+std::to_string(SceneFogFieldSlices)+"\n";
+            source += "\n#define SCENE_FOG_LANES "+std::to_string(SceneFogFieldLanes)+"\n";
             source += SceneFogFieldComputeShader;
             scene_fog_field_shader.AttachComputeSource(source.c_str());
             glUniformBlockBinding(scene_fog_field_shader.Handle(),glGetUniformBlockIndex(scene_fog_field_shader.Handle(),"SceneViewBlock"),8);
@@ -1459,7 +1467,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         scene_fog_field_shader.Use();
         glUniform1f(scene_fog_field_range,field_range);
         glBindImageTexture(0,scene_fog_field_texture,0,GL_TRUE,0,GL_READ_WRITE,GL_RGBA32F);
-        glDispatchCompute((width+7)/8,height,1);
+        glDispatchCompute((width+SceneFogFieldLanes-1)/SceneFogFieldLanes,height,1);
         glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT);
         glBindImageTexture(0,0,0,GL_FALSE,0,GL_WRITE_ONLY,GL_RGBA32F);
         glActiveTexture(GL_TEXTURE12); glBindTexture(GL_TEXTURE_3D,scene_fog_field_texture);
