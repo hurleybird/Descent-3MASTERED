@@ -2,6 +2,21 @@
 
 ## Active 2026-10-21 flare regression investigation
 
+LATEST after6fa4372: supported Windows Release IPO now defaults on through CMake
+CheckIPOSupported, with D3_ENABLE_RELEASE_IPO=OFF or explicit CMake IPO override
+available. Debug unaffected. ipo-default-build.log passes; /GL verified.
+ABBA ipo-combined003 CPU1.7067/1.6235/1.6071/1.7263;
+0051.4057/1.2174/1.2229/1.3768;
+0071.3907/1.2710/1.3600/1.4044. Work CPU improves too. All three images exact.
+Heavy ipo-default-multiview audits pass; image differs only locally around
+Buddybot (plus its secondary-view image), whose pose hash differs despite same
+position. Ordinary ipo-heavy control/IPO similarly differs only bbox
+1279,561..1393,657:0.279% pixels above2. All other pose hashes match. Inspected:
+no fog/cockpit/material defect apparent, but this is NOT a pixel-exact heavy
+comparison and whole-program optimization may alter simulation rounding.
+Normal no-IPO backup out/bloom-demand-candidate.exe; default IPO backup
+out/ipo-default-candidate.exe; owned runtime currently latter. No preview changes.
+
 LATEST after f0aba62: shelved ordered canvas collection composition. Exact
 normal/heavy images, tests passed, but ABBA005 CPU1.33/1.36/1.32/1.29ms did not
 show a win. All source changes removed; out/rejected-canvas-composition.patch

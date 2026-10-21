@@ -10,6 +10,21 @@ SET( CMAKE_ALLOW_LOOSE_LOOP_CONSTRUCTS TRUE )
 
 PROJECT(Descent3Mastered VERSION 0.9.1)
 
+# Optimize across the engine's static-library boundaries in Windows Release
+# builds. Keep Debug iteration unchanged and honor an explicit CMake override.
+if(MSVC)
+	option(D3_ENABLE_RELEASE_IPO "Enable supported whole-program Release optimization" ON)
+	if(D3_ENABLE_RELEASE_IPO AND NOT DEFINED CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE)
+		include(CheckIPOSupported)
+		check_ipo_supported(RESULT D3_IPO_SUPPORTED OUTPUT D3_IPO_DIAGNOSTIC LANGUAGES C CXX)
+		if(D3_IPO_SUPPORTED)
+			set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
+		else()
+			message(WARNING "Release IPO unavailable: ${D3_IPO_DIAGNOSTIC}")
+		endif()
+	endif()
+endif()
+
 function(add_hog_file HOG_NAME HOG_SRC_DIR)
 	string( REPLACE "." "_" HOG_TARGET ${HOG_NAME} )
 	
