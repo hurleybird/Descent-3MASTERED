@@ -2,6 +2,20 @@
 
 ## October 20 continuation
 
+October 21: current/previous normalized animation inputs use ranges in one
+frame-owned, recycled float array rather than separate shared vectors per model.
+Invalid ranges/counts/non-finite values reject; held-frame/rest/keyed/deformation
+tests and the combined runtime audit pass. Images match image-requirements.
+Interleaved save005 no-marker trials: parent 2.027/2.250 ms, packed inputs
+1.938/2.004 ms (variable timings, not a precise speedup claim).
+Fresh no-marker corpus current/original (ms): 000 2.207/1.520;
+001 1.654/1.789; 002 2.830/2.365; 003 3.068/2.574; 004 0.926/0.838;
+005 2.005/0.967; 006 0.966/0.878; 007 2.349/1.222. One trial is ahead,
+seven are still behind; the goal is NOT achieved. All eight current screenshots
+are pixel-exact to the earlier `cpu-oct21-current-savegNNN` captures. Combined
+probe was also visually inspected. Current corpus:
+`cpu-pose-corpus-{current,legacy}-savegNNN-20261021`.
+
 October 21: complete retained model tables own their image dependency unions;
 source preparation no longer traverses their parts when requirements are stable.
 Publication validates the union of retained image requirements once per frame.

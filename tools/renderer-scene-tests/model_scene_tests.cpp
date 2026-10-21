@@ -141,17 +141,18 @@ int runModelSceneTests() {
             ModelInstance instance; instance.identity = 100;
             PreparedModel model; model.asset = rest_asset; model.deferred_pose = true;
             model.previous_pose_valid = history; model.previous_pose_time = 18;
-            if (current_keys) model.pose_inputs = std::make_shared<const std::vector<float>>(1,.75f);
-            if (previous_keys) model.previous_pose_inputs = std::make_shared<const std::vector<float>>(1,.25f);
+            const float current_key = .75f, previous_key = .25f;
+            if (current_keys) model.pose_inputs = input.appendPoseInputs(&current_key,1);
+            if (previous_keys) model.previous_pose_inputs = input.appendPoseInputs(&previous_key,1);
             model.parts.resize(1); model.parts[0].surfaces.resize(1);
             input.appendModel(instance,std::move(model)); input.model_instances.push_back(instance);
             const auto frame = Presentation::freeze(input);
             const auto& pose = frame->resolvedModel(0,0).parts[0];
             const auto& source = input.modelsFor(0)[0];
             const auto expected = ComposeModelPose(*animation,EvaluateModelPose(*animation,
-                source.pose_inputs ? source.pose_inputs->data() : nullptr,19));
+                input.poseInputs(source.pose_inputs).data(),19));
             const auto prior = history ? ComposeModelPose(*animation,EvaluateModelPose(*animation,
-                source.previous_pose_inputs ? source.previous_pose_inputs->data() : nullptr,18)) : expected;
+                input.poseInputs(source.previous_pose_inputs).data(),18)) : expected;
             check(pose.current.position.x == expected.submodels[0].translation.x &&
                 pose.current.position.y == expected.submodels[0].translation.y &&
                 pose.previous.position.x == prior.submodels[0].translation.x &&
@@ -589,15 +590,18 @@ int runModelSceneTests() {
             deferred.simulation_time = sample*.11;
             auto& input = deferred.modelsFor(0)[0];
             input.previous_pose_time = deferred.simulation_time-.07;
-            input.pose_inputs = std::make_shared<const std::vector<float>>(2,sample/40.f);
-            input.previous_pose_inputs = std::make_shared<const std::vector<float>>(2,(40-sample)/40.f);
+            const float current_keys[] = {sample/40.f,sample/40.f};
+            const float previous_keys[] = {(40-sample)/40.f,(40-sample)/40.f};
+            deferred.model_pose_inputs.clear();
+            input.pose_inputs = deferred.appendPoseInputs(current_keys,2);
+            input.previous_pose_inputs = deferred.appendPoseInputs(previous_keys,2);
             const auto published = Presentation::freeze(deferred);
             const auto coarse = published->data().model_instances[0].render_bounds;
             const auto& resolved = published->resolvedModel(0,0);
             check(&resolved == &published->resolvedModel(0,0),"Repeated view rebuilt a resolved model");
             check(published->data().modelsFor(0)[0].deferred_pose,"Resolution mutated published inputs");
-            const auto expected = ComposeModelPose(*tracks,EvaluateModelPose(*tracks,input.pose_inputs->data(),float(deferred.simulation_time)));
-            const auto prior = ComposeModelPose(*tracks,EvaluateModelPose(*tracks,input.previous_pose_inputs->data(),float(input.previous_pose_time)));
+            const auto expected = ComposeModelPose(*tracks,EvaluateModelPose(*tracks,deferred.poseInputs(input.pose_inputs).data(),float(deferred.simulation_time)));
+            const auto prior = ComposeModelPose(*tracks,EvaluateModelPose(*tracks,deferred.poseInputs(input.previous_pose_inputs).data(),float(input.previous_pose_time)));
             VisibleSurface motion_surface; motion_surface.model = true; motion_surface.part_index = 1;
             const auto motion = surfaceMotion(*published,motion_surface,true);
             const auto expected_previous = compose(instance.previous,resolved.parts[1].previous);
@@ -684,7 +688,12 @@ int runModelSceneTests() {
         tracks->submodel.clear(); assets.removeModel(80);
         check(held->resolvedModel(0,0).parts[0].vertices[0].x == held_x,"Held pose depended on unloaded animation");
         auto invalid = deferred;
-        invalid.modelsFor(0)[0].pose_inputs = std::make_shared<const std::vector<float>>(1,.5f);
+        const float key = .5f;
+        invalid.modelsFor(0)[0].pose_inputs = invalid.appendPoseInputs(&key,1);
+        rejects([&] { Presentation::freeze(invalid); });
+        invalid = deferred; invalid.modelsFor(0)[0].pose_inputs = {UINT32_MAX,2};
+        rejects([&] { Presentation::freeze(invalid); });
+        invalid = deferred; invalid.model_pose_inputs[0] = std::numeric_limits<float>::quiet_NaN();
         rejects([&] { Presentation::freeze(invalid); });
         invalid = deferred; invalid.modelsFor(0)[0].deformation = std::numeric_limits<float>::infinity();
         rejects([&] { Presentation::freeze(invalid); });

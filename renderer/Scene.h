@@ -572,13 +572,16 @@ struct ModelBindingInputs {
             subobject_mask == other.subobject_mask && material_palette == other.material_palette;
     }
 };
+struct PoseInputRange {
+    uint32_t offset = 0, count = 0;
+    bool empty() const { return count == 0; }
+};
 struct PreparedModel {
     ModelAssetRef asset;
     ModelBindingInputs binding_inputs;
     SurfaceModulation modulation;
     uint64_t pose_source_revision = 0;
-    std::shared_ptr<const std::vector<float>> pose_inputs;
-    std::shared_ptr<const std::vector<float>> previous_pose_inputs;
+    PoseInputRange pose_inputs, previous_pose_inputs;
     bool deferred_pose = false, previous_pose_valid = false;
     double previous_pose_time = 0;
     float deformation = 0, previous_deformation = 0;
@@ -779,6 +782,22 @@ struct FrameData {
     std::vector<ObjectState> objects;
     std::vector<ModelInstance> model_instances;
     std::vector<PreparedModel> model_variants;
+    // Dynamic animation samples belong to the frame, not separately allocated
+    // reference-counted vectors on each model. Ranges survive vector growth.
+    std::vector<float> model_pose_inputs;
+    PoseInputRange appendPoseInputs(const float* values,size_t count) {
+        if (!count) return {};
+        if (!values || count > UINT32_MAX || model_pose_inputs.size() > UINT32_MAX-count)
+            throw std::invalid_argument("Invalid pose input count");
+        const PoseInputRange range{uint32_t(model_pose_inputs.size()),uint32_t(count)};
+        model_pose_inputs.insert(model_pose_inputs.end(),values,values+count);
+        return range;
+    }
+    ModelRange<const float> poseInputs(PoseInputRange range) const {
+        if (range.offset > model_pose_inputs.size() || range.count > model_pose_inputs.size()-range.offset)
+            throw std::invalid_argument("Invalid pose input range");
+        return {range.count ? model_pose_inputs.data()+range.offset : nullptr,range.count};
+    }
     ModelRange<PreparedModel> variants(const ModelInstance& instance) {
         if (instance.model_begin > model_variants.size() || instance.model_count > model_variants.size()-instance.model_begin)
             throw std::invalid_argument("Invalid model variant range");

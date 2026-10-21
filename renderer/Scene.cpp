@@ -506,10 +506,10 @@ const PreparedModel& Presentation::resolvedModel(size_t instance,size_t variant)
     if (cached) return *cached;
     auto result = std::make_unique<PreparedModel>(source);
     const auto& animation = *source.asset->geometry().animation;
-    const auto input = [](const std::shared_ptr<const std::vector<float>>& values) { return values ? values->data() : nullptr; };
+    const auto input = [&](PoseInputRange range) { return data_.poseInputs(range).data(); };
     const auto& rest = source.asset->geometry().rest_pose;
-    const bool current_rest = !source.pose_inputs && !rest.empty();
-    const bool previous_rest = !source.previous_pose_inputs && !rest.empty();
+    const bool current_rest = source.pose_inputs.empty() && !rest.empty();
+    const bool previous_rest = source.previous_pose_inputs.empty() && !rest.empty();
     ModelTransforms current,previous;
     if (!current_rest) current = ComposeModelPose(animation,EvaluateModelPose(animation,input(source.pose_inputs),float(data_.simulation_time)));
     if (source.previous_pose_valid && !previous_rest)
@@ -571,6 +571,7 @@ Presentation::~Presentation() {
     reclaim(data_.objects,clean.objects);
     reclaim(data_.model_instances,clean.model_instances);
     reclaim(data_.model_variants,clean.model_variants);
+    reclaim(data_.model_pose_inputs,clean.model_pose_inputs);
     reclaim(data_.lights,clean.lights);
     reclaim(data_.light_candidate_indices,clean.light_candidate_indices);
     reclaim(data_.images,clean.images);
@@ -678,6 +679,8 @@ PresentationRef Presentation::complete(FrameData data) {
     image_requirements.begin();
     for (auto index : data.light_candidate_indices)
         require(index < data.lights.size(),"Candidate table references missing emitter");
+    for (float value : data.model_pose_inputs)
+        require(std::isfinite(value) && value >= 0 && value <= 1,"Invalid animation input");
     const auto validateIndices = [&](const SurfaceBinding& surface) {
         require(!surface.reflection || surface.reflection->id().lifetime == data.scene_lifetime,"Stale reflection asset in frame");
         for (auto index : surface.light_indices) require(index < data.lights.size(), "Surface references missing emitter");
@@ -815,9 +818,9 @@ PresentationRef Presentation::complete(FrameData data) {
                 require(model.asset->geometry().animation != nullptr,"Deferred pose has no owned animation");
                 require(std::isfinite(model.deformation) && std::isfinite(model.previous_deformation) &&
                     std::isfinite(model.previous_pose_time),"Invalid deferred pose inputs");
-                for (const auto* input : {&model.pose_inputs,&model.previous_pose_inputs}) if (*input) {
-                    require((*input)->size() == model.asset->geometry().parts.size(),"Incomplete animation inputs");
-                    for (float value : **input) require(std::isfinite(value) && value >= 0 && value <= 1,"Invalid animation input");
+                for (const auto range : {model.pose_inputs,model.previous_pose_inputs}) {
+                    const auto input = data.poseInputs(range);
+                    require(input.empty() || input.size() == model.asset->geometry().parts.size(),"Incomplete animation inputs");
                 }
             }
             require(model.parts.size() == model.asset->geometry().parts.size(), "Incomplete object pose");

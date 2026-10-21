@@ -1,5 +1,23 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## October 21 continuation (supersedes timings below)
+
+Active target remains beating **every** pre-rewrite CPU baseline without
+compromising architecture. Latest no-marker corpus has one trial ahead and
+seven behind; dense total ~3.068 vs 2.574 ms, wall-facing save005 ~2.005 vs
+0.967 ms. This is not completion or gameplay qualification. See the top of
+`renderer-cpu-ownership-repair.md` for exact measurements/capture paths.
+The inspection runtime is `C:/tmp/D3RendererVerification/scene-view-test`;
+Candidate, Previous Candidate, main checkout and Desktop remain untouched.
+No shadows or cancelled cockpit art work resumed.
+
+Current repairs include retained table dependency unions, frame storage reuse,
+lazy/rest model poses, packed light candidates and animation inputs, exact
+procedural kernels, separate samplers, and reusable image upload storage.
+All eight latest current images match the earlier procedural-kernel checkpoint;
+this is not an assertion of pre-rewrite visual equivalence. `lib/gitinfo.h` is
+untracked user/generated material; do not add it to checkpoints.
+
 ## October 17 continuation (supersedes the performance status below)
 
 October 20: frame-owned image/resource bindings now preserve material tables

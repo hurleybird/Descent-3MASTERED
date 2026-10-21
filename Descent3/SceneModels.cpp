@@ -220,6 +220,7 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::Presenta
         previous_frame = nullptr;
     data.model_instances.reserve(data.objects.size()+3);
     data.model_variants.reserve(previous_frame ? previous->model_variants.size() : data.objects.size());
+    if (previous_frame) data.model_pose_inputs.reserve(previous->model_pose_inputs.size());
     const bool audit_geometry = FindArg("-scene-geometry-revision-audit") != 0;
     const bool lod_probe = SceneGeometryInspection() && FindArg("-scene-lod-probe");
     const bool deformation_probe = SceneGeometryInspection() && FindArg("-scene-deformation-probe");
@@ -333,14 +334,16 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::Presenta
                 else SetNormalizedTimeAnim(source->rtype.pobj_info.anim_frame, normalized, model);
                 input = normalized;
             }
-            const bool same_inputs = history && (input ? history->pose_inputs &&
-                history->pose_inputs->size() == size_t(model->n_models) &&
-                std::equal(history->pose_inputs->begin(),history->pose_inputs->end(),input) : !history->pose_inputs);
-            if (same_inputs) variant.pose_inputs = history->pose_inputs;
-            else if (input) variant.pose_inputs = std::make_shared<const std::vector<float>>(input,input+model->n_models);
+            if (input) variant.pose_inputs = data.appendPoseInputs(input,model->n_models);
             variant.deferred_pose = true;
             variant.previous_pose_valid = history && instance.has_previous;
-            variant.previous_pose_inputs = history ? history->pose_inputs : variant.pose_inputs;
+            variant.previous_pose_inputs = variant.pose_inputs;
+            if (history) {
+                const auto prior = previous->poseInputs(history->pose_inputs);
+                const bool same_inputs = prior.size() == variant.pose_inputs.count &&
+                    (prior.empty() || std::equal(prior.begin(),prior.end(),input));
+                if (!same_inputs) variant.previous_pose_inputs = data.appendPoseInputs(prior.data(),prior.size());
+            }
             variant.previous_pose_time = history ? previous->simulation_time : data.simulation_time;
             variant.deformation = effect.deformation;
             variant.previous_deformation = history ? history->deformation : effect.deformation;
@@ -455,7 +458,7 @@ void AuditGameModelPoses(const d3scene::Presentation& frame) {
             if (!source.deferred_pose) continue;
             const auto* authored = GetPolymodelPointer(int(source.asset->id().slot));
             const auto expected = ComposeModelPose(*authored,EvaluateModelPose(*authored,
-                source.pose_inputs ? source.pose_inputs->data() : nullptr,float(frame.data().simulation_time)));
+                frame.data().poseInputs(source.pose_inputs).data(),float(frame.data().simulation_time)));
             const auto& resolved = frame.resolvedModel(i,v);
             for (int part = 0; part < expected.count; ++part) {
                 const auto a = value(expected.submodels[part]); const auto& b = resolved.parts[part].current;
