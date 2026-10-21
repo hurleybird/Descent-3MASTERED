@@ -2,6 +2,19 @@
 
 ## Current handoff state — view-level fog pipelines verified
 
+Latest source: portal aperture bounds stream clipped vertices/intersections
+directly, removing two temporary polygons per traversed portal. A bounded ring
+queue and queued/exterior scratch retain capacity; no view result borrows them.
+512 deterministic tilted/eye-crossing camera cases compare exactly to the old
+materialized clipping algorithm. Existing cycle/widening/door/exterior tests pass.
+Build portal-stream-build.log; tests portal-stream-tests.log. 005/007 and combined
+AO/bloom/resource/deformation/auxiliary images pixel-exact to plane checkpoint.
+CPU whole-frame timings drifted upward (0051.37->1.50,0071.48->1.80); do NOT
+claim a measured speedup. This removes needless intermediate work/allocations,
+but remaining CPU goal unmet. Fresh interleaved old/new BEFORE this change:
+0051.18/1.37ms,0071.41/1.48ms. Raw plane-baseline-*,portal-stream-*.
+Runtime matches source; no user preview changes, no active captures/builds.
+
 October21 continuation after commit1f0bee2: rejected and removed three trials:
 fused diffuse/specular emitter traversal (pixel-exact but006GPU .88->.91ms),
 direct-slot model asset transaction cache (005CPU1.36->1.38,0071.44->1.41;

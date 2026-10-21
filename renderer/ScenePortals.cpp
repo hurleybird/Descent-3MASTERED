@@ -2,7 +2,6 @@
 #include "ScenePortals.h"
 #include <algorithm>
 #include <unordered_map>
-#include <deque>
 #include <cmath>
 #include <limits>
 namespace d3scene {
@@ -32,30 +31,32 @@ PortalWindow projectedPortal(const Camera& camera,const MeshGeometry& mesh,const
     const double facing = double(n.x)*(eye.x-first.x)+double(n.y)*(eye.y-first.y)+double(n.z)*(eye.z-first.z);
     const double tolerance = 2.e-6*(1+std::abs(eye.x)+std::abs(eye.y)+std::abs(eye.z));
     if (!two_sided && facing < -tolerance) return {};
-    std::vector<ClipPosition> input, clipped;
-    for (const auto& corner : polygon.corners) input.push_back(project(camera,mesh.vertices[corner.vertex]));
+    const double infinity = std::numeric_limits<double>::infinity();
+    PortalWindow result{infinity,infinity,-infinity,-infinity,false};
+    const auto include = [&](const ClipPosition& p) {
+        result.visible = true;
+        result.left = std::min(result.left,p.x/p.w); result.right = std::max(result.right,p.x/p.w);
+        result.bottom = std::min(result.bottom,p.y/p.w); result.top = std::max(result.top,p.y/p.w);
+    };
     // Portal apertures before the geometry near plane must remain open: clipping
     // them at near=1 causes disappearing rooms as the camera crosses a doorway.
     constexpr double eye_clip = 1.e-5;
-    auto previous = input.back();
-    for (const auto current : input) {
+    // The consumer needs only bounds, not a temporary clipped polygon. Stream
+    // the exact same vertices/intersections directly into those bounds.
+    auto previous = project(camera,mesh.vertices[polygon.corners.back().vertex]);
+    for (const auto& corner : polygon.corners) {
+        const auto current = project(camera,mesh.vertices[corner.vertex]);
         if ((previous.w >= eye_clip) != (current.w >= eye_clip)) {
             const double t = (eye_clip-previous.w)/(current.w-previous.w);
-            clipped.push_back({previous.x+(current.x-previous.x)*t,previous.y+(current.y-previous.y)*t,0,eye_clip});
+            include({previous.x+(current.x-previous.x)*t,previous.y+(current.y-previous.y)*t,0,eye_clip});
         }
-        if (current.w >= eye_clip) clipped.push_back(current);
+        if (current.w >= eye_clip) include(current);
         previous = current;
     }
-    if (clipped.empty()) {
+    if (!result.visible) {
         // At the portal plane, rounding must not close the aperture.
         if (std::abs(facing) <= tolerance) return {-1,-1,1,1,true};
         return {};
-    }
-    const double infinity = std::numeric_limits<double>::infinity();
-    PortalWindow result{infinity,infinity,-infinity,-infinity,true};
-    for (const auto p : clipped) {
-        result.left = std::min(result.left,p.x/p.w); result.right = std::max(result.right,p.x/p.w);
-        result.bottom = std::min(result.bottom,p.y/p.w); result.top = std::max(result.top,p.y/p.w);
     }
     return result;
 }
@@ -78,9 +79,14 @@ PortalVisibility queryPortalVisibility(const Presentation& frame,const View& vie
         result.exterior = {-1,-1,1,1,true};
         return result;
     }
-    std::deque<size_t> queue;
-    std::vector<bool> queued(rooms.size(),false);
-    std::vector<PortalWindow> exterior_bounds(rooms.size());
+    // Scratch is query-local in meaning and never escapes into the result.
+    // The queued bit bounds simultaneous entries by the number of rooms.
+    static thread_local std::vector<size_t> queue;
+    static thread_local std::vector<bool> queued;
+    static thread_local std::vector<PortalWindow> exterior_bounds;
+    queue.resize(rooms.size()); queued.assign(rooms.size(),false);
+    exterior_bounds.assign(rooms.size(),{});
+    size_t queue_head = 0, queue_count = 0;
     for (size_t i = 0; i < rooms.size(); ++i) if (rooms[i].exterior)
         exterior_bounds[i] = rooms[i].asset->geometry().vertices.empty() ? PortalWindow{-1,-1,1,1,true} :
             projectedBounds(camera,rooms[i].asset->bounds());
@@ -95,7 +101,10 @@ PortalVisibility queryPortalVisibility(const Presentation& frame,const View& vie
                 std::max(target.right,window.right),std::max(target.top,window.top),true};
         }
         target = window;
-        if (!queued[index]) { queue.push_back(index); queued[index] = true; }
+        if (!queued[index]) {
+            queue[(queue_head+queue_count)%queue.size()] = index;
+            ++queue_count; queued[index] = true;
+        }
     };
     if (view.exterior_origin) {
         // Seed available exterior shells, then enter interiors only through
@@ -103,8 +112,9 @@ PortalVisibility queryPortalVisibility(const Presentation& frame,const View& vie
         for (size_t i = 0; i < rooms.size(); ++i)
             if (rooms[i].exterior) widen(i,{-1,-1,1,1,true});
     } else widen(root->second,{-1,-1,1,1,true});
-    while (!queue.empty()) {
-        const size_t index = queue.front(); queue.pop_front(); queued[index] = false;
+    while (queue_count) {
+        const size_t index = queue[queue_head];
+        queue_head = (queue_head+1)%queue.size(); --queue_count; queued[index] = false;
         const auto& room = rooms[index];
         const auto window = windows[index];
         if (room.exterior) {

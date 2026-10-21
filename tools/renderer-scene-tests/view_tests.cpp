@@ -746,6 +746,57 @@ int runSceneViewTests() {
         identical=a.surfaces[i].room_index==repeated.surfaces[i].room_index && a.surfaces[i].depth==repeated.surfaces[i].depth;
     check(identical,"Auxiliary view mutated main visibility");
     check(frame->data().rooms.size()==10&&frame->data().objects.size()==3,"Visibility discarded off-camera scene content");
+    {
+        // Independent materialized-clipping reference for streaming aperture
+        // bounds, including eye-plane crossings and entirely hidden openings.
+        using namespace d3scene;
+        SceneAssets fixture_assets;
+        FrameData data; data.sequence=1; data.scene_lifetime=fixture_assets.lifetime();
+        appendRoom(fixture_assets,data,triangle(0,2));
+        appendRoom(fixture_assets,data,triangle(0,4));
+        Portal portal; portal.polygon=0; portal.destination_room=1; portal.two_sided=true;
+        data.rooms[0].portals.push_back(portal);
+        const auto frame=Presentation::freeze(data);
+        const auto& mesh=frame->data().rooms[0].asset->geometry();
+        for (int sample=0;sample<512;++sample) {
+            auto request=view(); request.room=0;
+            const float angle=float(sample)*.071f;
+            request.camera.position={float(sample%17-8)*.2f,float(sample%11-5)*.2f,float(sample%23)*.2f};
+            request.camera.right={std::cos(angle),0,-std::sin(angle)};
+            request.camera.forward={std::sin(angle),0,std::cos(angle)};
+            const auto camera=prepareCamera(request);
+            std::vector<ClipPosition> input,clipped;
+            for (auto p : mesh.vertices) input.push_back(project(camera,p));
+            auto previous=input.back();
+            constexpr double eye_clip=1.e-5;
+            for (auto current : input) {
+                if ((previous.w>=eye_clip)!=(current.w>=eye_clip)) {
+                    const double t=(eye_clip-previous.w)/(current.w-previous.w);
+                    clipped.push_back({previous.x+(current.x-previous.x)*t,previous.y+(current.y-previous.y)*t,0,eye_clip});
+                }
+                if (current.w>=eye_clip) clipped.push_back(current);
+                previous=current;
+            }
+            const double infinity=std::numeric_limits<double>::infinity();
+            PortalWindow expected{infinity,infinity,-infinity,-infinity,!clipped.empty()};
+            for (auto p : clipped) {
+                expected.left=std::min(expected.left,p.x/p.w); expected.right=std::max(expected.right,p.x/p.w);
+                expected.bottom=std::min(expected.bottom,p.y/p.w); expected.top=std::max(expected.top,p.y/p.w);
+            }
+            const auto eye=request.camera.position;
+            if (clipped.empty() && std::abs(2.0-eye.z)<=2.e-6*(1+std::abs(eye.x)+std::abs(eye.y)+std::abs(eye.z)))
+                expected={-1,-1,1,1,true};
+            expected.left=std::max(-1.0,expected.left); expected.right=std::min(1.0,expected.right);
+            expected.bottom=std::max(-1.0,expected.bottom); expected.top=std::min(1.0,expected.top);
+            expected.visible=expected.visible && expected.left<=expected.right && expected.bottom<=expected.top;
+            const auto result=queryPortalVisibility(*frame,request,camera);
+            const auto actual=result.rooms[1];
+            check(actual.visible==expected.visible && (!expected.visible ||
+                (actual.left==expected.left && actual.right==expected.right &&
+                 actual.bottom==expected.bottom && actual.top==expected.top)),
+                "Streaming portal clipping differs from materialized reference");
+        }
+    }
     d3scene::FrameData portals; portals.sequence = 2; portals.scene_lifetime = assets.lifetime();
     for (int i = 0; i < 4; ++i) appendRoom(assets,portals,triangle(0,2.f+i*2));
     portals.rooms[0].portals.push_back({0,1});
