@@ -2,6 +2,18 @@
 
 ## October 20 continuation
 
+Identity lookup uses packed, frame-owned tables rather than per-entry hash nodes.
+Extraction/model history reuse the previous presentation's indices. Light/room
+reachability uses one dense relation and a reusable traversal queue; exterior
+reachability is computed once per light, not once per terrain patch. Contract
+tests include growth, duplicates, signed/sparse/high-bit identities and copies.
+`cpu-packed-relations-20261020-savegNNN` CPU means: 4.87, 3.38, 6.63, 6.38,
+1.41, 5.48, 1.74, 5.38 ms. Mixed/noisy timings do not establish a corpus speedup.
+Seven captures match the deferred checkpoint exactly; save000's first capture
+has a localized moving-object difference, and an unchanged-executable repeat
+matches exactly. The combined auxiliary/deformation/resource audit probe matches
+exactly. These changes eliminate node allocations, not whole-frame allocation.
+
 World model evaluation is now demand-driven. Published frames retain owned
 animation inputs and conservative animation bounds; a view resolves the selected
 variant only after room/coarse-bound rejection. Current/previous deformation and

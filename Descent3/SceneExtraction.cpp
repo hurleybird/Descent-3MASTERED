@@ -6,7 +6,6 @@
 #include <algorithm>
 #include <limits>
 #include <stdexcept>
-#include <unordered_map>
 
 namespace {
 uint64_t Sequence = 0;
@@ -88,7 +87,7 @@ void InvalidateGameSceneGeometry() {
 uint64_t GameSceneGeometryRevision() { return GeometryEpoch; }
 
 d3scene::FrameData ExtractGameFrame(double time, float delta, bool paused, bool advance_history,
-    const d3scene::FrameData* retained_rooms,bool audit_geometry) {
+    const d3scene::Presentation* retained_frame,bool audit_geometry) {
     if (Sequence == std::numeric_limits<uint64_t>::max())
         throw std::overflow_error("Presentation sequence exhausted");
     auto& assets = d3scene::assets();
@@ -101,9 +100,7 @@ d3scene::FrameData ExtractGameFrame(double time, float delta, bool paused, bool 
     // No domain is marked executable until its complete preparation exists.
     // Capturing source object transforms is NOT equivalent to preparing models.
     data.pending_domains = d3scene::AllPendingDomains;
-    std::unordered_map<int,const d3scene::RoomState*> retained;
-    if (retained_rooms && retained_rooms->scene_lifetime == data.scene_lifetime)
-        for (const auto& room : retained_rooms->rooms) retained.emplace(room.number,&room);
+    if (retained_frame && retained_frame->data().scene_lifetime != data.scene_lifetime) retained_frame = nullptr;
     for (int i = 0; i < MAX_ROOMS; ++i) {
         if (!Rooms[i].used) { assets.removeRoom(i); continue; }
         const room& source = Rooms[i];
@@ -126,8 +123,8 @@ d3scene::FrameData ExtractGameFrame(double time, float delta, bool paused, bool 
         state.fog_color = {source.fog_r, source.fog_g, source.fog_b};
         state.pulse_time = source.pulse_time;
         state.pulse_offset = source.pulse_offset;
-        const auto previous_room = retained.find(i);
-        const d3scene::RoomState* cached = previous_room == retained.end() ? nullptr : previous_room->second;
+        const auto* previous_room = retained_frame ? retained_frame->roomIndices().find(i) : nullptr;
+        const d3scene::RoomState* cached = previous_room ? &retained_frame->data().rooms[previous_room->second] : nullptr;
         bool reuse = cached && source.mirror_face < 0 && cached->asset->id() == state.asset->id() &&
             cached->surfaces.publishedFor(state.asset->id()) && cached->authored_flags == state.authored_flags &&
             cached->portals.size() == size_t(source.num_portals);
@@ -167,7 +164,8 @@ d3scene::FrameData ExtractGameFrame(double time, float delta, bool paused, bool 
         }
         data.rooms.push_back(std::move(state));
     }
-    std::unordered_map<uint32_t, const d3scene::ObjectState*> previous_objects;
+    d3scene::SceneLookup<uint32_t, const d3scene::ObjectState*> previous_objects;
+    previous_objects.reserve(PreviousObjects.size());
     if (PreviousLifetime == data.scene_lifetime && PreviousTime <= time)
         for (const auto& object : PreviousObjects) previous_objects.emplace(object.handle, &object);
     for (int i = 0; i <= Highest_object_index; ++i) {
@@ -196,8 +194,8 @@ d3scene::FrameData ExtractGameFrame(double time, float delta, bool paused, bool 
     return data;
 }
 d3scene::PresentationRef ExtractGamePresentation(double time,float delta,bool paused,bool advance_history,
-    const d3scene::FrameData* retained_rooms) {
-    return d3scene::Presentation::freeze(ExtractGameFrame(time,delta,paused,advance_history,retained_rooms));
+    const d3scene::Presentation* retained_frame) {
+    return d3scene::Presentation::freeze(ExtractGameFrame(time,delta,paused,advance_history,retained_frame));
 }
 
 d3scene::View MakeGameSceneView(d3scene::ViewKind kind, uint64_t history_key,

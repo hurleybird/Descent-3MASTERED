@@ -4,8 +4,6 @@
 #include "SceneTerrain.h"
 #include <algorithm>
 #include <cmath>
-#include <unordered_map>
-#include <unordered_set>
 
 namespace d3scene {
 float roomLightScalar(float time, uint8_t pulse, uint8_t offset, uint32_t room, bool strobe, bool flicker, bool editor) {
@@ -99,52 +97,68 @@ void prepareLightInfluences(FrameData& data) {
         if (!mesh.surface.unlit) for (size_t i = 0; i < data.lights.size(); ++i)
             mesh.surface.light_indices.push_back(static_cast<uint32_t>(i));
     }
-    std::unordered_map<int32_t,const RoomState*> rooms;
-    for (const auto& room : data.rooms) rooms.emplace(room.number,&room);
-    std::vector<std::unordered_set<int32_t>> reachable(data.lights.size());
+    SceneLookup<int32_t,size_t> rooms;
+    rooms.reserve(data.rooms.size());
+    for (size_t i = 0; i < data.rooms.size(); ++i) rooms.emplace(data.rooms[i].number,i);
+    // Reachability is a dense light/room relation, not a separately allocated
+    // hash node for every visited room. Traversal and all consumers share it.
+    const size_t room_count = data.rooms.size();
+    if (room_count && data.lights.size() > (std::numeric_limits<size_t>::max)()/room_count)
+        throw std::length_error("Light reachability table overflow");
+    std::vector<uint8_t> reachable(data.lights.size()*room_count,0);
+    std::vector<uint8_t> exterior(data.lights.size(),0);
+    std::vector<size_t> queue;
+    queue.reserve(room_count);
     for (size_t i = 0; i < data.lights.size(); ++i) {
         const auto& light = data.lights[i];
-        std::vector<int32_t> queue;
-        if (rooms.count(light.room)) { queue.push_back(light.room); reachable[i].insert(light.room); }
+        queue.clear();
+        const auto* origin = rooms.find(light.room);
+        if (origin) { queue.push_back(origin->second); reachable[i*room_count+origin->second] = 1; }
         else { // Exterior policy remains conservative until terrain portals migrate.
-            for (const auto& room : data.rooms) reachable[i].insert(room.number);
+            std::fill(reachable.begin()+i*room_count,reachable.begin()+(i+1)*room_count,1);
+            exterior[i] = 1;
         }
         for (size_t next = 0; next < queue.size(); ++next) {
-            const auto& room = *rooms.at(queue[next]);
+            const auto& room = data.rooms[queue[next]];
+            exterior[i] |= room.exterior;
             for (const auto& portal : room.portals) {
-                if (!rooms.count(portal.destination_room) || reachable[i].count(portal.destination_room)) continue;
+                const auto* destination = rooms.find(portal.destination_room);
+                if (!destination || reachable[i*room_count+destination->second]) continue;
                 if (!touches(light,MeshView(room.asset->geometry()),room.asset->geometry().polygons[portal.polygon],{})) continue;
-                reachable[i].insert(portal.destination_room); queue.push_back(portal.destination_room);
+                reachable[i*room_count+destination->second] = 1; queue.push_back(destination->second);
             }
         }
     }
-    for (auto& room : data.rooms) {
+    for (size_t r = 0; r < room_count; ++r) {
+        auto& room = data.rooms[r];
         room.light_influences_prepared = true;
         auto& candidates = room.light_candidates;
         candidates.clear();
-        for (size_t i = 0; i < data.lights.size(); ++i) if (reachable[i].count(room.number) &&
+        for (size_t i = 0; i < data.lights.size(); ++i) if (reachable[i*room_count+r] &&
             touchesBounds(data.lights[i],room.asset->bounds())) candidates.push_back(uint32_t(i));
     }
-    for (auto& object : data.model_instances) for (auto& model : object.models) for (size_t part = 0; part < model.parts.size(); ++part) {
+    for (auto& object : data.model_instances) {
+      const auto* room = rooms.find(object.room);
+      for (auto& model : object.models) for (size_t part = 0; part < model.parts.size(); ++part) {
         auto& pose = model.parts[part];
         pose.light_influences_prepared = true;
         auto& candidates = pose.light_candidates;
         candidates.clear();
         if (!pose.draw) continue;
-        const auto transform = compose(object.current,pose.current);
-        const auto bounds = transformBounds(transform,model.asset->geometry().parts[part].local_bounds);
+        Bounds bounds;
+        if (!model.deferred_pose && pose.vertices.empty())
+            bounds = transformBounds(compose(object.current,pose.current),model.asset->geometry().parts[part].local_bounds);
         for (size_t i = 0; i < data.lights.size(); ++i)
-            if ((object.room < 0 || reachable[i].count(object.room)) &&
+            if ((object.room < 0 || (room && reachable[i*room_count+room->second])) &&
                 (model.deferred_pose || !pose.vertices.empty() || touchesBounds(data.lights[i],bounds))) candidates.push_back(uint32_t(i));
+    }
     }
     if (data.terrain.asset) for (size_t patch = 0; patch < data.terrain.patches.size(); ++patch) {
         const auto& bounds = data.terrain.asset->patches()[patch].bounds;
         std::vector<uint32_t> indices;
         for (size_t light = 0; light < data.lights.size(); ++light) {
             const auto& source = data.lights[light];
-            bool exterior = !rooms.count(source.room);
-            for (auto room : reachable[light]) exterior = exterior || rooms.at(room)->exterior;
-            if (!exterior) continue;
+            if (!exterior[light]) continue;
             const auto axis = [](float p,float lo,float hi) { return p-std::max(lo,std::min(p,hi)); };
             const float x = axis(source.position.x,bounds.minimum.x,bounds.maximum.x);
             const float y = axis(source.position.y,bounds.minimum.y,bounds.maximum.y);

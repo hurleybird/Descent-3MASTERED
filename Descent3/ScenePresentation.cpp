@@ -466,7 +466,7 @@ d3scene::PresentationRef PrepareGamePresentation() {
     if (!retain_rooms) ResetSplitSpecularTexturePairCache();
     const unsigned int simulation_random = ps_rand_get_state();
     auto data = [&] { PERF_MARKER_SCOPE("Scene.Extract"); return ExtractGameFrame(Gametime, Frametime, Game_paused,true,
-        retain_rooms && previous_models ? &previous_models->data() : nullptr,FindArg("-scene-geometry-revision-audit") != 0); }();
+        retain_rooms ? previous_models.get() : nullptr,FindArg("-scene-geometry-revision-audit") != 0); }();
     const auto control_delta = GetPlayerControlledTranslationDelta();
     data.player_control_delta = {control_delta.x,control_delta.y,control_delta.z};
     data.afterburner_factor = (std::max)(0.f,(std::min)(1.f,Render_afterburner_visual_factor));
@@ -574,7 +574,7 @@ d3scene::PresentationRef PrepareGamePresentation() {
     { PERF_MARKER_SCOPE("Scene.PrepareTerrain"); PrepareGameTerrain(data); }
     { PERF_MARKER_SCOPE("Scene.PrepareSky"); PrepareGameSky(data); }
     { PERF_MARKER_SCOPE("Scene.PrepareEffects"); PrepareGameEffects(data); }
-    { PERF_MARKER_SCOPE("Scene.PrepareModels"); PrepareGameModelInstances(data, previous_models ? &previous_models->data() : nullptr,retain_rooms); }
+    { PERF_MARKER_SCOPE("Scene.PrepareModels"); PrepareGameModelInstances(data, previous_models.get(),retain_rooms); }
     { PERF_MARKER_SCOPE("Scene.PrepareObjectEffects"); PrepareGameObjectEffects(data); }
     { PERF_MARKER_SCOPE("Scene.PrepareScorches"); PrepareGameScorches(data); }
     if (SceneGeometryInspection() && FindArg("-scene-cockpit-probe")) {

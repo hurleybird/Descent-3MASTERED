@@ -595,7 +595,7 @@ PresentationRef Presentation::complete(FrameData data) {
             for (const auto& surface : data.terrain.patches[patch]) { validateSurface(surface); validateIndices(surface); }
         }
     } else require(data.terrain.materials.empty() && data.terrain.patches.empty(),"Terrain materials have no grid");
-    std::unordered_map<int32_t,size_t> rooms;
+    SceneLookup<int32_t,size_t> rooms;
     rooms.reserve(data.rooms.size());
     for (const auto& room : data.rooms) {
         require(room.number >= 0 && rooms.emplace(room.number,size_t(&room-data.rooms.data())).second, "Duplicate or invalid scene room");
@@ -637,7 +637,7 @@ PresentationRef Presentation::complete(FrameData data) {
         require(room != rooms.end() && static_cast<size_t>(mesh.receiver_polygon) < data.rooms[room->second].surfaces.size() &&
             mesh.collection == 0 && mesh.surface.layer == RenderLayer::World,"Mesh receiver is not a world surface");
     }
-    std::unordered_map<uint32_t,size_t> objects;
+    SceneLookup<uint32_t,size_t> objects;
     objects.reserve(data.objects.size());
     for (const auto& object : data.objects) {
         require(objects.emplace(object.handle,size_t(&object-data.objects.data())).second, "Duplicate object lifetime in scene");
@@ -651,7 +651,7 @@ PresentationRef Presentation::complete(FrameData data) {
                 "Invalid simulation observation volume");
         }
     }
-    std::unordered_map<uint64_t,size_t> model_instances;
+    SceneLookup<uint64_t,size_t> model_instances;
     model_instances.reserve(data.model_instances.size());
     for (const auto& object : data.objects)
         for (const auto hidden : object.camera_hidden_objects)

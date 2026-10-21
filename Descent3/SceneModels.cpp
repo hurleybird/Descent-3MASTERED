@@ -31,7 +31,6 @@
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
-#include <unordered_map>
 
 extern bool is_multi_demo;
 
@@ -40,7 +39,7 @@ d3scene::Vec3 value(const vector& v) { return {v.x, v.y, v.z}; }
 d3scene::Transform value(const ModelSubmodelTransform& t) {
     return {value(t.translation), value(t.orientation.rvec), value(t.orientation.uvec), value(t.orientation.fvec)};
 }
-using RoomTable = std::unordered_map<int,const d3scene::RoomState*>;
+using RoomTable = d3scene::SceneLookup<int,const d3scene::RoomState*>;
 void prepareFacingPart(d3scene::FrameData& frame,const d3scene::ObjectState* owner,
     const poly_model& model,size_t part_index,const d3scene::Transform& world) {
     const auto& part = model.submodel[part_index];
@@ -215,17 +214,18 @@ d3scene::ModelAssetRef PrepareGameModelAsset(int number,bool audit_geometry) {
     return asset;
 }
 
-void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::FrameData* previous,bool retain_materials) {
+void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::Presentation* previous_frame,bool retain_materials) {
+    const auto* previous = previous_frame ? &previous_frame->data() : nullptr;
+    if (previous && (previous->scene_lifetime != data.scene_lifetime || previous->simulation_time > data.simulation_time))
+        previous_frame = nullptr;
     const bool audit_geometry = FindArg("-scene-geometry-revision-audit") != 0;
     const bool lod_probe = SceneGeometryInspection() && FindArg("-scene-lod-probe");
     const bool deformation_probe = SceneGeometryInspection() && FindArg("-scene-deformation-probe");
     const int player_color_texture = FindTextureName("MultiColor");
-    std::unordered_map<int, d3scene::ModelAssetRef> frame_assets;
+    d3scene::SceneLookup<int, d3scene::ModelAssetRef> frame_assets;
     RoomTable rooms;
+    rooms.reserve(data.rooms.size());
     for (const auto& room : data.rooms) rooms.emplace(room.number,&room);
-    std::unordered_map<uint64_t, const d3scene::ModelInstance*> prior;
-    if (previous && previous->scene_lifetime == data.scene_lifetime && previous->simulation_time <= data.simulation_time)
-        for (const auto& instance : previous->model_instances) prior.emplace(instance.identity, &instance);
     for (auto& owner : data.objects) {
         auto* source = ObjGet(owner.handle);
         if (!source) throw std::logic_error("Object changed during presentation preparation");
@@ -302,9 +302,9 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::FrameDat
             d3scene::PreparedModel variant;
             variant.asset = found->second;
             variant.pose_source_revision = SceneModelSourceEpoch();
-            const auto old = prior.find(instance.identity);
+            const auto* old = previous_frame ? previous_frame->modelIndices().find(instance.identity) : nullptr;
             const d3scene::PreparedModel* history = nullptr;
-            if (old != prior.end()) for (const auto& previous_variant : old->second->models)
+            if (old) for (const auto& previous_variant : previous->model_instances[old->second].models)
                 if (previous_variant.asset->id() == variant.asset->id()) { history = &previous_variant; break; }
             const auto ambient = ambientColor(*source,rooms,data.terrain);
             auto effect = appearance(*source);

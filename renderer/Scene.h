@@ -1,5 +1,6 @@
 // Descent 3MASTERED - GPL-3.0-or-later
 #pragma once
+#include "SceneLookup.h"
 
 // The scene boundary deliberately has no game, OpenGL, g3, or renderer-state
 // dependencies. Owned values cross it; pointers into the simulation do not.
@@ -677,19 +678,19 @@ public:
     // from auxiliary views never read game state or depend on the main view.
     const PreparedModel& resolvedModel(size_t instance,size_t variant) const;
     const ForegroundLayer* foreground(uint64_t identity) const;
-    const std::unordered_map<int32_t,size_t>& roomIndices() const { return room_indices_; }
-    const std::unordered_map<uint32_t,size_t>& objectIndices() const { return object_indices_; }
-    const std::unordered_map<uint64_t,size_t>& modelIndices() const { return model_indices_; }
+    const SceneLookup<int32_t,size_t>& roomIndices() const { return room_indices_; }
+    const SceneLookup<uint32_t,size_t>& objectIndices() const { return object_indices_; }
+    const SceneLookup<uint64_t,size_t>& modelIndices() const { return model_indices_; }
     void requireExecutable() const;
 private:
     explicit Presentation(FrameData&& data) : data_(std::move(data)) {}
     static PresentationRef complete(FrameData data);
     FrameData data_;
-    std::unordered_map<int32_t,size_t> room_indices_;
+    SceneLookup<int32_t,size_t> room_indices_;
     std::vector<uint32_t> image_slots_; // packed frame-owned name -> image index, zero means empty
     mutable std::vector<std::unique_ptr<PreparedModel>> resolved_models_;
-    std::unordered_map<uint32_t,size_t> object_indices_;
-    std::unordered_map<uint64_t,size_t> model_indices_;
+    SceneLookup<uint32_t,size_t> object_indices_;
+    SceneLookup<uint64_t,size_t> model_indices_;
 };
 
 } // namespace d3scene

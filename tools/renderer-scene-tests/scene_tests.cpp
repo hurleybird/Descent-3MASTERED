@@ -357,6 +357,29 @@ int runModuleContextTests();
 int runAutomapTests();
 int main() {
     try {
+        {
+            d3scene::SceneLookup<uint64_t,size_t> index;
+            check(index.find(0) == index.end(),"Empty scene lookup found a key");
+            for (size_t i = 0; i < 4096; ++i)
+                check(index.emplace(uint64_t(i)*UINT64_C(0x100000001),i).second,"Scene identity insertion failed");
+            for (size_t i = 0; i < 4096; ++i) {
+                const auto key = uint64_t(i)*UINT64_C(0x100000001);
+                check(index.at(key) == i,"Packed identity lost generation bits");
+                check(!index.emplace(key,9999).second && index.at(key) == i,"Duplicate identity overwrote its value");
+            }
+            check(index.size() == 4096 && !index.count(UINT64_MAX),"Scene lookup population or absence incorrect");
+            auto copy = index;
+            copy.emplace(UINT64_MAX,42);
+            check(!index.count(UINT64_MAX) && copy.at(UINT64_MAX) == 42,"Copied identity table aliased its source");
+            d3scene::SceneLookup<int32_t,size_t> signed_index;
+            signed_index.reserve(3);
+            signed_index.emplace(INT32_MIN,1); signed_index.emplace(-1,2); signed_index.emplace(INT32_MAX,3);
+            check(signed_index.at(INT32_MIN) == 1 && signed_index.at(-1) == 2 && signed_index.at(INT32_MAX) == 3,
+                "Signed identity sentinel collided with a valid key");
+            bool absent = false;
+            try { signed_index.at(0); } catch (const std::out_of_range&) { absent = true; }
+            check(absent,"Missing identity did not reject lookup");
+        }
         assetTests(); frameTests(); extractionTests();
         Checks += runSceneViewTests();
         Checks += runModelPoseTests();
