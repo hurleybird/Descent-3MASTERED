@@ -124,13 +124,16 @@ class ModelAsset final {
 public:
     AssetId id() const { return id_; }
     const ModelGeometry& geometry() const { return geometry_; }
-    bool hasViewAttachments() const { return has_view_attachments_; }
+    bool hasViewAttachments() const { return !view_attachments_.empty(); }
+    const std::vector<uint32_t>& viewAttachments() const { return view_attachments_; }
 private:
     friend class SceneAssets;
     ModelAsset(AssetId id, ModelGeometry geometry);
     AssetId id_;
     ModelGeometry geometry_;
-    bool has_view_attachments_ = false;
+    // Authored candidates in part order; instance masks/custom policy remain
+    // dynamic. Ordinary material parts need no per-instance attachment walk.
+    std::vector<uint32_t> view_attachments_;
 };
 using ModelAssetRef = std::shared_ptr<const ModelAsset>;
 

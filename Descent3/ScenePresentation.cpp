@@ -386,6 +386,15 @@ void logPreparedModels(const d3scene::Presentation& frame) {
         for (const auto& part : model.parts) model_surfaces += part.surfaces.size();
     if (data.terrain.asset) for (const auto& patch : data.terrain.asset->patches()) terrain_surfaces += patch.batches.size();
     AutomatedCaptureLog("scene inventory rooms=%u models=%u terrain=%u meshes=%u",unsigned(room_surfaces),unsigned(model_surfaces),unsigned(terrain_surfaces),unsigned(data.meshes.size()));
+    unsigned attachments = 0, world_meshes = 0, foreground_meshes = 0, receivers = 0, positions = 0, uvs = 0;
+    for (const auto& mesh : data.meshes) {
+        attachments += mesh.model_instance != 0;
+        world_meshes += mesh.collection == 0; foreground_meshes += mesh.collection != 0;
+        receivers += mesh.receiver_polygon >= 0;
+        positions += !mesh.vertices.empty(); uvs += !mesh.texture_uvs.empty();
+    }
+    AutomatedCaptureLog("scene mesh inventory attachments=%u world=%u foreground=%u receivers=%u position_streams=%u uv_streams=%u",
+        attachments,world_meshes,foreground_meshes,receivers,positions,uvs);
     AutomatedCaptureLog("scene retained room surfaces=%u",unsigned(retained_surfaces));
     std::unordered_set<const d3scene::ModelParts::Summary*> material_tables;
     size_t unique_model_surfaces = 0;

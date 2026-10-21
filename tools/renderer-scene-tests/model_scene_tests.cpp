@@ -265,6 +265,34 @@ int runModelSceneTests() {
         assets.removeModel(98);
     }
     {
+        auto geometry = modelGeometry();
+        geometry.parts.push_back(geometry.parts[0]);
+        geometry.parts.push_back(geometry.parts[0]);
+        geometry.parts[1].parent = 0;
+        geometry.parts[1].authored_flags = SOF_FACING | SOF_CUSTOM;
+        geometry.parts[2].parent = 1;
+        geometry.parts[2].authored_flags = SOF_GLOW;
+        for (const auto parent_flags : {uint32_t(0),uint32_t(SOF_SHELL),uint32_t(SOF_CUSTOM)}) {
+            geometry.parts[0].authored_flags = parent_flags;
+            const auto asset = assets.publishModel(98,geometry);
+            check(asset->viewAttachments() == std::vector<uint32_t>({1,2}),"Attachment inventory lost authored order");
+            for (uint32_t mask = 0; mask < 8; ++mask) for (bool custom : {false,true}) {
+                const auto roles = ResolveSceneModelRoles(*asset,mask,custom);
+                std::vector<uint32_t> expected,actual;
+                for (uint32_t i = 0; i < roles.size(); ++i)
+                    if (roles[i] == SceneModelPartRole::Facing || roles[i] == SceneModelPartRole::Glow) expected.push_back(i);
+                for (const auto i : asset->viewAttachments()) {
+                    const auto& part = asset->geometry().parts[i];
+                    const auto role = part.hierarchy_hidden ? SceneModelPartRole::Hidden :
+                        ResolveSceneModelPartRole(part.authored_flags,mask,i,custom);
+                    if (role == SceneModelPartRole::Facing || role == SceneModelPartRole::Glow) actual.push_back(i);
+                }
+                check(actual == expected,"Sparse attachments changed mask/custom/hierarchy semantics");
+            }
+        }
+        assets.removeModel(98);
+    }
+    {
         auto roles_geometry = modelGeometry();
         roles_geometry.parts.push_back(roles_geometry.parts[0]);
         roles_geometry.parts[1].parent = 0;

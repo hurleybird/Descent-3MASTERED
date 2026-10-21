@@ -225,8 +225,10 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::Presenta
     const int player_color_texture = FindTextureName("MultiColor");
     // Reuse only lookup capacity. Every transaction discards all old entries
     // before resolving this frame's model revisions; no mutable source is kept.
-    static thread_local d3scene::SceneLookup<int,d3scene::ModelAssetRef> frame_assets;
-    frame_assets.clear();
+    static thread_local std::array<d3scene::ModelAssetRef,MAX_POLY_MODELS> frame_assets;
+    static thread_local std::vector<int> frame_asset_slots;
+    for (const auto slot : frame_asset_slots) frame_assets[slot].reset();
+    frame_asset_slots.clear();
     // A published palette belongs to an asset/appearance, not an object pose.
     // Borrow one canonical table per asset during this transaction. Distinct
     // appearances keep their own history; per-object baked UVs never share.
@@ -294,6 +296,17 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::Presenta
             requested[1] = medium >= 0 ? medium : model_number;
             requested[2] = low >= 0 ? low : requested[1];
         }
+        // History identifies an instance, not one of its LOD variants. Resolve
+        // it once. Stable inventory order supplies a checked ordinal; insertion,
+        // removal and allocation reuse fall back to the full identity index.
+        const d3scene::ModelInstance* previous_instance = nullptr;
+        if (previous_frame) {
+            const size_t ordinal = data.model_instances.size();
+            if (ordinal < previous->model_instances.size() && previous->model_instances[ordinal].identity == instance.identity)
+                previous_instance = &previous->model_instances[ordinal];
+            else if (const auto* found = previous_frame->modelIndices().find(instance.identity))
+                previous_instance = &previous->model_instances[found->second];
+        }
         for (size_t tier = 0; tier < requested.size(); ++tier) {
             model_number = requested[tier];
             if (instance.model_count) {
@@ -311,17 +324,17 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::Presenta
                 throw std::invalid_argument("Object references missing model");
             auto* model = GetPolymodelPointer(model_number);
             if (!model->new_style) throw std::logic_error("Unprepared legacy model format in scene variant");
-            auto found = frame_assets.find(model_number);
-            if (found == frame_assets.end()) {
+            auto& asset = frame_assets[model_number];
+            if (!asset) {
                 PERF_MARKER_SCOPE("Scene.Models.Asset");
-                found = frame_assets.emplace(model_number,PrepareGameModelAsset(model_number,audit_geometry)).first;
+                frame_asset_slots.push_back(model_number);
+                asset = PrepareGameModelAsset(model_number,audit_geometry);
             }
             d3scene::PreparedModel variant;
-            variant.asset = found->second;
+            variant.asset = asset;
             variant.pose_source_revision = SceneModelSourceEpoch();
-            const auto* old = previous_frame ? previous_frame->modelIndices().find(instance.identity) : nullptr;
             const d3scene::PreparedModel* history = nullptr;
-            if (old) for (const auto& previous_variant : previous->modelsFor(old->second))
+            if (previous_instance) for (const auto& previous_variant : previous->variants(*previous_instance))
                 if (previous_variant.asset->id() == variant.asset->id()) { history = &previous_variant; break; }
             variant.modulation = {{1,1,1},effect.color,effect.alpha};
             const bool directional = source->lighting_render_type != LRT_STATIC &&
@@ -400,9 +413,26 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::Presenta
                 else for (size_t i = 0; i < history->parts.size(); ++i)
                     if (history->parts[i].draw) variant.previous_draw_mask |= uint32_t(1)<<i;
             }
-            // Pose and modulation were captured above. A sealed binding table
-            // without view-local attachments needs no per-part source traversal.
-            if (reuse_materials && !variant.asset->hasViewAttachments() && !(baked && audit_geometry)) {
+            const auto append_attachment = [&](size_t i,SceneModelPartRole role) {
+                const auto begin = data.meshes.size();
+                if (role == SceneModelPartRole::Facing) prepareFacingPart(data,&owner,*model,i,{});
+                if (role == SceneModelPartRole::Glow) prepareGlowPart(data,&owner,source,*model,i,{});
+                for (size_t attachment = begin; attachment < data.meshes.size(); ++attachment) {
+                    auto& mesh = data.meshes[attachment];
+                    mesh.compiled_owner = instance.compiled_owner;
+                    mesh.model_instance = instance.identity;
+                    mesh.model_variant = static_cast<int32_t>(variant_index);
+                    mesh.model_part = static_cast<int32_t>(i);
+                }
+            };
+            // The asset owns attachment inventory. Reusing a material table
+            // must not restart the full authored hierarchy walk per instance.
+            if (reuse_materials && !(baked && audit_geometry)) {
+                for (const auto i : variant.asset->viewAttachments()) {
+                    const auto& part = variant.asset->geometry().parts[i];
+                    if (!part.hierarchy_hidden) append_attachment(i,ResolveSceneModelPartRole(part.authored_flags,
+                        source->rtype.pobj_info.subobj_flags,i,effect.custom_texture >= 0));
+                }
                 data.appendModel(instance,std::move(variant));
                 continue;
             }
@@ -412,17 +442,7 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::Presenta
                 const bool has_previous = (variant.previous_draw_mask & (uint32_t(1)<<i)) != 0;
                 const auto role = roles[i];
                 const bool draw = role == SceneModelPartRole::Surface;
-                const auto attachment_begin = data.meshes.size();
-                if (role == SceneModelPartRole::Facing)
-                    prepareFacingPart(data,&owner,*model,i,{});
-                if (role == SceneModelPartRole::Glow)
-                    prepareGlowPart(data,&owner,source,*model,i,{});
-                for (size_t attachment = attachment_begin; attachment < data.meshes.size(); ++attachment) {
-                    data.meshes[attachment].compiled_owner = instance.compiled_owner;
-                    data.meshes[attachment].model_instance = instance.identity;
-                    data.meshes[attachment].model_variant = static_cast<int32_t>(variant_index);
-                    data.meshes[attachment].model_part = static_cast<int32_t>(i);
-                }
+                append_attachment(i,role);
                 const auto* old_part = history ? &history->parts[i] : nullptr;
                 if (reuse_materials && baked && draw && audit_geometry) {
                     bool matches = true;

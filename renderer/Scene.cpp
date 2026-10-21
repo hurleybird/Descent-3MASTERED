@@ -378,7 +378,8 @@ bool operator==(const ModelGeometry& a, const ModelGeometry& b) {
 }
 ModelAsset::ModelAsset(AssetId id, ModelGeometry geometry) : id_(id), geometry_(std::move(geometry)) {
     for (auto& part : geometry_.parts) {
-        has_view_attachments_ = has_view_attachments_ || (part.authored_flags & (SOF_FACING|SOF_GLOW|SOF_THRUSTER));
+        if (part.authored_flags & (SOF_FACING|SOF_GLOW|SOF_THRUSTER))
+            view_attachments_.push_back(uint32_t(&part-geometry_.parts.data()));
         if (!part.geometry.vertices.empty()) {
             part.local_bounds.minimum = part.local_bounds.maximum = part.geometry.vertices.front();
             for (const auto p : part.geometry.vertices) {

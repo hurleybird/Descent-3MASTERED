@@ -2,6 +2,42 @@
 
 ## Active 2026-10-21 flare regression investigation
 
+CURRENT uncommitted after 0e93c7f: model asset lookup is a bounded touched-slot
+array, and previous-instance identity is resolved once per object (checked
+ordinal with full-identity fallback), not once per LOD. Capture-only mesh
+inventory shows005 has385 meshes,278 model attachments,20 position streams,
+7 UV streams. Heavy multi-view/SSAA2/MSAA4/AO/bloom audit passes, pixel exact
+against foreground-coverage-multiview; image visually inspected. 005 is exact.
+Lookup ABBA new/control/control/new CPU .989792/.996054/1.113586/.988628;
+GPU .146354/.142892/.146078/.149980. Control drift precludes a large gain claim.
+Evidence lives in C:/tmp/D3RendererVerification/lookup* (NOT worktree/out).
+Long command-line capture paths truncate: keep the established short root.
+
+Verified: immutable ModelAsset owns ordered attachment indices;
+reused model materials traverse only these candidates, preserving mask/custom
+and hierarchy exclusion. Full material/audit traversal still uses shared append
+logic. Contract tests pass for sparse/full role equivalence. Heavy multi-view
+image remains exact. Against reconstructed IPO-ON old005 (new/old/old/new),
+CPU1.081220/.915870/.918290/1.064262; GPU .143820/.313464/.315288/.142794.
+Thus005 is still CPU-slower; do NOT claim the goal is met. Evidence attachment*.
+Next investigate immutable room spatial indexing to reduce per-face query work.
+
+Pre-rewrite source baseline was reconstructed cleanly at bfb59647 in managed
+worktree C:/Users/Jeff/.codex/worktrees/renderer-baseline-rebuild/DESCENT-3MASTERED.
+Reused out/build/renderer-ipo for THAT baseline (not modern IPO experiments).
+Current old build IPO ON hash A6286E9315A60F3C93B3A764C93A808B8FA385924ADDFACE1B573433374F3DA4.
+It is NOT the missing historical frozen binary. out/reconstructed-baseline-results.txt
+records the first IPO-OFF corpus. Both IPO ON,005 old/new/new/old CPU
+1.215698/1.242192/1.248760/1.205988, GPU .355526/.151030/.153606/.357338.
+007 CPU1.506008/1.312890/1.169590/1.128914, GPU .563614/.592722/.576442/.510162;
+whole distribution drifts despite repeat images matching. No definitive007 win.
+out/empty-view-candidate.exe is now the 0e93c7f control (FD3018DA...086B82).
+Sampling old005 shows driver/string lookup; new005 about half render samples
+in preparation, especially resources/model preparation and destruction. Sampler
+uses GameRenderFrame warmup for BOTH and perturbs timing; sampled timings invalid.
+No PowerShell deletion. Usage58% used, credits unchanged62451.4387600000.
+User again says STOP STOPPING: checkpoints are not stopping points.
+
 LATEST after b53e1d2: foreground composition consumes its existing RGBA8 layer
 directly when SSAA is off; MSAA still resolves on read, SSAA keeps its reduction.
 BlendLayerOverPostPresent replaces the hardwired post-composite input. The
