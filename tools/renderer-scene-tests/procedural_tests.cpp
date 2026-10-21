@@ -3,10 +3,58 @@
 #include "../../renderer/SceneAnimation.h"
 #include <stdexcept>
 #include <climits>
+#include <vector>
 int runProceduralTests() {
     using namespace d3scene;
     int checks = 0;
     const auto check = [&](bool value) { ++checks; if (!value) throw std::runtime_error("Procedural clock/random contract"); };
+    for (int heat = 0; heat < 256; ++heat) {
+        std::vector<uint8_t> pixels(258,99);
+        for (int i = 0; i < 256; ++i) pixels[i+1] = uint8_t(i);
+        fadeProcedural(pixels.data()+1,256,uint8_t(heat));
+        const int fade = ((255-heat)>>3)+1;
+        for (int i = 0; i < 256; ++i) check(pixels[i+1] == (i > fade ? i-fade : 0));
+        check(pixels.front() == 99 && pixels.back() == 99);
+    }
+    for (size_t width : {size_t(1),size_t(2),size_t(15),size_t(16),size_t(17),size_t(18),size_t(31),size_t(32),size_t(33),size_t(127),size_t(128),size_t(129)})
+    for (size_t height : {size_t(1),size_t(2),size_t(3),size_t(128)}) {
+        std::vector<uint8_t> pixels(width*height+2,73),result(pixels.size(),91);
+        ProceduralRandom random(uint32_t(width*height));
+        for (size_t i = 0; i < width*height; ++i) pixels[i+1] = uint8_t(random());
+        const auto* source = pixels.data()+1;
+        blendProcedural(source,result.data()+1,width,height);
+        for (size_t y = 0; y < height; ++y) for (size_t x = 0; x < width; ++x) {
+            const int expected = (int(source[y*width+x])+source[y*width+(x+1)%width]+
+                source[y*width+(x+width-1)%width]+source[((y+1)%height)*width+x])>>2;
+            check(result[y*width+x+1] == expected);
+        }
+        check(result.front() == 91 && result.back() == 91);
+    }
+    for (size_t count : {size_t(0),size_t(1),size_t(15),size_t(17),size_t(255)}) {
+        std::vector<uint8_t> pixels(count+2,91);
+        fadeProcedural(pixels.data()+1,count,255);
+        for (size_t i = 0; i < count; ++i) check(pixels[i+1] == 90);
+        check(pixels.front() == 91 && pixels.back() == 91);
+    }
+    for (size_t width : {size_t(1),size_t(2),size_t(7),size_t(8),size_t(9),size_t(10),size_t(15),size_t(16),size_t(17),size_t(127),size_t(128),size_t(129)})
+    for (size_t height : {size_t(1),size_t(2),size_t(3),size_t(128)})
+    for (unsigned density : {0u,1u,3u,8u,15u,31u,32u,255u}) {
+        std::vector<int16_t> pixels(width*height+2,73),result(pixels.size(),91);
+        ProceduralRandom random(uint32_t(width*height));
+        for (size_t i = 0; i < width*height; ++i) {
+            pixels[i+1] = i%4 == 0 ? INT16_MIN : i%4 == 1 ? INT16_MAX : int16_t(random()*2);
+            result[i+1] = int16_t(random()*2);
+        }
+        const auto prior = result;
+        const auto* source = pixels.data()+1;
+        stepProceduralWater(source,result.data()+1,width,height,density);
+        for (size_t y = 0; y < height; ++y) for (size_t x = 0; x < width; ++x) {
+            const int value = ((int(source[((y+1)%height)*width+x])+source[((y+height-1)%height)*width+x]+
+                source[y*width+(x+1)%width]+source[y*width+(x+width-1)%width])>>1)-prior[y*width+x+1];
+            check(result[y*width+x+1] == int16_t(value-(value>>(density&31))));
+        }
+        check(result.front() == 91 && result.back() == 91);
+    }
     check(visualAngle(1,160,5000) == 14600);
     check(weaponSpriteAngle(10,0) == 0);
     check(weaponSpriteAngle(1.25,65536) == 16384);

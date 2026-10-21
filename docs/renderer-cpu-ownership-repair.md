@@ -2,6 +2,19 @@
 
 ## October 20 continuation
 
+October 21: exact SSE2/scalar procedural kernels replace the fire fade/diffusion
+and four-neighbor water update loops. Tests cover every fire heat/byte value,
+unaligned/tail buffers, wrapped/small rows, signed water extremes and truncation.
+Update rate, random streams and GPU work are unchanged. Four fire textures fell
+from ~0.14 to ~0.07–0.08 ms; three water textures ~0.16 to ~0.14 ms. Combined
+probe is pixel-exact. Fresh interleaved no-marker captures (current / original,
+ms): 000 2.386/1.533; 001 1.780/1.686; 002 3.079/2.412; 003 3.692/2.567;
+004 0.858/0.811; 005 2.100/0.929; 006 1.156/0.850; 007 2.483/1.134.
+Every baseline is still behind. Seven current images match frame-storage
+exactly; save000 reproduces the previously documented moving-object variant
+(mean RGB .0164749053, bounds 711,413–769,468). Capture folders:
+`C:/tmp/D3RendererVerification/cpu-oct21-{current|legacy}-savegNNN`.
+
 October 21: deferred models reuse their compiled rest transforms when a pose has
 no animation inputs. Current and previous samples choose independently; keyed
 and autonomous animated poses retain evaluation. Eight mixed-history/key tests

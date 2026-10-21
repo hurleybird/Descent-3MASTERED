@@ -30,6 +30,7 @@
 #include "mem.h"
 #include "ddio.h"
 #include "config.h"
+#include "gameloop.h"
 #include "../renderer/SceneProcedural.h"
 
 #define BRIGHT_COLOR	254
@@ -362,24 +363,7 @@ void DrawProceduralLine(ProceduralEvaluation& context, int x1, int y1, int x2, i
 // Fades an entire bitmap one step closer to black
 void FadeProcTexture(ProceduralEvaluation& context, int tex_handle)
 {
-	int total = PROC_SIZE * PROC_SIZE;
-	ubyte* src_data = context.destination;
-	int fadeval;
-	fadeval = 255 - GameTextures[tex_handle].procedural->heat;
-	fadeval >>= 3;
-	fadeval++;
-
-	for (int i = 0; i < total; i++, src_data++)
-	{
-		int pix = *src_data;
-		if (pix)
-		{
-			if (pix - fadeval <= 0)
-				*src_data = 0;
-			else
-				*src_data = pix - fadeval;
-		}
-	}
+    d3scene::fadeProcedural(context.destination,PROC_SIZE*PROC_SIZE,GameTextures[tex_handle].procedural->heat);
 }
 
 // Heats an entire bitmap 
@@ -402,41 +386,9 @@ void HeatProcTexture(ProceduralEvaluation& context, int tex_handle)
 // Fades and entire bitmap one step closer to black
 void BlendProcTexture(int tex_handle)
 {
-	int total = PROC_SIZE * PROC_SIZE;
-	ubyte* src_data = (ubyte*)GameTextures[tex_handle].procedural->proc1;
-	ubyte* dest_data = (ubyte*)GameTextures[tex_handle].procedural->proc2;
-	ubyte* start_data = src_data;
-
-	for (int i = 0; i < PROC_SIZE; i++)
-	{
-		ubyte* downrow;
-		ubyte* start_row = src_data;
-		// Get row underneath
-		if (i != PROC_SIZE - 1)
-			downrow = src_data + PROC_SIZE;
-		else
-			downrow = start_data;
-		for (int t = 0; t < PROC_SIZE; t++, src_data++, dest_data++, downrow++)
-		{
-			// Get center
-			total = *src_data;
-			// Get right
-			if (t != PROC_SIZE - 1)
-				total += *(src_data + 1);
-			else
-				total += *(start_row);
-			// Get left
-			if (t)
-				total += *(src_data - 1);
-			else
-				total += *(start_row + PROC_SIZE - 1);
-
-			// Get below
-			total += *(downrow);
-			total >>= 2;
-			*dest_data = total;
-		}
-	}
+    const auto* procedural = GameTextures[tex_handle].procedural;
+    d3scene::blendProcedural(static_cast<const uint8_t*>(procedural->proc1),
+        static_cast<uint8_t*>(procedural->proc2),PROC_SIZE,PROC_SIZE);
 }
 
 // Draws lightning into a bitmap
@@ -1025,70 +977,9 @@ void CalcWater2(int handle, int density)
 
 void CalcWater(int handle, int density)
 {
-	int newh;
-	int count = PROC_SIZE + 1;
-	proc_struct* procedural = GameTextures[handle].procedural;
-
-	short* newptr = (short*)procedural->proc2;
-	short* oldptr = (short*)procedural->proc1;
-
-	int x, y;
-
-	// Do main block
-	for (y = 1; y < (PROC_SIZE - 1); y++, count += 2)
-	{
-		for (x = 1; x < PROC_SIZE - 1; x++, count++)
-		{
-			newh = ((oldptr[count + PROC_SIZE]
-				+ oldptr[count - PROC_SIZE]
-				+ oldptr[count + 1]
-				+ oldptr[count - 1]
-				) >> 1)
-				- newptr[count];
-			newptr[count] = newh - (newh >> density);
-		}
-	}
-	int up, down, left, right;
-	count = 0;
-	for (y = 0; y < PROC_SIZE; y++)
-	{
-		if (y == 0)
-			up = -((PROC_SIZE - 1) * PROC_SIZE);
-		else
-			up = PROC_SIZE;
-		if (y == PROC_SIZE - 1)
-			down = -((PROC_SIZE - 1) * PROC_SIZE);
-		else
-			down = PROC_SIZE;
-		for (x = 0; x < PROC_SIZE; x++, count++)
-		{
-			if ((y != 0 && y != PROC_SIZE - 1) && x != 0 && x != PROC_SIZE - 1)
-			{
-				if (x == 1)
-				{
-					x = PROC_SIZE - 2;
-					count += (PROC_SIZE - 3);
-				}
-				continue;
-			}
-			if (x == 0)
-				left = -(PROC_SIZE - 1);
-			else
-				left = 1;
-
-			if (x == PROC_SIZE - 1)
-				right = -(PROC_SIZE - 1);
-			else
-				right = 1;
-			newh = oldptr[count + down];
-			newh += oldptr[count - up];
-			newh += oldptr[count + right];
-			newh += oldptr[count - left];
-			newh >>= 1;
-			newh -= newptr[count];
-			newptr[count] = newh - (newh >> density);
-		}
-	}
+    const auto* procedural = GameTextures[handle].procedural;
+    d3scene::stepProceduralWater(static_cast<const int16_t*>(procedural->proc1),
+        static_cast<int16_t*>(procedural->proc2),PROC_SIZE,PROC_SIZE,unsigned(density));
 }
 
 void DrawWaterNoLight(int handle)
@@ -1327,6 +1218,7 @@ void AllocateMemoryForWaterProcedural(int handle)
 // Does a water effect for this texture
 void EvaluateWaterProcedural(ProceduralEvaluation& context, int handle)
 {
+    PERF_MARKER_SCOPE("Scene.Procedural.Water");
 	proc_struct* procedural = GameTextures[handle].procedural;
 	if (procedural->memory_type != PROC_MEMORY_TYPE_WATER)
 		AllocateMemoryForWaterProcedural(handle);
@@ -1444,6 +1336,7 @@ void AllocateMemoryForFireProcedural(int handle)
 
 void EvaluateFireProcedural(ProceduralEvaluation& context, int handle)
 {
+    PERF_MARKER_SCOPE("Scene.Procedural.Fire");
 	proc_struct* procedural = GameTextures[handle].procedural;
 
 	int dest_bitmap = procedural->procedural_bitmap;
