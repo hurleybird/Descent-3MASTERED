@@ -2,6 +2,31 @@
 
 ## Active 2026-10-21 flare regression investigation
 
+LATEST after732e1c5: rejected the shared GPU constant upload arena. Persistent
+and subdata paths matched the heavy multiview image exactly, but initially put
+fence retirement mid-submission and increased measured GPU interval. Moving
+retirement to presentation boundary restored GPU~.17ms; ABBA005 CPU
+1.2141/1.2626/1.2749/1.3450 did not establish a useful win. Removed ALL arena
+source changes. Preserved out/rejected-scene-stream.patch and
+out/rejected-SceneStreamArena.h, binaries out/scene-stream*-candidate.exe.
+Do not accidentally deploy those binaries. Normal build restored afterward.
+
+Isolated whole-program build out/build/renderer-ipo (CMake
+CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE=ON), source732e1c5, no tracked build
+configuration edits. ipo-pair005 control/IPO/IPO/control CPU
+1.2727/1.2298/1.1872/1.3839; GPU~.17 throughout; image exact. Promising but only
+one scene tested, not a renderer-architecture speedup claim. Keep this baseline
+binary before rebuilding IPO with further changes.
+
+Image metadata now derived from validated contiguous mip base extent/count,
+eliminating a per-revision heap vector. make_shared also combines image and
+ownership block allocations. image-layout-tests.log PASS, image-layout-build2.log
+PASS; first game build failed Windows max macro, fixed parenthesized std::max.
+image-layout005 and image-layout-audit003 are pixel-exact against their controls;
+003 includes resource and image-revision audits. No wall-time claim yet.
+Owned scene-view-test now contains normal image-layout build; delivered v3.1
+unchanged. Last usage37% consumed, credits unchanged62451.4387600000.
+
 LATEST: upstream ViewGeometryDemand qualified by geometry-demand-tests.log,
 geometry-demand-build.log and geometry-demand-audit-build.log. Optional
 -scene-demand-audit reconstructs resource demand from the draw list and compares

@@ -142,21 +142,31 @@ struct ImageMip {
 struct ImageExtent { uint32_t width = 0, height = 0; };
 struct ImageSource;
 class ImageAsset final {
+    struct ConstructionKey {};
 public:
+    // Only the publishing owner can supply the key. Public construction lets
+    // make_shared allocate the immutable value and its ownership block together.
+    ImageAsset(ConstructionKey,AssetId,const ImageSource&);
     AssetId id() const { return id_; }
     ImageFormat format() const { return format_; }
     // Layout inspection never evaluates pixels. Each pixel payload has one
     // owner: this asset for copied data, or the retained immutable recipe.
-    const std::vector<ImageExtent>& mips() const { return mips_; }
+    size_t mipCount() const { return mip_count_; }
+    ImageExtent extent(size_t level) const {
+        if (level >= mip_count_) throw std::out_of_range("Image mip index outside asset");
+        return {(std::max)(1u,base_extent_.width >> level),(std::max)(1u,base_extent_.height >> level)};
+    }
     const std::vector<uint8_t>& pixels(size_t level) const;
     uint32_t generatedLevels() const { return generated_levels_; }
     uint32_t paddedExtent() const { return padded_extent_; }
 private:
     friend class SceneAssets;
-    ImageAsset(AssetId,const ImageSource&);
     AssetId id_;
     ImageFormat format_;
-    std::vector<ImageExtent> mips_;
+    // Publication validates a contiguous halving chain. Its dimensions are
+    // completely specified by this base extent and count, not a heap table.
+    ImageExtent base_extent_;
+    uint32_t mip_count_ = 0;
     std::vector<std::vector<uint8_t>> pixels_;
     ImmutablePixelsRef deferred_;
     uint32_t generated_levels_ = 0;

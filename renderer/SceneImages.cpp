@@ -49,15 +49,16 @@ void expandImageRgba(ImageFormat format,const uint8_t* source,size_t count,uint8
         }
     }
 }
-ImageAsset::ImageAsset(AssetId id,const ImageSource& source)
-    : id_(id),format_(source.format),deferred_(source.deferred),generated_levels_(source.generated_levels),padded_extent_(source.padded_extent) {
+ImageAsset::ImageAsset(ConstructionKey,AssetId id,const ImageSource& source)
+    : id_(id),format_(source.format),base_extent_{source.mips[0].width,source.mips[0].height},
+      mip_count_(uint32_t(source.mips.size())),deferred_(source.deferred),
+      generated_levels_(source.generated_levels),padded_extent_(source.padded_extent) {
     for (const auto& mip : source.mips) {
-        mips_.push_back({mip.width,mip.height});
         if (!deferred_) pixels_.emplace_back(mip.pixels,mip.pixels+mip.bytes);
     }
 }
 const std::vector<uint8_t>& ImageAsset::pixels(size_t level) const {
-    if (level >= mips_.size()) throw std::out_of_range("Image mip index outside asset");
+    if (level >= mip_count_) throw std::out_of_range("Image mip index outside asset");
     return deferred_ ? deferred_->bytes() : pixels_[level];
 }
 ImageAssetRef SceneAssets::image(uint32_t slot) const { return slot < images_.size() ? images_[slot] : nullptr; }
@@ -90,9 +91,9 @@ ImageAssetRef SceneAssets::publishImage(uint32_t slot,const ImageSource& source)
     auto previous = image(slot);
     bool matches = previous && previous->format() == source.format && previous->generatedLevels() == source.generated_levels &&
         previous->paddedExtent() == source.padded_extent &&
-        previous->mips_.size() == source.mips.size();
+        previous->mipCount() == source.mips.size();
     for (size_t i = 0; matches && i < source.mips.size(); ++i) {
-        const auto& a = previous->mips_[i]; const auto& b = source.mips[i];
+        const auto a = previous->extent(i); const auto& b = source.mips[i];
         matches = a.width == b.width && a.height == b.height && (source.deferred ? previous->deferred_ == source.deferred :
             (previous->pixels(i).size() == b.bytes && std::memcmp(previous->pixels(i).data(),b.pixels,b.bytes) == 0));
     }
@@ -102,7 +103,7 @@ ImageAssetRef SceneAssets::publishImage(uint32_t slot,const ImageSource& source)
         return previous;
     }
     if (revision_ == std::numeric_limits<uint64_t>::max()) throw std::overflow_error("Scene revision exhausted");
-    ImageAssetRef replacement(new ImageAsset({lifetime_,revision_+1,slot},source));
+    ImageAssetRef replacement = std::make_shared<ImageAsset>(ImageAsset::ConstructionKey{},AssetId{lifetime_,revision_+1,slot},source);
     if (slot >= images_.size()) images_.resize(size_t(slot)+1);
     images_[slot] = replacement; ++revision_;
     if (slot >= image_source_revisions_.size()) image_source_revisions_.resize(size_t(slot)+1);

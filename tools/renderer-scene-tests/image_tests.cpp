@@ -32,7 +32,7 @@ int runSceneImageTests() {
         source.deferred = std::make_shared<CountedPixels>(calls); source.content_revision = 2;
         const auto next = assets.publishImage(0,source);
         check(next != held && *calls == 0,"New recipe aliased old pixels or evaluated during publication");
-        check(next->mips()[0].width == 1 && *calls == 0,"Layout inspection evaluated deferred pixels");
+        check(next->extent(0).width == 1 && *calls == 0,"Layout inspection evaluated deferred pixels");
         check(&next->pixels(0) == &source.deferred->bytes(),"Image copied recipe-owned pixels");
         const auto raw = next->pixels(0);
         source.deferred.reset(); source.mips[0].pixels = raw.data();
@@ -214,7 +214,11 @@ int runSceneImageTests() {
     check(changed->id() != image->id() && image->pixels(0)[0] == 0,"Held image changed with mutable source");
     uint16_t mip = 0xffff;
     source.mips.push_back({1,1,reinterpret_cast<const uint8_t*>(&mip),2});
-    check(assets.publishImage(42,source)->mips().size() == 2,"Authored mip chain lost");
+    check(assets.publishImage(42,source)->mipCount() == 2,"Authored mip chain lost");
+    check(assets.image(42)->extent(1).width == 1 && assets.image(42)->extent(1).height == 1,"Mip extent derivation");
+    bool bad_level_rejected = false;
+    try { assets.image(42)->extent(2); } catch (const std::out_of_range&) { bad_level_rejected = true; }
+    check(bad_level_rejected,"Invalid mip metadata index accepted");
     source.mips[1].width = 2;
     rejects([&] { assets.publishImage(42,source); });
     source.mips.resize(1); source.mips[0].bytes = 6;
@@ -374,7 +378,7 @@ int runSceneImageTests() {
     assets.reset();
     auto stale = second->data(); stale.scene_lifetime = assets.lifetime();
     rejects([&] { Presentation::freeze(stale); });
-    check(!assets.image(42) && image->mips()[0].width == 2,"Scene reset invalidated held image");
+    check(!assets.image(42) && image->extent(0).width == 2,"Scene reset invalidated held image");
     check(assets.publishImage(43,source)->id().lifetime != truecolor->id().lifetime,"Image slot reuse inherited old lifetime");
     return checks;
 }

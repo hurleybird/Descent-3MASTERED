@@ -611,13 +611,13 @@ void GL4Renderer::BindSceneImage(const d3scene::ImageAsset& image,int unit,bool 
         PERF_MARKER_SCOPE("Scene.UploadImage");
         if (!gpu.texture) glGenTextures(1,&gpu.texture);
         glBindTexture(GL_TEXTURE_2D,gpu.texture);
-        const auto width = image.paddedExtent() ? image.paddedExtent() : image.mips()[0].width;
-        const auto height = image.paddedExtent() ? image.paddedExtent() : image.mips()[0].height;
-        const auto levels = image.generatedLevels() ? image.generatedLevels() : uint32_t(image.mips().size());
+        const auto width = image.paddedExtent() ? image.paddedExtent() : image.extent(0).width;
+        const auto height = image.paddedExtent() ? image.paddedExtent() : image.extent(0).height;
+        const auto levels = image.generatedLevels() ? image.generatedLevels() : uint32_t(image.mipCount());
         const bool same_storage = gpu.width == width && gpu.height == height && gpu.levels == levels;
         glPixelStorei(GL_UNPACK_ALIGNMENT,1);
-        for (size_t level = 0; level < image.mips().size(); ++level) {
-            const auto& mip = image.mips()[level];
+        for (size_t level = 0; level < image.mipCount(); ++level) {
+            const auto mip = image.extent(level);
             const uint32_t width = image.paddedExtent() ? image.paddedExtent() : mip.width;
             const uint32_t height = image.paddedExtent() ? image.paddedExtent() : mip.height;
             const auto* pixels = image.pixels(level).data();
@@ -641,7 +641,7 @@ void GL4Renderer::BindSceneImage(const d3scene::ImageAsset& image,int unit,bool 
         gpu.id = image.id(); gpu.width = width; gpu.height = height; gpu.levels = levels;
     } else glBindTexture(GL_TEXTURE_2D,gpu.texture);
     const bool filter = baked || OpenGL_preferred_state.filtering;
-    const bool mip = !baked && OpenGL_preferred_state.mipping && (image.generatedLevels() > 1 || image.mips().size() > 1);
+    const bool mip = !baked && OpenGL_preferred_state.mipping && (image.generatedLevels() > 1 || image.mipCount() > 1);
     const int sampling = int(wrap)|(int(filter)<<1)|(int(mip)<<2);
     const float anisotropy = mip ? std::min(OpenGL_max_anisotropy,std::max(1.f,static_cast<float>(OpenGL_preferred_state.anisotropy))) : 1;
     // Sampling belongs to a binding, not to image storage: one image may be
