@@ -2,6 +2,20 @@
 
 ## October 20 continuation
 
+October 21: fresh three-round coalesced/current versus pre-rewrite CPU corpus
+(90 frames, mean render_ms over 15-84): 000 1.3307/1.5256; 001 1.0275/1.6308;
+002 1.8465/2.4484; 003 2.1012/2.5930; 004 .6132/.7939; 005 1.3878/.9409;
+006 .7551/.8463; 007 1.3858/1.1825. Six ahead, two behind, goal NOT met.
+Save005 current runs vary 1.596/1.412/1.155 while old .970/.915/.938; do not
+present a single best run as representative. Raw cpu-coalesced-baseline-*.
+
+Next verified binary part-demand.exe collects GPU model/part demand once per
+compiled identity, not a duplicate per face followed by sorting; draw record
+assembly reuses one resolved-model lookup. Three long images and combined probe
+EXACT. Dense paired CPU 2.360/2.349 -> 2.280/2.226; 005/007 mixed, no general
+speed claim. Build passes, raw cpu-part-demand-*. Next: compatible display-canvas
+view composition, preserving target/camera/order and clear/resolve barriers.
+
 October 21, next checkpoint (`draw-coalesced.exe`):
 
 - Fire publishes owned indexed pixels and a copied palette; expansion is shared

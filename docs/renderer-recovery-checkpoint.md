@@ -2,6 +2,12 @@
 
 ## October 21 resumed work — supersedes restart pause below
 
+Newest: part-demand.exe built, dense/wall/fog long images and combined probe
+exact. Dense CPU modestly improved, others mixed. Full coalesced vs legacy
+three-round CPU corpus still six ahead/two behind (005/007); see ownership doc.
+No capture/sampler active. Next: fuse compatible display-canvas views while
+preserving foreground layer ordering, clears/resolves and independent view APIs.
+
 Newest: draw-coalesced.exe qualified against all eight images, combined probe,
 mirror, high-quality dense scene; all EXACT. Includes owned indexed fire pixels,
 lazy clip codes, SAH fog asset compilation, adjacent equal-UBO multidraw.
