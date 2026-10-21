@@ -8,6 +8,18 @@
 #endif
 
 namespace d3scene {
+// Constant-height impulse span, with authored wrapping (not saturation).
+inline void addProceduralSpan(int16_t* pixels,size_t count,uint8_t height) {
+    size_t i = 0;
+#ifdef D3_PROCEDURAL_SSE2
+    const auto addition = _mm_set1_epi16(height);
+    for (; i+8 <= count; i += 8) {
+        const auto values = _mm_loadu_si128(reinterpret_cast<const __m128i*>(pixels+i));
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(pixels+i),_mm_add_epi16(values,addition));
+    }
+#endif
+    for (; i < count; ++i) pixels[i] = int16_t(pixels[i]+height);
+}
 // Exact byte kernels: saturating decay and the authored four-tap wrapped
 // diffusion. Source/destination diffusion buffers must not overlap. SSE2 uses
 // widened integer sums, not rounded byte averages, so every texel is unchanged.

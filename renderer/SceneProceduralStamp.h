@@ -4,8 +4,34 @@
 #include <cmath>
 #include <cstdint>
 #include <vector>
+#include <array>
+#include "SceneProcedural.h"
 
 namespace d3scene {
+// Integer disk coverage is independent of water state, position and strength.
+class ProceduralDiscStamp {
+    int radius_ = -1;
+    std::array<int16_t,256> extent_{};
+public:
+    void prepare(uint8_t radius) {
+        if (radius_ == radius) return;
+        int extent = int(radius)-1;
+        for (int row = 0; row < radius; ++row) {
+            while (extent*extent+row*row >= int(radius)*radius) --extent;
+            extent_[row] = int16_t(extent);
+        }
+        radius_ = radius;
+    }
+    void apply(int16_t* destination,int width,int height,int x,int y,uint8_t strength) const {
+        if (radius_ <= 0 || !strength) return;
+        const int top = std::max(1-radius_,1-y), bottom = std::min(radius_,height-1-y);
+        for (int cy = top; cy < bottom; ++cy) {
+            const int extent = extent_[std::abs(cy)];
+            const int left = std::max(-extent,1-x), right = std::min(extent+1,width-1-x);
+            if (left < right) addProceduralSpan(destination+width*(cy+y)+x+left,size_t(right-left),strength);
+        }
+    }
+};
 // The authored radial disturbance is independent of position, tick and water
 // state. Compile its exact integer additions; executing a stamp only clips,
 // addresses and adds. A changed radius/height explicitly recompiles the kernel.

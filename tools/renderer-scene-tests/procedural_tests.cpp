@@ -12,6 +12,25 @@ int runProceduralTests() {
     int checks = 0;
     const auto check = [&](bool value) { ++checks; if (!value) throw std::runtime_error("Procedural clock/random contract"); };
     {
+        ProceduralDiscStamp stamp;
+        for (int radius = 0; radius < 256; ++radius) {
+            stamp.prepare(uint8_t(radius));
+            for (const auto center : {std::pair<int,int>{0,0},{1,127},{64,64},{127,127},{255,255},{3,4}})
+                for (int strength : {0,1,255}) {
+                    std::vector<int16_t> expected(128*128),actual;
+                    for (size_t i = 0; i < expected.size(); ++i) expected[i] = int16_t(i*1237);
+                    actual = expected;
+                    const int x = center.first,y = center.second;
+                    stamp.apply(actual.data(),128,128,x,y,uint8_t(strength));
+                    const int left = std::max(-radius,1-x),right = std::min(radius,127-x);
+                    const int top = std::max(-radius,1-y),bottom = std::min(radius,127-y);
+                    for (int cy = top; cy < bottom; ++cy) for (int cx = left; cx < right; ++cx)
+                        if (cx*cx+cy*cy < radius*radius) expected[128*(cy+y)+cx+x] += strength;
+                    check(actual == expected);
+                }
+        }
+    }
+    {
         // The pose suite initializes the shared authored trig tables first.
         ProceduralSineStamp stamp;
         int evaluations = 0;

@@ -2,6 +2,19 @@
 
 ## Active 2026-10-21 flare regression investigation
 
+LATEST after fafef18: water height impulses use retained integer disk row spans
+and wrapping SSE2 additions (scalar fallback). No per-frame allocation. Tests
+compare every radius0..255, six clipped/interior centers and strengths0/1/255,
+including overflow. Contract/build pass; disc-pair005b image is pixel-exact.
+Isolated kernel benchmark: radius16/32/64 speedups5.12/7.69/8.91x; radius3~1.09x.
+Whole-frame ABBA CPU1.2264/1.2196/1.1892/1.1648 shows NO convincing frame gain.
+Retained as a measured kernel improvement, not credited toward overall target.
+out/disc-stamp-candidate.exe is the tested binary. Owned runtime ended on scalar
+control after ABBA. Harness old manifest disappeared externally during this run;
+out/profile-renderer.ps1 now owns the exact verified launch arguments instead of
+depending on that historical artifact. First failed disc-pair005-control folder
+is incomplete; use disc-pair005b-* results. Other delivered builds untouched.
+
 LATEST after e868ed3: common-color fog fields now store scalar optical depth
 (R16F/R32F), reconstructing weighted RGB from the common color. Mixed-color
 visible volumes retain RGBA. Exact equality only; different densities are valid.

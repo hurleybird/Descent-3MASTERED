@@ -1012,35 +1012,14 @@ void PublishWaterImage(int handle)
 
 void AddProcHeightBlob(ProceduralEvaluation& context, static_proc_element* proc, int handle)
 {
-	int rquad;
-	int cx, cy, cyq;
-	int left, top, right, bottom;
 	short* dest_data = (short*)GameTextures[handle].procedural->proc1;
-	int x = proc->x1;
-	int y = proc->y1;
 	int procnum = proc - GameTextures[handle].procedural->static_proc_elements;
 	if (proc->frequency && ((context.tick + procnum) % proc->frequency))
 		return;
-	int radius = proc->size;
-	int height = proc->speed;
-	rquad = radius * radius;
-
-	left = -radius; right = radius;
-	top = -radius; bottom = radius;
-	// Perform edge clipping...
-	if (x - radius < 1) left -= (x - radius - 1);
-	if (y - radius < 1) top -= (y - radius - 1);
-	if (x + radius > PROC_SIZE - 1) right -= (x + radius - PROC_SIZE + 1);
-	if (y + radius > PROC_SIZE - 1) bottom -= (y + radius - PROC_SIZE + 1);
-	for (cy = top; cy < bottom; cy++)
-	{
-		cyq = cy * cy;
-		for (cx = left; cx < right; cx++)
-		{
-			if (cx * cx + cyq < rquad)
-				dest_data[PROC_SIZE * (cy + y) + (cx + x)] += height;
-		}
-	}
+    static thread_local std::array<d3scene::ProceduralDiscStamp,256> stamps;
+    auto& stamp = stamps[proc->size];
+    stamp.prepare(proc->size);
+    stamp.apply(dest_data,PROC_SIZE,PROC_SIZE,proc->x1,proc->y1,proc->speed);
 }
 
 void AddProcRaindrops(ProceduralEvaluation& context, static_proc_element* proc, int handle)
