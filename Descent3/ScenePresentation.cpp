@@ -149,19 +149,20 @@ struct MaterialResolution {
 };
 void resolveMaterial(d3scene::SurfaceBinding&,MaterialResolution&,bool model,bool exterior);
 void prepareImages(d3scene::FrameData& data) {
-    std::unordered_map<int,d3scene::ImageAssetRef> images;
+    // Source handles and resource names occupy bounded registries. Reuse index
+    // scratch, not thousands of per-frame hash nodes/reference-counted entries.
+    static thread_local std::array<int,MAX_BITMAPS+MAX_LIGHTMAPS> pixels;
+    static thread_local std::array<int,MAX_BITMAPS+MAX_LIGHTMAPS+MAX_TEXTURES+1> bindings;
+    static thread_local size_t previous_binding_count = 0;
+    pixels.fill(-1); bindings.fill(-1);
+    data.images.reserve(previous_binding_count);
     MaterialResolution resolution(static_cast<float>(data.simulation_time));
-    std::unordered_map<uint32_t,size_t> bindings;
     const auto image = [&](int handle,bool baked) -> d3scene::ImageAssetRef {
         const int slot = handle+(baked ? MAX_BITMAPS : 0);
-        const auto found = images.find(slot);
-        if (found != images.end()) return found->second;
         const auto revision = baked ? lm_ContentRevision(handle) : bm_ContentRevision(handle);
         const auto resident = d3scene::assets().image(slot,revision);
         if (resident && !FindArg("-scene-image-revision-audit")) {
-            const auto& asset = resident;
-            images.emplace(slot,asset);
-            return asset;
+            return resident;
         }
         d3scene::ImageSource source;
         source.content_revision = revision;
@@ -191,15 +192,17 @@ void prepareImages(d3scene::FrameData& data) {
         auto asset = d3scene::assets().publishImage(slot,source);
         if (resident && asset != resident)
             Error("Image content changed without a producer revision: slot %d",slot);
-        images.emplace(slot,asset);
         return asset;
     };
     const auto sample = [&](int handle,bool baked,int texture = -1) -> d3scene::FrameData::ImageBinding {
         const uint32_t key = texture >= 0 ? uint32_t(MAX_BITMAPS+MAX_LIGHTMAPS+texture+1) : uint32_t(handle+(baked ? MAX_BITMAPS : 0)+1);
-        const auto found = bindings.find(key);
-        if (found != bindings.end()) return data.images[found->second];
-        auto asset = image(texture >= 0 ? resolution.bitmap(texture) : handle,baked);
-        bindings.emplace(key,data.images.size()); data.images.push_back({key,asset});
+        if (key >= bindings.size()) Error("Image resource outside source registry");
+        if (bindings[key] >= 0) return data.images[bindings[key]];
+        const int bitmap = texture >= 0 ? resolution.bitmap(texture) : handle;
+        const int pixel_slot = bitmap+(baked ? MAX_BITMAPS : 0);
+        if (bitmap < 0 || pixel_slot >= int(pixels.size())) Error("Image pixels outside source registry");
+        auto asset = pixels[pixel_slot] >= 0 ? data.images[pixels[pixel_slot]].asset : image(bitmap,baked);
+        bindings[key] = pixels[pixel_slot] = int(data.images.size()); data.images.push_back({key,asset});
         return {key,std::move(asset)};
     };
     const auto prepare = [&](d3scene::SurfaceBinding& surface) {
@@ -275,6 +278,7 @@ void prepareImages(d3scene::FrameData& data) {
     for (auto& object : data.model_instances) for (auto& model : object.models) for (auto& part : model.parts) prepareTable(part.surfaces,true,false);
     for (auto& surface : data.terrain.materials) prepare(surface);
     for (auto& mesh : data.meshes) prepare(mesh.surface);
+    previous_binding_count = data.images.size();
 }
 // Field-wise fingerprints diagnose state-vs-pixel variation; never hash padding
 // or use diagnostic hashes as asset identities.

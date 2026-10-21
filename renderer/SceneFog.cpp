@@ -167,6 +167,20 @@ FogAssetRef SceneAssets::publishFog(const std::vector<RoomState>& rooms) {
     if (fog_ && source.size() == fog_->source_.size() && std::equal(source.begin(),source.end(),fog_->source_.begin(),same)) return fog_;
     if (revision_ == std::numeric_limits<uint64_t>::max()) throw std::overflow_error("Scene revision exhausted");
     auto volumes = compileFogVolumes(source);
+    const auto finite = [](Vec3 v) { return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z); };
+    const auto require = [](bool valid,const char* message) { if (!valid) throw std::invalid_argument(message); };
+    for (const auto& volume : volumes) {
+        require(finite(volume.color) && std::isfinite(volume.depth) && volume.depth > 0,"Invalid fog volume");
+        require(finite(volume.bounds.minimum) && finite(volume.bounds.maximum),"Invalid fog bounds");
+        require(volume.boundary.empty() == volume.nodes.empty(),"Missing fog spatial index");
+        for (size_t index = 0; index < volume.nodes.size(); ++index) {
+            const auto& node = volume.nodes[index];
+            require(finite(node.bounds.minimum) && finite(node.bounds.maximum) && node.escape > index && node.escape <= volume.nodes.size() &&
+                uint64_t(node.first)+node.count <= volume.boundary.size(),"Invalid fog spatial node");
+        }
+        for (const auto& triangle : volume.boundary)
+            require(finite(triangle.a) && finite(triangle.b) && finite(triangle.c) && finite(triangle.inward),"Invalid fog boundary");
+    }
     auto replacement = FogAssetRef(new FogAsset({lifetime_,revision_+1,0},std::move(source),std::move(volumes)));
     fog_ = replacement; ++revision_;
     return replacement;

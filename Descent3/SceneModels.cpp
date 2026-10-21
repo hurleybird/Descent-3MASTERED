@@ -41,6 +41,35 @@ d3scene::Transform value(const ModelSubmodelTransform& t) {
     return {value(t.translation), value(t.orientation.rvec), value(t.orientation.uvec), value(t.orientation.fvec)};
 }
 using RoomTable = std::unordered_map<int,const d3scene::RoomState*>;
+// A pose is a function of the model, its animation inputs and the presentation
+// clock, not of object placement. Instances with identical inputs share the
+// evaluation. Scratch retains capacity only; frames copy the resulting values.
+const ModelTransforms& evaluateSharedPose(int number,const poly_model& model,const float* input,
+    uint64_t sequence,float time) {
+    struct Entry {
+        bool has_input = false;
+        std::array<float,MAX_SUBOBJECTS> input{};
+        ModelTransforms transforms;
+    };
+    struct Bucket { uint64_t sequence = 0, source_revision = 0; size_t count = 0; std::vector<Entry> entries; };
+    static thread_local std::array<Bucket,MAX_POLY_MODELS> cache;
+    auto& bucket = cache[number];
+    const auto revision = SceneModelSourceEpoch();
+    if (bucket.sequence != sequence || bucket.source_revision != revision) {
+        bucket.sequence = sequence; bucket.source_revision = revision; bucket.count = 0;
+    }
+    for (size_t i = 0; i < bucket.count; ++i) {
+        const auto& entry = bucket.entries[i];
+        if (entry.has_input == bool(input) && (!input || std::equal(input,input+model.n_models,entry.input.begin())))
+            return entry.transforms;
+    }
+    if (bucket.entries.size() == bucket.count) bucket.entries.emplace_back();
+    auto& entry = bucket.entries[bucket.count++];
+    entry.has_input = input != nullptr;
+    if (input) std::copy(input,input+model.n_models,entry.input.begin());
+    entry.transforms = ComposeModelPose(model,EvaluateModelPose(model,input,time));
+    return entry.transforms;
+}
 void prepareFacingPart(d3scene::FrameData& frame,const d3scene::ObjectState* owner,
     const poly_model& model,size_t part_index,const d3scene::Transform& world) {
     const auto& part = model.submodel[part_index];
@@ -195,6 +224,10 @@ d3scene::Vec3 ambientColor(const object& source, const RoomTable& rooms, const d
 }
 
 void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::FrameData* previous,bool retain_materials) {
+    unsigned pose_reused = 0, pose_clock = 0, pose_changed = 0;
+    const bool audit_geometry = FindArg("-scene-geometry-revision-audit") != 0;
+    const bool lod_probe = SceneGeometryInspection() && FindArg("-scene-lod-probe");
+    const bool deformation_probe = SceneGeometryInspection() && FindArg("-scene-deformation-probe");
     static std::array<uint64_t,MAX_POLY_MODELS> published_epochs{};
     const int player_color_texture = FindTextureName("MultiColor");
     std::unordered_map<int, d3scene::ModelAssetRef> frame_assets;
@@ -239,7 +272,6 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::FrameDat
         if (source->type == OBJ_BUILDING && (source->flags & OF_USE_DESTROYED_POLYMODEL) &&
             Object_info[source->id].lo_render_handle >= 0) model_number = Object_info[source->id].lo_render_handle;
         std::array<int,3> requested{{model_number,model_number,model_number}};
-        const bool lod_probe = SceneGeometryInspection() && FindArg("-scene-lod-probe");
         if ((Detail_settings.Object_complexity != OBJECT_COMPLEXITY_MAX || lod_probe) &&
             (source->lighting_render_type == LRT_STATIC || source->lighting_render_type == LRT_GOURAUD)) {
             int medium = -1, low = -1;
@@ -277,7 +309,7 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::FrameDat
                 PERF_MARKER_SCOPE("Scene.Models.Asset");
                 auto asset = d3scene::assets().model(model_number);
                 const auto epoch = SceneModelSourceEpoch();
-                if (asset && published_epochs[model_number] == epoch && FindArg("-scene-geometry-revision-audit") &&
+                if (asset && published_epochs[model_number] == epoch && audit_geometry &&
                     !MatchesSceneModelAsset(asset->geometry(),*model))
                     throw std::logic_error("Model geometry changed without producer invalidation");
                 if (!asset || (published_epochs[model_number] != epoch && !MatchesSceneModelAsset(asset->geometry(),*model))) {
@@ -291,11 +323,16 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::FrameDat
             }
             d3scene::PreparedModel variant;
             variant.asset = found->second;
+            variant.pose_source_revision = SceneModelSourceEpoch();
+            const auto old = prior.find(instance.identity);
+            const d3scene::PreparedModel* history = nullptr;
+            if (old != prior.end()) for (const auto& previous_variant : old->second->models)
+                if (previous_variant.asset->id() == variant.asset->id()) { history = &previous_variant; break; }
             const auto ambient = ambientColor(*source,rooms,data.terrain);
             auto effect = appearance(*source);
             // Explicit inspection fixture: exercises prepared-position uploads even
             // when a saved scene has no active cloak/deformation. Never mutates game state.
-            if (SceneGeometryInspection() && FindArg("-scene-deformation-probe")) effect.deformation = .2f;
+            if (deformation_probe) effect.deformation = .2f;
             const bool directional = source->lighting_render_type != LRT_STATIC &&
                 (source->lighting_render_type == LRT_GOURAUD || NoLightmaps);
             // The saved per-object UV layout is not the shared model's topology.
@@ -312,19 +349,35 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::FrameDat
                 else SetNormalizedTimeAnim(source->rtype.pobj_info.anim_frame, normalized, model);
                 input = normalized;
             }
-            const auto pose = EvaluateModelPose(*model, input, static_cast<float>(data.simulation_time));
-            const auto transforms = ComposeModelPose(*model, pose);
+            const bool rest = !input && variant.asset->geometry().rest_pose.size() == variant.asset->geometry().parts.size();
+            const bool same_inputs = history && (input ? history->pose_inputs &&
+                history->pose_inputs->size() == size_t(model->n_models) &&
+                std::equal(history->pose_inputs->begin(),history->pose_inputs->end(),input) : !history->pose_inputs);
+            if (same_inputs) variant.pose_inputs = history->pose_inputs;
+            else if (input) variant.pose_inputs = std::make_shared<const std::vector<float>>(input,input+model->n_models);
+            const bool reuse_pose = same_inputs && !variant.asset->geometry().pose_uses_clock &&
+                history->pose_source_revision == variant.pose_source_revision;
+            pose_reused += reuse_pose; pose_clock += variant.asset->geometry().pose_uses_clock;
+            pose_changed += !same_inputs;
+            const ModelTransforms* transforms = nullptr;
+            if (!rest && !reuse_pose) transforms = &evaluateSharedPose(model_number,*model,input,data.sequence,static_cast<float>(data.simulation_time));
+            if (audit_geometry) {
+                const auto evaluated = ComposeModelPose(*model,EvaluateModelPose(*model,input,static_cast<float>(data.simulation_time)));
+                const auto same = [](d3scene::Vec3 a,d3scene::Vec3 b) { return a.x == b.x && a.y == b.y && a.z == b.z; };
+                for (int i = 0; i < evaluated.count; ++i) {
+                    const auto a = value(evaluated.submodels[i]);
+                    const auto b = reuse_pose ? history->parts[i].current : rest ? variant.asset->geometry().rest_pose[i] : value(transforms->submodels[i]);
+                    if (!same(a.position,b.position) || !same(a.right,b.right) || !same(a.up,b.up) || !same(a.forward,b.forward))
+                        throw std::logic_error("Model pose changed without changed inputs or producer invalidation");
+                }
+            }
             PerfMarkersEnd("Scene.Models.Pose");
-            const auto old = prior.find(instance.identity);
-            const d3scene::PreparedModel* history = nullptr;
-            if (old != prior.end()) for (const auto& previous_variant : old->second->models)
-                if (previous_variant.asset->id() == variant.asset->id()) { history = &previous_variant; break; }
             const auto roles = ResolveSceneModelRoles(variant.asset->geometry(),source->rtype.pobj_info.subobj_flags,effect.custom_texture >= 0);
             PERF_MARKER_SCOPE("Scene.Models.Parts");
             for (size_t i = 0; i < variant.asset->geometry().parts.size(); ++i) {
                 const auto& asset_part = variant.asset->geometry().parts[i];
                 d3scene::PreparedModelPart part;
-                part.current = value(transforms.submodels[i]);
+                part.current = reuse_pose ? history->parts[i].current : rest ? variant.asset->geometry().rest_pose[i] : value(transforms->submodels[i]);
                 part.previous = history ? history->parts[i].current : part.current;
                 part.has_previous = history && history->parts[i].draw && instance.has_previous;
                 part.vertices = d3scene::deformMesh(asset_part.geometry,effect.deformation,data.simulation_time,owner.handle,static_cast<uint32_t>(i));
@@ -349,7 +402,7 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::FrameDat
                 bool reuse_materials = retain_materials && old_part && old_part->material_palette == part.material_palette &&
                     old_part->appearance_inputs == part.appearance_inputs && old_part->baked_layout_revision == part.baked_layout_revision &&
                     old_part->surfaces.publishedFor(variant.asset->id(),uint32_t(i),part.material_palette);
-                if (reuse_materials && baked && part.draw && FindArg("-scene-geometry-revision-audit")) {
+                if (reuse_materials && baked && part.draw && audit_geometry) {
                     for (size_t face = 0; reuse_materials && face < asset_part.geometry.polygons.size(); ++face) {
                         const auto& source_face = source->lm_object.lightmap_faces[i][face];
                         const auto& retained = old_part->surfaces[face];
@@ -407,6 +460,7 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::FrameDat
         if (!instance.models.empty()) data.model_instances.push_back(std::move(instance));
     }
     data.observation_inputs_prepared = true;
+    if (AutomatedCapturePending()) AutomatedCaptureLog("scene pose cache reused=%u clock=%u changed=%u",pose_reused,pose_clock,pose_changed);
 }
 
 void PrepareGameStaticModel(d3scene::FrameData& data,int number,const d3scene::Transform& placement,

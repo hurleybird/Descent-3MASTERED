@@ -97,11 +97,33 @@ d3scene::ModelGeometry CompileSceneModelAsset(const poly_model& model, size_t* r
         }
         geometry.parts.push_back(std::move(part));
     }
+    const bool static_rest = (model.flags & PMF_TIMED) || std::none_of(geometry.parts.begin(),geometry.parts.end(),
+        [](const d3scene::ModelPart& part) { return (part.authored_flags & (SOF_ROTATE|SOF_TURRET)) != 0; });
+    geometry.pose_uses_clock = std::any_of(geometry.parts.begin(),geometry.parts.end(),[&](const d3scene::ModelPart& part) {
+        return (part.authored_flags & SOF_ROTATE) || ((part.authored_flags & SOF_TURRET) &&
+            !(model.flags & PMF_TIMED) && model.num_key_angles <= 0);
+    });
+    if (static_rest) {
+        ModelPose rest; rest.count = model.n_models;
+        const auto transforms = ComposeModelPose(model,rest);
+        for (int i = 0; i < transforms.count; ++i) {
+            const auto& t = transforms.submodels[i];
+            geometry.rest_pose.push_back({value(t.translation),value(t.orientation.rvec),value(t.orientation.uvec),value(t.orientation.fvec)});
+        }
+    }
     return geometry;
 }
 bool MatchesSceneModelAsset(const d3scene::ModelGeometry& geometry,const poly_model& model) {
     if (model.n_models < 0 || model.n_textures < 0 || geometry.parts.size() != size_t(model.n_models) ||
         geometry.textures.size() != size_t(model.n_textures) || (model.n_models && !model.submodel)) return false;
+    const bool static_rest = (model.flags & PMF_TIMED) || std::none_of(geometry.parts.begin(),geometry.parts.end(),
+        [](const d3scene::ModelPart& part) { return (part.authored_flags & (SOF_ROTATE|SOF_TURRET)) != 0; });
+    if (static_rest != (geometry.rest_pose.size() == geometry.parts.size())) return false;
+    const bool clock = std::any_of(geometry.parts.begin(),geometry.parts.end(),[&](const d3scene::ModelPart& part) {
+        return (part.authored_flags & SOF_ROTATE) || ((part.authored_flags & SOF_TURRET) &&
+            !(model.flags & PMF_TIMED) && model.num_key_angles <= 0);
+    });
+    if (clock != geometry.pose_uses_clock) return false;
     const auto same = [](d3scene::Vec3 a,const vector& b) { return a.x == b.x && a.y == b.y && a.z == b.z; };
     for (int i = 0; i < model.n_textures; ++i) if (geometry.textures[i] != model.textures[i]) return false;
     for (int i = 0; i < model.n_models; ++i) {

@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <map>
 #include <cmath>
+#include <cstring>
 namespace {
 float height(int index) { return (std::max)(0.f,(std::min)(Terrain_seg[index].y,MAX_TERRAIN_HEIGHT)); }
 const terrain_tex_segment& terrainTexture(const terrain_segment& cell) {
@@ -114,6 +115,27 @@ void PrepareGameTerrain(d3scene::FrameData& frame) {
     }
 }
 void PrepareGameSky(d3scene::FrameData& frame) {
+    // Geometry belongs to the authored sky, not the presentation clock. Keep
+    // its inputs alongside immutable assets; rotation/materials remain frame
+    // data. Compare only geometry inputs (not mutable fog or rotation state).
+    struct SkyGeometry {
+        uint64_t lifetime = 0;
+        terrain_sky source{};
+        d3scene::MeshAssetRef dome, horizon, stars;
+    };
+    static SkyGeometry retained;
+    if (retained.lifetime != frame.scene_lifetime) {
+        retained = {};
+        retained.lifetime = frame.scene_lifetime;
+    }
+    const auto& prior = retained.source;
+    const bool same_horizon = std::memcmp(prior.horizon_vectors,Terrain_sky.horizon_vectors,sizeof(prior.horizon_vectors)) == 0;
+    if (!same_horizon || std::memcmp(prior.horizon_u,Terrain_sky.horizon_u,sizeof(prior.horizon_u)) ||
+        std::memcmp(prior.horizon_v,Terrain_sky.horizon_v,sizeof(prior.horizon_v))) retained.dome.reset();
+    if (!same_horizon || prior.sky_color != Terrain_sky.sky_color || prior.horizon_color != Terrain_sky.horizon_color)
+        retained.horizon.reset();
+    if (std::memcmp(prior.star_vectors,Terrain_sky.star_vectors,sizeof(prior.star_vectors)) ||
+        std::memcmp(prior.star_color,Terrain_sky.star_color,sizeof(prior.star_color))) retained.stars.reset();
     const auto color = [](ddgr_color c) -> d3scene::Vec3 {
         return {GR_COLOR_RED(c)/255.f,GR_COLOR_GREEN(c)/255.f,GR_COLOR_BLUE(c)/255.f};
     };
@@ -139,9 +161,9 @@ void PrepareGameSky(d3scene::FrameData& frame) {
       return rotation;
     };
     const auto rotation = skyRotation(TF_ROTATE_SKY);
-    const auto publish = [&](uint32_t slot,d3scene::MeshGeometry geometry,int bitmap) {
+    const auto publish = [&](const d3scene::MeshAssetRef& asset,int bitmap) {
         d3scene::PreparedMesh mesh;
-        mesh.asset = d3scene::assets().publishMesh(slot,std::move(geometry));
+        mesh.asset = asset;
         mesh.world = rotation;
         mesh.camera_translation = {1,.5f,1};
         mesh.surface.layer = d3scene::RenderLayer::Background;
@@ -167,6 +189,7 @@ void PrepareGameSky(d3scene::FrameData& frame) {
         geometry.polygons.push_back(std::move(face));
     };
     if (Terrain_sky.textured) {
+      if (!retained.dome) {
         d3scene::MeshGeometry dome;
         for (int t = 0; t < MAX_HORIZON_PIECES; ++t) {
             const int next = (t+1)%MAX_HORIZON_PIECES;
@@ -174,14 +197,20 @@ void PrepareGameSky(d3scene::FrameData& frame) {
             for (int ring = 1; ring < 4; ++ring)
                 polygon(dome,{{t,ring},{next,ring},{next,ring+1},{t,ring+1}},false);
         }
-        const int bitmap = GetTextureBitmapAtTime(Terrain_sky.dome_texture,0,static_cast<float>(frame.simulation_time),false);
-        publish(0,std::move(dome),GetHighResolutionSkyBitmap(Terrain_sky.dome_texture,bitmap));
+        retained.dome = d3scene::assets().publishMesh(0,std::move(dome));
+      }
+      const int bitmap = GetTextureBitmapAtTime(Terrain_sky.dome_texture,0,static_cast<float>(frame.simulation_time),false);
+      publish(retained.dome,GetHighResolutionSkyBitmap(Terrain_sky.dome_texture,bitmap));
     }
+    if (!retained.horizon) {
     d3scene::MeshGeometry horizon;
     for (int t = 0; t < MAX_HORIZON_PIECES; ++t)
         polygon(horizon,{{t,4},{(t+1)%MAX_HORIZON_PIECES,4},{(t+1)%MAX_HORIZON_PIECES,5},{t,5}},true);
-    publish(1,std::move(horizon),-1);
+    retained.horizon = d3scene::assets().publishMesh(1,std::move(horizon));
+    }
+    publish(retained.horizon,-1);
     if (Terrain_sky.flags & TF_STARS) {
+      if (!retained.stars) {
         d3scene::MeshGeometry stars;
         const d3scene::Vec2 offsets[4] = {{-.5f,.5f},{.5f,.5f},{.5f,-.5f},{-.5f,-.5f}};
         for (unsigned index = 0; index < MAX_STARS; ++index) {
@@ -195,14 +224,17 @@ void PrepareGameSky(d3scene::FrameData& frame) {
             }
             stars.polygons.push_back(std::move(marker));
         }
+        retained.stars = d3scene::assets().publishMesh(4,std::move(stars));
+      }
         d3scene::PreparedMesh batch;
-        batch.asset = d3scene::assets().publishMesh(4,std::move(stars));
+        batch.asset = retained.stars;
         batch.world = skyRotation(TF_ROTATE_STARS); batch.camera_translation = {1,1,1};
         batch.surface.layer = d3scene::RenderLayer::Background;
         batch.surface.unlit = true; batch.surface.two_sided = true;
         batch.surface.blend = d3scene::BlendMode::Alpha;
         frame.meshes.push_back(std::move(batch));
     }
+    retained.source = Terrain_sky;
     if (Terrain_sky.flags & TF_SATELLITES) {
         const auto quad = d3scene::assets().quadMesh();
         for (unsigned index = 0; index < Terrain_sky.num_satellites && index < MAX_SATELLITES; ++index) {

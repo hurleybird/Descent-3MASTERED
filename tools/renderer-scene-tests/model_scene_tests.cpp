@@ -66,6 +66,13 @@ int runModelSceneTests() {
     poly_model source_model{}; source_model.n_models = 1; source_model.submodel = &source_part;
     size_t repaired = 0;
     const auto compiled = CompileSceneModelAsset(source_model,&repaired);
+    check(compiled.rest_pose.size() == 1 && compiled.rest_pose[0].right.x == 1,
+        "Static model rest transform was not compiled with its asset");
+    source_part.flags |= SOF_ROTATE;
+    check(CompileSceneModelAsset(source_model).rest_pose.empty(),"Autonomous rotation was frozen into a rest pose");
+    source_model.flags |= PMF_TIMED;
+    check(CompileSceneModelAsset(source_model).rest_pose.size() == 1,"Timed no-input rest semantics changed");
+    source_model.flags &= ~PMF_TIMED; source_part.flags &= ~SOF_ROTATE;
     check(repaired == 2 && compiled.parts[0].geometry.vertex_normals[1].z == -1, "Invalid authored normals not repaired at asset boundary");
     check(std::isnan(normals[1].y), "Asset compiler rewrote source shading data");
     check(MatchesSceneModelAsset(compiled,source_model), "Resident model did not recognize repaired source normals");

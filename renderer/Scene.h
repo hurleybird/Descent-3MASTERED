@@ -104,6 +104,10 @@ struct ModelPart {
 struct ModelGeometry {
     std::vector<ModelPart> parts;
     std::vector<int32_t> textures;
+    // Compiled local-to-model transforms for an unanimated rest pose. Empty
+    // means evaluation is required (e.g. an autonomous rotating submodel).
+    std::vector<Transform> rest_pose;
+    bool pose_uses_clock = false;
 };
 bool operator==(const ModelGeometry&, const ModelGeometry&);
 class ModelAsset final {
@@ -453,6 +457,8 @@ struct PreparedModelPart {
 };
 struct PreparedModel {
     ModelAssetRef asset;
+    uint64_t pose_source_revision = 0;
+    std::shared_ptr<const std::vector<float>> pose_inputs;
     std::vector<PreparedModelPart> parts;
     Bounds render_bounds;
     bool has_render_bounds = false;

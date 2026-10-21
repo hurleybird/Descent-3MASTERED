@@ -2,6 +2,26 @@
 
 ## October 20 continuation
 
+Second checkpoint: model assets retain rest poses; unchanged instance inputs
+reuse previous poses, and identical animated inputs share one evaluation within
+a frame. Geometry audit independently evaluates every pose. Immutable fog
+validation moved to fog publication. Sky geometry is retained against its
+authored geometry inputs, separately from frame rotation and material state.
+Transient upload addresses no longer clear the whole-level table every view.
+Resource index scratch replaces per-frame hash-node allocations.
+
+`cpu-sky-corpus-20261020-savegNNN` completes all eight saves. Seven images match
+the start-of-day rewrite exactly. Save002 had a small animated-pickup delta;
+`cpu-sky-repeat-20261020-saveg002` matches exactly. This is capture variability,
+not proof of old-renderer parity. Full pose/image audits complete all eight
+(`cpu-pose-corpus-20261020-savegNNN`); view/deformation/resource probe with AO and
+bloom also completes (`cpu-sky-viewprobe-20261020`). Dense total render CPU is
+7.83 ms in the latest clean capture, still far above the 2.93 ms old baseline.
+Detailed markers are not the root cause: disabled-marker paired runs measured
+8.33 ms new / 2.63 ms old before the sky change. Contract suite passes.
+Next: remove whole-level per-polygon light assignment from frame preparation;
+retain conservative candidates and refine only demanded geometry per view.
+
 Frame-owned image bindings replace surface-owned pixel revisions. Surface
 tables keep stable resource names; each frame owns the immutable images bound
 to them. Texture animation selects the frame image once per resource; scrolling

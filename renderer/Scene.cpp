@@ -39,8 +39,7 @@ void RoomSurfaces::seal(AssetId asset,uint32_t part,bool palette) {
         if (surface.lightmap_bitmap >= 0) image({surface.lightmap_bitmap,true,surface.baked_image,ImageFormat::ARGB1555,surface.lightmap_wrap,surface.lightmap_u_scale,surface.lightmap_v_scale});
     }
     images_ = std::make_shared<const std::vector<ImageDependency>>(unique);
-    // Drop scratch references after copying so the scratch capacity does not
-    // extend the lifetime of image assets from an unloaded level.
+    // Dependency scratch contains names/metadata, never frame image ownership.
     unique.clear();
     publication_ = asset; publication_part_ = part; publication_palette_ = palette;
     std::sort(reflections.begin(),reflections.end());
@@ -250,6 +249,12 @@ void SceneAssets::removeRoom(uint32_t slot) {
 }
 
 bool operator==(const ModelGeometry& a, const ModelGeometry& b) {
+    if (a.pose_uses_clock != b.pose_uses_clock) return false;
+    if (a.rest_pose.size() != b.rest_pose.size()) return false;
+    for (size_t i = 0; i < a.rest_pose.size(); ++i) {
+        const auto& x = a.rest_pose[i]; const auto& y = b.rest_pose[i];
+        if (!equal(x.position,y.position) || !equal(x.right,y.right) || !equal(x.up,y.up) || !equal(x.forward,y.forward)) return false;
+    }
     if (a.textures != b.textures || a.parts.size() != b.parts.size()) return false;
     for (size_t i = 0; i < a.parts.size(); ++i) {
         const auto& x = a.parts[i]; const auto& y = b.parts[i];
@@ -288,6 +293,8 @@ ModelAssetRef SceneAssets::model(uint32_t slot) const {
     return slot < models_.size() ? models_[slot] : nullptr;
 }
 ModelAssetRef SceneAssets::publishModel(uint32_t slot, ModelGeometry geometry) {
+    require(geometry.rest_pose.empty() || geometry.rest_pose.size() == geometry.parts.size(),"Incomplete model rest pose");
+    for (const auto& transform : geometry.rest_pose) require(finite(transform),"Invalid model rest pose");
     for (size_t i = 0; i < geometry.parts.size(); ++i) {
         const auto& part = geometry.parts[i];
         validateGeometry(part.geometry);
@@ -438,18 +445,8 @@ PresentationRef Presentation::complete(FrameData data) {
     require(finite(data.exterior_fog.color) && std::isfinite(data.exterior_fog.start) && std::isfinite(data.exterior_fog.end) &&
         (!data.exterior_fog.enabled || data.exterior_fog.end > data.exterior_fog.start),"Invalid exterior fog");
     require(!data.fog || data.fog->id().lifetime == data.scene_lifetime,"Stale fog asset");
-    for (const auto& volume : fogVolumes(data)) {
-        require(finite(volume.color) && std::isfinite(volume.depth) && volume.depth > 0,"Invalid fog volume");
-        require(finite(volume.bounds.minimum) && finite(volume.bounds.maximum),"Invalid fog bounds");
-        require(volume.boundary.empty() == volume.nodes.empty(),"Missing fog spatial index");
-        for (size_t index = 0; index < volume.nodes.size(); ++index) {
-            const auto& node = volume.nodes[index];
-            require(finite(node.bounds.minimum) && finite(node.bounds.maximum) && node.escape > index && node.escape <= volume.nodes.size() &&
-                uint64_t(node.first)+node.count <= volume.boundary.size(),"Invalid fog spatial node");
-        }
-        for (const auto& triangle : volume.boundary)
-            require(finite(triangle.a) && finite(triangle.b) && finite(triangle.c) && finite(triangle.inward),"Invalid fog boundary");
-    }
+    // Fog topology is immutable and validated by its publishing owner. Only
+    // the asset lifetime belongs to this frame's validation boundary.
     for (const auto& mesh : data.meshes) {
         require(mesh.asset && mesh.asset->id().lifetime == data.scene_lifetime,"Stale generic mesh");
         require(mesh.vertices.empty() || mesh.vertices.size() == mesh.asset->geometry().vertices.size(),

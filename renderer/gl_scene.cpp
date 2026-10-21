@@ -612,7 +612,10 @@ void GL4Renderer::UploadSceneFrame(const d3scene::Presentation& frame, const d3s
         }
         const bool rebuild_reflections = scene_frame_sequence != frame.data().sequence && reflection_revisions != scene_reflection_revisions;
         if (rebuild_reflections) { scene_reflection_assets.clear(); scene_room_bindings.clear(); }
-        scene_surface_ranges.assign(frame.data().compiled_surface_count,SceneSurfaceRanges{});
+        // Stable frame addresses do not require clearing the whole level for
+        // every view. Every demanded entry is fully assigned below (or copied
+        // from a complete retained room table); unseen entries are never read.
+        scene_surface_ranges.resize(frame.data().compiled_surface_count);
         const auto reflection = [&](const d3scene::SurfaceBinding& surface) {
             SceneReflectionRanges reflection_ranges{};
             if (surface.reflection && surface.specular_strength > 0) {
@@ -657,6 +660,7 @@ void GL4Renderer::UploadSceneFrame(const d3scene::Presentation& frame, const d3s
         }
         const auto add = [&](const d3scene::SurfaceBinding& surface,uint32_t index,const std::vector<uint32_t>& lights) {
             auto& ranges = scene_surface_ranges[index];
+            ranges = {};
             const auto reflection_ranges = reflection(surface);
             ranges.reflections = reflection_ranges.sources;
             ranges.normals = reflection_ranges.normals;
