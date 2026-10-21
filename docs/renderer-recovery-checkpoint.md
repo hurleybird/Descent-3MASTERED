@@ -23,8 +23,16 @@ Normal4K half screenshot visually inspected. Capture maxRGB75 in effects image
 falls in known moving-object region; do not attribute that peak to quantization.
 Raw fog4k-half-*,fog-half-audit-*,fog-half-multiview,roof4k-motion-half640.
 No preview/Candidate/main changes. C:free26GB; avoid duplicate full4K series.
-Next CPU candidate: compile model/mesh owner ordinals once during publication
-instead of repeated identity hashes in each view. Not implemented yet.
+Publication now compiles model/mesh owner and attachment ordinals into the owned
+frame. View queries no longer repeat those identity lookups. Builder-supplied
+ordinals are overwritten, reordered frames recompile, and held frames retain their
+own indices. New tests cover these cases and detachment; contract tests/build pass
+(owner-ordinal-tests-final.log/owner-ordinal-build.log). Runtime scene-view-test
+includes this change. 005/007 and combined multiview/deformation/resource/audit
+captures are pixel-identical to aperture-clip baselines. CPU005 1.61->1.58ms,
+007 1.66->1.71ms: mixed/no meaningful performance claim. 007 uses full-precision
+field320 to isolate this CPU change from the newer default field storage.
+Raw owner-ordinal005/007/owner-ordinal-multiview. Preview v2 remains unchanged.
 
 Native4K roof qualification completed (3840x2160). Full64frame rotating series
 fog-series-roof4k-motion-{ref,field320,field640}. Scaled diagnostic ROI/band by

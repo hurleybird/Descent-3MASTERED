@@ -296,6 +296,37 @@ int runModelSceneTests() {
     data.modelsFor(1)[0].parts[0].surfaces[0].alpha = 0.5f;
     auto frame = Presentation::freeze(data);
     {
+        check(frame->data().model_instances[0].compiled_owner==0 &&
+            frame->data().model_instances[1].compiled_owner==1,"Model owner ordinals were not compiled");
+        auto linked=frame->data();
+        PreparedMesh attachment;
+        attachment.asset=assets.publishMesh(999,asset->geometry().parts[0].geometry);
+        attachment.has_owner=true; attachment.owner=42;
+        attachment.model_instance=linked.model_instances[0].identity;
+        attachment.model_variant=0; attachment.model_part=0;
+        attachment.compiled_owner=attachment.compiled_model=999; // stale/untrusted builder hints
+        linked.meshes.push_back(attachment);
+        const auto held=Presentation::freeze(linked);
+        check(held->data().meshes.back().compiled_owner==0 && held->data().meshes.back().compiled_model==0,
+            "Publication trusted a builder's attachment ordinal");
+        linked=held->data();
+        std::swap(linked.objects[0],linked.objects[1]);
+        linked.meshes.back().model_instance=linked.model_instances[1].identity;
+        const auto reordered=Presentation::freeze(linked);
+        check(reordered->data().model_instances[0].compiled_owner==1 &&
+            reordered->data().model_instances[1].compiled_owner==0 &&
+            reordered->data().meshes.back().compiled_owner==1 && reordered->data().meshes.back().compiled_model==1,
+            "Reordered frame retained stale ownership/attachment ordinals");
+        check(held->data().model_instances[0].compiled_owner==0 && held->data().meshes.back().compiled_model==0,
+            "Recompiling ownership changed a held frame");
+        linked.model_instances[0].has_owner=false; linked.meshes.back().has_owner=false;
+        linked.meshes.back().model_instance=0; linked.meshes.back().model_variant=linked.meshes.back().model_part=-1;
+        const auto detached=Presentation::freeze(linked);
+        check(detached->data().model_instances[0].compiled_owner==size_t(-1) &&
+            detached->data().meshes.back().compiled_owner==size_t(-1) &&
+            detached->data().meshes.back().compiled_model==size_t(-1),"Detached entities retained compiled dependencies");
+    }
+    {
         auto composed = frame->data();
         const Transform pose[] = {part.current};
         const auto range = composed.appendModelTransforms(pose,1);

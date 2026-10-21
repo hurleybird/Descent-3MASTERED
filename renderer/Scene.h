@@ -358,6 +358,8 @@ struct PreparedMesh {
     uint64_t model_instance = 0; // optional dependency on a prepared model, not a game object
     int32_t model_part = -1; // sprite position is local to this part; its basis remains camera-local
     int32_t model_variant = -1;
+    // Recompiled on publication; ordinals belong only to this owned frame.
+    size_t compiled_owner = size_t(-1), compiled_model = size_t(-1);
 };
 struct Portal {
     int32_t polygon = -1, destination_room = -1, destination_portal = -1;
@@ -699,6 +701,7 @@ struct ModelInstance {
     std::array<uint32_t,3> lod_models{{0,0,0}};
     Bounds render_bounds; // union of every variant, never the simulation radius
     bool has_render_bounds = false;
+    size_t compiled_owner = size_t(-1); // publication-owned object ordinal
 };
 
 enum class LightSource : uint8_t { Object, Effect };

@@ -972,9 +972,11 @@ PresentationRef Presentation::complete(FrameData data) {
     for (const auto& transform : data.model_transforms)
         require(finite(transform),"Invalid composed model transform");
     size_t model_end = 0;
-    for (const auto& object : data.model_instances) {
+    for (auto& object : data.model_instances) {
         require(object.identity,"Absent model instance identity");
-        require(!object.has_owner || objects.count(object.owner),"Model owner is not part of this presentation");
+        const auto* owner = object.has_owner ? objects.find(object.owner) : nullptr;
+        require(!object.has_owner || owner,"Model owner is not part of this presentation");
+        object.compiled_owner = owner ? owner->second : size_t(-1);
         require(finite(object.current) && finite(object.previous),"Invalid model placement");
         data.ambientFor(object);
         require(object.model_count && object.model_begin == model_end,"Model variants must partition frame storage");
@@ -1051,15 +1053,19 @@ PresentationRef Presentation::complete(FrameData data) {
     require(model_end == data.model_variants.size(),"Unowned model variants in frame storage");
     image_requirements.finish();
     for (const auto& dependency : image_requirements.values()) validateDependency(dependency);
-    for (const auto& mesh : data.meshes) {
-        require(!mesh.has_owner || objects.count(mesh.owner),"Mesh owner is not part of this presentation");
+    for (auto& mesh : data.meshes) {
+        const auto* owner = mesh.has_owner ? objects.find(mesh.owner) : nullptr;
+        require(!mesh.has_owner || owner,"Mesh owner is not part of this presentation");
+        mesh.compiled_owner = owner ? owner->second : size_t(-1);
+        const auto* attachment = mesh.model_instance ? model_instances.find(mesh.model_instance) : nullptr;
+        mesh.compiled_model = attachment ? attachment->second : size_t(-1);
         require(mesh.model_variant >= -1 && (mesh.model_instance == 0 ? mesh.model_variant == -1 :
-            (model_instances.count(mesh.model_instance) && mesh.model_variant >= 0 &&
-                size_t(mesh.model_variant) < data.model_instances[model_instances.at(mesh.model_instance)].model_count &&
-                mesh.collection == data.model_instances[model_instances.at(mesh.model_instance)].collection)),
+            (attachment && mesh.model_variant >= 0 &&
+                size_t(mesh.model_variant) < data.model_instances[mesh.compiled_model].model_count &&
+                mesh.collection == data.model_instances[mesh.compiled_model].collection)),
             "Model attachment references an absent instance variant");
         require(mesh.model_part >= -1 && (mesh.model_part < 0 || (mesh.model_instance &&
-            size_t(mesh.model_part) < data.modelsFor(model_instances.at(mesh.model_instance))[mesh.model_variant].parts.size())),
+            size_t(mesh.model_part) < data.modelsFor(mesh.compiled_model)[mesh.model_variant].parts.size())),
             "Model attachment references an absent pose part");
     }
     std::shared_ptr<Presentation> prepared(new Presentation(std::move(data),std::move(storage)));

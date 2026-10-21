@@ -547,17 +547,15 @@ static ViewVisibility queryResolvedView(const Presentation& frame,const View& vi
             consider(MeshView(geometry),projected,{},room.surfaces[f],{static_cast<uint32_t>(r),static_cast<uint32_t>(f)});
         }
     }
-    const auto& owner_indices = frame.objectIndices();
-    const auto& instances = frame.modelIndices();
     static thread_local std::vector<bool> model_owners,visible_owners;
     model_owners.assign(world_content ? frame.data().objects.size() : 0,false);
     visible_owners.assign(model_owners.size(),false);
     if (world_content) for (const auto index : collection.models) {
         const auto& instance = frame.data().model_instances[index];
-        if (instance.has_owner) model_owners[owner_indices.at(instance.owner)] = true;
+        if (instance.has_owner) model_owners[instance.compiled_owner] = true;
     }
     const auto eligible = [&](const ModelInstance& instance) {
-        return instance.collection == view.collection && instance.visible && (!instance.has_owner || (frame.data().objects[owner_indices.at(instance.owner)].visible &&
+        return instance.collection == view.collection && instance.visible && (!instance.has_owner || (frame.data().objects[instance.compiled_owner].visible &&
             !excludesObject(view,instance.owner)));
     };
     for (size_t i = 0; i < frame.data().objects.size(); ++i) {
@@ -580,7 +578,7 @@ static ViewVisibility queryResolvedView(const Presentation& frame,const View& vi
         const auto& model = frame.resolvedModel(i,variant);
         if (!model.has_render_bounds || boundsOutside(result.camera,model.render_bounds,window)) continue;
         if (world_content && object.has_owner) {
-            const auto index = owner_indices.at(object.owner);
+            const auto index = object.compiled_owner;
             if (!visible_owners[index]) result.object_indices.push_back(uint32_t(index));
             visible_owners[index] = true;
         }
@@ -639,9 +637,9 @@ static ViewVisibility queryResolvedView(const Presentation& frame,const View& vi
         if (instance.receiver_polygon >= 0 && !std::binary_search(visible_receivers.begin(),visible_receivers.end(),
             (uint64_t(room_indices.at(instance.room))<<32)|uint32_t(instance.receiver_polygon))) continue;
         if (instance.has_owner && (excludesObject(view,instance.owner) ||
-            !frame.data().objects[owner_indices.at(instance.owner)].visible)) continue;
+            !frame.data().objects[instance.compiled_owner].visible)) continue;
         if (instance.model_instance) {
-            const auto& model = frame.data().model_instances[instances.at(instance.model_instance)];
+            const auto& model = frame.data().model_instances[instance.compiled_model];
             if (!eligible(model) || uint32_t(instance.model_variant) != selectModelVariant(model,result.camera)) continue;
         }
         const auto& geometry = instance.asset->geometry();
@@ -655,7 +653,7 @@ static ViewVisibility queryResolvedView(const Presentation& frame,const View& vi
         VisibleSurface item; item.mesh = true; item.mesh_index = static_cast<uint32_t>(index);
         Transform attachment;
         if (instance.model_part >= 0) {
-            const auto index = instances.at(instance.model_instance);
+            const auto index = instance.compiled_model;
             const auto& model = frame.resolvedModel(index,size_t(instance.model_variant));
             attachment = compose(frame.data().model_instances[index].current,model.parts[instance.model_part].current);
         }
