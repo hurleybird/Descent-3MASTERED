@@ -1,5 +1,18 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## October 21 resumed work — supersedes restart pause below
+
+User asked to continue, aiming to stop at 0% included usage; a small accidental
+credit overrun is acceptable, not deliberate credit use. Last check 38% remaining.
+See the top of `renderer-cpu-ownership-repair.md` for completed verification and
+fresh paired timings (still seven of eight behind pre-rewrite).
+Current verification binary: `out/perf-checkpoints/object-history.exe`, deployed
+only to `C:/tmp/D3RendererVerification/scene-view-test`. Mesh alpha summary,
+positive lightmap compatibility proof reuse, contiguous publication uniqueness
+checks and compact source transform history are built/tested. Dense/wall/combined
+probe images match the preceding checkpoint exactly. No captures are pending
+at this checkpoint. Continue improving CPU preparation; do not claim completion.
+
 ## October 21 restart pause — latest state
 
 User requested a yield to restart. Do not resume until requested. Last included

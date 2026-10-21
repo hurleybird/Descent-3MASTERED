@@ -409,6 +409,16 @@ void extractionTests() {
     const auto empty = ExtractGamePresentation(6, 0, true);
     check(empty->data().rooms.empty() && !d3scene::assets().room(0), "removed room retained in current scene");
     check(a->data().rooms[0].asset->geometry().vertices.size() == 3, "unload invalidated held presentation");
+    Highest_object_index = -1;
+    ExtractGamePresentation(7,0,false);
+    Highest_object_index = 0;
+    const auto restored_slot = ExtractGamePresentation(8,0,false);
+    check(!restored_slot->data().objects[0].has_previous,"Absent high slot retained history after inventory shrink");
+    Objects[0].type = OBJ_NONE;
+    ExtractGamePresentation(9,0,false);
+    Objects[0].type = OBJ_ROBOT;
+    check(!ExtractGamePresentation(10,0,false)->data().objects[0].has_previous,
+        "Absent object retained history across a committed empty slot");
     ResetGamePresentationScene();
 }
 }

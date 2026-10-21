@@ -105,5 +105,32 @@ int runLightTests() {
     appendSurfaceLightIndices(frame->data(),frame->data().rooms[0].light_candidates,
         MeshView(mesh),mesh.polygons[0],{},submitted);
     check(submitted == std::vector<int32_t>{0},"Later frame preparation changed held-frame light refinement");
+    {
+        FrameData keys; keys.sequence = 1; keys.scene_lifetime = assets.lifetime();
+        for (uint64_t i = 100; i > 0; --i) {
+            auto light = point; light.id.owner = i; keys.lights.push_back(light);
+        }
+        const auto held = Presentation::freeze(keys);
+        keys.lights.push_back(keys.lights[37]);
+        rejects([&] { Presentation::freeze(keys); });
+        keys.lights.clear(); keys.lights.push_back(point);
+        check(Presentation::freeze(keys)->data().lights.size() == 1 && held->data().lights.size() == 100,
+            "Publication uniqueness scratch retained a failed frame or mutated a held frame");
+        keys.camera_perturbations.resize(2);
+        rejects([&] { Presentation::freeze(keys); });
+        keys.camera_perturbations.back().owner = 1;
+        check(Presentation::freeze(keys)->data().camera_perturbations.size() == 2,"Distinct camera owners rejected");
+        keys.foregrounds.resize(2);
+        View overlay; overlay.kind = ViewKind::Preview; overlay.history_key = 1;
+        overlay.viewport = overlay.projection_anchor = {0,0,64,64};
+        for (auto& foreground : keys.foregrounds) foreground.layer.scene_views.push_back(overlay);
+        keys.foregrounds[0].identity = keys.foregrounds[1].identity = 1;
+        keys.foregrounds[1].order = 1;
+        rejects([&] { Presentation::freeze(keys); });
+        keys.foregrounds[1].identity = 2; keys.foregrounds[1].order = 0;
+        rejects([&] { Presentation::freeze(keys); });
+        keys.foregrounds[1].phase = ForegroundPhase::FinalOverlay;
+        check(Presentation::freeze(keys)->data().foregrounds.size() == 2,"Independent foreground phases collapsed");
+    }
     return checks;
 }

@@ -2,6 +2,40 @@
 
 ## October 20 continuation
 
+October 21, after restart: user authorized continued work, aiming to stop at
+0% included usage (a small accidental credit overrun is acceptable, deliberate
+credit consumption is not). Latest check: 38% included remaining.
+
+The text-owned checkpoint's dense/wall/probe and SSAA2/MSAA4/AO/bloom images
+match their respective controls exactly. Final text-owned totals were
+3.506/1.985 ms; high-settings owned/control 3.583/3.607 ms, not evidence of a
+substantial speedup.
+
+Current repairs move generic-mesh vertex-alpha classification into immutable
+assets (publication no longer scans their polygons), reuse positive object
+lightmap compatibility proofs only for the same object generation/model asset/
+source epoch/allocation revision, and replace node-allocated publication
+uniqueness sets with reusable contiguous key arrays. The full compatibility
+guard still runs for new/replaced layouts and under geometry audit. All eight
+saves passed that audit. Six images are exact; 000 reproduces the known moving
+object difference, and 002 differs within the previously variable pickup bounds
+(854,375)-(927,436), not a claim of exact parity for those two captures.
+
+Fresh no-marker paired corpus before the compact-history change, current/old ms:
+000 2.023/1.512; 001 1.494/1.845; 002 2.612/2.317; 003 2.898/2.680;
+004 0.842/0.801; 005 1.832/1.014; 006 0.968/0.855; 007 2.147/1.216.
+Still only one scene ahead, seven behind. Captures: `cpu-keys-{current,legacy}-savegNNN-20261021`.
+
+Object history now stores only transforms, handles and sequence stamps in the
+simulation's existing slot index, replacing a duplicate ObjectState inventory
+and rebuilt lookup. Commit remains after successful extraction; non-advancing
+captures, rewinds, level reset, deleted slots and generation replacement are
+tested. Runtime dense/wall/combined resource-and-view probes match the keys
+checkpoint exactly: `cpu-object-history-{saveg003,saveg005,probe}-20261021`.
+Build/test logs: `out/cpu-object-history-{tests,build}.log`. Current verification
+binary retained at `out/perf-checkpoints/object-history.exe`. The target remains
+unmet; no Candidate or Previous Candidate deployment.
+
 Latest user direction (October 21, overnight): continue toward a **marked
 improvement** over the old renderer, not mere parity. Preserve architectural
 quality. Do not consume purchased credits: periodically check included usage,

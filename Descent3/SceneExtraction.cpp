@@ -9,7 +9,17 @@
 
 namespace {
 uint64_t Sequence = 0;
-std::vector<d3scene::ObjectState> PreviousObjects;
+// Simulation slots already provide the index. History needs only the previous
+// transform and generation, not a second full ObjectState inventory plus a
+// freshly built hash lookup. Sequence stamps retire absent slots without a
+// full-array clear, including when Highest_object_index shrinks.
+struct ObjectHistory {
+    d3scene::Transform transform;
+    uint32_t handle = 0;
+    uint64_t sequence = 0;
+};
+std::array<ObjectHistory,MAX_OBJECTS> PreviousObjects{};
+uint64_t PreviousSequence = 0;
 uint64_t PreviousLifetime = 0;
 double PreviousTime = 0;
 uint64_t GeometryEpoch = 1;
@@ -80,7 +90,7 @@ d3scene::MeshGeometry extractGeometry(const room& source) {
 }
 
 void ResetGamePresentationScene() {
-    PreviousObjects.clear(); PreviousLifetime = 0;
+    PreviousSequence = 0; PreviousLifetime = 0;
     d3scene::assets().reset();
 }
 void InvalidateGameSceneGeometry() {
@@ -183,10 +193,7 @@ d3scene::FrameData ExtractGameFrame(double time, float delta, bool paused, bool 
         }
         data.rooms.push_back(std::move(state));
     }
-    d3scene::SceneLookup<uint32_t, const d3scene::ObjectState*> previous_objects;
-    previous_objects.reserve(PreviousObjects.size());
-    if (PreviousLifetime == data.scene_lifetime && PreviousTime <= time)
-        for (const auto& object : PreviousObjects) previous_objects.emplace(object.handle, &object);
+    const bool history_current = PreviousSequence && PreviousLifetime == data.scene_lifetime && PreviousTime <= time;
     for (int i = 0; i <= Highest_object_index; ++i) {
         const object& source = Objects[i];
         if (source.type == OBJ_NONE) continue;
@@ -200,16 +207,25 @@ d3scene::FrameData ExtractGameFrame(double time, float delta, bool paused, bool 
         state.current = transform(source.pos, source.orient);
         state.previous = state.current;
         state.radius = source.size;
-        const auto previous = previous_objects.find(state.handle);
-        if (previous != previous_objects.end()) {
-            state.previous = previous->second->current;
+        const auto& previous = PreviousObjects[i];
+        if (history_current && previous.sequence == PreviousSequence && previous.handle == state.handle) {
+            state.previous = previous.transform;
             state.has_previous = true;
         }
         data.objects.push_back(state);
     }
     // Commit presentation history once, never when rendering a view/pass.
     ++Sequence;
-    if (advance_history) { PreviousObjects = data.objects; PreviousLifetime = data.scene_lifetime; PreviousTime = time; }
+    if (advance_history) {
+        // Commit only after extraction succeeds. No allocation or source
+        // pointers are retained, and thumbnail captures never advance stamps.
+        size_t cursor = 0;
+        for (int i = 0; i <= Highest_object_index; ++i) if (Objects[i].type != OBJ_NONE) {
+            const auto& state = data.objects[cursor++];
+            PreviousObjects[i] = {state.current,state.handle,data.sequence};
+        }
+        PreviousSequence = data.sequence; PreviousLifetime = data.scene_lifetime; PreviousTime = time;
+    }
     return data;
 }
 d3scene::PresentationRef ExtractGamePresentation(double time,float delta,bool paused,bool advance_history,

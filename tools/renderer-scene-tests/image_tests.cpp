@@ -189,6 +189,42 @@ int runSceneImageTests() {
     check(!policy.blended() && !policy.testsDepth() && !policy.writesDepth() && policy.requiresLatePass(),
         "Foreground no-depth policy was inferred from color blending");
     // Pixel revisions belong to frames, not to retained surface storage.
+    {
+        SceneAssets mesh_assets;
+        MeshGeometry geometry;
+        geometry.vertices = {{0,0,0},{1,0,0},{0,1,0}};
+        MeshPolygon face; face.normal = {0,0,1}; face.corners = {{0},{1},{2}};
+        geometry.polygons = {face,face};
+        const auto opaque = mesh_assets.publishMesh(0,geometry);
+        geometry.polygons.back().corners.back().alpha = 254;
+        const auto translucent = mesh_assets.publishMesh(0,geometry);
+        check(!opaque->hasVertexAlpha() && translucent->hasVertexAlpha(),"Mesh alpha summary lost immutable revision ownership");
+        for (const auto& mesh : {opaque,translucent})
+        for (int blend = 0; blend < 4; ++blend)
+        for (int depth = 0; depth < 4; ++depth)
+        for (int layer = 0; layer < 2; ++layer)
+        for (int alpha = 0; alpha < 2; ++alpha) {
+            if (layer == int(RenderLayer::Background) && depth != int(DepthMode::Automatic) &&
+                depth != int(DepthMode::Disabled)) continue;
+            PreparedMesh instance; instance.asset = mesh;
+            instance.surface.blend = static_cast<BlendMode>(blend);
+            instance.surface.depth = static_cast<DepthMode>(depth);
+            instance.surface.layer = static_cast<RenderLayer>(layer);
+            instance.surface.alpha = alpha ? .5f : 1.f;
+            auto expected = compileMaterialPolicy(instance.surface,MeshPolygon{});
+            for (const auto& polygon : mesh->geometry().polygons) {
+                const auto policy = compileMaterialPolicy(instance.surface,polygon);
+                if (policy.blended()) expected = policy;
+            }
+            FrameData input; input.sequence = 1; input.scene_lifetime = mesh_assets.lifetime();
+            input.meshes.push_back(instance);
+            const auto result = Presentation::publish(std::move(input));
+            const auto& actual = result->data().meshes[0].surface.material;
+            check(actual.blend == expected.blend && actual.depth == expected.depth &&
+                actual.layer == expected.layer && actual.texture_alpha == expected.texture_alpha,
+                "Asset alpha summary changed compiled material policy");
+        }
+    }
     FrameData frame;
     frame.sequence = 1; frame.scene_lifetime = assets.lifetime(); frame.images = {{44,truecolor}};
     MeshGeometry triangle;

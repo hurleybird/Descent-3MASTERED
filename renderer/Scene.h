@@ -60,11 +60,13 @@ class MeshAsset final {
 public:
     AssetId id() const { return id_; }
     const MeshGeometry& geometry() const { return geometry_; }
+    bool hasVertexAlpha() const { return vertex_alpha_; }
 private:
     friend class SceneAssets;
-    MeshAsset(AssetId id,MeshGeometry geometry) : id_(id), geometry_(std::move(geometry)) {}
+    MeshAsset(AssetId id,MeshGeometry geometry);
     AssetId id_;
     MeshGeometry geometry_;
+    bool vertex_alpha_ = false;
 };
 using MeshAssetRef = std::shared_ptr<const MeshAsset>;
 

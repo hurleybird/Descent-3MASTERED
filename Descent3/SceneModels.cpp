@@ -323,8 +323,21 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::Presenta
             // The saved per-object UV layout is not the shared model's topology.
             // Reject mismatched layouts before indexing (including destroyed-model swaps).
             PerfMarkersBegin("Scene.Models.Layout");
-            const bool baked = !NoLightmaps && source->lm_object.used && source->lighting_render_type == LRT_LIGHTMAPS &&
-                model_number == source->rtype.pobj_info.model_num && ObjectLightmapsMatchPolymodel(source);
+            const auto layout_revision = ObjectLightmapLayoutRevision();
+            const bool baked_candidate = !NoLightmaps && source->lm_object.used && source->lighting_render_type == LRT_LIGHTMAPS &&
+                source->render_type == RT_POLYOBJ && model_number == source->rtype.pobj_info.model_num;
+            // A retained successful binding is also a compatibility proof for
+            // this object generation, immutable model revision and allocation
+            // epoch. Setup/clear invalidate the epoch; model replacement cannot
+            // find this history. Never reuse a negative or unvalidated result.
+            const bool layout_proven = history && history->binding_inputs.valid &&
+                history->binding_inputs.baked_layout_revision == layout_revision &&
+                history->pose_source_revision == variant.pose_source_revision;
+            const bool checked_layout = baked_candidate && (!layout_proven || audit_geometry) ?
+                ObjectLightmapsMatchPolymodel(source) : layout_proven;
+            if (baked_candidate && layout_proven && audit_geometry && !checked_layout)
+                throw std::logic_error("Object lightmap compatibility changed without producer invalidation");
+            const bool baked = baked_candidate && checked_layout;
             PerfMarkersEnd("Scene.Models.Layout");
             PerfMarkersBegin("Scene.Models.Pose");
             float normalized[MAX_SUBOBJECTS]{};
@@ -352,7 +365,7 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::Presenta
             variant.binding_inputs.appearance = {{float(directional),float(source->rtype.pobj_info.tmap_override),
                 float(effect.custom_texture),float(effect.has_player_color),effect.player_color.x,
                 effect.player_color.y,effect.player_color.z,float(player_color_texture)}};
-            variant.binding_inputs.baked_layout_revision = baked ? ObjectLightmapLayoutRevision() : 0;
+            variant.binding_inputs.baked_layout_revision = baked ? layout_revision : 0;
             variant.binding_inputs.subobject_mask = source->rtype.pobj_info.subobj_flags;
             variant.binding_inputs.material_palette = !baked;
             variant.binding_inputs.valid = true;

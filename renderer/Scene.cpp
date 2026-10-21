@@ -12,7 +12,6 @@
 #include <stdexcept>
 #include <unordered_set>
 #include <utility>
-#include <set>
 #include <map>
 #include <tuple>
 #include <algorithm>
@@ -410,6 +409,11 @@ MeshAssetRef SceneAssets::quadMesh(uint32_t count) {
     if (!asset) asset = publishMesh(count == 1 ? 2 : 256+count,unitQuadBatch(count));
     return asset;
 }
+MeshAsset::MeshAsset(AssetId id,MeshGeometry geometry) : id_(id), geometry_(std::move(geometry)) {
+    for (const auto& polygon : geometry_.polygons)
+        for (const auto& corner : polygon.corners)
+            if (corner.alpha < 255) { vertex_alpha_ = true; return; }
+}
 MeshAssetRef SceneAssets::publishMesh(uint32_t slot,MeshGeometry geometry) {
     validateGeometry(geometry);
     if (slot < meshes_.size() && meshes_[slot] && meshes_[slot]->geometry() == geometry) return meshes_[slot];
@@ -432,20 +436,25 @@ MaterialPolicy modulatedMaterialPolicy(const SurfaceBinding& surface,float alpha
     }
     return policy;
 }
-MaterialPolicy compileMaterialPolicy(const SurfaceBinding& surface, const MeshPolygon& polygon) {
+namespace {
+MaterialPolicy materialPolicy(const SurfaceBinding& surface, bool vertex_alpha) {
     MaterialPolicy result;
     result.layer = surface.layer;
     if (surface.texture_alpha || surface.blend == BlendMode::Additive || surface.blend == BlendMode::Multiply) {
         result.texture_alpha = surface.view_image_slot || (surface.color_image && surface.color_format != ImageFormat::ARGB1555) ?
             TextureAlpha::Continuous : TextureAlpha::Cutout;
     }
-    bool fractional = surface.alpha < 1 || result.texture_alpha == TextureAlpha::Continuous || surface.soft_depth_range > 0;
-    for (const auto& corner : polygon.corners) fractional = fractional || corner.alpha < 255;
+    const bool fractional = vertex_alpha || surface.alpha < 1 || result.texture_alpha == TextureAlpha::Continuous || surface.soft_depth_range > 0;
     result.blend = surface.blend != BlendMode::Solid ? surface.blend : fractional ? BlendMode::Alpha : BlendMode::Solid;
     result.depth = surface.depth != DepthMode::Automatic ? surface.depth :
         surface.layer == RenderLayer::Background ? DepthMode::Disabled :
         result.blended() ? DepthMode::ReadOnly : DepthMode::ReadWrite;
     return result;
+}
+}
+MaterialPolicy compileMaterialPolicy(const SurfaceBinding& surface, const MeshPolygon& polygon) {
+    return materialPolicy(surface,std::any_of(polygon.corners.begin(),polygon.corners.end(),
+        [](const MeshCorner& corner) { return corner.alpha < 255; }));
 }
 
 const ForegroundLayer* Presentation::foreground(uint64_t identity) const {
@@ -614,27 +623,39 @@ PresentationRef Presentation::complete(FrameData data) {
     require(finite(data.player_control_delta) && std::isfinite(data.afterburner_factor) &&
         data.afterburner_factor >= 0 && data.afterburner_factor <= 1,"Invalid presentation motion inputs");
     require((data.pending_domains & ~AllPendingDomains) == 0, "Unknown pending scene domain");
-    std::unordered_set<uint64_t> foreground_ids;
-    std::set<std::pair<ForegroundPhase,int32_t>> foreground_order;
+    // These are publication checks, not lookup tables. Accumulate contiguous
+    // keys and check adjacent sorted values instead of allocating tree/hash
+    // nodes for every emitter and overlay on every frame. No borrowed state
+    // survives the call; an exception is cleared by the next publication.
+    static thread_local std::vector<uint64_t> foreground_ids;
+    static thread_local std::vector<std::pair<ForegroundPhase,int32_t>> foreground_order;
+    static thread_local std::vector<std::tuple<LightSource,uint64_t,uint32_t>> emitters;
+    static thread_local std::vector<uint32_t> camera_owners;
+    foreground_ids.clear(); foreground_order.clear(); emitters.clear(); camera_owners.clear();
+    const auto unique = [](auto& keys,const char* message) {
+        std::sort(keys.begin(),keys.end());
+        require(std::adjacent_find(keys.begin(),keys.end()) == keys.end(),message);
+    };
     for (const auto& foreground : data.foregrounds) {
-        require(foreground.identity && foreground_ids.insert(foreground.identity).second,
-            "Invalid or duplicate foreground identity");
+        require(foreground.identity,"Invalid or duplicate foreground identity");
+        foreground_ids.push_back(foreground.identity);
         require(foreground.phase == ForegroundPhase::WorldOverlay || foreground.phase == ForegroundPhase::FinalOverlay,
             "Unknown foreground phase");
-        require(foreground_order.emplace(foreground.phase,foreground.order).second,"Ambiguous foreground order");
+        foreground_order.emplace_back(foreground.phase,foreground.order);
         validateForeground(foreground.layer);
     }
+    unique(foreground_ids,"Invalid or duplicate foreground identity");
+    unique(foreground_order,"Ambiguous foreground order");
     require(data.lighting_quality == LightingQuality::Vertex || data.lighting_quality == LightingQuality::Pixel,
         "Unknown lighting quality");
-    std::set<std::tuple<LightSource,uint64_t,uint32_t>> emitters;
-    std::unordered_set<uint32_t> camera_owners;
     for (const auto& effect : data.camera_perturbations) {
-        require(camera_owners.insert(effect.owner).second,"Duplicate camera perturbation owner");
+        camera_owners.push_back(effect.owner);
         require(finite(effect.rotation) && effect.rotation.position.x == 0 &&
             effect.rotation.position.y == 0 && effect.rotation.position.z == 0,"Invalid camera perturbation");
     }
+    unique(camera_owners,"Duplicate camera perturbation owner");
     for (const auto& light : data.lights) {
-        require(emitters.emplace(light.id.source,light.id.owner,light.id.channel).second, "Duplicate scene emitter identity");
+        emitters.emplace_back(light.id.source,light.id.owner,light.id.channel);
         require(finite(light.position) && finite(light.color) && finite(light.direction) &&
             std::isfinite(light.specular_strength) && light.specular_strength >= 0 &&
             std::isfinite(light.radius) && light.radius > 0 && std::isfinite(light.falloff) && light.falloff > 0 &&
@@ -642,6 +663,7 @@ PresentationRef Presentation::complete(FrameData data) {
         const auto& n = light.direction;
         require(!light.directional || std::abs(n.x*n.x+n.y*n.y+n.z*n.z-1) < .001f, "Scene light direction is not normalized");
     }
+    unique(emitters,"Duplicate scene emitter identity");
     for (const auto& image : data.images)
         require(image.binding && image.asset && image.asset->id().lifetime == data.scene_lifetime,"Stale image asset in frame");
     std::sort(data.images.begin(),data.images.end(),[](const FrameData::ImageBinding& a,const FrameData::ImageBinding& b) { return a.binding < b.binding; });
@@ -943,11 +965,7 @@ PresentationRef Presentation::complete(FrameData data) {
             return a.phase != b.phase ? a.phase < b.phase : a.order < b.order;
         });
     for (auto& mesh : prepared->data_.meshes) {
-        mesh.surface.material = compileMaterialPolicy(mesh.surface,MeshPolygon{});
-        for (const auto& polygon : mesh.asset->geometry().polygons) {
-            const auto policy = compileMaterialPolicy(mesh.surface,polygon);
-            if (policy.blended()) mesh.surface.material = policy;
-        }
+        mesh.surface.material = materialPolicy(mesh.surface,mesh.asset->hasVertexAlpha());
     }
     for (auto& surface : prepared->data_.terrain.materials)
         surface.material = compileMaterialPolicy(surface,MeshPolygon{});
