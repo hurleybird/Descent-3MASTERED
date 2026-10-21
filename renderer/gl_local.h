@@ -186,13 +186,13 @@ class GL4Renderer : public IRenderer
 	struct SceneRoomBindings { d3scene::RoomSurfaces surfaces; std::vector<SceneSurfaceRanges> ranges; bool reusable = false; };
 	std::vector<SceneRoomBindings> scene_room_bindings;
 	struct ScenePartRanges {
-        ElementRange polygons, positions;
+		ElementRange positions;
+        uint32_t light_table = 0; // offset+1; zero uses the draw's constant list
         d3scene::Transform previous_world;
         uint32_t motion_identity = 0;
         bool motion_valid = false;
     };
 	std::vector<ScenePartRanges> scene_part_ranges;
-	std::vector<ElementRange> scene_model_influences;
 	struct SceneReflectionRanges { ElementRange sources, normals, field; };
 	std::unordered_map<uint64_t, SceneReflectionRanges> scene_reflection_assets;
 	d3scene::RetainedDependencies<uint64_t> scene_reflection_dependencies;

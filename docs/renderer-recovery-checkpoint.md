@@ -2,6 +2,30 @@
 
 ## Active 2026-10-21 flare regression investigation
 
+MODEL EXPERIMENT VALIDATION (not in v3.1): primitive light lists + contiguous
+opaque material runs reduce005CPU1.56->1.38ms,0071.81->1.53-1.62ms. Both images
+exact, GPU005~.17,007~.75-.81ms. Still not marked old-renderer wins. First run
+model-runs005/007 accidentally omitted field flag; do NOT compare its007GPU
+to field baseline. Correct runs model-runs-field*, then model-runs-winding*.
+GPU model culling initially used terrain front-face convention: visible holes
+in006 ship. Corrected to clockwise for polymodels, including reflection parity;
+batch compatibility now separates model from other winding classes.006 exact;
+003 differs one pixel by5 levels (depth-order tie),001/005/007 and vertexlight
+exact before winding fix. Fresh combined MSAA4/SSAA2/AO/bloom/deform/resource/
+image-audit view: model-runs-control-multiview vs model-runs-winding-multiview
+EXACT. Older fog-refine-msaa-multiview reference differs and is not current
+baseline. Last source compatibility/comment edit needs final build. Experiments
+remain uncommitted until final verification. Keep stash backup.
+
+DELIVERED v3.1 separate folder C:/tmp/D3RendererVerification/
+fog-field-preview-20261021-v3.1, commit ef5db93, SHA256
+E043BD4CB8B12642D27B2EBB0C5E3A9439A0DBE2B043F6C7DD979C72E3EFC3A9.
+Packaged smoke flare-v31-packaged-smoke pixel-identical to fixed closeup;
+pilot restored from v3 after harness. Links delivered via commentary.
+V3/Candidate/Previous Candidate unchanged. Model experiment stash APPLIED
+successfully after packaging; stash retained as backup. Continue its runtime
+validation, now on flare-fixed source. Last usage28%, credits unchanged.
+
 User reports v3 fog looks clean in roof room, but flares show random coloured
 noise (clipboard-41724c53-9832-4822-b897-abdbfacdcabd.png). Priority is reproduce
 and fix this regression; continue work, do not yield unprompted. V3 remains

@@ -594,13 +594,32 @@ static ViewVisibility queryResolvedView(const Presentation& frame,const View& vi
             const auto& geometry = model.asset->geometry().parts[part].geometry;
             const MeshView mesh(geometry,model.parts[part].vertices);
             ProjectedMesh projected(result.camera,mesh,world,window,projection_scratch);
-            for (size_t face = 0; face < geometry.polygons.size(); ++face) {
+            const auto& asset_part = model.asset->geometry().parts[part];
+            for (const auto& run : asset_part.surface_runs) {
+              const auto& surface = model.parts[part].surface(asset_part,run.first);
+              const auto policy = modulatedMaterialPolicy(surface,model.modulation.alpha);
+              const bool per_corner = surface.reflection && (!surface.reflection->data().corner_normals.empty() ||
+                  !surface.reflection->data().field_corners.empty());
+              if (run.count > 1 && model.parts[part].material_palette && model.parts[part].vertices.empty() &&
+                  surface.draw_surface && !policy.blended() && !policy.requiresLatePass() && !per_corner) {
+                VisibleSurface item;
+                item.model = true; item.model_instance_index = static_cast<uint32_t>(i);
+                item.model_variant = variant; item.part_index = static_cast<uint32_t>(part);
+                item.polygon_index = run.first; item.polygon_count = uint16_t(run.count); item.placement = placement;
+                item.depth = static_cast<float>(dot(view.camera.forward,subtract(
+                    projected.vertex(geometry.polygons[run.first].corners[0].vertex).world,view.camera.position)));
+                result.stats.surfaces_considered += run.count;
+                result.surfaces.push_back(item);
+                continue;
+              }
+              for (size_t face = run.first; face < size_t(run.first)+run.count; ++face) {
                 VisibleSurface item;
                 item.model = true; item.model_instance_index = static_cast<uint32_t>(i);
                 item.model_variant = variant;
                 item.part_index = static_cast<uint32_t>(part); item.polygon_index = static_cast<uint32_t>(face);
                 item.placement = placement;
                 consider(mesh,projected,world,model.parts[part].surface(model.asset->geometry().parts[part],face),item,model.modulation.alpha);
+              }
             }
         }
     }

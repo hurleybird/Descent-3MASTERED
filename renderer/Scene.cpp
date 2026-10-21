@@ -385,7 +385,7 @@ ModelAsset::ModelAsset(AssetId id, ModelGeometry geometry) : id_(id), geometry_(
             }
         }
         std::map<std::tuple<int,float,float,float,bool>,uint32_t> palette;
-        part.surface_for_polygon.clear(); part.surface_polygons.clear();
+        part.surface_for_polygon.clear(); part.surface_polygons.clear(); part.surface_runs.clear();
         for (size_t face = 0; face < part.geometry.polygons.size(); ++face) {
             bool fractional = false;
             for (const auto& corner : part.geometry.polygons[face].corners) fractional = fractional || corner.alpha < 255;
@@ -394,6 +394,10 @@ ModelAsset::ModelAsset(AssetId id, ModelGeometry geometry) : id_(id), geometry_(
             const auto inserted = palette.emplace(key,uint32_t(part.surface_polygons.size()));
             if (inserted.second) part.surface_polygons.push_back(uint32_t(face));
             part.surface_for_polygon.push_back(inserted.first->second);
+            if (!part.surface_runs.empty() && face && part.surface_runs.back().count < UINT16_MAX &&
+                part.surface_for_polygon[face-1] == inserted.first->second)
+                ++part.surface_runs.back().count;
+            else part.surface_runs.push_back({uint32_t(face),1});
         }
     }
     const auto length = [](Vec3 p) { return std::sqrt(p.x*p.x+p.y*p.y+p.z*p.z); };

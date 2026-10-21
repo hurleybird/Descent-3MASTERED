@@ -37,6 +37,44 @@ int runModelSceneTests() {
     check(sizeof(RoomSurfaces) == sizeof(std::shared_ptr<void>) && sizeof(ModelParts) == sizeof(std::shared_ptr<void>),
         "Retained binding handles duplicated ownership of table metadata");
     {
+        SceneAssets fixtures;
+        auto geometry = modelGeometry();
+        auto& source = geometry.parts[0];
+        source.geometry.polygons.resize(6,source.geometry.polygons[0]);
+        source.polygon_materials.assign(6,-1);
+        source.polygon_colors = {{1,0,0},{1,0,0},{0,1,0},{0,1,0},{1,0,0},{1,0,0}};
+        const auto asset = fixtures.publishModel(1,geometry);
+        const auto& runs = asset->geometry().parts[0].surface_runs;
+        check(runs.size() == 3 && runs[0].first == 0 && runs[1].first == 2 && runs[2].first == 4 &&
+            runs[0].count == 2 && runs[1].count == 2 && runs[2].count == 2,
+            "Material runs reordered nonconsecutive primitive groups");
+        FrameData input; input.sequence = 1; input.scene_lifetime = fixtures.lifetime();
+        ModelInstance instance; instance.identity = 1; instance.current.position.z = 10;
+        PreparedModel model; model.asset = asset;
+        PreparedModelPart part; part.material_palette = true; part.surfaces.resize(2);
+        model.parts.push_back(part); input.appendModel(instance,model); input.model_instances.push_back(instance);
+        View request; request.history_key = 1; request.viewport = request.projection_anchor = {0,0,800,600};
+        request.portal_visibility = false;
+        const auto grouped = Presentation::freeze(input);
+        const auto visible = queryView(*grouped,request);
+        check(visible.surfaces.size() == 3,"Opaque model was not submitted as material runs");
+        size_t polygons = 0;
+        for (const auto& item : visible.surfaces) { check(item.model && item.polygon_count == 2,"Model run lost its primitive extent"); polygons += item.polygon_count; }
+        check(polygons == 6,"Model batching lost primitives");
+        input.model_variants[0].modulation.alpha = .5f;
+        const auto transparent = queryView(*Presentation::freeze(input),request);
+        check(transparent.surfaces.size() == 6,"Instance transparency lost per-face ordering");
+        for (const auto& item : transparent.surfaces) check(item.polygon_count == 1 && item.blended,"Blended geometry entered opaque batching");
+        input.model_variants[0].modulation.alpha = 1;
+        input.model_variants[0].parts[0].vertices = source.geometry.vertices;
+        input.model_variants[0].parts[0].vertices[0].x -= .1f;
+        const auto deformed = queryView(*Presentation::freeze(input),request);
+        check(deformed.surfaces.size() == 6,"Deformed geometry used an unproven winding batch");
+        input.model_variants[0].parts[0].vertices.clear();
+        check(queryView(*Presentation::freeze(input),request).surfaces.size() == 3 && queryView(*grouped,request).surfaces.size() == 3,
+            "Batch eligibility transition changed a held frame or retained stale deformation");
+    }
+    {
         uint32_t seed = 0x42b07u;
         const auto random = [&]() { seed = seed*1664525u+1013904223u; return (int(seed>>8)-8388608)/8388608.f; };
         for (int sample = 0; sample < 12000; ++sample) {
@@ -270,6 +308,9 @@ int runModelSceneTests() {
         const auto& palette = palette_asset->geometry().parts[0];
         check(palette.surface_polygons.size() == 2 && palette.surface_for_polygon[0] == palette.surface_for_polygon[1] &&
             palette.surface_for_polygon[0] != palette.surface_for_polygon[2],"Material palette merged distinct alpha policies or duplicated identical materials");
+        check(palette.surface_runs.size() == 2 && palette.surface_runs[0].first == 0 &&
+            palette.surface_runs[0].count == 2 && palette.surface_runs[1].first == 2 && palette.surface_runs[1].count == 1,
+            "Compiled material runs crossed an appearance boundary");
     }
     check(assets.publishModel(3,authored) == asset, "Unchanged model lost identity");
     authored.parts[0].geometry.vertices[0].x = -2;

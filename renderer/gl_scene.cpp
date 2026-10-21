@@ -25,7 +25,7 @@ static_assert(static_cast<int>(d3scene::OcclusionClass::Default) == RENDERER_AO_
     static_cast<int>(d3scene::OcclusionClass::Model) == RENDERER_AO_CLASS_POLYOBJECT &&
     static_cast<int>(d3scene::OcclusionClass::MineRock) == RENDERER_AO_CLASS_MINE_ROCK &&
     static_cast<int>(d3scene::OcclusionClass::Mine) == RENDERER_AO_CLASS_MINE,"Canvas AO class adapter differs from scene contract");
-struct SceneVertex { d3scene::Vec3 position; float u, v, lu, lv, alpha; d3scene::Vec3 normal, color; d3scene::Vec2 raster_offset; };
+struct SceneVertex { d3scene::Vec3 position; float u, v, lu, lv, alpha; d3scene::Vec3 normal, color; d3scene::Vec2 raster_offset; uint32_t polygon; };
 const char* SceneLightingShader = R"GLSL(#version 330 core
 layout(std140) uniform SceneViewBlock { vec4 view_params[14]; ivec4 view_options; };
 #define eye (view_params[0].xyz)
@@ -97,6 +97,7 @@ layout(std140) uniform SceneDrawBlock { vec4 draw_params[21]; uvec4 draw_identit
 #define planar_image (int(draw_params[20].x))
 #define motion_identity (draw_identity.x)
 #define motion_valid (int(draw_identity.y))
+#define polygon_light_table (int(draw_identity.z))
 uniform samplerBuffer scene_lights;
 uniform isamplerBuffer scene_influences;
 
@@ -116,10 +117,10 @@ float sceneEmitterAttenuation(int light,vec3 world_position,out vec3 incident) {
     }
     return attenuation;
 }
-vec3 sceneDynamicLighting(vec3 world_position) {
+vec3 sceneDynamicLighting(vec3 world_position,ivec2 influences) {
     vec3 dynamic_color = vec3(0);
-    for (int index = 0; index < influence_count; ++index) {
-        int light = texelFetch(scene_influences,influence_offset+index).r*4;
+    for (int index = 0; index < influences.y; ++index) {
+        int light = texelFetch(scene_influences,influences.x+index).r*4;
         vec4 color_falloff = texelFetch(scene_lights,light+1);
         vec3 incident;
         float attenuation = sceneEmitterAttenuation(light,world_position,incident);
@@ -136,6 +137,7 @@ layout(location=3) in float alpha;
 layout(location=4) in vec3 normal;
 layout(location=5) in vec3 vertex_color;
 layout(location=6) in vec2 raster_offset;
+layout(location=7) in uint polygon;
 uniform samplerBuffer instance_uvs;
 
 
@@ -158,7 +160,13 @@ out vec3 world_position;
 out vec3 ambient;
 out vec3 vertex_dynamic;
 out vec3 authored_color;
+flat out ivec2 primitive_influences;
 void main() {
+    primitive_influences = ivec2(influence_offset,influence_count);
+    if (polygon_light_table != 0) {
+        int entry = polygon_light_table-1+int(polygon)*2;
+        primitive_influences = ivec2(texelFetch(scene_influences,entry).r,texelFetch(scene_influences,entry+1).r);
+    }
     int position_record = (gl_VertexID+instance_position_offset)*2;
     vec3 prepared = use_instance_positions != 0 ? texelFetch(instance_positions,position_record).rgb : position;
     vec3 previous_prepared = use_instance_positions != 0 ? texelFetch(instance_positions,position_record+1).rgb : position;
@@ -167,7 +175,7 @@ void main() {
     world_position = world;
     gl_ClipDistance[0] = dot(vec4(world,1),world_clip_plane);
     authored_color = vertex_color;
-    vertex_dynamic = lighting_per_pixel != 0 ? vec3(0) : sceneDynamicLighting(world);
+    vertex_dynamic = lighting_per_pixel != 0 ? vec3(0) : sceneDynamicLighting(world,primitive_influences);
     float z = dot(relative,camera_forward);
     gl_Position = vec4(dot(relative,camera_right)*projection.x + z*projection.z,
                        dot(relative,camera_up)*projection.y + z*projection.w, z-2.0*near_distance,z);
@@ -244,6 +252,7 @@ in vec3 world_position;
 in vec3 ambient;
 in vec3 vertex_dynamic;
 in vec3 authored_color;
+flat in ivec2 primitive_influences;
 in vec2 texcoord, lightcoord;
 in float vertex_alpha;
 layout(location=0) out vec4 color;
@@ -385,7 +394,7 @@ void main() {
         vec3 direction = ambient_direction/max(length(ambient_direction),1.e-8);
         illumination *= clamp((1.0-dot(n,direction))*.5,0.0,1.0);
     }
-    vec3 dynamic_color = lighting_per_pixel != 0 ? sceneDynamicLighting(world_position) : vertex_dynamic;
+    vec3 dynamic_color = lighting_per_pixel != 0 ? sceneDynamicLighting(world_position,primitive_influences) : vertex_dynamic;
     illumination = clamp(illumination+dynamic_color,vec3(0),vec3(1));
     if (unlit != 0) illumination = vec3(1);
     color=vec4(base.rgb*color_modulation*authored_color*illumination*lighting_modulation,base.a);
@@ -410,8 +419,8 @@ void main() {
             reflected += texelFetch(scene_reflections,reflection_offset+i*2+1).rgb*response*weights[i];
         }
         reflected *= static_specular_strength;
-        for (int index = 0; index < influence_count; ++index) {
-            int light = texelFetch(scene_influences,influence_offset+index).r*4;
+        for (int index = 0; index < primitive_influences.y; ++index) {
+            int light = texelFetch(scene_influences,primitive_influences.x+index).r*4;
             vec3 incident;
             float attenuation = sceneEmitterAttenuation(light,world_position,incident);
             float response = pow(max(0.0,dot(v,reflect(incident,n))),specular_response.y);
@@ -577,7 +586,6 @@ void GL4Renderer::DestroySceneResources() {
     scene_view_buffer = 0;
     scene_draw_packets.clear(); scene_draw_records.clear(); scene_room_bindings.clear();
     scene_surface_ranges.clear();
-    scene_model_influences.clear();
     scene_part_ranges.clear();
     if (scene_position_buffer) glDeleteBuffers(1,&scene_position_buffer);
     if (scene_position_texture) glDeleteTextures(1,&scene_position_texture);
@@ -892,7 +900,6 @@ void GL4Renderer::PrepareSceneViewTables(const d3scene::PreparedView& prepared) 
                 scene_surface_ranges[mesh.surface.compiled_index].texture_uv = ElementRange(start,static_cast<uint32_t>(uvs.size())-start);
             }
         }
-        scene_model_influences.clear();
         scene_part_ranges.resize(frame.data().compiled_part_count);
         for (const auto& key : visible_models) {
           const auto& object = frame.data().model_instances[key.first];
@@ -909,12 +916,16 @@ void GL4Renderer::PrepareSceneViewTables(const d3scene::PreparedView& prepared) 
             if (dynamic_lighting && !part.light_candidates.empty()) {
                 const auto& geometry = model.asset->geometry().parts[&part-model.parts.data()].geometry;
                 const auto transform = d3scene::compose(object.current,part.current);
-                part_ranges.polygons = ElementRange(uint32_t(scene_model_influences.size()),uint32_t(geometry.polygons.size()));
+                const size_t table = indices.size();
+                indices.resize(table+geometry.polygons.size()*2,0);
+                part_ranges.light_table = uint32_t(table)+1;
                 for (const auto& polygon : geometry.polygons) {
                     const uint32_t start = uint32_t(indices.size());
                     d3scene::appendSurfaceLightIndices(frame.data(),part.light_candidates,
                         d3scene::MeshView(geometry,part.vertices),polygon,transform,indices);
-                    scene_model_influences.push_back(finish_lights(start));
+                    const auto lights = finish_lights(start);
+                    const size_t entry = table+size_t(&polygon-geometry.polygons.data())*2;
+                    indices[entry] = int32_t(lights.offset); indices[entry+1] = int32_t(lights.count);
                 }
             }
           }
@@ -1024,7 +1035,8 @@ void GL4Renderer::UploadSceneMesh(SceneMeshGpu& gpu, d3scene::AssetId id, const 
                 vertices.push_back({geometry.vertices[c.vertex],c.u,c.v,c.light_u,c.light_v,c.alpha/255.f,
                     geometry.vertex_normals.empty() ? polygon.normal : geometry.vertex_normals[c.vertex],
                     geometry.vertex_colors.empty() ? d3scene::Vec3{1,1,1} : geometry.vertex_colors[c.vertex],
-                    geometry.raster_offsets.empty() ? d3scene::Vec2{} : geometry.raster_offsets[c.vertex]});
+                    geometry.raster_offsets.empty() ? d3scene::Vec2{} : geometry.raster_offsets[c.vertex],
+                    uint32_t(&polygon-geometry.polygons.data())});
         });
         gpu.polygons.emplace_back(first,static_cast<uint32_t>(vertices.size())-first);
     }
@@ -1043,6 +1055,8 @@ void GL4Renderer::UploadSceneMesh(SceneMeshGpu& gpu, d3scene::AssetId id, const 
                 glEnableVertexAttribArray(attribute);
                 glVertexAttribPointer(attribute,counts[attribute],GL_FLOAT,GL_FALSE,sizeof(SceneVertex),reinterpret_cast<void*>(offsets[attribute]));
             }
+            glEnableVertexAttribArray(7);
+            glVertexAttribIPointer(7,1,GL_UNSIGNED_INT,sizeof(SceneVertex),reinterpret_cast<void*>(offsetof(SceneVertex,polygon)));
         } else glBindBuffer(GL_ARRAY_BUFFER,page.buffer);
         // GL preserves queued readers of a reused range. Static assets upload
         // once; only revised/retired geometry participates in allocator traffic.
@@ -1603,8 +1617,9 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         if (item.model) {
             const auto& part = *resolved_part;
             if (part.light_influences_prepared) {
-                const auto polygons = scene_part_ranges[part.compiled_index].polygons;
-                influences = polygons.count ? scene_model_influences[polygons.offset+item.polygon_index] : ElementRange();
+                influences = ElementRange();
+                const uint32_t table = view.dynamic_lighting && !surface.unlit ? scene_part_ranges[part.compiled_index].light_table : 0;
+                std::memcpy(record+86,&table,sizeof(table));
             }
         }
         record[62] = float(influences.offset);
@@ -1651,6 +1666,10 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         record[51] = modulation.alpha;
         record[3] = float(surface.effect_depth_offset);
         auto range = item.terrain || item.mesh ? ElementRange(0,gpu.vertices.count) : gpu.polygons[item.polygon_index];
+        if (item.model && item.polygon_count > 1) {
+            const auto last = gpu.polygons[item.polygon_index+item.polygon_count-1];
+            range.count = last.offset+last.count-range.offset;
+        }
         range.offset += gpu.vertices.offset;
         const auto uv_range = ranges.uv;
         const auto texture_uv_range = ranges.texture_uv;
@@ -1888,7 +1907,9 @@ void main() {
           };
           const auto raster = [](const d3scene::MaterialPolicy& p) { return std::make_tuple(p.layer,p.blend,p.depth); };
           return a.vao == b.vao && images(x) == images(y) && raster(a.policy) == raster(b.policy) &&
-              (ia.terrain || (ia.mesh && !x.two_sided)) == (ib.terrain || (ib.mesh && !y.two_sided)) &&
+              ia.model == ib.model &&
+              (ia.terrain || (ia.model && ia.polygon_count > 1) || (ia.mesh && !x.two_sided)) ==
+                  (ib.terrain || (ib.model && ib.polygon_count > 1) || (ib.mesh && !y.two_sided)) &&
               !x.view_image_slot && !y.view_image_slot && !a.policy.planar_slot && !b.policy.planar_slot &&
               std::memcmp(records.data()+first*(record_bytes/sizeof(float)),
                   records.data()+next*(record_bytes/sizeof(float)),88*sizeof(float)) == 0;
@@ -1936,8 +1957,11 @@ void main() {
         bind_image(surface.specular_image,8,surface.texture_wrap,false);
         scene_shader.Use();
         glBindBufferRange(GL_UNIFORM_BUFFER,7,scene_draw_buffer,item_index*record_bytes,22*16);
-        const bool cull = item.terrain || (item.mesh && !surface.two_sided);
-        const bool clockwise = cull && (d3scene::reversesWinding(camera) != d3scene::reversesWinding(visibility.world(item)));
+        const bool cull = item.terrain || (item.model && item.polygon_count > 1) || (item.mesh && !surface.two_sided);
+        // Authored polymodel fronts use clockwise winding, unlike the
+        // terrain batches. CPU face-normal culling previously hid this
+        // distinction; grouped model draws must preserve it explicitly.
+        const bool clockwise = cull && ((d3scene::reversesWinding(camera) != d3scene::reversesWinding(visibility.world(item))) != item.model);
         const RasterKey raster_key{policy.layer,policy.blend,policy.depth,cull,clockwise};
         if (!raster_bound || raster_key != previous_raster) {
         if(policy.blended()) {
