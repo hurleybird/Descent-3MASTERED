@@ -868,6 +868,13 @@ void PrepareGameCockpit(d3scene::FrameData& frame, bool advance,const d3scene::F
         pose = OffsetModelPose(model,pose,offsets,Cockpit_info.display_adjust_count);
     }
     const auto transforms = ComposeModelPose(*asset->geometry().animation,pose);
+    d3scene::Transform composed[MAX_SUBOBJECTS];
+    for (size_t i = 0; i < asset->geometry().parts.size(); ++i) {
+        const auto& transform = transforms.submodels[i];
+        composed[i] = {value(transform.translation),value(transform.orientation.rvec),
+            value(transform.orientation.uvec),value(transform.orientation.fvec)};
+    }
+    const auto composed_range = frame.appendModelTransforms(composed,asset->geometry().parts.size());
     float r,g,b;
     if (OBJECT_OUTSIDE(Player_object)) r = g = b = GetTerrainDynamicScalar(&Player_object->pos,CELLNUM(Player_object->roomnum));
     else GetRoomDynamicScalar(&Player_object->pos,&Rooms[Player_object->roomnum],&r,&g,&b);
@@ -886,6 +893,8 @@ void PrepareGameCockpit(d3scene::FrameData& frame, bool advance,const d3scene::F
         instance.identity = instance.collection = collections[layer];
         instance.current = instance.previous = placement;
         d3scene::PreparedModel prepared; prepared.asset = asset;
+        prepared.deferred_pose = true; prepared.composed_pose = composed_range;
+        prepared.modulation.ambient = ambient;
         prepared.pose_source_revision = SceneModelSourceEpoch();
         const d3scene::PreparedModel* history = nullptr;
         if (retain_materials && previous && previous->scene_lifetime == frame.scene_lifetime)
@@ -894,18 +903,23 @@ void PrepareGameCockpit(d3scene::FrameData& frame, bool advance,const d3scene::F
                     previous->variants(instance)[0].asset->id() == asset->id() &&
                     previous->variants(instance)[0].pose_source_revision == prepared.pose_source_revision)
                     history = &previous->variants(instance)[0];
+        prepared.binding_inputs.valid = true;
+        prepared.binding_inputs.subobject_mask = masks[layer];
+        prepared.binding_inputs.appearance = {{float(layer),float(Cockpit_alt_mode),
+            float(Cockpit_info.transparent_arm_mask&0xffffu),float(Cockpit_info.transparent_arm_mask>>16)}};
+        if (history && history->binding_inputs == prepared.binding_inputs && history->parts.publishedFor(asset->id())) {
+            prepared.parts = history->parts;
+            frame.appendModel(instance,std::move(prepared));
+            frame.model_instances.push_back(std::move(instance));
+            continue;
+        }
         prepared.parts.reserve(asset->geometry().parts.size());
         const auto roles = ResolveSceneModelRoles(*asset,masks[layer],false);
         for (size_t i = 0; i < asset->geometry().parts.size(); ++i) {
             const auto& geometry = asset->geometry().parts[i];
             d3scene::PreparedModelPart part;
-            const auto& transform = transforms.submodels[i];
-            part.current = {value(transform.translation),value(transform.orientation.rvec),
-                value(transform.orientation.uvec),value(transform.orientation.fvec)};
-            part.previous = part.current;
             part.draw = roles[i] == SceneModelPartRole::Surface;
-            part.appearance_inputs = {{ambient.x,ambient.y,ambient.z,float(layer),float(Cockpit_alt_mode),
-                float((Cockpit_info.transparent_arm_mask >> i)&1u)}};
+            part.appearance_inputs = {{float(layer),float(Cockpit_alt_mode),float((Cockpit_info.transparent_arm_mask >> i)&1u)}};
             if (history && history->parts[i].appearance_inputs == part.appearance_inputs &&
                 history->parts[i].surfaces.publishedFor(asset->id(),uint32_t(i),false)) {
                 part.surfaces = history->parts[i].surfaces;
@@ -916,7 +930,7 @@ void PrepareGameCockpit(d3scene::FrameData& frame, bool advance,const d3scene::F
             for (size_t face = 0; face < geometry.geometry.polygons.size(); ++face) {
                 d3scene::SurfaceBinding surface;
                 surface.depth = layer < 2 ? d3scene::DepthMode::ReadWrite : d3scene::DepthMode::Disabled;
-                surface.directional_ambient = true; surface.ambient_color = ambient;
+                surface.directional_ambient = true;
                 const int slot = geometry.polygon_materials[face];
                 if (slot >= 0) surface.texture = asset->geometry().textures[slot];
                 else surface.base_color = geometry.polygon_colors[face];

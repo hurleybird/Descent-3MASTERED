@@ -470,6 +470,20 @@ void AuditGameModelPoses(const d3scene::Presentation& frame) {
         for (size_t v = 0; v < instance.model_count; ++v) {
             const auto& source = frame.data().variants(instance)[v];
             if (!source.deferred_pose) continue;
+            if (!source.composed_pose.empty()) {
+                const auto transforms = frame.data().modelTransforms(source.composed_pose);
+                const auto previous = frame.data().modelTransforms(source.previous_composed_pose);
+                const auto& resolved = frame.resolvedModel(i,v);
+                const auto check = [&](const d3scene::Transform& a,const d3scene::Transform& b) {
+                    if (!same(a.position,b.position) || !same(a.right,b.right) || !same(a.up,b.up) || !same(a.forward,b.forward))
+                        throw std::logic_error("Resolved pose differs from composed producer inputs");
+                };
+                for (size_t part = 0; part < transforms.size(); ++part) {
+                    check(transforms[part],resolved.parts[part].current);
+                    check(source.previous_pose_valid ? previous[part] : transforms[part],resolved.parts[part].previous);
+                }
+                continue;
+            }
             const auto* authored = GetPolymodelPointer(int(source.asset->id().slot));
             const auto expected = ComposeModelPose(*authored,EvaluateModelPose(*authored,
                 frame.data().poseInputs(source.pose_inputs).data(),float(frame.data().simulation_time)));

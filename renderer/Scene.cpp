@@ -543,9 +543,27 @@ void compilePartBounds(const Transform& placement,const ModelPart& part,Prepared
     } else for (const auto vertex : pose.vertices)
         includeModelPoint(pose.render_bounds,pose.has_render_bounds,transformPoint(world,vertex));
 }
-void compileModelBounds(const Transform& placement,PreparedModel& model) {
+void compileModelBounds(const FrameData& frame,const Transform& placement,PreparedModel& model) {
     model.has_render_bounds = false;
     if (model.deferred_pose) {
+        if (!model.composed_pose.empty()) {
+            const auto transforms = frame.modelTransforms(model.composed_pose);
+            for (size_t i = 0; i < model.parts.size(); ++i) {
+                const auto& geometry = model.asset->geometry().parts[i];
+                if (!model.parts.read()[i].draw || geometry.geometry.polygons.empty()) continue;
+                auto local = geometry.local_bounds;
+                const float amount = std::abs(model.deformation);
+                const Vec3 expansion{std::max(std::abs(local.minimum.x),std::abs(local.maximum.x))*amount,
+                    std::max(std::abs(local.minimum.y),std::abs(local.maximum.y))*amount,
+                    std::max(std::abs(local.minimum.z),std::abs(local.maximum.z))*amount};
+                local.minimum = {local.minimum.x-expansion.x,local.minimum.y-expansion.y,local.minimum.z-expansion.z};
+                local.maximum = {local.maximum.x+expansion.x,local.maximum.y+expansion.y,local.maximum.z+expansion.z};
+                const auto bounds = transformBounds(compose(placement,transforms[i]),local);
+                includeModelPoint(model.render_bounds,model.has_render_bounds,bounds.minimum);
+                includeModelPoint(model.render_bounds,model.has_render_bounds,bounds.maximum);
+            }
+            return;
+        }
         const auto* summary = model.parts.publishedFor(model.asset->id()) ? model.parts.summary() : nullptr;
         if (summary && summary->has_rest_bounds && model.pose_inputs.empty() && model.deformation == 0) {
             model.render_bounds = transformBounds(placement,summary->rest_bounds);
@@ -589,15 +607,17 @@ const ResolvedModel& Presentation::resolvedModel(size_t instance,size_t variant)
     resolved.render_bounds = source.render_bounds; resolved.has_render_bounds = source.has_render_bounds;
     resolved.modulation.ambient = resolveModelAmbient(ambient,object.current.position,source.modulation.ambient);
     if (source.deferred_pose) {
-        const auto& animation = *source.asset->geometry().animation;
+        const auto* animation = source.asset->geometry().animation.get();
+        const auto composed = data_.modelTransforms(source.composed_pose);
+        const auto previous_composed = data_.modelTransforms(source.previous_composed_pose);
         const auto input = [&](PoseInputRange range) { return data_.poseInputs(range).data(); };
         const auto& rest = source.asset->geometry().rest_pose;
         const bool current_rest = source.pose_inputs.empty() && !rest.empty();
         const bool previous_rest = source.previous_pose_inputs.empty() && !rest.empty();
         ModelTransforms current,previous;
-        if (!current_rest) current = ComposeModelPose(animation,EvaluateModelPose(animation,input(source.pose_inputs),float(data_.simulation_time)));
-        if (source.previous_pose_valid && !previous_rest)
-            previous = ComposeModelPose(animation,EvaluateModelPose(animation,input(source.previous_pose_inputs),float(source.previous_pose_time)));
+        if (composed.empty() && !current_rest) current = ComposeModelPose(*animation,EvaluateModelPose(*animation,input(source.pose_inputs),float(data_.simulation_time)));
+        if (source.previous_pose_valid && previous_composed.empty() && !previous_rest)
+            previous = ComposeModelPose(*animation,EvaluateModelPose(*animation,input(source.previous_pose_inputs),float(source.previous_pose_time)));
         const auto value = [](const ModelSubmodelTransform& t) {
             const auto v = [](const vector& p) { return Vec3{p.x,p.y,p.z}; };
             return Transform{v(t.translation),v(t.orientation.rvec),v(t.orientation.uvec),v(t.orientation.fvec)};
@@ -617,8 +637,9 @@ const ResolvedModel& Presentation::resolvedModel(size_t instance,size_t variant)
                 part.has_previous = source.previous_pose_valid && (source.previous_draw_mask & (uint32_t(1)<<i));
                 part.light_influences_prepared = source.light_influences_prepared;
                 part.light_candidates = source.light_candidates;
-                part.current = current_rest ? rest[i] : value(current.submodels[i]);
-                part.previous = !source.previous_pose_valid ? part.current : previous_rest ? rest[i] : value(previous.submodels[i]);
+                part.current = !composed.empty() ? composed[i] : current_rest ? rest[i] : value(current.submodels[i]);
+                part.previous = !source.previous_pose_valid ? part.current : !previous_composed.empty() ? previous_composed[i] :
+                    previous_rest ? rest[i] : value(previous.submodels[i]);
                 const auto& geometry = source.asset->geometry().parts[i].geometry;
                 deformMeshInto(geometry,source.deformation,data_.simulation_time,source.deformation_owner,uint32_t(i),part.vertices);
                 if (source.previous_pose_valid)
@@ -680,6 +701,7 @@ Presentation::~Presentation() {
     reclaim(data_.model_instances,clean.model_instances);
     reclaim(data_.model_variants,clean.model_variants);
     reclaim(data_.model_pose_inputs,clean.model_pose_inputs);
+    reclaim(data_.model_transforms,clean.model_transforms);
     reclaim(data_.model_ambient_inputs,clean.model_ambient_inputs);
     reclaim(data_.lights,clean.lights);
     reclaim(data_.light_candidate_indices,clean.light_candidate_indices);
@@ -868,7 +890,9 @@ PresentationRef Presentation::complete(FrameData data) {
     } else require(data.terrain.materials.empty() && data.terrain.patches.empty(),"Terrain materials have no grid");
     auto& rooms = storage->room_indices_;
     rooms.reserve(data.rooms.size());
+    data.has_planar_surfaces = false;
     for (const auto& room : data.rooms) {
+        data.has_planar_surfaces = data.has_planar_surfaces || !room.mirrors.empty();
         require(room.number >= 0 && rooms.emplace(room.number,size_t(&room-data.rooms.data())).second, "Duplicate or invalid scene room");
         require(room.asset && room.asset->id().lifetime == data.scene_lifetime &&
             room.asset->id().slot == static_cast<uint32_t>(room.number), "Room asset identity mismatch");
@@ -940,6 +964,8 @@ PresentationRef Presentation::complete(FrameData data) {
         require(ambient.source != ModelAmbientInput::Source::Terrain || ambient.terrain,"Missing ambient terrain");
         require(!ambient.terrain || ambient.terrain->id().lifetime == data.scene_lifetime,"Stale ambient terrain");
     }
+    for (const auto& transform : data.model_transforms)
+        require(finite(transform),"Invalid composed model transform");
     size_t model_end = 0;
     for (const auto& object : data.model_instances) {
         require(object.identity && model_instances.emplace(object.identity,size_t(&object-data.model_instances.data())).second,"Duplicate or absent model instance identity");
@@ -958,9 +984,19 @@ PresentationRef Presentation::complete(FrameData data) {
             require(finite(model.modulation.ambient) && finite(model.modulation.color) &&
                 std::isfinite(model.modulation.alpha) && model.modulation.alpha >= 0 && model.modulation.alpha <= 1,
                 "Invalid model instance modulation");
+            require(model.deferred_pose || (model.composed_pose.empty() && model.previous_composed_pose.empty()),
+                "Composed transforms require deferred execution");
             if (model.deferred_pose) {
                 require(model.parts.size() <= MAX_SUBOBJECTS,"Too many deferred model parts");
-                require(model.asset->geometry().animation != nullptr,"Deferred pose has no owned animation");
+                require(!model.composed_pose.empty() || model.asset->geometry().animation != nullptr,"Deferred pose has no owned animation");
+                require(model.composed_pose.empty() == model.previous_composed_pose.empty() ||
+                    (!model.composed_pose.empty() && !model.previous_pose_valid),"Incomplete composed pose history");
+                for (const auto range : {model.composed_pose,model.previous_composed_pose}) {
+                    const auto transforms = data.modelTransforms(range);
+                    require(transforms.empty() || transforms.size() == model.parts.size(),"Incomplete composed pose");
+                }
+                require(model.composed_pose.empty() || (model.pose_inputs.empty() && model.previous_pose_inputs.empty()),
+                    "Ambiguous model pose inputs");
                 require(std::isfinite(model.deformation) && std::isfinite(model.previous_deformation) &&
                     std::isfinite(model.previous_pose_time),"Invalid deferred pose inputs");
                 for (const auto range : {model.pose_inputs,model.previous_pose_inputs}) {
@@ -1128,7 +1164,7 @@ PresentationRef Presentation::complete(FrameData data) {
                 surface_count += uint32_t(model.parts.read()[p].surfaces.size());
             }
             model.resolved_index = resolved_index++;
-            compileModelBounds(object.current,model);
+            compileModelBounds(prepared->data_,object.current,model);
             if (model.has_render_bounds) {
                 include(object.render_bounds,object.has_render_bounds,model.render_bounds.minimum);
                 include(object.render_bounds,object.has_render_bounds,model.render_bounds.maximum);

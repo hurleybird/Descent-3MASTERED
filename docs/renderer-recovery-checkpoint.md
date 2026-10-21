@@ -2,6 +2,21 @@
 
 ## October 21 resumed work — supersedes restart pause below
 
+Newest binary shared-pose.exe: frame-owned composed model transforms shared by
+cockpit layers; cockpit ambient now instance modulation, so stable part/material
+tables survive animation and lighting changes. General composed-pose execution
+supports owned transforms without animation tracks, previous poses, deformation
+and conservative bounds. Audit compares composed inputs explicitly (first probe
+failed the obsolete track-only audit; fixed probe2 passes). Tests pass. All eight
+short, three long, combined probe2, mirror, quality and headlight-off long images
+EXACT. Ambient-off screenshot visually inspected. No cockpit geometry changes.
+Includes publication's mirror-presence summary to skip mirror-free material scans.
+Long ABBA parent/new render: 003 (1.93,2.14)/(1.98,2.34),
+005 (1.33,1.26)/(1.32,1.26), 007 (1.47,1.43)/(1.59,1.42).
+NO general performance improvement established. Raw share-*, ambient-*, shared-pose-*.
+No active captures/sampler. Next: eliminate per-mesh light-list/temporary UV allocations.
+Latest sampler before these changes: out/cpu-pose-reuse-stack-005.txt.
+
 Latest binary pose-reuse.exe separates ResolvedModel execution data from the
 PreparedModel authoring table. Demanded parts occupy one frame-owned arena;
 dead snapshots release material owners but retain deformation buffer capacity.

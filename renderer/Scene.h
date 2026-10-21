@@ -625,12 +625,17 @@ struct PoseInputRange {
     uint32_t offset = 0, count = 0;
     bool empty() const { return count == 0; }
 };
+struct ModelTransformRange {
+    uint32_t offset = 0, count = 0;
+    bool empty() const { return count == 0; }
+};
 struct PreparedModel {
     ModelAssetRef asset;
     ModelBindingInputs binding_inputs;
     SurfaceModulation modulation;
     uint64_t pose_source_revision = 0;
     PoseInputRange pose_inputs, previous_pose_inputs;
+    ModelTransformRange composed_pose, previous_composed_pose;
     bool deferred_pose = false, previous_pose_valid = false;
     double previous_pose_time = 0;
     float deformation = 0, previous_deformation = 0;
@@ -842,6 +847,7 @@ struct ResolvedModel {
 };
 struct FrameData {
     uint32_t compiled_surface_count = 0, compiled_part_count = 0;
+    bool has_planar_surfaces = false; // compiled from published room mirror groups
     uint64_t sequence = 0, scene_lifetime = 0;
     double simulation_time = 0;
     float delta_time = 0;
@@ -873,6 +879,22 @@ struct FrameData {
     // Dynamic animation samples belong to the frame, not separately allocated
     // reference-counted vectors on each model. Ranges survive vector growth.
     std::vector<float> model_pose_inputs;
+    // Producers that already compose a hierarchy (including attachments) can
+    // publish it once. Material tables never carry these changing transforms.
+    std::vector<Transform> model_transforms;
+    ModelTransformRange appendModelTransforms(const Transform* values,size_t count) {
+        if (!count) return {};
+        if (!values || count > UINT32_MAX || model_transforms.size() > UINT32_MAX-count)
+            throw std::invalid_argument("Invalid model transform count");
+        const ModelTransformRange range{uint32_t(model_transforms.size()),uint32_t(count)};
+        model_transforms.insert(model_transforms.end(),values,values+count);
+        return range;
+    }
+    ModelRange<const Transform> modelTransforms(ModelTransformRange range) const {
+        if (range.offset > model_transforms.size() || range.count > model_transforms.size()-range.offset)
+            throw std::invalid_argument("Invalid model transform range");
+        return {range.count ? model_transforms.data()+range.offset : nullptr,range.count};
+    }
     PoseInputRange appendPoseInputs(const float* values,size_t count) {
         if (!count) return {};
         if (!values || count > UINT32_MAX || model_pose_inputs.size() > UINT32_MAX-count)

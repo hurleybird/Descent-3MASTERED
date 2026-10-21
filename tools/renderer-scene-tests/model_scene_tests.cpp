@@ -295,6 +295,19 @@ int runModelSceneTests() {
     data.model_instances[1].current.position.z = 20;
     data.modelsFor(1)[0].parts[0].surfaces[0].alpha = 0.5f;
     auto frame = Presentation::freeze(data);
+    {
+        auto composed = frame->data();
+        const Transform pose[] = {part.current};
+        const auto range = composed.appendModelTransforms(pose,1);
+        for (auto& model : composed.model_variants) { model.deferred_pose = true; model.composed_pose = range; }
+        const auto explicit_frame = Presentation::freeze(composed);
+        check(!asset->geometry().animation && explicit_frame->resolvedModel(0,0).parts[0].current.position.z == part.current.position.z &&
+            explicit_frame->resolvedModel(1,0).parts[0].current.position.z == part.current.position.z,
+            "Composed pose required animation tracks or lost a shared range");
+        composed.model_transforms[0].position.z = 99;
+        check(explicit_frame->resolvedModel(0,0).parts[0].current.position.z == part.current.position.z,
+            "Composed pose retained mutable producer transforms");
+    }
     check(frame->data().compiled_part_count == 2 && frame->data().modelsFor(0)[0].parts[0].compiled_index == 0 &&
         frame->data().modelsFor(1)[0].parts[0].compiled_index == 1,"Model parts lack unique packed addresses");
     {
@@ -651,6 +664,36 @@ int runModelSceneTests() {
             const auto published = Presentation::freeze(deferred);
             const auto coarse = published->data().model_instances[0].render_bounds;
             const auto& resolved = published->resolvedModel(0,0);
+            auto composed_input = published->data();
+            const Transform now[] = {resolved.parts[0].current,resolved.parts[1].current};
+            const Transform before[] = {resolved.parts[0].previous,resolved.parts[1].previous};
+            auto& composed_model = composed_input.modelsFor(0)[0];
+            composed_model.pose_inputs = {}; composed_model.previous_pose_inputs = {};
+            composed_model.composed_pose = composed_input.appendModelTransforms(now,2);
+            composed_model.previous_composed_pose = composed_input.appendModelTransforms(before,2);
+            const auto composed_frame = Presentation::freeze(composed_input);
+            const auto& composed_result = composed_frame->resolvedModel(0,0);
+            check(composed_frame->data().modelsFor(0)[0].parts.summary() == published->data().modelsFor(0)[0].parts.summary(),
+                "Publishing a composed pose detached the immutable binding table");
+            for (size_t p = 0; p < 2; ++p) {
+                check(composed_result.parts[p].current.position.x == resolved.parts[p].current.position.x &&
+                    composed_result.parts[p].previous.position.y == resolved.parts[p].previous.position.y &&
+                    composed_result.parts[p].current.right.x == resolved.parts[p].current.right.x,
+                    "Composed pose changed hierarchy transforms");
+                const auto bounds = composed_frame->data().model_instances[0].render_bounds;
+                for (const auto vertex : composed_result.parts[p].vertices) {
+                    const auto world = transformPoint(compose(instance.current,composed_result.parts[p].current),vertex);
+                    check(world.x >= bounds.minimum.x-1.e-4f && world.x <= bounds.maximum.x+1.e-4f &&
+                        world.y >= bounds.minimum.y-1.e-4f && world.y <= bounds.maximum.y+1.e-4f &&
+                        world.z >= bounds.minimum.z-1.e-4f && world.z <= bounds.maximum.z+1.e-4f,
+                        "Composed pose bounds excluded deformed geometry");
+                }
+            }
+            composed_model.composed_pose.count = 1;
+            rejects([&] { Presentation::freeze(composed_input); });
+            composed_model.composed_pose.count = 2;
+            composed_input.model_transforms[0].position.x = std::numeric_limits<float>::infinity();
+            rejects([&] { Presentation::freeze(composed_input); });
             check(&resolved == &published->resolvedModel(0,0),"Repeated view rebuilt a resolved model");
             check(published->data().modelsFor(0)[0].deferred_pose,"Resolution mutated published inputs");
             const auto expected = ComposeModelPose(*tracks,EvaluateModelPose(*tracks,deferred.poseInputs(input.pose_inputs).data(),float(deferred.simulation_time)));

@@ -228,6 +228,12 @@ int runSceneViewTests() {
             "Portal policy was compiled before the final mirror film material");
         auto parent = view(); parent.room = 0;
         const auto plan = planPlanarViews(*frame,parent);
+        check(frame->data().has_planar_surfaces,"Publication missed authored reflection producers");
+        auto no_mirrors = data;
+        no_mirrors.rooms[0].mirrors.clear(); no_mirrors.has_planar_surfaces = true;
+        const auto ordinary = Presentation::freeze(no_mirrors);
+        check(!ordinary->data().has_planar_surfaces && planPlanarViews(*ordinary,parent).images.empty(),
+            "Publication retained stale reflection-producer membership");
         check(&plan.consumer.frame() == frame.get() && plan.consumer.visibility().surfaces.size() == queryView(*frame,parent).surfaces.size(),
             "Planar schedule did not retain the consumer visibility");
         {

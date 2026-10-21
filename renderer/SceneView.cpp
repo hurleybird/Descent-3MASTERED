@@ -439,9 +439,11 @@ PlanarViewPlan planPlanarViews(const Presentation& frame,const View& parent,uint
     if (parent.reflections == ReflectionPolicy::SurfaceFilm || parent.collection) return plan;
     if (parent.has_clip_plane || parent.kind == ViewKind::Mirror)
         throw std::invalid_argument("Reflected producers must declare terminal surface-film policy");
+    if (!frame.data().has_planar_surfaces) return plan;
     const auto& visible = plan.consumer.visibility();
     std::unordered_set<uint64_t> slots;
     for (const auto& surface : visible.surfaces) {
+        if (surface.model || surface.mesh || surface.terrain) continue;
         const auto slot = visibleSurfaceBinding(frame,surface).material.planar_slot;
         if (slot) slots.insert(slot);
     }
