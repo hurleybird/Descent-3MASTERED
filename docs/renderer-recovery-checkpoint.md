@@ -2,6 +2,36 @@
 
 ## Current handoff state — view-level fog pipelines verified
 
+LATEST USER: continuous fog through ceiling space requested (async answer), and
+v2 screenshot still visibly stair-steps at the diagonal green/clear roof edge.
+Do not mistake filling that space for fixing undersampling. Keep clear-space
+fixture as regression. User preview was running briefly; left untouched.
+
+Authoring preview now supports -scene-inspection -scene-fog-room-source TARGET
+SOURCE. It copies optical properties in the owned frame before fog compilation,
+not simulation/level data; no hardcoded room ID or default appearance change.
+Roof preview uses183 184. Build continuous-roof-preview-build.log; new broad,
+shallow three-room connector tests verify merging, grazing rays, held assets and
+restoration (continuous-roof-tests.log passes). Captures roof-continuous-control,
+roof-continuous-preview,roof-continuous-below visually inspected: ceiling fogged.
+These use640field, no AO/bloom,720p. No packaged preview update yet.
+
+Rejected room-culling experiment (removed): omit per-face room aperture tests,
+keep portal visibility/backface/model bounds. Four images pixel-identical but
+CPU0051.64->1.34,0071.45->1.71,006.73->.80,0021.66->2.04ms; GPU mostly worse.
+Raw room-cull-clean-control*/room-cull-coarse*. Earlier room-cull-control* ran
+near a build and must NOT be used for timing. Runtime subsequently restored.
+
+Rejected fog reconstruction experiment (removed): interpolate depth per column,
+convert each to visible contribution before bilinear XY blending. Four reads
+instead of one; roof720motion error/flicker .676838/.777628, effectively unchanged.
+Raw fog-series-edge-motion-visible320, out/fog-visible320-metrics.csv. Saturation
+order does not explain the roof undersampling in this test.
+Current UNCOMMITTED shader experiment: positive cubic B-spline XY reconstruction,
+four trilinear reads; depth law unchanged. Build fog-cubic-filter-build.log.
+Running/next metrics: fog-series-edge-motion-cubic320 /out/fog-cubic320-metrics.csv.
+Do not claim fixed; decide from motion/edge error and GPU cost, remove if rejected.
+
 LATEST: bounded compact optical-field storage. Field remains opt-in, exact fog
 remains default. The field now selects RGBA16F when a conservative optical-depth
 bound including color magnitude and repeated store-rounding fits a half-range

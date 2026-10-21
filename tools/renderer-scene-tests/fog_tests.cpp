@@ -21,6 +21,44 @@ d3scene::RoomState box(d3scene::SceneAssets& assets,int id,float z) {
 }
 int runFogTests() {
     {
+        // A broad, shallow clear connector between fogged rooms. Enabling its
+        // authored fog must remove both internal boundaries, including for an
+        // eye inside that connector, without changing previously held assets.
+        using namespace d3scene;
+        SceneAssets fixtures;
+        std::vector<RoomState> rooms;
+        for (int i = 0; i < 3; ++i) {
+            auto room = box(fixtures,i,2.f+2*i);
+            auto geometry = room.asset->geometry();
+            for (auto& vertex : geometry.vertices) { vertex.x *= 100; vertex.y *= 100; }
+            room.asset = fixtures.publishRoom(i,geometry);
+            rooms.push_back(std::move(room));
+        }
+        rooms[0].portals.push_back({1,1,0}); rooms[0].surfaces[1].draw_surface = false;
+        rooms[1].portals.push_back({0,0,0}); rooms[1].surfaces[0].draw_surface = false;
+        rooms[1].portals.push_back({1,2,0}); rooms[1].surfaces[1].draw_surface = false;
+        rooms[2].portals.push_back({0,1,1}); rooms[2].surfaces[0].draw_surface = false;
+        rooms[1].fog_enabled = false;
+        const auto clear = fixtures.publishFog(rooms);
+        check(clear->volumes().size() == 2,"Clear connector was implicitly fogged");
+        rooms[1].fog_enabled = true;
+        const auto filled = fixtures.publishFog(rooms);
+        check(filled != clear && filled->volumes().size() == 1 && filled->volumes()[0].rooms.size() == 3,
+            "Continuous fog did not rebuild and merge connector boundaries");
+        const auto& joined = filled->volumes()[0];
+        check(joined.boundary.size() == 28,"Continuous connector retained internal portal triangles");
+        check(near(fogSegmentLength(joined,{0,0,0},{0,0,10},false),6),"Continuous connector lost axial fog");
+        for (float z : {4.f,4.001f,5.f,5.999f,6.f}) {
+            check(fogContains(joined,{0,0,z}),"Connector eye is outside continuous fog");
+            check(near(fogSegmentLength(joined,{0,0,z},{99,0,z},true),99),
+                "Broad shallow connector lost grazing fog");
+        }
+        check(clear->volumes().size() == 2 && !fogContains(clear->volumes()[0],{0,0,5}) &&
+            !fogContains(clear->volumes()[1],{0,0,5}),"Fog authoring preview mutated held clear space");
+        rooms[1].fog_enabled = false;
+        check(fixtures.publishFog(rooms)->volumes().size() == 2,"Restoring clear connector retained merged fog");
+    }
+    {
         using namespace d3scene;
         check(fogFieldFitsHalf(1,1) && fogFieldFitsHalf(100,32),"Ordinary fog rejected compact storage");
         check(!fogFieldFitsHalf(32768,0) && !fogFieldFitsHalf(65504,1) && !fogFieldFitsHalf(1.e12,1),

@@ -718,6 +718,35 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance) {
         }
       }
     }
+    if (SceneGeometryInspection()) {
+        // Explicit authoring preview: copy optical properties before compilation,
+        // not a view-dependent patch to the finished image or mutable level data.
+        const int option = FindArg("-scene-fog-room-source");
+        if (option) {
+            const auto roomNumber = [&](int offset) {
+                const char* text = GetArg(option+offset);
+                char* end = nullptr;
+                const long number = text ? std::strtol(text,&end,10) : -1;
+                if (!text || end == text || *end || number < 0 || number >= MAX_ROOMS)
+                    throw std::invalid_argument("Fog room preview requires target and source room numbers");
+                return int(number);
+            };
+            const int target_number = roomNumber(1), source_number = roomNumber(2);
+            auto target = std::find_if(data.rooms.begin(),data.rooms.end(),
+                [&](const d3scene::RoomState& room) { return room.number == target_number; });
+            const auto source = std::find_if(data.rooms.begin(),data.rooms.end(),
+                [&](const d3scene::RoomState& room) { return room.number == source_number; });
+            if (target == data.rooms.end() || source == data.rooms.end() || !(source->fog_depth > 0))
+                throw std::invalid_argument("Fog room preview references missing room or invalid source depth");
+            target->fog_enabled = source->fog_enabled;
+            target->fog_depth = source->fog_depth;
+            target->fog_color = source->fog_color;
+            if (AutomatedCapturePending())
+                AutomatedCaptureLog("scene fog authoring preview target=%d source=%d enabled=%d depth=%.9g color=%.9g,%.9g,%.9g",
+                    target_number,source_number,target->fog_enabled,target->fog_depth,
+                    target->fog_color.x,target->fog_color.y,target->fog_color.z);
+        }
+    }
     { PERF_MARKER_SCOPE("Scene.PublishFog"); data.fog = d3scene::assets().publishFog(data.rooms); }
     if (SceneGeometryInspection() && FindArg("-scene-lod-probe") && Player_object) {
         // Isolated authored-model inspection: keep every player variant and
