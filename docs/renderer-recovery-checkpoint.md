@@ -2,6 +2,22 @@
 
 ## Active 2026-10-21 flare regression investigation
 
+LATEST after 0a2a8d6: opt-in -capture-thread-cycles appends raw render_thread_cycles
+to the TSV (-1 unavailable/disabled). Windows QueryThreadCycleTime includes
+user/kernel thread work; never convert these counts to elapsed milliseconds.
+Two queries only when capture perf logging + explicit flag are enabled. Build
+passes and captured counts are valid. Wall/cycle changes largely track each
+other here, so scheduling interruptions alone do not explain timing drift.
+Warm image owner local is no longer const, permitting implicit move on return.
+Different-binary image-owner005 gave move~.96ms/control1.01-1.09ms, pixel-exact,
+BUT same-binary temporary copy/move switch did NOT confirm a large gain:
+image-owner-same005 copy/move/move/copy CPU.999/1.034/1.028/1.054, cycles
+4.673m/4.841m/4.779m/4.908m. Do not attribute the earlier gap to this one line.
+Temporary copy probe removed from source. out/image-owner-probe.exe preserves
+that experiment only; current owned runtime still probe exe at this checkpoint.
+out/image-owner-move-candidate.exe has the final no-probe source semantics.
+Usage48% consumed; credits unchanged62451.4387600000.
+
 LATEST after a908e90: frame compilation retains collection membership across
 recycled snapshot storage. Exact ordered model collection IDs and mesh
 (collection,has-receiver) pairs prove reuse; payload changes do not rebuild

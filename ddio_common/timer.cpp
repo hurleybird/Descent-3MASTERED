@@ -64,6 +64,19 @@ double timer_GetTime64()
 	return (static_cast<longlong>(std::chrono::duration_cast<std::chrono::microseconds>(time).count()) / 1000000.0);
 }
 
+bool timer_GetThreadCycles(unsigned long long& cycles)
+{
+    cycles = 0;
+#ifdef WIN32
+    ULONG64 value = 0;
+    if (!QueryThreadCycleTime(GetCurrentThread(), &value)) return false;
+    cycles = value;
+    return true;
+#else
+    return false;
+#endif
+}
+
 //returns time in milliseconds
 longlong timer_GetMSTime()
 {

@@ -336,7 +336,7 @@ static void AutomatedFramePerfLog(int gameplay_frame, double frame_start_interva
 	double tail_ms, double cap_wait_ms, double total_ms, float frame_time_ms,
 	double work_ms, double effective_interval_ms,
 	double previous_defer_ms, const renderer_frame_pacing_info& pacing_info,
-	const tRendererStats& renderer_stats)
+	const tRendererStats& renderer_stats, long long render_thread_cycles)
 {
 	const char* path = GetEngineEnvironmentValue(ENGINE_ENV_FRAME_PERF_LOG,
 		ENGINE_LEGACY_ENV_FRAME_PERF_LOG);
@@ -348,10 +348,10 @@ static void AutomatedFramePerfLog(int gameplay_frame, double frame_start_interva
 		return;
 	if (!wrote_header)
 	{
-		fputs("gameplay_frame\tframe_start_interval_ms\tpacing_wait_ms\tsimulation_ms\trender_ms\tpresent_ms\ttail_ms\tcap_wait_ms\ttotal_ms\tframetime_ms\twork_ms\teffective_interval_ms\tdefer_ms\tpresent_interval_ms\tswap_call_ms\tqueue_depth\tqueued_frames\tgpu_frame_ms\tgpu_frame_serial\tpolygons\tvertices\ttexture_uploads\n", file);
+		fputs("gameplay_frame\tframe_start_interval_ms\tpacing_wait_ms\tsimulation_ms\trender_ms\tpresent_ms\ttail_ms\tcap_wait_ms\ttotal_ms\tframetime_ms\twork_ms\teffective_interval_ms\tdefer_ms\tpresent_interval_ms\tswap_call_ms\tqueue_depth\tqueued_frames\tgpu_frame_ms\tgpu_frame_serial\tpolygons\tvertices\ttexture_uploads\trender_thread_cycles\n", file);
 		wrote_header = true;
 	}
-	fprintf(file, "%d\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%d\t%d\t%.3f\t%llu\t%d\t%d\t%d\n",
+	fprintf(file, "%d\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%.3f\t%d\t%d\t%.3f\t%llu\t%d\t%d\t%d\t%lld\n",
 		gameplay_frame, frame_start_interval_ms, pacing_wait_ms, simulation_ms,
 		render_ms, present_ms, tail_ms, cap_wait_ms, total_ms, frame_time_ms,
 		work_ms, effective_interval_ms, previous_defer_ms,
@@ -360,7 +360,7 @@ static void AutomatedFramePerfLog(int gameplay_frame, double frame_start_interva
 		pacing_info.latest_gpu_frame_ms,
 		(unsigned long long)pacing_info.latest_gpu_frame_serial,
 		renderer_stats.poly_count, renderer_stats.vert_count,
-		renderer_stats.texture_uploads);
+		renderer_stats.texture_uploads, render_thread_cycles);
 	fclose(file);
 }
 
@@ -3546,6 +3546,9 @@ void GameFrame(void)
 	const double automated_perf_simulation_begin = automated_perf_frame_begin;
 	double automated_perf_render_begin = automated_perf_simulation_begin;
 	double automated_perf_render_end = automated_perf_simulation_begin;
+	unsigned long long automated_perf_cycles_begin = 0;
+	long long automated_perf_render_cycles = -1;
+	bool automated_perf_cycles_valid = false;
 	double automated_perf_present_begin = automated_perf_simulation_begin;
 	double automated_perf_present_end = automated_perf_simulation_begin;
 	double automated_perf_pre_cap_end = automated_perf_simulation_begin;
@@ -3780,6 +3783,8 @@ void GameFrame(void)
 #endif
 
 	RTP_tSTARTTIME(renderframe_time, curr_time);
+	if (automated_perf_active && FindArg("-capture-thread-cycles"))
+		automated_perf_cycles_valid = timer_GetThreadCycles(automated_perf_cycles_begin);
 	if (automated_perf_active)
 		automated_perf_render_begin = timer_GetTime64();
 	if (Clean_screenshot_requested && !Skip_render_game_frame && !Dedicated_server)
@@ -3805,6 +3810,11 @@ void GameFrame(void)
 	}
 	if (automated_perf_active)
 		automated_perf_render_end = timer_GetTime64();
+	if (automated_perf_cycles_valid) {
+		unsigned long long end = 0;
+		if (timer_GetThreadCycles(end) && end >= automated_perf_cycles_begin)
+			automated_perf_render_cycles = static_cast<long long>(end-automated_perf_cycles_begin);
+	}
 
 	RTP_tENDTIME(renderframe_time, curr_time);
 
@@ -4026,7 +4036,7 @@ void GameFrame(void)
 			(automated_perf_cap_end - automated_perf_frame_begin) * 1000.0,
 			Frametime * 1000.0f, frame_pacing_work_ms,
 			frame_pacing_effective_interval_ms, automated_perf_previous_defer_ms,
-			frame_pacing_info, renderer_stats);
+			frame_pacing_info, renderer_stats, automated_perf_render_cycles);
 	}
 
 	EndAutomatedCaptureFrame();

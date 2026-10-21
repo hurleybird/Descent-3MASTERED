@@ -192,7 +192,7 @@ void prepareImages(d3scene::FrameData& data,MaterialResolution& resolution) {
         ++image_requests;
         const int slot = handle+(baked ? MAX_BITMAPS : 0);
         const auto revision = baked ? lm_ContentRevision(handle) : bm_ContentRevision(handle);
-        const auto resident = d3scene::assets().image(slot,revision);
+        auto resident = d3scene::assets().image(slot,revision);
         if (resident && !audit_images) {
             return resident;
         }

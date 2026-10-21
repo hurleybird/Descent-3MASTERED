@@ -72,6 +72,8 @@ void timer_Close();
 //	returns time in seconds
 float timer_GetTime();
 double timer_GetTime64();
+// Diagnostic thread work counter, not elapsed time. False means unavailable.
+bool timer_GetThreadCycles(unsigned long long& cycles);
 
 //returns time in milliseconds
 longlong timer_GetMSTime();
