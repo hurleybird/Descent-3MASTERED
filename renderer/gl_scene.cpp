@@ -281,7 +281,8 @@ vec3 applySceneFog(vec3 radiance,out float transmission) {
     }
     float optical_depth = 0.0;
     vec3 weighted_color = vec3(0);
-    if (fog_field_range > 0.0) {
+#if SCENE_FOG_MODE == 2
+    {
         float z = max(0.0,dot(delta,camera_forward));
         vec2 uv = vec2(dot(delta,camera_right),dot(delta,camera_up))/max(z,1.e-6)*projection.xy+projection.zw;
         float slices = float(textureSize(scene_fog_field,0).z-1);
@@ -291,7 +292,9 @@ vec3 applySceneFog(vec3 radiance,out float transmission) {
         float fraction = clamp((z-low_z)/(high_z-low_z),0.0,1.0);
         vec4 integrated = texture(scene_fog_field,vec3(uv*0.5+0.5,(sample_index+fraction+0.5)/(slices+1.0)));
         optical_depth = integrated.a; weighted_color = integrated.rgb;
-    } else for (int candidate = 0; candidate < fog_volume_count; ++candidate) {
+    }
+#elif SCENE_FOG_MODE == 1
+    for (int candidate = 0; candidate < fog_volume_count; ++candidate) {
         int entry = fog_volume_offset+candidate*3;
         int volume = texelFetch(scene_influences,entry).r;
         int view_nodes = texelFetch(scene_influences,entry+1).r;
@@ -324,6 +327,7 @@ vec3 applySceneFog(vec3 radiance,out float transmission) {
         float amount = clamp(path,0.0,interval)*forward_scale/appearance.w;
         optical_depth += amount; weighted_color += appearance.rgb*amount;
     }
+#endif
     if (optical_depth > 0.0) {
         radiance = mix(radiance,multiply_material != 0 ? vec3(1) : (fog_additive != 0 ? vec3(0) : weighted_color/optical_depth),clamp(optical_depth,0.0,1.0));
         transmission *= 1.0-clamp(optical_depth,0.0,1.0);
@@ -568,7 +572,7 @@ void GL4Renderer::DestroySceneResources() {
     scene_frame_owner.reset();
     scene_draw_record_bytes = 0;
     scene_asset_lifetime = 0;
-    scene_shader.Destroy();
+    for (auto& program : scene_programs) program.shader.Destroy();
 }
 
 void GL4Renderer::BindSceneImage(const d3scene::ImageAsset& image,int unit,bool wrap,bool baked) {
@@ -1169,8 +1173,17 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         have_previous_view_projection = history.previous_valid;
         std::memcpy(previous_view_projection,history.previous.view_projection.data(),sizeof(previous_view_projection));
     }
+    PrepareSceneViewTables(prepared);
+    check_scene_error("frame upload");
+    const bool field_fog = FindArg("-scene-fog-field") && scene_view_fog.count &&
+        visibility.camera.projection.orthographic_depth_scale == 0;
+    const size_t fog_mode = scene_view_fog.count == 0 ? 0 : (field_fog ? 2 : 1);
+    auto& scene_shader = scene_programs[fog_mode].shader;
+    auto& scene_uniforms = scene_programs[fog_mode].uniforms;
     if (!scene_shader.Handle()) {
-        scene_shader.AttachSource(SceneVertexShader.c_str(), SceneFragmentShader.c_str());
+        auto fragment = SceneFragmentShader;
+        fragment.insert(fragment.find('\n')+1,"#define SCENE_FOG_MODE "+std::to_string(fog_mode)+"\n");
+        scene_shader.AttachSource(SceneVertexShader.c_str(), fragment.c_str());
         // Resolve the shader interface at link time, never by string in a view.
         scene_uniforms.colortexture = scene_shader.FindUniform("colortexture");
         scene_uniforms.planar_texture = scene_shader.FindUniform("planar_texture");
@@ -1211,8 +1224,6 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         glUniform1i(scene_uniforms.scene_occlusion,11);
         glUniform1i(scene_uniforms.opaque_depth,7);
     }
-    PrepareSceneViewTables(prepared);
-    check_scene_error("frame upload");
 
     // The pass owns depth/blend/culling policy. No game draw-state capture and
     // no invocation of RenderMine/RenderTerrain/RenderObject occurs here.
@@ -1399,7 +1410,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     // Experimental view-owned optical field. Resolution is deliberately
     // independent of SSAA/MSAA; all surface depths sample the same integral.
     float field_range = 0;
-    if (FindArg("-scene-fog-field") && scene_view_fog.count && projection.orthographic_depth_scale == 0) {
+    if (field_fog) {
         PERF_MARKER_SCOPE("Scene.FogField");
         if (!scene_fog_field_shader.Handle()) {
             std::string source = SceneLightingShader;

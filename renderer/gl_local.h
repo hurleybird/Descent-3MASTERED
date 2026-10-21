@@ -142,7 +142,6 @@ class GL4Renderer : public IRenderer
 	void UploadSceneMesh(SceneMeshGpu&, d3scene::AssetId, const d3scene::MeshGeometry&);
 	void ReleaseSceneMesh(SceneMeshGpu&);
 	uint64_t scene_asset_lifetime = 0;
-	ShaderProgram scene_shader;
 	struct SceneUniformLocations {
 		GLint colortexture = -1;
 		GLint planar_texture = -1;
@@ -166,7 +165,9 @@ class GL4Renderer : public IRenderer
 		GLint opaque_depth = -1;
 		GLint depth_snapshot_origin = -1;
 		GLint planar_projection = -1;
-	} scene_uniforms;
+	};
+	struct SceneProgram { ShaderProgram shader; SceneUniformLocations uniforms; };
+	std::array<SceneProgram,3> scene_programs; // no interior fog, exact boundaries, optical field
 	GLuint scene_light_buffer = 0, scene_light_texture = 0;
 	GLuint scene_draw_buffer = 0;
     GLuint scene_view_buffer = 0;

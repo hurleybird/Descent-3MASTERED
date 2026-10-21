@@ -1,5 +1,45 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## Current handoff state — view-level fog pipelines verified
+
+Working source now specializes the scene fragment program at view level into
+no interior fog / exact boundaries / field sampling. No per-material variants.
+Exterior analytic fog remains common. Table upload precedes pipeline selection,
+and each program owns its cached uniform locations. Missing uniforms are legal
+glUniform(-1) calls. Build fog-pipeline-build.log and existing scene tests pass.
+Clean 500-frame save006 GPU .95ms control -> .88ms specialized, repeat .878ms;
+field save002 .71ms both control and specialized. This is a modest no-fog win,
+NOT an explanation for the remaining old-renderer GPU gap. Both images pixel
+exact against effbe85 controls. Roof audit and multiview/resource/deformation
+audits pass; multiview screenshot visually inspected. Raw fog-pipeline-* runs.
+Preview v2 remains immutable effbe85; only scene-view-test runtime updated.
+
+Fresh CPU sampler completed normally:14807 total samples,1563 preparation.
+Preparation inclusive resources424, publication397, models313, procedural231;
+these overlap, not additive times. Whole-level publication remains a meaningful
+cost; do not bypass immutable/multiview ownership by skipping hidden resources.
+No sampler running. Last included usage16% used, ordinaryUsageAllowed=true.
+
+## Previous checkpoint — preview v2 available; CPU investigation continuing
+
+Commit effbe85. Preview delivered in commentary (not a turn-ending yield):
+C:\tmp\D3RendererVerification\fog-field-preview-20261021-v2
+Launch Fog Preview.cmd starts save002, Launch Roof Preview.cmd starts
+roofprobe20261021; both width320. Reference launchers use exact CURRENT integrator,
+not old renderer. Original preview/Candidate/main unchanged; no desktop files.
+Package smoke test passed and normal roof image visually inspected:
+fog-preview-v2-roof-smoke/saveg003.png. Clear ceiling strip still present, explicitly
+disclosed. ExecutableSHA2569E1655FDE2441B9F1D08C4A75547B19FE6905325E471ABDB5507F42D407B00A9.
+Package is a separate2.18GB copy; never overwrite it while user may be testing.
+
+Continuing toward remaining CPU baseline misses005/007, not stopping for pending
+art-direction answer. Fresh read-only stack sampler running against exact
+scene-view-test runtime (NOT preview): out/cpu-streamed-stack005{,-errors}.txt.
+35second sampler,6000frame capture cpu-streamed-sampled005. Sampled timings are
+INVALID for performance claims. Current build/PDB match. Check processes/sessions
+before any build/runtime replacement. Last included usage14% used, allowed.
+Multiview field audits maxerrors1.96e-6 and2.43e-6, both CPU references agree.
+
 ## LATEST: streamed column integration; sharper optional preview being prepared
 
 Supersedes implementation/cost details immediately below. Depth128 experiment
