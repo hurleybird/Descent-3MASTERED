@@ -284,11 +284,12 @@ vec3 applySceneFog(vec3 radiance,out float transmission) {
     if (fog_field_range > 0.0) {
         float z = max(0.0,dot(delta,camera_forward));
         vec2 uv = vec2(dot(delta,camera_right),dot(delta,camera_up))/max(z,1.e-6)*projection.xy+projection.zw;
-        float sample_index = min(63.0,floor(sqrt(clamp(z/fog_field_range,0.0,1.0))*64.0));
-        float low_z = sample_index*sample_index/4096.0*fog_field_range;
-        float high_z = (sample_index+1.0)*(sample_index+1.0)/4096.0*fog_field_range;
+        float slices = float(textureSize(scene_fog_field,0).z-1);
+        float sample_index = min(slices-1.0,floor(sqrt(clamp(z/fog_field_range,0.0,1.0))*slices));
+        float low_z = sample_index*sample_index/(slices*slices)*fog_field_range;
+        float high_z = (sample_index+1.0)*(sample_index+1.0)/(slices*slices)*fog_field_range;
         float fraction = clamp((z-low_z)/(high_z-low_z),0.0,1.0);
-        vec4 integrated = texture(scene_fog_field,vec3(uv*0.5+0.5,(sample_index+fraction+0.5)/65.0));
+        vec4 integrated = texture(scene_fog_field,vec3(uv*0.5+0.5,(sample_index+fraction+0.5)/(slices+1.0)));
         optical_depth = integrated.a; weighted_color = integrated.rgb;
     } else for (int candidate = 0; candidate < fog_volume_count; ++candidate) {
         int entry = fog_volume_offset+candidate*3;
@@ -436,7 +437,7 @@ void main() {
 static void AuditSceneFogField(const d3scene::View& view,const d3scene::Camera& camera,
     const std::vector<d3scene::FogVolume>& volumes,const std::vector<uint32_t>& candidates,
     int width,int height,float range) {
-    std::vector<float> texels(size_t(width)*height*65*4);
+    std::vector<float> texels(size_t(width)*height*(SceneFogFieldSlices+1)*4);
     glMemoryBarrier(GL_TEXTURE_UPDATE_BARRIER_BIT);
     glGetTexImage(GL_TEXTURE_3D,0,GL_RGBA,GL_FLOAT,texels.data());
     std::vector<int> winding;
@@ -457,8 +458,9 @@ static void AuditSceneFogField(const d3scene::View& view,const d3scene::Camera& 
             c.forward.y+c.right.y*rx+c.up.y*ry,c.forward.z+c.right.z*rx+c.up.z*ry};
         const float ray_length = std::sqrt(ray.x*ray.x+ray.y*ray.y+ray.z*ray.z);
         const float forward = ray.x*c.forward.x+ray.y*c.forward.y+ray.z*c.forward.z;
-        for (int slice : {0,1,4,12,24,40,55,64}) {
-            const float z = range*float(slice*slice)/4096.f;
+        for (int probe : {0,1,4,12,24,40,55,64}) {
+            const int slice = probe*SceneFogFieldSlices/64;
+            const float z = range*float(slice*slice)/float(SceneFogFieldSlices*SceneFogFieldSlices);
             const d3scene::Vec3 endpoint{c.position.x+ray.x*z/forward,c.position.y+ray.y*z/forward,c.position.z+ray.z*z/forward};
             const float start = d3scene::fogRayStart(view,endpoint);
             double expected[4] = {};
@@ -1404,6 +1406,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
             source.replace(0,source.find('\n'),"#version 430 core");
             source += "\nuniform samplerBuffer scene_fog;\n";
             source += SceneFogIntersectionShader;
+            source += "\n#define SCENE_FOG_SLICES "+std::to_string(SceneFogFieldSlices)+"\n";
             source += SceneFogFieldComputeShader;
             scene_fog_field_shader.AttachComputeSource(source.c_str());
             glUniformBlockBinding(scene_fog_field_shader.Handle(),glGetUniformBlockIndex(scene_fog_field_shader.Handle(),"SceneViewBlock"),8);
@@ -1429,7 +1432,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         };
         glActiveTexture(GL_TEXTURE12);
         if (width != scene_fog_field_width || height != scene_fog_field_height) {
-            allocate(scene_fog_field_texture,65,GL_RGBA32F);
+            allocate(scene_fog_field_texture,SceneFogFieldSlices+1,GL_RGBA32F);
             scene_fog_field_width = width; scene_fog_field_height = height;
         }
         field_range = 1;
@@ -1444,14 +1447,14 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
         scene_fog_field_shader.Use();
         glUniform1f(scene_fog_field_range,field_range);
-        glBindImageTexture(0,scene_fog_field_texture,0,GL_TRUE,0,GL_WRITE_ONLY,GL_RGBA32F);
+        glBindImageTexture(0,scene_fog_field_texture,0,GL_TRUE,0,GL_READ_WRITE,GL_RGBA32F);
         glDispatchCompute((width+7)/8,height,1);
         glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT);
         glBindImageTexture(0,0,0,GL_FALSE,0,GL_WRITE_ONLY,GL_RGBA32F);
         glActiveTexture(GL_TEXTURE12); glBindTexture(GL_TEXTURE_3D,scene_fog_field_texture);
         if (AutomatedCapturePending() && FindArg("-scene-fog-field-audit"))
             AuditSceneFogField(view,visibility.camera,fog_volumes,scene_view_fog_volumes,width,height,field_range);
-        if (AutomatedCapturePending()) AutomatedCaptureLog("scene fog field %dx%dx64 range=%.6g",width,height,field_range);
+        if (AutomatedCapturePending()) AutomatedCaptureLog("scene fog field %dx%dx%d range=%.6g",width,height,SceneFogFieldSlices,field_range);
     }
     scene_shader.Use();
     glUniform1f(scene_uniforms.fog_field_range,field_range);

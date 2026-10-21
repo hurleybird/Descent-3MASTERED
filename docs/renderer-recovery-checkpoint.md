@@ -1,5 +1,34 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## LATEST: streamed column integration; sharper optional preview being prepared
+
+Supersedes implementation/cost details immediately below. Depth128 experiment
+rejected: moving-edge error1.319/flicker1.427 vs64depth1.386/1.480, butGPUclean
+.59->1.16ms,effects6.02->6.75. Kept64slices, centralized SceneFogFieldSlices for
+allocation, GLSL compiler define, diagnostics; fragment lookup derives actual
+texture depth. No new user setting. XYwidth320 DOES halve boundary error/flicker:
+still1.264/.223, rotation.677/.778, vswidth1602.928/.272 and1.386/1.480.
+
+Reduced shader temporary storage12KiB->4KiB per8-ray workgroup: remove vec4
+density_samples array, integrate each volume's scalar occupied length directly,
+add its colored prefix into the owned output column. Coherent read/write image,
+memoryBarrierImage before each subsequent volume's readback. Every invocation
+owns its full column; zero-contribution columns explicitly cleared. No races or
+cross-invocation blending. Same result to <=1 display-level rounding on tiny
+fractions of pixels; audits512 samples in roof/001/003/007 <=1.04e-6 against both
+CPU definitions (which agree exactly). Single compute pass, no history/jitter.
+
+500frame GPU width160 .59->.42ms; width3201.39->.74ms clean,7.11->6.31ms effects.
+CPUstreamed1601.71/3201.77/effects1.80ms. Single runs, do NOT claim all-baseline
+victory. Raw fog-streamed{,320}-{clean,effects}, old fog-single320-*. Normal
+images inspected previously; mirrored probe pixel-exact but its room has NO fog
+(do NOT claim reflected fog qualification). Offscreen fog view plus resource,
+geometry, deformation audits pass fog-streamed-multiview; six-save audit suite
+fog-streamed-suite-*. Build out/fog-streamed-build.log. Runtime matches source.
+Source uncommitted atop e3e2c38; next checkpoint/package optional new preview.
+No active captures/build. Lastusage14% consumed, ordinaryUsageAllowed=true.
+No Candidate/main/old-preview changes. Async roof-art question remains pending.
+
 ## LATEST: temporal fog rejected; single-pass field verified against controls
 
 Supersedes ALL history/normalized-half-storage details below. Centered spatial
