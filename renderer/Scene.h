@@ -309,12 +309,24 @@ MaterialPolicy compileMaterialPolicy(const SurfaceBinding&, const MeshPolygon&);
 struct SurfaceModulation { Vec3 ambient{1,1,1}, color{1,1,1}; float alpha = 1; };
 SurfaceModulation modulatedSurface(const SurfaceBinding&,const SurfaceModulation&);
 MaterialPolicy modulatedMaterialPolicy(const SurfaceBinding&,float alpha);
+// A range in the presentation's packed emitter-index table. Instances and
+// terrain patches share lists without duplicating material records.
+struct LightCandidateRange {
+    uint32_t offset = 0, count = 0;
+    bool empty() const { return count == 0; }
+};
+struct TerrainPatchState {
+    LightCandidateRange light_candidates;
+    uint32_t surface_base = 0;
+};
 struct TerrainState {
     TerrainAssetRef asset;
     TerrainOcclusionRef occlusion; // null means authored table is unavailable/invalidated
     float observation_distance = 0; // world units; zero means not published
     std::vector<SurfaceBinding> materials;
-    std::vector<std::vector<SurfaceBinding>> patches;
+    std::vector<TerrainPatchState> patches;
+    bool light_influences_prepared = false;
+    const SurfaceBinding& surface(size_t patch,size_t batch) const;
 };
 enum class MeshAlignment : uint8_t { World, Camera, FacingEye, CameraUpright, Axis };
 struct PreparedMesh {
@@ -447,12 +459,6 @@ public:
     void resize(size_t n) { edit(); values_->resize(n); }
     void push_back(const SurfaceBinding& value) { edit(); values_->push_back(value); }
 };
-// A range in the presentation's packed emitter-index table. Many instances
-// may share a room's conservative list without owning copies of it.
-struct LightCandidateRange {
-    uint32_t offset = 0, count = 0;
-    bool empty() const { return count == 0; }
-};
 struct RoomState {
     int32_t number = -1;
     uint64_t source_material_revision = 0;
@@ -524,6 +530,8 @@ public:
         uint32_t drawn_parts = 0; // deferred source models have at most 32 parts
         float motion_radius = 0;
         bool has_geometry = false;
+        Bounds rest_bounds;
+        bool has_rest_bounds = false;
         std::shared_ptr<const std::vector<RoomSurfaces::ImageDependency>> images;
     };
 private:

@@ -370,7 +370,7 @@ void logPreparedModels(const d3scene::Presentation& frame) {
         if (room.surfaces.publishedFor(room.asset->id())) retained_surfaces += room.surfaces.size(); }
     for (const auto& model : data.model_variants)
         for (const auto& part : model.parts) model_surfaces += part.surfaces.size();
-    for (const auto& patch : data.terrain.patches) terrain_surfaces += patch.size();
+    if (data.terrain.asset) for (const auto& patch : data.terrain.asset->patches()) terrain_surfaces += patch.batches.size();
     AutomatedCaptureLog("scene inventory rooms=%u models=%u terrain=%u meshes=%u",unsigned(room_surfaces),unsigned(model_surfaces),unsigned(terrain_surfaces),unsigned(data.meshes.size()));
     AutomatedCaptureLog("scene retained room surfaces=%u",unsigned(retained_surfaces));
     unsigned reflection_surfaces = 0, reflection_sources = 0, smooth_reflections = 0;

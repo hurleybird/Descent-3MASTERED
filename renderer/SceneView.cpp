@@ -549,7 +549,7 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
                 const Vec3 center{(patch.bounds.minimum.x+patch.bounds.maximum.x)*.5f,
                     (patch.bounds.minimum.y+patch.bounds.maximum.y)*.5f,(patch.bounds.minimum.z+patch.bounds.maximum.z)*.5f};
                 for (size_t batch = 0; batch < patch.batches.size(); ++batch) {
-                    const auto& surface = terrain.patches[patch_index][batch];
+                    const auto& surface = terrain.surface(patch_index,batch);
                     if (!surface.draw_surface) continue;
                     VisibleSurface item; item.terrain = true;
                     item.terrain_patch = static_cast<uint32_t>(patch_index); item.terrain_batch = static_cast<uint32_t>(batch);
@@ -633,7 +633,7 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
 const SurfaceBinding& visibleSurfaceBinding(const Presentation& frame,const VisibleSurface& item) {
     const auto& data = frame.data();
     if (item.mesh) return data.meshes[item.mesh_index].surface;
-    if (item.terrain) return data.terrain.patches[item.terrain_patch][item.terrain_batch];
+    if (item.terrain) return data.terrain.surface(item.terrain_patch,item.terrain_batch);
     if (item.model) {
         const auto& model = frame.resolvedModel(item.model_instance_index,item.model_variant);
         return model.parts[item.part_index].surface(model.asset->geometry().parts[item.part_index],item.polygon_index);

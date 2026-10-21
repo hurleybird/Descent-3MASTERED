@@ -2,6 +2,41 @@
 
 ## October 20 continuation
 
+October 21: terrain patch state no longer duplicates SurfaceBinding tables.
+The immutable terrain asset maps batches to the frame's shared material table;
+compact patch records carry only packed light candidates and GPU surface bases.
+Validation/compilation and reflection collection visit materials once. Lighting,
+visibility and GL submission consume the same explicit patch/material split.
+Material and patch vector capacity is recycled with other frame storage.
+Tests cover aliasing, material changes, held frames, patch-local light ranges,
+surface addressing and invalid ranges. Eight saves and a combined probe ran;
+seven images are exact to keys, 002 repeats the documented pickup variation.
+An explicit outdoor SSAA2/MSAA4/AO/bloom probe is pixel-exact to rest-bounds
+and was visually inspected: `cpu-terrain-outdoor-{current,control}-20261021`.
+
+Fresh paired no-marker current/old ms: 000 1.811/1.536; 001 1.421/1.709;
+002 2.570/2.474; 003 2.727/2.581; 004 0.693/0.870; 005 1.840/0.936;
+006 0.851/0.893; 007 2.027/1.198. Three trials ahead, five behind; still NOT
+the requested marked improvement everywhere. Paths: `cpu-terrain-{current,legacy}-savegNNN-20261021`;
+use `cpu-terrain-repeat-{current,legacy}-saveg007-20261021` for 007 because a
+helper compile overlapped the original legacy007 run. No other pair overlapped.
+
+Also replaced eight-corner bound transformation with component support corners
+preserving operation order (12,000 randomized exact-reference tests), and retained
+rest-pose bounds for undeformed/unkeyed models. Animated/deforming models retain
+the full motion envelope. Dense/wall/probe images remained exact at both steps.
+Current executable: `out/perf-checkpoints/terrain-bindings.exe`; build/test logs
+`out/cpu-terrain-bindings-{tests,build}.log`.
+
+Read-only external sampling helper: `out/sample-render-thread.cpp` and `.exe`.
+It suspends only the exact verification executable's main thread briefly to walk
+stacks, resumes before symbol decoding, and never writes target memory. Sampled
+runs are diagnostic, NEVER timing evidence. First unfiltered results identified
+terrain copying/validation/destruction, but also included final capture logging.
+The first absolute FrameCount filter yielded zero samples because save games
+restore that counter. Relative-counter filtering and a sampler deadline before
+the final capture are now being tried (`cpu-stack-steady-wall*`).
+
 October 21, after restart: user authorized continued work, aiming to stop at
 0% included usage (a small accidental credit overrun is acceptable, deliberate
 credit consumption is not). Latest check: 38% included remaining.

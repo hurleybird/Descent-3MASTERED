@@ -67,14 +67,16 @@ float sampleTerrainExposure(const TerrainGrid& grid,Vec3 position,int32_t cell) 
     // Preserve the authored legacy height sampling interval: int(350 / 8) = 43.
     return sampleTerrainExposure({grid.sky_visibility.empty() ? nullptr : grid.sky_visibility.data(),grid.width,grid.depth,grid.spacing,43},position,cell);
 }
+const SurfaceBinding& TerrainState::surface(size_t patch,size_t batch) const {
+    return materials.at(asset->patches().at(patch).batches.at(batch).material);
+}
 void prepareTerrainPatches(TerrainState& terrain) {
     terrain.patches.clear();
+    terrain.light_influences_prepared = false;
     if (!terrain.asset) return;
-    for (const auto& patch : terrain.asset->patches()) {
-        std::vector<SurfaceBinding> surfaces;
-        for (const auto& batch : patch.batches) surfaces.push_back(terrain.materials.at(batch.material));
-        terrain.patches.push_back(std::move(surfaces));
-    }
+    if (terrain.materials.size() != terrain.asset->grid().materials.size())
+        throw std::invalid_argument("Incomplete terrain materials");
+    terrain.patches.resize(terrain.asset->patches().size());
 }
 TerrainAsset::TerrainAsset(AssetId id,const TerrainGrid& grid) : id_(id), grid_(grid) {
     constexpr uint32_t patch_size = 16;

@@ -76,6 +76,15 @@ void ModelParts::seal(const ModelAsset& asset) {
         if (part.draw && !geometry.geometry.polygons.empty()) {
             summary->has_geometry = true;
             summary->motion_radius = std::max(summary->motion_radius,geometry.motion_radius);
+            if (!asset.geometry().rest_pose.empty()) {
+                const auto bounds = transformBounds(asset.geometry().rest_pose[i],geometry.local_bounds);
+                if (!summary->has_rest_bounds) { summary->rest_bounds = bounds; summary->has_rest_bounds = true; }
+                else {
+                    auto& b = summary->rest_bounds;
+                    b.minimum = {std::min(b.minimum.x,bounds.minimum.x),std::min(b.minimum.y,bounds.minimum.y),std::min(b.minimum.z,bounds.minimum.z)};
+                    b.maximum = {std::max(b.maximum.x,bounds.maximum.x),std::max(b.maximum.y,bounds.maximum.y),std::max(b.maximum.z,bounds.maximum.z)};
+                }
+            }
         }
         images.insert(images.end(),part.surfaces.images().begin(),part.surfaces.images().end());
     }
@@ -166,13 +175,20 @@ Transform compose(const Transform& parent, const Transform& local) {
 }
 Bounds transformBounds(const Transform& transform,const Bounds& local) {
     Bounds result;
-    result.minimum = result.maximum = transformPoint(transform,local.minimum);
-    for (unsigned corner = 1; corner < 8; ++corner) {
-        const auto point = transformPoint(transform,{corner&1 ? local.maximum.x : local.minimum.x,
-            corner&2 ? local.maximum.y : local.minimum.y,corner&4 ? local.maximum.z : local.minimum.z});
-        result.minimum = {std::min(result.minimum.x,point.x),std::min(result.minimum.y,point.y),std::min(result.minimum.z,point.z)};
-        result.maximum = {std::max(result.maximum.x,point.x),std::max(result.maximum.y,point.y),std::max(result.maximum.z,point.z)};
-    }
+    // Each output component is monotonic in each input coordinate. Select its
+    // two support corners directly. Unlike center/extents arithmetic this keeps
+    // transformPoint's operation order, including its rounding at large offsets.
+    const auto axis = [&](float a,float b,float c,float translation,float& minimum,float& maximum) {
+        minimum = (a*(a >= 0 ? local.minimum.x : local.maximum.x)+
+            b*(b >= 0 ? local.minimum.y : local.maximum.y)+
+            c*(c >= 0 ? local.minimum.z : local.maximum.z))+translation;
+        maximum = (a*(a >= 0 ? local.maximum.x : local.minimum.x)+
+            b*(b >= 0 ? local.maximum.y : local.minimum.y)+
+            c*(c >= 0 ? local.maximum.z : local.minimum.z))+translation;
+    };
+    axis(transform.right.x,transform.up.x,transform.forward.x,transform.position.x,result.minimum.x,result.maximum.x);
+    axis(transform.right.y,transform.up.y,transform.forward.y,transform.position.y,result.minimum.y,result.maximum.y);
+    axis(transform.right.z,transform.up.z,transform.forward.z,transform.position.z,result.minimum.z,result.maximum.z);
     return result;
 }
 bool operator!=(AssetId a, AssetId b) { return !(a == b); }
@@ -473,10 +489,16 @@ void compileModelBounds(const Transform& placement,PreparedModel& model) {
     };
     model.has_render_bounds = false;
     if (model.deferred_pose) {
+        const auto* summary = model.parts.publishedFor(model.asset->id()) ? model.parts.summary() : nullptr;
+        if (summary && summary->has_rest_bounds && model.pose_inputs.empty() && model.deformation == 0) {
+            model.render_bounds = transformBounds(placement,summary->rest_bounds);
+            model.has_render_bounds = true;
+            return;
+        }
         float radius = 0;
-        if (model.parts.publishedFor(model.asset->id())) {
-            radius = model.parts.summary()->motion_radius*(1+std::abs(model.deformation));
-            model.has_render_bounds = model.parts.summary()->has_geometry;
+        if (summary) {
+            radius = summary->motion_radius*(1+std::abs(model.deformation));
+            model.has_render_bounds = summary->has_geometry;
         } else for (size_t i = 0; i < model.parts.size(); ++i) {
             const auto& pose = model.parts.read()[i];
             const auto& part = model.asset->geometry().parts[i];
@@ -587,6 +609,8 @@ Presentation::~Presentation() {
     reclaim(data_.camera_perturbations,clean.camera_perturbations);
     reclaim(data_.meshes,clean.meshes);
     reclaim(data_.foregrounds,clean.foregrounds);
+    reclaim(data_.terrain.materials,clean.terrain.materials);
+    reclaim(data_.terrain.patches,clean.terrain.patches);
     pool->spare[pool->count++] = std::move(clean);
 }
 PresentationRef Presentation::freeze(const FrameData& data) {
@@ -753,10 +777,7 @@ PresentationRef Presentation::complete(FrameData data) {
         require(data.terrain.materials.size() == data.terrain.asset->grid().materials.size(),"Incomplete terrain materials");
         for (const auto& surface : data.terrain.materials) { validateSurface(surface); validateIndices(surface); }
         require(data.terrain.patches.size() == data.terrain.asset->patches().size(),"Incomplete terrain patch bindings");
-        for (size_t patch = 0; patch < data.terrain.patches.size(); ++patch) {
-            require(data.terrain.patches[patch].size() == data.terrain.asset->patches()[patch].batches.size(),"Incomplete terrain batch bindings");
-            for (const auto& surface : data.terrain.patches[patch]) { validateSurface(surface); validateIndices(surface); }
-        }
+        for (const auto& patch : data.terrain.patches) data.lightCandidates(patch.light_candidates);
     } else require(data.terrain.materials.empty() && data.terrain.patches.empty(),"Terrain materials have no grid");
     SceneLookup<int32_t,size_t> rooms;
     rooms.reserve(data.rooms.size());
@@ -939,8 +960,12 @@ PresentationRef Presentation::complete(FrameData data) {
         room.surface_base = surface_count;
         surface_count += static_cast<uint32_t>(room.surfaces.size());
     }
-    for (auto& surface : prepared->data_.terrain.materials) index_surface(surface);
-    for (auto& patch : prepared->data_.terrain.patches) for (auto& surface : patch) index_surface(surface);
+    for (size_t i = 0; i < prepared->data_.terrain.patches.size(); ++i) {
+        auto& patch = prepared->data_.terrain.patches[i];
+        const auto count = prepared->data_.terrain.asset->patches()[i].batches.size();
+        require(count <= UINT32_MAX-surface_count,"Too many terrain batches");
+        patch.surface_base = surface_count; surface_count += uint32_t(count);
+    }
     for (auto& mesh : prepared->data_.meshes) index_surface(mesh.surface);
     for (auto& model : prepared->data_.model_variants) {
         model.surface_base = surface_count;
@@ -968,8 +993,6 @@ PresentationRef Presentation::complete(FrameData data) {
         mesh.surface.material = materialPolicy(mesh.surface,mesh.asset->hasVertexAlpha());
     }
     for (auto& surface : prepared->data_.terrain.materials)
-        surface.material = compileMaterialPolicy(surface,MeshPolygon{});
-    for (auto& patch : prepared->data_.terrain.patches) for (auto& surface : patch)
         surface.material = compileMaterialPolicy(surface,MeshPolygon{});
     for (auto& room : prepared->data_.rooms) {
         room.portals.seal();

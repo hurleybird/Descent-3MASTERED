@@ -587,7 +587,7 @@ void GL4Renderer::UploadSceneFrame(const d3scene::Presentation& frame, const d3s
                 visible_models.emplace_back(item.model_instance_index,item.model_variant);
             }
             else if (item.mesh) meshes[item.mesh_index] = 1;
-            else if (item.terrain) surfaces[frame.data().terrain.patches[item.terrain_patch][item.terrain_batch].compiled_index] = 1;
+            else if (item.terrain) surfaces[frame.data().terrain.patches[item.terrain_patch].surface_base+item.terrain_batch] = 1;
             else {
                 rooms[item.room_index] = 1;
                 surfaces[frame.data().rooms[item.room_index].surface_base+item.polygon_index] = 1;
@@ -632,7 +632,7 @@ void GL4Renderer::UploadSceneFrame(const d3scene::Presentation& frame, const d3s
         scene_reflection_dependencies.begin();
         scene_reflection_dependencies.addValue(0); // initialize the empty GPU buffer once
         for (const auto& room : frame.data().rooms) collectTable(room.surfaces);
-        for (const auto& patch : frame.data().terrain.patches) for (const auto& surface : patch) collect(surface);
+        for (const auto& surface : frame.data().terrain.materials) collect(surface);
         for (const auto& mesh : frame.data().meshes) collect(mesh.surface);
         for (const auto& model : frame.data().model_variants) for (const auto& part : model.parts)
             collectTable(part.surfaces);
@@ -680,12 +680,12 @@ void GL4Renderer::UploadSceneFrame(const d3scene::Presentation& frame, const d3s
         // must not evict the main view's immutable fields every frame.
         if (rebuild_reflections) {
             for (const auto& room : frame.data().rooms) for (const auto& surface : room.surfaces) reflection(surface);
-            for (const auto& patch : frame.data().terrain.patches) for (const auto& surface : patch) reflection(surface);
+            for (const auto& surface : frame.data().terrain.materials) reflection(surface);
             for (const auto& mesh : frame.data().meshes) reflection(mesh.surface);
             for (const auto& model : frame.data().model_variants)
                 for (const auto& part : model.parts) for (const auto& surface : part.surfaces) reflection(surface);
         }
-        const auto add = [&](const d3scene::SurfaceBinding& surface,uint32_t index,const std::vector<uint32_t>& lights) {
+        const auto add = [&](const d3scene::SurfaceBinding& surface,uint32_t index,const auto& lights) {
             auto& ranges = scene_surface_ranges[index];
             ranges = {};
             const auto reflection_ranges = reflection(surface);
@@ -728,7 +728,17 @@ void GL4Renderer::UploadSceneFrame(const d3scene::Presentation& frame, const d3s
                 scene_surface_ranges[room.surface_base+face].lights = ElementRange(start,uint32_t(indices.size())-start);
             }
         }
-        for (const auto& patch : frame.data().terrain.patches) for (const auto& surface : patch) if (surfaces[surface.compiled_index]) add(surface,surface.compiled_index,surface.light_indices);
+        const auto& terrain = frame.data().terrain;
+        for (size_t p = 0; p < terrain.patches.size(); ++p) {
+            const auto& patch = terrain.patches[p];
+            for (size_t b = 0; b < terrain.asset->patches()[p].batches.size(); ++b) {
+                const auto index = patch.surface_base+uint32_t(b);
+                if (!surfaces[index]) continue;
+                const auto& surface = terrain.surface(p,b);
+                if (terrain.light_influences_prepared) add(surface,index,frame.data().lightCandidates(patch.light_candidates));
+                else add(surface,index,surface.light_indices);
+            }
+        }
         for (const auto& mesh : frame.data().meshes) {
             if (!meshes[&mesh-frame.data().meshes.data()]) continue;
             add(mesh.surface,mesh.surface.compiled_index,mesh.surface.light_indices);
@@ -1188,7 +1198,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::Presentat
             if (batches.size() <= item.terrain_batch) batches.resize(item.terrain_batch+1);
             mesh = &batches[item.terrain_batch];
             UploadSceneMesh(*mesh,terrain.asset->id(),terrain.asset->patches()[item.terrain_patch].batches[item.terrain_batch].geometry);
-            binding = &terrain.patches[item.terrain_patch][item.terrain_batch];
+            binding = &terrain.surface(item.terrain_patch,item.terrain_batch);
         } else if (item.model) {
             const auto& object = presentation.data().model_instances[item.model_instance_index];
             const auto& model = presentation.resolvedModel(item.model_instance_index,item.model_variant);
@@ -1219,6 +1229,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::Presentat
         record[79] = float(policy.planar_slot != 0);
         record[80] = float(planar_image);
         uint32_t surface_index = binding->compiled_index;
+        if (item.terrain) surface_index = presentation.data().terrain.patches[item.terrain_patch].surface_base+item.terrain_batch;
         if (item.model) {
             const auto& model = presentation.resolvedModel(item.model_instance_index,item.model_variant);
             const auto& part = model.parts[item.part_index];

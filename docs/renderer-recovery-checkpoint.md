@@ -2,6 +2,13 @@
 
 ## October 21 resumed work — supersedes restart pause below
 
+Latest: compact terrain patch/material separation and support/rest bounds are
+built and image-verified. Current binary `out/perf-checkpoints/terrain-bindings.exe`.
+Latest paired corpus has three scenes ahead, five behind; exact evidence and
+sampling-helper status are at the top of renderer-cpu-ownership-repair.md.
+Read-only sampler session may still be finishing; do not overwrite a running
+verification executable. Last usage check: 37% remaining.
+
 User asked to continue, aiming to stop at 0% included usage; a small accidental
 credit overrun is acceptable, not deliberate credit use. Last check 38% remaining.
 See the top of `renderer-cpu-ownership-repair.md` for completed verification and

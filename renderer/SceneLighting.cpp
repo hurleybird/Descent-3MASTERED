@@ -183,9 +183,11 @@ void prepareLightInfluences(FrameData& data) {
     }
     }
     }
+    data.terrain.light_influences_prepared = true;
     if (data.terrain.asset) for (size_t patch = 0; patch < data.terrain.patches.size(); ++patch) {
         const auto& bounds = data.terrain.asset->patches()[patch].bounds;
-        std::vector<uint32_t> indices;
+        auto& candidates = data.terrain.patches[patch].light_candidates;
+        candidates = startRange();
         for (size_t light = 0; light < data.lights.size(); ++light) {
             const auto& source = data.lights[light];
             if (!exterior[light]) continue;
@@ -193,9 +195,9 @@ void prepareLightInfluences(FrameData& data) {
             const float x = axis(source.position.x,bounds.minimum.x,bounds.maximum.x);
             const float y = axis(source.position.y,bounds.minimum.y,bounds.maximum.y);
             const float z = axis(source.position.z,bounds.minimum.z,bounds.maximum.z);
-            if (x*x+y*y+z*z <= source.radius*source.radius) indices.push_back(static_cast<uint32_t>(light));
+            if (x*x+y*y+z*z <= source.radius*source.radius) packed.push_back(static_cast<uint32_t>(light));
         }
-        for (auto& surface : data.terrain.patches[patch]) surface.light_indices = indices;
+        finishRange(candidates);
     }
 }
 }

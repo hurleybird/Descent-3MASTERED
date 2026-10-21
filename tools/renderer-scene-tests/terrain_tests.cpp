@@ -65,6 +65,18 @@ int runTerrainTests() {
     frame.terrain.asset = changed; frame.terrain.materials.resize(1);
     prepareTerrainPatches(frame.terrain);
     const auto frozen = Presentation::freeze(frame);
+    check(&frozen->data().terrain.surface(0,0) == &frozen->data().terrain.surface(changed->patches().size()-1,0));
+    uint32_t batch_count = 0;
+    for (size_t patch = 0; patch < changed->patches().size(); ++patch) {
+        check(frozen->data().terrain.patches[patch].surface_base == batch_count);
+        batch_count += uint32_t(changed->patches()[patch].batches.size());
+    }
+    check(frozen->data().compiled_surface_count == batch_count);
+    frame.terrain.materials[0].alpha = .5f;
+    const auto tinted = Presentation::freeze(frame);
+    check(tinted->data().terrain.surface(0,0).material.blended() &&
+        frozen->data().terrain.surface(0,0).alpha == 1);
+    frame.terrain.materials[0].alpha = 1;
     View view; view.history_key = 1; view.viewport = view.projection_anchor = {0,0,800,600};
     view.camera.position = {128,100,16}; view.camera.forward = {0,-.6f,.8f}; view.camera.up = {0,.8f,.6f};
     const auto visible = queryView(*frozen,view);
@@ -88,9 +100,18 @@ int runTerrainTests() {
     check(!queryView(*Presentation::freeze(frame),view).surfaces.empty());
     Light light; light.room = 0; light.position = {8,8,8}; light.radius = 32;
     frame.lights.push_back(light); prepareLightInfluences(frame);
-    check(frame.terrain.patches[0][0].light_indices.size() == 1 && frame.terrain.patches.back()[0].light_indices.empty());
+    check(frame.lightCandidates(frame.terrain.patches[0].light_candidates).size() == 1 && frame.terrain.patches.back().light_candidates.empty());
+    const auto illuminated = Presentation::freeze(frame);
     frame.rooms[0].exterior = false; prepareLightInfluences(frame);
-    check(frame.terrain.patches[0][0].light_indices.empty());
+    check(frame.terrain.patches[0].light_candidates.empty());
+    check(illuminated->data().lightCandidates(illuminated->data().terrain.patches[0].light_candidates).size() == 1);
+    {
+        auto invalid = frame;
+        invalid.terrain.patches[0].light_candidates = {UINT32_MAX,1};
+        bool rejected = false;
+        try { Presentation::freeze(invalid); } catch (const std::invalid_argument&) { rejected = true; }
+        check(rejected);
+    }
     assets.reset();
     check(!assets.terrain() && frozen->data().terrain.asset->grid().heights[256] == 12);
     check(assets.publishTerrain(grid)->id().lifetime != changed->id().lifetime);

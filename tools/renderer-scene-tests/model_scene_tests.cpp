@@ -35,6 +35,34 @@ int runModelSceneTests() {
     using namespace d3scene;
     checks = 0;
     {
+        uint32_t seed = 0x42b07u;
+        const auto random = [&]() { seed = seed*1664525u+1013904223u; return (int(seed>>8)-8388608)/8388608.f; };
+        for (int sample = 0; sample < 12000; ++sample) {
+            const float scale = sample%3 == 0 ? 100000.f : sample%3 == 1 ? .00001f : 100.f;
+            Transform placement;
+            placement.position = {random()*scale,random()*scale,random()*scale};
+            placement.right = {random()*3,random()*3,random()*3};
+            placement.up = {random()*3,random()*3,random()*3};
+            placement.forward = {random()*3,random()*3,random()*3};
+            Bounds box;
+            box.minimum = {random()*scale,random()*scale,random()*scale};
+            box.maximum = {box.minimum.x+std::abs(random())*scale,
+                box.minimum.y+std::abs(random())*scale,box.minimum.z+std::abs(random())*scale};
+            Bounds reference; reference.minimum = reference.maximum = transformPoint(placement,box.minimum);
+            for (unsigned corner = 1; corner < 8; ++corner) {
+                const auto p = transformPoint(placement,{corner&1 ? box.maximum.x : box.minimum.x,
+                    corner&2 ? box.maximum.y : box.minimum.y,corner&4 ? box.maximum.z : box.minimum.z});
+                reference.minimum = {std::min(reference.minimum.x,p.x),std::min(reference.minimum.y,p.y),std::min(reference.minimum.z,p.z)};
+                reference.maximum = {std::max(reference.maximum.x,p.x),std::max(reference.maximum.y,p.y),std::max(reference.maximum.z,p.z)};
+            }
+            const auto actual = transformBounds(placement,box);
+            check(actual.minimum.x == reference.minimum.x && actual.minimum.y == reference.minimum.y &&
+                actual.minimum.z == reference.minimum.z && actual.maximum.x == reference.maximum.x &&
+                actual.maximum.y == reference.maximum.y && actual.maximum.z == reference.maximum.z,
+                "Support-corner transform changed bounds rounding or missed reflected/scaled geometry");
+        }
+    }
+    {
         ModelBindingInputs key;
         check(!(key == key),"Uninitialized producer binding inputs permitted reuse");
         key.valid = true; key.subobject_mask = UINT32_MAX; key.material_palette = true;
@@ -147,6 +175,19 @@ int runModelSceneTests() {
             model.parts.resize(1); model.parts[0].surfaces.resize(1);
             input.appendModel(instance,std::move(model)); input.model_instances.push_back(instance);
             const auto frame = Presentation::freeze(input);
+            auto retained = frame->data(); ++retained.sequence;
+            const auto next = Presentation::freeze(retained);
+            const auto& bounds = next->data().model_instances[0].render_bounds;
+            const auto& local = rest_asset->geometry().parts[0].local_bounds;
+            if (!current_keys) {
+                check(bounds.minimum.x == local.minimum.x && bounds.maximum.x == local.maximum.x &&
+                    bounds.minimum.z == local.minimum.z && bounds.maximum.z == local.maximum.z,
+                    "Resting model still uses its full animation envelope");
+                retained.model_variants[0].deformation = .2f;
+                const auto deformed = Presentation::freeze(retained);
+                check(deformed->data().model_instances[0].render_bounds.maximum.x > bounds.maximum.x,
+                    "Deformation reused an invalid rest bound");
+            } else check(bounds.maximum.x > local.maximum.x,"Keyed animation reused an invalid rest bound");
             const auto& pose = frame->resolvedModel(0,0).parts[0];
             const auto& source = input.modelsFor(0)[0];
             const auto expected = ComposeModelPose(*animation,EvaluateModelPose(*animation,
