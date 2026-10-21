@@ -2,6 +2,16 @@
 
 ## Current handoff state — view-level fog pipelines verified
 
+ProjectedMesh now omits duplicate lateral camera-plane checks when its aperture
+is contained in[-1,1]. Near and mirror/world planes remain, and wider apertures
+retain all planes. This can only admit additional conservative edge candidates,
+never remove previously visible geometry. Tests pass; 005/007 and multiview
+images pixel-exact, logged per-view surface counts unchanged. Raw aperture-clip*.
+CPU0051.50->1.61,0071.80->1.66: mixed, no whole-frame speed claim.
+Next quality check should cover native4K: user screenshots are ~3840x2160,
+where the fixed320-column preview spans12 display pixels per column. Existing
+moving-edge metrics are1280x720 and must not be represented as4K qualification.
+
 Latest source: portal aperture bounds stream clipped vertices/intersections
 directly, removing two temporary polygons per traversed portal. A bounded ring
 queue and queued/exterior scratch retain capacity; no view result borrows them.

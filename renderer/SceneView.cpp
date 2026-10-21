@@ -119,9 +119,16 @@ class ProjectedMesh {
     PortalWindow window_;
     ProjectionScratch& scratch_;
     uint64_t generation_;
+    size_t first_plane_;
 public:
     ProjectedMesh(const Camera& camera,MeshView geometry,Transform placement,PortalWindow window,ProjectionScratch& scratch)
         : camera_(camera),geometry_(geometry),placement_(placement),window_(window),scratch_(scratch) {
+        // A viewport-contained aperture already supplies all four lateral
+        // constraints below. Keep near/world clipping, and retain camera-side
+        // tests for callers supplying a wider aperture. Omitting a redundant
+        // rounded-plane rejection can only make this query more conservative.
+        first_plane_ = window.left >= -1 && window.right <= 1 &&
+            window.bottom >= -1 && window.top <= 1 ? 4 : 0;
         if (++scratch_.generation == 0) {
             for (auto& vertex : scratch_.vertices) vertex.generation = 0;
             ++scratch_.generation;
@@ -144,7 +151,7 @@ public:
         auto& result = scratch_.vertices[index];
         if (result.outside != UINT16_MAX) return result.outside;
         uint16_t outside = 0;
-        for (size_t i = 0; i < camera_.planes.size(); ++i) {
+        for (size_t i = first_plane_; i < camera_.planes.size(); ++i) {
             const auto& plane = camera_.planes[i];
             if (distance(plane,result.world) < -tolerance(plane,result.world)) outside |= uint16_t(1)<<i;
         }
