@@ -20,6 +20,13 @@ exactly and was visually inspected. `cpu-shared-model-assets-audit-20261020`
 also verifies the newly shared cockpit asset path. Contract suite passes.
 Dense preparation remains about 4.5 ms; whole-level model assembly is still
 the largest substage. Do not claim completion or old-renderer visual parity.
+Terrain publication now also consumes the existing Terrain_render_revision
+(loader/min-max rebuild and terrain deformation already advance it), plus the
+four lightmap assignments. It no longer compares all 65,536 cells every frame.
+All eight `cpu-terrain-audit-20261020-savegNNN` captures pass the full source
+comparison. Clean save003/save004 images match exactly; their latest CPU means
+are 6.63/1.43 ms, with enough run-to-run noise that the small-scene change is not
+a demonstrated total-time win. Terrain source revision is not a visibility skip.
 
 Second checkpoint: model assets retain rest poses; unchanged instance inputs
 reuse previous poses, and identical animated inputs share one evaluation within

@@ -15,6 +15,7 @@
 #include <map>
 #include <cmath>
 #include <cstring>
+#include <stdexcept>
 namespace {
 float height(int index) { return (std::max)(0.f,(std::min)(Terrain_seg[index].y,MAX_TERRAIN_HEIGHT)); }
 const terrain_tex_segment& terrainTexture(const terrain_segment& cell) {
@@ -71,7 +72,13 @@ void PrepareGameTerrain(d3scene::FrameData& frame) {
     if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
         AutomatedCaptureLog("scene terrain visibility table=%d distance=%g",bool(frame.terrain.occlusion),frame.terrain.observation_distance);
     auto asset = assets.terrain();
-    if (!asset || !matches(asset->grid())) {
+    static unsigned published_revision = 0;
+    static std::array<int,4> published_lightmaps{{-1,-1,-1,-1}};
+    const bool inputs_current = asset && published_revision == Terrain_render_revision &&
+        std::equal(published_lightmaps.begin(),published_lightmaps.end(),TerrainLightmaps);
+    if (inputs_current && FindArg("-scene-geometry-revision-audit") && !matches(asset->grid()))
+        throw std::logic_error("Terrain changed without producer invalidation");
+    if (!asset || (!inputs_current && !matches(asset->grid()))) {
         d3scene::TerrainGrid grid;
         grid.width = TERRAIN_WIDTH; grid.depth = TERRAIN_DEPTH; grid.spacing = TERRAIN_SIZE;
         grid.sky_visibility.assign(Terrain_dynamic_table,Terrain_dynamic_table+TERRAIN_WIDTH*TERRAIN_DEPTH);
@@ -98,6 +105,8 @@ void PrepareGameTerrain(d3scene::FrameData& frame) {
         }
         asset = assets.publishTerrain(grid);
     }
+    published_revision = Terrain_render_revision;
+    std::copy(TerrainLightmaps,TerrainLightmaps+4,published_lightmaps.begin());
     frame.terrain.asset = asset;
     for (const auto& material : asset->grid().materials) {
         d3scene::SurfaceBinding binding;
