@@ -278,7 +278,9 @@ uniform int scene_highlight_suppression;
 )GLSL" + SceneFogIntersectionShader + R"GLSL(
 vec3 applySceneFog(vec3 radiance,out float transmission) {
     transmission = 1.0;
-    if (fog_enabled == 0) return radiance;
+    // No medium can contribute: preserve transmission without constructing
+    // a ray or clip-plane path for every fragment in a clear view.
+    if (fog_enabled == 0 || (fog_volume_count == 0 && fog_exterior == 0)) return radiance;
     vec3 delta = world_position-eye;
     float distance = length(delta);
     if (distance < 1.e-6) return radiance;

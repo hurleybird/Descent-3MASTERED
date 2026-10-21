@@ -21,6 +21,9 @@
 #include <string.h>
 #ifdef __LINUX__
 #include "lnxfix.h"
+#ifndef _WIN32
+#include <strings.h>
+#endif
 #else
 #define strcasecmp stricmp
 #endif

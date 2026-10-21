@@ -2,6 +2,30 @@
 
 ## Active 2026-10-21 flare regression investigation
 
+LATEST afterf786976: sustained eight-save corpus is CPU-faster than reconstructed
+old in EVERY save (roughly34-69% first sweep;005 repeated advantage23-36%).
+out/sustained-baseline-results.txt holds exact numbers and evidence paths.
+Same720p/noAO/bloom/SSAA/MSAA,CPU2,fixed dt,seed/headlight; BOTH -limitframe0.
+3000frames,rows500..2499. Do NOT mix with paced120FPS results, where005 lagged.
+New approved fieldfog differs from old legacyfog: not strict effect parity.
+GPU006/007 stillslower by~.045ms in that sweep.006 has NO fog at all.
+
+Rejected32-thread fog groups:007 GPU .646376 vs8-thread .580300;006 unchanged
+as expected for no fog. Pixel exact. Source reverted to8. Details in
+out/rejected-fog-lanes.txt. No shared-memory accumulation changes implemented.
+
+Validated no-medium early exit in applySceneFog: transmission stays1, radiance
+unchanged when interior count0/exterior disabled.006720p and4K images exact.
+4K1000frames400..899 ABBA new/control/control/new GPU
+1.829818/1.919534/1.916514/1.827844 (~.089ms,4.6%); CPU
+.378016/.406526/.399322/.397430.720p GPU .473781/.489691 (single pair).
+Build includes early exit and8-thread fog, SHA
+AF7862F6655F782BC4EFF40490148866646DFF5C8243C6CFA47CB73F06310109.
+Added explicit UNIX argument-test definition/POSIX declaration; all3 contract
+targets pass on Windows including simulated GNU spelling (not a Linux build).
+Next: shader output contract specialization for absent surface-record consumers.
+Usage63% used, credits unchanged62451.4387600000. Continue without yielding.
+
 LATEST after572463c: room surface BVH experiment REJECTED and all source/tests
 removed. Conservative correctness and exact heavy image passed, but both corner
 and interval node tests regressed CPU. out/rejected-room-index.txt has evidence.
