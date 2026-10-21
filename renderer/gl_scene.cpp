@@ -586,6 +586,7 @@ void GL4Renderer::PrepareSceneViewTables(const d3scene::PreparedView& prepared) 
     PERF_MARKER_SCOPE("Scene.UploadFrame");
     const auto& frame = prepared.frame();
     const auto& demand = prepared.visibility();
+    const bool dynamic_lighting = prepared.view().dynamic_lighting;
     const auto resident = scene_frame_owner.lock();
     const bool new_frame = resident.get() != &frame;
     if (!scene_light_buffer) {
@@ -660,6 +661,21 @@ void GL4Renderer::PrepareSceneViewTables(const d3scene::PreparedView& prepared) 
         static thread_local std::vector<d3scene::Vec2> uvs;
         static thread_local std::vector<d3scene::Vec3> reflections;
         indices.clear(); uvs.clear(); reflections.clear();
+        // Equal lists have equal meaning, not a different address per face.
+        // Reuse the preceding nonempty list without hashing or reordering;
+        // this also lets equal draw records share the existing ordered batch.
+        ElementRange previous_lights;
+        const auto finish_lights = [&](uint32_t start) {
+            const uint32_t count = uint32_t(indices.size())-start;
+            if (!count) return ElementRange();
+            if (count == previous_lights.count && std::equal(indices.begin()+start,indices.end(),
+                    indices.begin()+previous_lights.offset)) {
+                indices.resize(start);
+                return previous_lights;
+            }
+            previous_lights = ElementRange(start,count);
+            return previous_lights;
+        };
         const auto collect = [&](const d3scene::SurfaceBinding& surface) {
             if (surface.reflection && surface.specular_strength > 0) scene_reflection_dependencies.addValue(surface.reflection->id().revision);
         };
@@ -736,8 +752,11 @@ void GL4Renderer::PrepareSceneViewTables(const d3scene::PreparedView& prepared) 
             ranges.reflections = reflection_ranges.sources;
             ranges.normals = reflection_ranges.normals;
             ranges.field = reflection_ranges.field;
-            ranges.lights = ElementRange(static_cast<uint32_t>(indices.size()),static_cast<uint32_t>(lights.size()));
-            for (uint32_t index : lights) indices.push_back(static_cast<int32_t>(index));
+            if (dynamic_lighting && !surface.unlit) {
+                const uint32_t start = uint32_t(indices.size());
+                for (uint32_t index : lights) indices.push_back(static_cast<int32_t>(index));
+                ranges.lights = finish_lights(start);
+            }
             const uint32_t start = static_cast<uint32_t>(uvs.size());
             d3scene::forEachTriangleCorner(surface.baked_uvs.size(),[&](size_t corner) { uvs.push_back(surface.baked_uvs[corner]); });
             ranges.uv = ElementRange(start,static_cast<uint32_t>(uvs.size())-start);
@@ -763,13 +782,14 @@ void GL4Renderer::PrepareSceneViewTables(const d3scene::PreparedView& prepared) 
                     scene_surface_ranges.begin()+room.surface_base+room.surfaces.size());
             }
             }
-            if (room.light_influences_prepared) for (size_t face = 0; face < room.surfaces.size(); ++face) {
+            if (dynamic_lighting && room.light_influences_prepared) for (size_t face = 0; face < room.surfaces.size(); ++face) {
                 if (!surfaces[room.surface_base+face]) continue;
+                if (room.surfaces[face].unlit) continue;
                 const uint32_t start = uint32_t(indices.size());
                 const auto& geometry = room.asset->geometry();
                 d3scene::appendSurfaceLightIndices(frame.data(),room.light_candidates,
                     d3scene::MeshView(geometry),geometry.polygons[face],{},indices);
-                scene_surface_ranges[room.surface_base+face].lights = ElementRange(start,uint32_t(indices.size())-start);
+                scene_surface_ranges[room.surface_base+face].lights = finish_lights(start);
             }
         }
         const auto& terrain = frame.data().terrain;
@@ -789,11 +809,12 @@ void GL4Renderer::PrepareSceneViewTables(const d3scene::PreparedView& prepared) 
         for (const auto& mesh : frame.data().meshes) {
             if (!meshes[&mesh-frame.data().meshes.data()]) continue;
             add(mesh.surface,mesh.surface.compiled_index,mesh.light_influences_prepared ? no_lights : mesh.surface.light_indices);
-            if (mesh.light_influences_prepared && !mesh.light_candidates.empty()) {
+            if (dynamic_lighting && !mesh.surface.unlit && mesh.light_influences_prepared && !mesh.light_candidates.empty()) {
                 const auto range = mesh.light_candidates;
                 if (!mesh_candidates_uploaded || range.offset != last_mesh_candidates.offset || range.count != last_mesh_candidates.count) {
-                    last_mesh_lights = ElementRange(uint32_t(indices.size()),range.count);
+                    const uint32_t start = uint32_t(indices.size());
                     for (const auto light : frame.data().lightCandidates(range)) indices.push_back(int32_t(light));
+                    last_mesh_lights = finish_lights(start);
                     last_mesh_candidates = range; mesh_candidates_uploaded = true;
                 }
                 scene_surface_ranges[mesh.surface.compiled_index].lights = last_mesh_lights;
@@ -818,7 +839,7 @@ void GL4Renderer::PrepareSceneViewTables(const d3scene::PreparedView& prepared) 
             part_ranges.motion_identity = motion.identity; part_ranges.motion_valid = motion.valid;
             for (size_t surface = 0; surface < part.surfaces.size(); ++surface)
                 add(part.surfaces[surface],part.surface_base+uint32_t(surface),part.surfaces[surface].light_indices);
-            if (!part.light_candidates.empty()) {
+            if (dynamic_lighting && !part.light_candidates.empty()) {
                 const auto& geometry = model.asset->geometry().parts[&part-model.parts.data()].geometry;
                 const auto transform = d3scene::compose(object.current,part.current);
                 part_ranges.polygons = ElementRange(uint32_t(scene_model_influences.size()),uint32_t(geometry.polygons.size()));
@@ -826,7 +847,7 @@ void GL4Renderer::PrepareSceneViewTables(const d3scene::PreparedView& prepared) 
                     const uint32_t start = uint32_t(indices.size());
                     d3scene::appendSurfaceLightIndices(frame.data(),part.light_candidates,
                         d3scene::MeshView(geometry,part.vertices),polygon,transform,indices);
-                    scene_model_influences.emplace_back(start,uint32_t(indices.size())-start);
+                    scene_model_influences.push_back(finish_lights(start));
                 }
             }
           }
@@ -857,7 +878,6 @@ void GL4Renderer::PrepareSceneViewTables(const d3scene::PreparedView& prepared) 
                 scene_part_ranges[part.compiled_index].positions = ElementRange(start,static_cast<uint32_t>(positions.size())-start);
           }
         }
-        if (positions.empty()) positions.push_back({});
         PerfMarkersEnd("Scene.Upload.Positions");
         PerfMarkersBegin("Scene.Upload.GLBuffers");
         if (rebuild_reflections) {
@@ -865,8 +885,13 @@ void GL4Renderer::PrepareSceneViewTables(const d3scene::PreparedView& prepared) 
             glBindBuffer(GL_TEXTURE_BUFFER,scene_reflection_buffer);
             glBufferData(GL_TEXTURE_BUFFER,reflections.size()*sizeof(d3scene::Vec3),reflections.data(),GL_STATIC_DRAW);
         }
-        glBindBuffer(GL_TEXTURE_BUFFER,scene_position_buffer);
-        glBufferData(GL_TEXTURE_BUFFER,positions.size()*sizeof(d3scene::PositionPair),positions.data(),GL_STREAM_DRAW);
+        // All streams start with valid minimal GL storage. An absent range
+        // has no shader reader, so it needs neither a dummy record nor a new
+        // allocation/upload. Retained bytes cannot be addressed by this view.
+        if (!positions.empty()) {
+            glBindBuffer(GL_TEXTURE_BUFFER,scene_position_buffer);
+            glBufferData(GL_TEXTURE_BUFFER,positions.size()*sizeof(d3scene::PositionPair),positions.data(),GL_STREAM_DRAW);
+        }
         scene_view_fog_volumes.clear();
         static thread_local std::vector<d3scene::FogViewNode> fog_nodes;
         static thread_local std::vector<int32_t> fog_entries;
@@ -887,16 +912,18 @@ void GL4Renderer::PrepareSceneViewTables(const d3scene::PreparedView& prepared) 
         indices.insert(indices.end(),fog_entries.begin(),fog_entries.end());
         if (AutomatedCapturePending()) AutomatedCaptureLog("scene optical fog candidates=%u total=%u nodes=%u/%u",
             scene_view_fog.count,unsigned(d3scene::fogVolumes(frame.data()).size()),unsigned(view_fog_nodes),unsigned(source_fog_nodes));
-        if (indices.empty()) indices.push_back(0);
-        if (uvs.empty()) uvs.push_back({0,0});
-        glBindBuffer(GL_TEXTURE_BUFFER,scene_uv_buffer);
-        glBufferData(GL_TEXTURE_BUFFER,uvs.size()*sizeof(d3scene::Vec2),uvs.data(),GL_STREAM_DRAW);
+        if (!uvs.empty()) {
+            glBindBuffer(GL_TEXTURE_BUFFER,scene_uv_buffer);
+            glBufferData(GL_TEXTURE_BUFFER,uvs.size()*sizeof(d3scene::Vec2),uvs.data(),GL_STREAM_DRAW);
+        }
         if (new_frame) {
             glBindBuffer(GL_TEXTURE_BUFFER,scene_light_buffer);
             glBufferData(GL_TEXTURE_BUFFER,lights.size()*sizeof(float),lights.data(),GL_STREAM_DRAW);
         }
-        glBindBuffer(GL_TEXTURE_BUFFER,scene_influence_buffer);
-        glBufferData(GL_TEXTURE_BUFFER,indices.size()*sizeof(int32_t),indices.data(),GL_STREAM_DRAW);
+        if (!indices.empty()) {
+            glBindBuffer(GL_TEXTURE_BUFFER,scene_influence_buffer);
+            glBufferData(GL_TEXTURE_BUFFER,indices.size()*sizeof(int32_t),indices.data(),GL_STREAM_DRAW);
+        }
         if (new_frame) scene_frame_owner = frame.shared_from_this();
         PerfMarkersEnd("Scene.Upload.GLBuffers");
         if (AutomatedCapturePending()) AutomatedCaptureLog("profile upload bindings=%u positions=%u uvs=%u influences=%u reflection_rebuild=%d frame_constants=%d",
@@ -1335,10 +1362,11 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         const bool exterior = item.terrain || (item.model ? exteriorRoom(presentation.data().model_instances[item.model_instance_index].room) :
             (item.mesh ? exteriorRoom(presentation.data().meshes[item.mesh_index].room) : presentation.data().rooms[item.room_index].exterior));
         record[72] = float(view.collection == 0 && exterior && exterior_fog.enabled);
-        { const auto value = item.world.position; record[0] = value.x; record[1] = value.y; record[2] = value.z; } { const auto value = item.world.right; record[4] = value.x; record[5] = value.y; record[6] = value.z; }
-        { const auto value = item.world.up; record[8] = value.x; record[9] = value.y; record[10] = value.z; } { const auto value = item.world.forward; record[12] = value.x; record[13] = value.y; record[14] = value.z; }
+        const auto& world = visibility.world(item);
+        { const auto value = world.position; record[0] = value.x; record[1] = value.y; record[2] = value.z; } { const auto value = world.right; record[4] = value.x; record[5] = value.y; record[6] = value.z; }
+        { const auto value = world.up; record[8] = value.x; record[9] = value.y; record[10] = value.z; } { const auto value = world.forward; record[12] = value.x; record[13] = value.y; record[14] = value.z; }
         d3scene::SurfaceMotion motion;
-        motion.previous = item.world;
+        motion.previous = world;
         if (resolved_part) {
             const auto& prepared = scene_part_ranges[resolved_part->compiled_index];
             motion.previous = prepared.previous_world; motion.identity = prepared.motion_identity;
@@ -1652,7 +1680,7 @@ void main() {
         scene_shader.Use();
         glBindBufferRange(GL_UNIFORM_BUFFER,7,scene_draw_buffer,item_index*record_bytes,22*16);
         const bool cull = item.terrain || (item.mesh && !surface.two_sided);
-        const bool clockwise = cull && (d3scene::reversesWinding(camera) != d3scene::reversesWinding(item.world));
+        const bool clockwise = cull && (d3scene::reversesWinding(camera) != d3scene::reversesWinding(visibility.world(item)));
         const RasterKey raster_key{policy.layer,policy.blend,policy.depth,cull,clockwise};
         if (!raster_bound || raster_key != previous_raster) {
         if(policy.blended()) {

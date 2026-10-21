@@ -48,6 +48,27 @@ void appendRoom(d3scene::SceneAssets& assets,d3scene::FrameData& data,d3scene::M
 int runSceneViewTests() {
     {
         using namespace d3scene;
+        static_assert(sizeof(VisibleSurface) <= 48,"Per-polygon visibility record grew placement data");
+        ViewVisibility first;
+        first.placements.push_back({{7,8,9}});
+        VisibleSurface a; a.placement = 0; a.polygon_index = 2;
+        VisibleSurface b = a; b.polygon_index = 3;
+        first.surfaces = {a,b,{}};
+        check(&first.world(first.surfaces[0]) == &first.world(first.surfaces[1]),"Part polygons did not share placement");
+        check(first.world(first.surfaces[2]).position.x == 0,"World-space surface has nonidentity placement");
+        auto copy = first;
+        copy.placements[0].position.x = 19;
+        check(first.world(first.surfaces[0]).position.x == 7 && copy.world(copy.surfaces[1]).position.x == 19,
+            "Copied visibility aliases mutable placements");
+        auto moved = std::move(copy);
+        check(moved.world(moved.surfaces[0]).position.x == 19,"Moving view lost placement indices");
+        VisibleSurface invalid; invalid.placement = 2;
+        bool rejected = false;
+        try { first.world(invalid); } catch (const std::out_of_range&) { rejected = true; }
+        check(rejected,"Missing view placement was silently accepted");
+    }
+    {
+        using namespace d3scene;
         const VisibleSurface* storage = nullptr;
         {
             ViewVisibility first;
@@ -864,8 +885,8 @@ int runSceneViewTests() {
         "Background did not precede world geometry");
     sky_view.camera.position = {100,2,50};
     sky_result = d3scene::queryView(*environment_frame,sky_view);
-    check(sky_result.surfaces.size() == 1 && sky_result.surfaces[0].world.position.x == 100 &&
-        sky_result.surfaces[0].world.position.y == 1 && sky_result.surfaces[0].world.position.z == 50,
+    check(sky_result.surfaces.size() == 1 && sky_result.world(sky_result.surfaces[0]).position.x == 100 &&
+        sky_result.world(sky_result.surfaces[0]).position.y == 1 && sky_result.world(sky_result.surfaces[0]).position.z == 50,
         "View-relative mesh anchor did not preserve authored parallax");
     check(environment_frame->data().meshes[1].world.position.x == 0,"Auxiliary camera mutated prepared mesh transform");
     appendRoom(assets,environment,triangle(0,3)); sky_view = view(); sky_view.room = 0;

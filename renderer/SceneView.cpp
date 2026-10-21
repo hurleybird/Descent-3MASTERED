@@ -16,6 +16,7 @@ namespace d3scene {
 struct ViewStoragePool {
     struct Buffers {
         std::vector<VisibleSurface> surfaces;
+        std::vector<Transform> placements;
         std::vector<uint32_t> objects,rooms;
     };
     std::array<Buffers,4> spare;
@@ -28,6 +29,7 @@ ViewVisibility::ViewVisibility() {
     if (pool->count) {
         auto& buffers = pool->spare[--pool->count];
         surfaces.swap(buffers.surfaces); object_indices.swap(buffers.objects); room_indices.swap(buffers.rooms);
+        placements.swap(buffers.placements);
     }
 }
 ViewVisibility::~ViewVisibility() {
@@ -37,6 +39,7 @@ ViewVisibility::~ViewVisibility() {
     if (!pool || pool->publisher != std::this_thread::get_id() || pool->count == pool->spare.size()) return;
     auto& buffers = pool->spare[pool->count++];
     surfaces.clear(); object_indices.clear(); room_indices.clear();
+    placements.clear(); placements.swap(buffers.placements);
     surfaces.swap(buffers.surfaces); object_indices.swap(buffers.objects); room_indices.swap(buffers.rooms);
 }
 static ViewVisibility queryResolvedView(const Presentation&,const View&);
@@ -504,12 +507,12 @@ static ViewVisibility queryResolvedView(const Presentation& frame,const View& vi
         return PortalWindow{-1,-1,1,1,true};
     };
     static thread_local ProjectionScratch projection_scratch;
-    auto consider = [&](MeshView geometry,ProjectedMesh& projected, const SurfaceBinding& surface, VisibleSurface item,float alpha = 1) {
+    auto consider = [&](MeshView geometry,ProjectedMesh& projected,const Transform& world,const SurfaceBinding& surface,VisibleSurface item,float alpha = 1) {
         if (!surface.draw_surface) return;
         ++result.stats.surfaces_considered;
         const auto& polygon = geometry.topology.polygons[item.polygon_index];
         const auto point = projected.vertex(polygon.corners[0].vertex).world;
-        const auto normal = transformDirection(item.world,polygon.normal);
+        const auto normal = transformDirection(world,polygon.normal);
         if (dot(normal,subtract(view.camera.position,point)) < 0) {
             ++result.stats.surfaces_backfacing;
             return;
@@ -534,7 +537,7 @@ static ViewVisibility queryResolvedView(const Presentation& frame,const View& vi
         ProjectedMesh projected(result.camera,MeshView(geometry),{},windows[r],projection_scratch);
         for (size_t f = 0; f < geometry.polygons.size(); ++f) {
             if (excludesSurface(view,{room.asset->id(),static_cast<uint32_t>(f)})) continue;
-            consider(MeshView(geometry),projected,room.surfaces[f],{static_cast<uint32_t>(r),static_cast<uint32_t>(f)});
+            consider(MeshView(geometry),projected,{},room.surfaces[f],{static_cast<uint32_t>(r),static_cast<uint32_t>(f)});
         }
     }
     const auto& owner_indices = frame.objectIndices();
@@ -580,6 +583,9 @@ static ViewVisibility queryResolvedView(const Presentation& frame,const View& vi
             if (!model.parts[part].draw) continue;
             if (!model.parts[part].has_render_bounds || boundsOutside(result.camera,model.parts[part].render_bounds,window)) continue;
             const auto world = compose(object.current,model.parts[part].current);
+            if (result.placements.size() >= UINT32_MAX) throw std::length_error("Too many view placements");
+            const uint32_t placement = uint32_t(result.placements.size());
+            result.placements.push_back(world);
             const auto& geometry = model.asset->geometry().parts[part].geometry;
             const MeshView mesh(geometry,model.parts[part].vertices);
             ProjectedMesh projected(result.camera,mesh,world,window,projection_scratch);
@@ -588,8 +594,8 @@ static ViewVisibility queryResolvedView(const Presentation& frame,const View& vi
                 item.model = true; item.model_instance_index = static_cast<uint32_t>(i);
                 item.model_variant = variant;
                 item.part_index = static_cast<uint32_t>(part); item.polygon_index = static_cast<uint32_t>(face);
-                item.world = world;
-                consider(mesh,projected,model.parts[part].surface(model.asset->geometry().parts[part],face),item,model.modulation.alpha);
+                item.placement = placement;
+                consider(mesh,projected,world,model.parts[part].surface(model.asset->geometry().parts[part],face),item,model.modulation.alpha);
             }
         }
     }
@@ -646,30 +652,32 @@ static ViewVisibility queryResolvedView(const Presentation& frame,const View& vi
             const auto& model = frame.resolvedModel(index,size_t(instance.model_variant));
             attachment = compose(frame.data().model_instances[index].current,model.parts[instance.model_part].current);
         }
-        item.world = resolveMeshTransform(instance,result.camera,instance.model_part >= 0 ? &attachment : nullptr);
+        const auto world = resolveMeshTransform(instance,result.camera,instance.model_part >= 0 ? &attachment : nullptr);
         if (instance.maximum_depth > 0) {
             const auto& b = instance.depth_reference;
             bool beyond = true;
             for (unsigned corner = 0; corner < 8; ++corner) {
-                const auto p = transformPoint(item.world,{corner&1 ? b.maximum.x : b.minimum.x,
+                const auto p = transformPoint(world,{corner&1 ? b.maximum.x : b.minimum.x,
                     corner&2 ? b.maximum.y : b.minimum.y,corner&4 ? b.maximum.z : b.minimum.z});
                 beyond = beyond && dot(view.camera.forward,subtract(p,view.camera.position)) > instance.maximum_depth;
             }
             if (beyond) continue;
         }
-        if (instance.size_fade_range.y > 0 && dot(item.world.right,item.world.right) == 0) continue;
+        if (instance.size_fade_range.y > 0 && dot(world.right,world.right) == 0) continue;
         // Pixel-expanded markers can straddle a clip boundary while their
         // centers are outside. Submit the batch; homogeneous GPU clipping sees
         // the expanded vertices and is authoritative for this representation.
         bool visible = !geometry.raster_offsets.empty();
-        ProjectedMesh projected(result.camera,MeshView(geometry,instance.vertices),item.world,window,projection_scratch);
+        ProjectedMesh projected(result.camera,MeshView(geometry,instance.vertices),world,window,projection_scratch);
         if (!visible) for (const auto& polygon : geometry.polygons)
             if (!projected.outside(polygon)) { visible = true; break; }
         if (!visible) continue;
+        if (result.placements.size() >= UINT32_MAX) throw std::length_error("Too many view placements");
+        item.placement = uint32_t(result.placements.size()); result.placements.push_back(world);
         item.layer = instance.surface.material.layer;
         item.blended = instance.surface.material.blended();
         item.late = instance.surface.material.requiresLatePass();
-        item.depth = static_cast<float>(dot(view.camera.forward,subtract(item.world.position,view.camera.position)));
+        item.depth = static_cast<float>(dot(view.camera.forward,subtract(world.position,view.camera.position)));
         result.surfaces.push_back(item);
     }
     std::sort(result.object_indices.begin(),result.object_indices.end());

@@ -347,8 +347,8 @@ int runModelSceneTests() {
     view.history_key = 1; view.viewport = view.projection_anchor = {0,0,1280,720};
     auto result = queryView(*frame,view);
     check(result.surfaces.size() == 2, "Prepared model surfaces missing");
-    check(result.surfaces[0].model && result.surfaces[0].world.position.z == 10, "Instance transform not composed");
-    check(result.surfaces[1].blended && result.surfaces[1].world.position.z == 18, "Instance material leaked between objects");
+    check(result.surfaces[0].model && result.world(result.surfaces[0]).position.z == 10, "Instance transform not composed");
+    check(result.surfaces[1].blended && result.world(result.surfaces[1]).position.z == 18, "Instance material leaked between objects");
     view.excluded_objects = {42};
     auto excluded = queryView(*frame,view);
     check(excluded.surfaces.size() == 1 && excluded.surfaces[0].model_instance_index == 1, "Excluded viewer mesh was rendered");
@@ -474,15 +474,15 @@ int runModelSceneTests() {
     moving.previous.position = {2,3,4}; motion_data.variants(moving)[0].parts[0].previous.position = {5,6,7};
     auto moving_frame = Presentation::freeze(motion_data);
     VisibleSurface moving_surface; moving_surface.model = true; moving_surface.model_instance_index = 0; moving_surface.part_index = 0;
-    const auto motion = surfaceMotion(*moving_frame,moving_surface,true);
+    const auto motion = surfaceMotion(*moving_frame,moving_surface,{},true);
     check(motion.valid && motion.identity != 0 && motion.previous.position.x == 7 && motion.previous.position.z == 11,
         "Motion did not compose previous object and hierarchical part transforms");
-    check(!surfaceMotion(*moving_frame,moving_surface,false).valid,"Model motion ignored camera-history invalidation");
+    check(!surfaceMotion(*moving_frame,moving_surface,{},false).valid,"Model motion ignored camera-history invalidation");
     motion_data.variants(moving)[0].parts[0].has_previous = false;
-    check(!surfaceMotion(*Presentation::freeze(motion_data),moving_surface,true).valid,
+    check(!surfaceMotion(*Presentation::freeze(motion_data),moving_surface,{},true).valid,
         "New topology/part pose reused an unrelated predecessor");
     motion_data.variants(moving)[0].parts[0].has_previous = true; moving.has_previous = false;
-    check(!surfaceMotion(*Presentation::freeze(motion_data),moving_surface,true).valid,
+    check(!surfaceMotion(*Presentation::freeze(motion_data),moving_surface,{},true).valid,
         "A newly allocated object claimed valid model motion");
     PreparedModelPart paired;
     paired.previous_vertices = authored.parts[0].geometry.vertices;
@@ -545,7 +545,7 @@ int runModelSceneTests() {
     const auto variant_motion_frame = Presentation::freeze(variant_motion);
     for (uint32_t variant = 0; variant < 3; ++variant) {
         VisibleSurface surface; surface.model = true; surface.model_variant = variant;
-        const auto variant_surface_motion = surfaceMotion(*variant_motion_frame,surface,true);
+        const auto variant_surface_motion = surfaceMotion(*variant_motion_frame,surface,{},true);
         check(variant_surface_motion.valid && variant_surface_motion.previous.position.x == float(variant+1),"LOD motion borrowed another variant's pose");
     }
     auto bounded_lod = lod_frame->data();
@@ -582,8 +582,8 @@ int runModelSceneTests() {
         auto excluded_view = view; excluded_view.excluded_objects = {42};
         check(queryView(*standalone_frame,excluded_view).surfaces.size() == 2,"Object exclusion hid an unrelated standalone model");
         VisibleSurface standalone_surface; standalone_surface.model = true;
-        check(!surfaceMotion(*standalone_frame,standalone_surface,true).valid &&
-            surfaceMotion(*standalone_frame,standalone_surface,true).identity == 0,"Standalone model borrowed game motion identity");
+        check(!surfaceMotion(*standalone_frame,standalone_surface,{},true).valid &&
+            surfaceMotion(*standalone_frame,standalone_surface,{},true).identity == 0,"Standalone model borrowed game motion identity");
         PreparedMesh attachment; attachment.asset = assets.publishMesh(19,unitBillboardQuad());
         attachment.world.position.z = 10; attachment.model_instance = standalone.model_instances[0].identity;
         attachment.model_variant = 0; standalone.meshes.push_back(attachment);
@@ -699,7 +699,7 @@ int runModelSceneTests() {
             const auto expected = ComposeModelPose(*tracks,EvaluateModelPose(*tracks,deferred.poseInputs(input.pose_inputs).data(),float(deferred.simulation_time)));
             const auto prior = ComposeModelPose(*tracks,EvaluateModelPose(*tracks,deferred.poseInputs(input.previous_pose_inputs).data(),float(input.previous_pose_time)));
             VisibleSurface motion_surface; motion_surface.model = true; motion_surface.part_index = 1;
-            const auto motion = surfaceMotion(*published,motion_surface,true);
+            const auto motion = surfaceMotion(*published,motion_surface,{},true);
             const auto expected_previous = compose(instance.previous,resolved.parts[1].previous);
             check(motion.valid && motion.previous.position.x == expected_previous.position.x &&
                 motion.previous.position.y == expected_previous.position.y && motion.previous.right.y == expected_previous.right.y,

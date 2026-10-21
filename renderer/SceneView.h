@@ -56,17 +56,15 @@ bool boundsOutside(const Camera&,const Bounds&,PortalWindow);
 struct VisibleSurface {
     uint32_t room_index = 0, polygon_index = 0;
     float depth = 0;
-    bool blended = false;
-    bool late = false; // pass membership is independent of color blending
-    bool model = false;
     uint32_t model_instance_index = 0, part_index = 0;
     uint32_t model_variant = 0;
-    Transform world;
-    bool terrain = false;
+    uint32_t placement = UINT32_MAX; // view-owned placement; sentinel is world-space geometry
     uint32_t terrain_patch = 0, terrain_batch = 0;
-    bool mesh = false;
     uint32_t mesh_index = 0;
     RenderLayer layer = RenderLayer::World;
+    bool blended = false;
+    bool late = false; // pass membership is independent of color blending
+    bool model = false, terrain = false, mesh = false;
 };
 struct ViewQueryStats {
     uint32_t rooms_considered = 0, surfaces_considered = 0;
@@ -84,6 +82,11 @@ struct ViewVisibility {
     uint64_t frame_sequence = 0, scene_lifetime = 0, history_key = 0;
     Camera camera;
     std::vector<VisibleSurface> surfaces;
+    std::vector<Transform> placements; // one per placed part/mesh, never one per polygon
+    const Transform& world(const VisibleSurface& surface) const {
+        static const Transform identity;
+        return surface.placement == UINT32_MAX ? identity : placements.at(surface.placement);
+    }
     std::vector<uint32_t> object_indices;
     std::vector<uint32_t> room_indices;
     ViewQueryStats stats;

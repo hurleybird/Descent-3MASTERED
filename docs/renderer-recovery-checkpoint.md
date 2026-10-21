@@ -2,6 +2,59 @@
 
 ## October 21 resumed work — supersedes restart pause below
 
+Upload allocator experiment REMOVED from source. ring-* wrapped within frames.
+epoch-* and local-* had inflated GPU elapsed intervals because the retirement
+fence was inserted after the next frame's GPU timer started. Moving retirement
+to Flip after GPU timer end (upload-retire.exe / retire-1-*) restored .30/.19/1.60
+ms. Per-pass queries were essentially unchanged. Earlier diagnosis of a large
+mapped-memory GPU execution regression was NOT established and is superseded.
+Correctly retired persistent mapping (upload-mapped.exe / mapped-* ABBA) CPU:
+003 parent(2.20,2.04) new(2.06,2.34); 005 (1.62,1.61)/(1.44,1.57);
+007 (1.74,1.71)/(1.69,1.60). Mixed, no clear overall win; allocator removed.
+Binaries/raw results retained as evidence only, not qualified checkpoints.
+Bounds clip-mask experiment REMOVED: eight images exact, tests passed, mixed
+long ABBA (clip-*): 003 parent2.21/2.12 new2.17/2.14;0051.51/1.64 vs1.44/1.48;
+0071.65/1.59 vs1.66/1.72. No clear overall win. clip-mask.exe evidence only.
+NoMarkers short 3-scene comparison plain-* confirms remaining CPU regression:
+legacy0032.53/2.48,005.88/.89,0071.11/1.07;
+mesh-streams0031.94/2.28,0051.08/1.18,0071.34/1.17.
+Fine-grained markers do add overhead but do NOT explain away misses.
+New uninstrumented sampler out/cpu-plain-stack-005.txt completed normally.
+Disposable no-poly-clip-diagnostic.exe (source already reverted) bypassed face
+frustum tests, not backface/room/part culling. noclip-* NoMarkers long ABBA:
+003 parent2.14/1.96 new1.99/2.24;0051.36/1.49 vs1.46/1.40;
+0071.38/1.39 vs1.59/1.72. Extra geometry offset savings; not a candidate.
+Current uncommitted changes: consumer-demand light lists (disabled views/unlit
+surfaces omit preparation), empty position/UV/influence streams retain initial
+GL storage without dummy uploads, identical preceding nonempty light lists
+reuse their range (enables existing ordered draw batching). light-ranges.exe.
+Eight short images and combined probe exact on repeats. First save002 capture
+differed on a small region and had DIFFERENT Buddybot published pose hash:
+827298972120713296 vs reference18368182606202919774; three repeats of the SAME
+binary exact, as were single-draw and normal diagnostic reruns. Diagnostic flag
+removed. Do not call that a proven renderer regression or hide the anomaly.
+Full NoMarkers lrbase-* three rounds, avg render ms current/old:
+0001.52/1.48;0011.03/1.65;0021.76/2.23;0031.93/2.55;
+004.54/.76;0051.09/.90;006.66/.84;0071.35/1.14. Goal STILL NOT MET.
+Timing variation substantial, especially current003/007; preserve all rounds.
+Newest SOURCE and binary view-placements-direct.exe also move placement transforms
+out of per-polygon VisibleSurface into view-owned pooled storage. Records <=48
+bytes; room/terrain use identity sentinel, one placement per model part/mesh.
+All consumers migrated. Tests cover copy/move/ownership/missing indices and
+existing posed/sky/motion behavior. Tests/build PASS. Eight short images,
+combined probe, SSAA2MSAA4 AO/bloom and mirror are EXACT. Long NoMarkers vp-*
+ABBA vp-* was mixed/slower dense (parent1.88/1.88 vs2.24/2.10). Removed a new
+per-polygon placement-table lookup from CPU consideration: pass the already
+resolved per-part transform directly. vpd-* marked ABBA then measured dense
+parent2.06/2.18 vs new1.95/2.00 render ms; wall1.65/1.37 vs1.45/1.69 (mixed).
+Dense main-view preparation itself .277/.292 -> .235/.239 ms (~17% reduction).
+Wall main-view preparation .139/.115 -> .111/.128 (small/mixed). Preparation
+outside visibility varied substantially despite being unchanged; do not claim
+whole-frame universal improvement. Long dense/wall images and vpd-probe EXACT.
+Current temporary runtime view-placements-direct.exe; sampler/captures stopped
+at this checkpoint. Main checkout, Candidate/Previous Candidate untouched.
+Latest included usage 7% remaining; stop at zero, no deliberate credit use.
+
 Newest mesh-streams.exe shares canonical effect light candidates and appends
 prepared UVs directly into upload storage (no per-mesh temporary). Tests pass;
 eight short scenes and combined probe EXACT. Long ABBA parent/new CPU:
@@ -9,8 +62,7 @@ eight short scenes and combined probe EXACT. Long ABBA parent/new CPU:
 007 (1.46,1.50)/(1.38,1.47). Mixed; goal still unmet.
 Latest sampler out/cpu-mesh-streams-stack-005.txt adds external-leaf nearest
 renderer call sites. Sampling finished normally; no sampler active.
-Next experiment: bounded fence-protected persistent per-view upload buffers,
-replacing repeated buffer-store orphaning (old renderer already streams persistently).
+Upload experiment completed/rejected as documented above.
 
 Newest binary shared-pose.exe: frame-owned composed model transforms shared by
 cockpit layers; cockpit ambient now instance modulation, so stable part/material

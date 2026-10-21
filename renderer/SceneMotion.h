@@ -36,8 +36,8 @@ inline SurfaceMotion modelPartMotion(const ModelInstance& object,const PreparedM
     result.valid = camera_history && object.has_previous && part.has_previous;
     return result;
 }
-inline SurfaceMotion surfaceMotion(const Presentation& frame,const VisibleSurface& item,bool camera_history) {
-    if (!item.model) { SurfaceMotion result; result.previous = item.world; return result; }
+inline SurfaceMotion surfaceMotion(const Presentation& frame,const VisibleSurface& item,const Transform& current,bool camera_history) {
+    if (!item.model) { SurfaceMotion result; result.previous = current; return result; }
     return modelPartMotion(frame.data().model_instances[item.model_instance_index],
         frame.resolvedModel(item.model_instance_index,item.model_variant).parts[item.part_index],camera_history);
 }
