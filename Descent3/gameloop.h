@@ -69,6 +69,7 @@ bool RendererShouldCountMsaaTransitionFrame();
 bool AutomatedCaptureSuppressesInput();
 bool AutomatedCaptureForcesForwardInput();
 bool AutomatedCaptureForcesTricordInput();
+bool AutomatedCaptureForcesUpInput();
 bool AutomatedCaptureForcesHeadingInput();
 bool AutomatedCaptureForcesPrimaryFireInput();
 

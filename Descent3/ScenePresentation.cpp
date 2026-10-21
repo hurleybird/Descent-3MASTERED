@@ -18,6 +18,7 @@
 #include "descent.h"
 #include "bitmap.h"
 #include <cmath>
+#include <cstdlib>
 #include <algorithm>
 #include <cstring>
 #include <stdexcept>
@@ -546,13 +547,13 @@ void PrepareGameInspectionBanner(d3scene::FrameData& data) {
     data.foregrounds.push_back(std::move(foreground));
 }
 
-d3scene::PresentationRef PrepareGamePresentation() {
+d3scene::PresentationRef PrepareGamePresentation(bool advance) {
     PERF_MARKER_SCOPE("Scene.PreparePresentation");
     static d3scene::PresentationRef previous_models;
     const bool retain_rooms = [&] { PERF_MARKER_SCOPE("Scene.MaterialInputs"); return roomMaterialInputsUnchanged(); }();
     if (!retain_rooms) ResetSplitSpecularTexturePairCache();
     const unsigned int simulation_random = ps_rand_get_state();
-    auto data = [&] { PERF_MARKER_SCOPE("Scene.Extract"); return ExtractGameFrame(Gametime, Frametime, Game_paused,true,
+    auto data = [&] { PERF_MARKER_SCOPE("Scene.Extract"); return ExtractGameFrame(Gametime, advance ? Frametime : 0, Game_paused,advance,
         retain_rooms ? previous_models.get() : nullptr,FindArg("-scene-geometry-revision-audit") != 0); }();
     const auto control_delta = GetPlayerControlledTranslationDelta();
     data.player_control_delta = {control_delta.x,control_delta.y,control_delta.z};
@@ -666,13 +667,13 @@ d3scene::PresentationRef PrepareGamePresentation() {
     { PERF_MARKER_SCOPE("Scene.PrepareScorches"); PrepareGameScorches(data); }
     if (SceneGeometryInspection() && FindArg("-scene-cockpit-probe")) {
         PERF_MARKER_SCOPE("Scene.PrepareCockpit");
-        PrepareGameCockpit(data,true,previous_models ? &previous_models->data() : nullptr,retain_rooms);
+        PrepareGameCockpit(data,advance,previous_models ? &previous_models->data() : nullptr,retain_rooms);
         PrepareCockpitComposition(data,{Game_window_x,Game_window_y,Game_window_w,Game_window_h},SceneCockpitZoom);
     }
     if (SceneGeometryInspection() && (FindArg("-scene-reticle-probe") || FindArg("-scene-hud-probe"))) {
         const auto layout = CaptureGameHUDLayout();
         if (FindArg("-scene-reticle-probe")) PrepareGameReticle(data,layout);
-        if (FindArg("-scene-hud-probe")) PrepareGameHUD(data,layout,true);
+        if (FindArg("-scene-hud-probe")) PrepareGameHUD(data,layout,advance);
     }
     PrepareGameInspectionBanner(data);
     if (SceneGeometryInspection() && FindArg("-scene-view-image-probe")) {
@@ -738,7 +739,7 @@ d3scene::PresentationRef PrepareGamePresentation() {
     logPreparedModels(*prepared);
     if (ps_rand_get_state() != simulation_random)
         Error("Presentation preparation consumed simulation randomness");
-    previous_models = prepared;
+    if (advance) previous_models = prepared;
     return prepared;
 }
 
@@ -768,6 +769,14 @@ d3scene::VisibilityReport RenderGameSceneView(const d3scene::Presentation& frame
             view.camera.right = {1,0,0}; view.camera.up = {0,.8f,.6f}; view.camera.forward = {0,-.6f,.8f};
             view.exterior_origin = true;
         }
+    }
+    const int heading_arg = FindArg("-scene-camera-heading");
+    if (heading_arg && AutomatedCaptureFrameIndex() >= 0 && GetArg(heading_arg+1)) {
+        const float angle = float(std::atof(GetArg(heading_arg+1)))*.01745329252f;
+        const float c = std::cos(angle),s = std::sin(angle);
+        const auto right = view.camera.right,forward = view.camera.forward;
+        view.camera.right = {right.x*c-forward.x*s,right.y*c-forward.y*s,right.z*c-forward.z*s};
+        view.camera.forward = {forward.x*c+right.x*s,forward.y*c+right.y*s,forward.z*c+right.z*s};
     }
     const int pitch_arg = FindArg("-scene-camera-pitch");
     if (pitch_arg && AutomatedCaptureFrameIndex() >= 0 && GetArg(pitch_arg+1)) {

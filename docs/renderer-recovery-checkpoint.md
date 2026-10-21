@@ -1,5 +1,115 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## October 21 continuation — density history, roof reproduction, snapshot repair
+
+LATEST UPDATE (supersedes storage/injection details below): actual upstream bug
+found and FIXED in SceneExtraction.cpp: bounds_volume ignored FF_NOT_SHELL, unlike
+physics fvi_QuickRoomCheck. Detail surfaces remain renderable but no longer bound
+fog. Geometry audit now recognizes shell flag edits; extraction tests cover this
+and retained-frame isolation. Roof connected fog boundary1452 ->420triangles.
+Before fix, rawfield audit vs old signed CPU integration differed .306; a new
+independent CPU positive-winding interval oracle agreed within .0041. After shell
+fix both CPU references agree EXACTLY on all512samples; max field error .002885.
+This resolves that cancellation discrepancy, NOT the authored clear roof space.
+Capture: fog-shell-roof-audit. Successful tests/build: out/fog-shell-tests.log,
+out/fog-shell-build.log. Current benchmark runtime matches this source build.
+
+Injection now integrates occupied fraction per depth cell analytically from
+crossing slope/depth events rather than one jittered depth point. XY jitter only.
+Temporal sample centers are physical mid-depth of quadratic cells (and inverse
+reprojection accounts for that offset). Cell integration is exact for valid
+non-overlapping boundaries; overlapping sheets are clamped per cell (approximate).
+fogOccupiedLength is a SLOW sorted-crossing audit/test oracle, not a render-loop
+query. Both oracle definitions remain reported; do not silently redefine parity.
+Pre-shell cell-vs-point residual flicker improved only10–15%; need remeasure after
+shell fix. fog-cell-edge-{still,motion}-{raw,temporal}-90..95 captures exist.
+
+Storage now uses asset-wide normalized density (minimum authored depth) in three
+RGBA16F raw/history textures; final accumulated optical depth is RGBA32F to avoid
+half overflow on long paths. Before cell/shell changes this costs .88ms clean,
+6.42effects (fog-units-*), meanRGB .017,max2 against32F. ~37% memory saving rather
+than previous all-half50%. Histories absent for >1presentation retired, once per
+presentation. Added image-write barrier BEFORE scratch reuse as required for
+prior sampler reads; confirmed Khronos glMemoryBarrier reference. Fetch barriers
+remain between producers/consumers. No field-default change, no user-preview update.
+
+ACTIVE authorization: keep working; do NOT yield merely for a checkpoint or a
+blocked subtask. User may be absent. Move to other safe renderer work if a task
+blocks. Stop before credits. Latest usage check: 7% used, ordinaryUsageAllowed=true.
+No subagents. No shadows. User preview/Candidate/main worktree remain untouched.
+
+The roof defect is now reproduced by actually moving the ship upward after moving
+out from under a nearby beam. From save002: -capture-forward -capture-forward-until
+30 -capture-up -capture-up-from 40, capture frame120. Image/logs:
+C:\tmp\D3RendererVerification\roof-path30-audit (save attempt here failed; do not reuse).
+Successful saved fixture: roof-save-image\roofsave; immutable test-seed copy named
+roofprobe20261021 in seeds\savegame. roof-reload proves the new save reloads.
+Eye2657.94336,-209.141159,3611.18555, room183, fog_enabled=0, depth100.
+Its lower portal0 leads to fog room184 (same connected volume as188), at y~-209.98.
+Upper portals89/90/91/92/126 lead to fog room24 through grating at y~-199.89.
+Thus a roughly10unit clear space separates authored fog regions. This explains
+the broad un-fogged upper structure from ceiling height; not a rare viewing angle.
+No room-number-specific fix and no authored fog changes made. A soft transition
+would be a deliberate appearance change, NOT restored geometric equivalence.
+User correctly identified this hard edge as a prime shimmer/undersampling test.
+
+Second opt-in -scene-fog-field prototype replaces cumulative-history blending with:
+jittered raw medium density64layers -> world-position reprojection/history of
+density -> forward-depth integration65endpoints. Halton2/3/5, history time constant
+.08s. Asset revision/camera history/sequence checks invalidate old medium history.
+Per-view density pingpong; raw/final scratch shared and re-integrated on replay.
+Still authored linear fog law, NOT fully lit/shadowed physical volumetrics.
+fogWinding exposes actual signed occupancy; injection uses winding>0 rather than
+doubling density for overlapping sheets. Unit test covers winding2.
+Current experiment uses RGBA16F for all four textures (32F binaries preserved).
+Storage range/degenerate authored densities and history resource retirement still
+need review. Orthographic views still use exact reference. Defaults unchanged.
+
+Diagnostics: -scene-fog-debug emits optical amount in grayscale; -scene-fog-history-off
+disables temporal blending for controlled tests. -scene-fog-boundary-audit prints
+containment/room diagnostics; -scene-fog-boundary-dump adds triangles and portal data.
+Capture controls now support up, forward-until, up-from, heading-until. Pitch and
+heading view-only fixtures exist too but do not move ship/headlight.
+
+Temporal evidence: fog-stable-{ref,raw,temporal}-90..95, fog-edge-still-*90..95 and
+fog-edge-motion-*90..95 under C:\tmp\D3RendererVerification. Motion uses physical
+-capture-heading from saved roof pose. All grayscale diagnostics, not perf runs.
+out/measure-fog-temporal.ps1 compares (candidate-reference) residual changes to
+subtract real motion; ROI y100..429, low-optical-depth edge mask reference-owned.
+Stationary edge mean residual flicker ~1.65raw -> .293temporal (0..255 units),
+moving edge ~.784raw -> .507temporal. This compares the new jittered pipeline with
+and without history, NOT against the first rejected unjittered preview. Six frames
+is preliminary; do not claim shimmer solved. Normal images inspected as well.
+
+500frame measurements, averages100..449, save002; all captures serialized and no
+user game running. fog-bench-* folders, matching logs/settings. Clean1280x720,
+SSAA1/MSAA0/noAO/noBloom. Effects1920x1080/SSAA2/MSAA4/AO+bloom:
+  rewrite reference: CPU1.75/GPU2.46 clean; CPU2.12/GPU23.75 effects
+  density32: CPU1.73/GPU1.10 clean; CPU1.93/GPU6.58 effects
+  density16: CPU1.75/GPU .84 clean; CPU1.87/GPU6.30 effects
+  density16 width320: CPU1.78/GPU2.57 clean; CPU1.86/GPU8.20 effects
+  pre-rewrite: CPU2.38/GPU1.37 clean; CPU2.82/GPU6.22 effects
+Single runs only, not a qualified overall win. Old/new effects differ and high-
+settings GPU time is roughly tied, NOT faster.32Fvs16F clean image meanRGB .0513,
+max2;16Fvsrewrite-reference effects image meanRGB .388,max11. Wide field is costly.
+Executables preserved out/perf-checkpoints/fog-density-f32.exe and -f16.exe.
+
+Incidental REAL migration bug repaired: SGSSnapshot called RenderModuleSceneView
+outside ModuleSceneScope, then also needed an independent image rather than the
+live display target after composition. PrepareGamePresentation(bool advance=true)
+now supports non-advancing snapshot extraction, cockpit/HUD preparation and avoids
+replacing previous_models. Save owns its published presentation, plans independent
+SaveThumbnail image and mirror dependencies, reads it through explicit blocking
+readViewImage(Presentation,key) API (RGBA8 bottom-up), packs existing1555 save format.
+No g3 rendering state borrow, live-frame overwrite, or thumbnail present/flip.
+Readback checks scene lifetime and presentation sequence; GL pack/FBO state restored.
+Save+reload both succeeded; scene-contract tests pass. No save files outside test
+runtime/seed were touched. Thumbnail visual QA and extended capture cases remain.
+
+Current built source: out/fog-fp16-build.log. Latest tests out/fog-thumbnail-tests.log
+pass. lib/gitinfo.h remains unrelated untracked; do not stage it. The previous
+checkpoint below documents the FIRST rejected prototype and is superseded here.
+
 ## October 21 fog investigation — ACTIVE after user reset
 
 User renewed work authorization after a usage reset: continue renderer improvements,

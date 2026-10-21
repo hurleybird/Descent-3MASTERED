@@ -51,7 +51,9 @@ void PrepareGameHUD(d3scene::FrameData&,const HUDCanvasLayout&,bool advance);
 void RenderPreparedReticle(const d3scene::Presentation&);
 void RenderGameForegrounds(const d3scene::Presentation&,d3scene::ForegroundPhase);
 void PrepareCockpitComposition(d3scene::FrameData&,d3scene::Rect viewport,float zoom);
-d3scene::PresentationRef PrepareGamePresentation();
+// Independent captures publish their own scene without advancing cockpit/HUD
+// animation or replacing the gameplay presentation's motion-history source.
+d3scene::PresentationRef PrepareGamePresentation(bool advance = true);
 d3scene::VisibilityReport RenderGameSceneView(const d3scene::Presentation&, d3scene::View);
 bool SceneGeometryInspection();
 void RenderModuleSceneView(object*, vector*, int, matrix*, float, bool,

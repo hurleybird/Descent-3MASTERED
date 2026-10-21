@@ -38,34 +38,32 @@ bool fogBounds(vec3 low,vec3 high,vec3 inverse_direction,bvec3 parallel,float le
 }
 )GLSL";
 
-// One invocation owns an entire optical ray. Each boundary crossing contributes
-// a change of slope and intercept to a prefix sum, not 64 repeated traversals.
-// RGB is integrated color*density, A is integrated density; neither is clamped
-// before interpolation. Authored linear forward-depth fog remains unchanged.
+// Density injection, temporal reconstruction, then integration. History stores
+// a world-space medium property, never a camera-to-surface accumulated fog value.
+// Boundary crossings are binned once per ray, not retraced for every depth cell.
 static const char* SceneFogFieldComputeShader = R"GLSL(
 layout(local_size_x=8,local_size_y=1) in;
-layout(rgba32f,binding=0) writeonly uniform image3D fog_field_output;
+layout(rgba16f,binding=0) writeonly uniform image3D fog_field_output;
 uniform float fog_field_range;
+uniform vec2 fog_jitter;
 const int FOG_SLICES = 64;
-// Eight independent columns share storage, with lane-interleaved addresses.
-// Explicit workgroup storage avoids spilling two large per-ray local arrays.
-// No barrier is needed: each lane reads/writes only its own column.
 shared float slope_events[FOG_SLICES*8];
-shared float offset_events[FOG_SLICES*8];
-shared vec4 integrated_samples[FOG_SLICES*8];
-void crossingEvent(float z,float sign) {
-    int slice = int(ceil(sqrt(clamp(z/fog_field_range,0.0,1.0))*float(FOG_SLICES-1)));
+shared float depth_events[FOG_SLICES*8];
+shared vec4 density_samples[FOG_SLICES*8];
+void crossingEvent(float z,float sign,float start) {
+    int slice = max(0,int(floor(sqrt(max(0.0,z/fog_field_range))*float(FOG_SLICES))));
+    if (slice>=FOG_SLICES) return;
     int address=slice*8+int(gl_LocalInvocationIndex);
     slope_events[address] += sign;
-    offset_events[address] -= sign*z;
+    depth_events[address] += sign*max(z,start);
 }
 void main() {
     ivec3 size = imageSize(fog_field_output);
     ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
     if (any(greaterThanEqual(pixel,size.xy))) return;
     int lane=int(gl_LocalInvocationIndex);
-    for (int i=0;i<FOG_SLICES;++i) integrated_samples[i*8+lane]=vec4(0);
-    vec2 ndc = (vec2(pixel)+0.5)/vec2(size.xy)*2.0-1.0;
+    for (int i=0;i<FOG_SLICES;++i) density_samples[i*8+lane]=vec4(0);
+    vec2 ndc = (vec2(pixel)+fog_jitter)/vec2(size.xy)*2.0-1.0;
     vec3 direction = normalize(camera_forward+camera_right*((ndc.x-projection.z)/projection.x)+
         camera_up*((ndc.y-projection.w)/projection.y));
     float forward_scale = dot(direction,camera_forward);
@@ -87,9 +85,12 @@ void main() {
         vec4 appearance=texelFetch(scene_fog,volume*4);
         vec4 low=texelFetch(scene_fog,volume*4+1), high=texelFetch(scene_fog,volume*4+2);
         if (!fogBounds(low.xyz,high.xyz,inverse_direction,parallel,length)) continue;
-        vec4 density=vec4(appearance.rgb,1.0)/appearance.w;
-        for (int i=0;i<FOG_SLICES;++i) { slope_events[i*8+lane]=0.0; offset_events[i*8+lane]=0.0; }
-        crossingEvent(start*forward_scale,texelFetch(scene_fog,volume*4+3).x);
+        // Asset-wide density units keep half-float storage bounded independently
+        // of authored fog depth. History uses the same units until asset reset.
+        vec4 density=vec4(appearance.rgb,1.0)*texelFetch(scene_fog,volume*4+3).w;
+        for (int i=0;i<FOG_SLICES;++i) {
+            slope_events[i*8+lane]=0.0; depth_events[i*8+lane]=0.0;
+        }
         int node=0;
         while (node<view_count) {
             int source_node=texelFetch(scene_influences,view_nodes+node*2).r;
@@ -105,26 +106,82 @@ void main() {
                 if (fogHit(texelFetch(scene_fog,offset).xyz,texelFetch(scene_fog,offset+1).xyz,
                     texelFetch(scene_fog,offset+2).xyz,direction,crossing) && crossing>1.e-5 && crossing<length) {
                     float sign=dot(texelFetch(scene_fog,offset+3).xyz,direction)>0.0 ? 1.0 : -1.0;
-                    crossingEvent(max(start,crossing)*forward_scale,sign);
+                    crossingEvent(crossing*forward_scale,sign,start*forward_scale);
                 }
             }
             ++node;
         }
-        float slope=0.0,offset=0.0;
+        float winding=texelFetch(scene_fog,volume*4+3).z;
         for (int slice=0;slice<FOG_SLICES;++slice) {
             int address=slice*8+lane;
-            slope+=slope_events[address]; offset+=offset_events[address];
-            float t=float(slice)/float(FOG_SLICES-1);
-            float z=t*t*fog_field_range;
-            // Authored rooms can contain overlapping/non-manifold boundary
-            // sheets. Match the reference's per-volume physical path bounds;
-            // clamping only the final color cannot prevent excess density.
-            float path=clamp(slope*z+offset,0.0,max(0.0,z-start*forward_scale));
-            integrated_samples[address]+=density*path;
+            float low=float(slice)/float(FOG_SLICES),high=float(slice+1)/float(FOG_SLICES);
+            float low_z=low*low*fog_field_range,high_z=high*high*fog_field_range;
+            float interval=max(0.0,high_z-max(low_z,start*forward_scale));
+            // Integrate the oriented occupancy through the cell instead of
+            // accepting/missing the whole interval at one jittered depth.
+            // Closed non-overlapping boundaries are exact along this column.
+            // Clamp overlapping sheets per cell, never amplify their density.
+            float occupied=winding*interval+slope_events[address]*high_z-depth_events[address];
+            if (interval>0.0)
+                density_samples[address]+=density*clamp(occupied/(high_z-low_z),0.0,1.0);
+            winding+=slope_events[address];
         }
     }
     for (int slice=0;slice<FOG_SLICES;++slice) {
-        imageStore(fog_field_output,ivec3(pixel,slice),integrated_samples[slice*8+lane]);
+        imageStore(fog_field_output,ivec3(pixel,slice),density_samples[slice*8+lane]);
+    }
+}
+)GLSL";
+
+static const char* SceneFogTemporalShader = R"GLSL(
+layout(local_size_x=4,local_size_y=4,local_size_z=4) in;
+layout(rgba16f,binding=0) writeonly uniform image3D fog_density_output;
+uniform sampler3D fog_current_density,fog_previous_density;
+uniform float fog_field_range,fog_previous_range,fog_history_weight;
+uniform mat4 fog_previous_matrix;
+void main() {
+    ivec3 size=imageSize(fog_density_output),cell=ivec3(gl_GlobalInvocationID);
+    if (any(greaterThanEqual(cell,size))) return;
+    vec3 uv=(vec3(cell)+0.5)/vec3(size);
+    vec2 ndc=uv.xy*2.0-1.0;
+    // Average-density samples live at the midpoint in physical depth, not
+    // the square of the midpoint in slice coordinates.
+    float half_slice=0.5/float(size.z);
+    float z=(uv.z*uv.z+half_slice*half_slice)*fog_field_range;
+    vec3 world=eye+z*(camera_forward+camera_right*((ndc.x-projection.z)/projection.x)+
+        camera_up*((ndc.y-projection.w)/projection.y));
+    vec4 current=texelFetch(fog_current_density,cell,0);
+    if (fog_history_weight>0.0) {
+        vec4 previous=fog_previous_matrix*vec4(world,1);
+        float previous_half_slice=0.5/float(textureSize(fog_previous_density,0).z);
+        vec3 previous_uv=vec3(previous.xy/max(previous.w,1.e-6)*0.5+0.5,
+            sqrt(max(previous.w/fog_previous_range-previous_half_slice*previous_half_slice,0.0)));
+        // Reject history outside its actual sample support, including near/far
+        // cells. No clamped border texel is allowed to masquerade as history.
+        vec3 half_texel=0.5/vec3(textureSize(fog_previous_density,0));
+        if (previous.w>0.0 && all(greaterThanEqual(previous_uv,half_texel)) && all(lessThanEqual(previous_uv,1.0-half_texel)))
+            current=mix(current,texture(fog_previous_density,previous_uv),fog_history_weight);
+    }
+    imageStore(fog_density_output,cell,current);
+}
+)GLSL";
+
+static const char* SceneFogIntegrateShader = R"GLSL(#version 430 core
+layout(local_size_x=8,local_size_y=8) in;
+layout(rgba32f,binding=0) writeonly uniform image3D fog_integral_output;
+uniform sampler3D fog_density;
+uniform float fog_field_range;
+uniform float fog_density_scale;
+void main() {
+    ivec2 pixel=ivec2(gl_GlobalInvocationID.xy);
+    ivec3 size=textureSize(fog_density,0);
+    if (any(greaterThanEqual(pixel,size.xy))) return;
+    vec4 integrated=vec4(0);
+    imageStore(fog_integral_output,ivec3(pixel,0),integrated);
+    for (int slice=0;slice<size.z;++slice) {
+        float low=float(slice)/float(size.z),high=float(slice+1)/float(size.z);
+        integrated+=texelFetch(fog_density,ivec3(pixel,slice),0)*((high*high-low*low)*fog_field_range/fog_density_scale);
+        imageStore(fog_integral_output,ivec3(pixel,slice+1),integrated);
     }
 }
 )GLSL";

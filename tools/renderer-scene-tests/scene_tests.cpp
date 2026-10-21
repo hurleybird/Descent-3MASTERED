@@ -546,6 +546,19 @@ void extractionTests() {
     const auto e = ExtractGamePresentation(5, 0, true);
     check(e->data().scene_lifetime != a->data().scene_lifetime && !e->data().objects[0].has_previous,
         "level reset retained object history");
+    surface.flags |= FF_NOT_SHELL;
+    bool missed_shell = false;
+    try { ExtractGameFrame(5.1,0,true,false,nullptr,true); }
+    catch (const std::logic_error&) { missed_shell = true; }
+    check(missed_shell,"Geometry audit ignored changed room-shell membership");
+    InvalidateGameSceneGeometry();
+    const auto detail = ExtractGamePresentation(5.1,0,true,false);
+    check(!detail->data().rooms[0].asset->geometry().polygons[0].bounds_volume &&
+        detail->data().rooms[0].surfaces.size() == 1 && detail->data().rooms[0].surfaces[0].draw_surface,
+        "Non-shell detail either bounded fog or lost its render surface");
+    check(e->data().rooms[0].asset->geometry().polygons[0].bounds_volume,
+        "Shell edit changed an already published boundary");
+    surface.flags &= ~FF_NOT_SHELL;
     source = {};
     const auto empty = ExtractGamePresentation(6, 0, true);
     check(empty->data().rooms.empty() && !d3scene::assets().room(0), "removed room retained in current scene");

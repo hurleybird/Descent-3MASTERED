@@ -35,6 +35,7 @@ public:
 	virtual d3scene::VisibilityReport RenderSceneView(const d3scene::PreparedView& view) = 0;
 	virtual void RenderForeground(const d3scene::Presentation&, const d3scene::ForegroundLayer&) = 0;
 	virtual void RenderViewImage(const d3scene::Presentation&, const d3scene::ViewImageRequest&) = 0;
+	virtual d3scene::ImageMip ReadViewImage(const d3scene::Presentation&, uint64_t image) = 0;
 
 	//INITIALIZATION
 

@@ -288,7 +288,7 @@ const std::vector<FogVolume>& fogVolumes(const FrameData& frame) {
     static const std::vector<FogVolume> empty;
     return frame.fog ? frame.fog->volumes() : empty;
 }
-bool fogContains(const FogVolume& volume,Vec3 position) {
+int fogWinding(const FogVolume& volume,Vec3 position) {
     // Net oriented crossings remain valid for non-convex connected rooms and
     // disconnected ray intervals; no camera-room ID shortcut is required.
     int winding = 0;
@@ -296,8 +296,9 @@ bool fogContains(const FogVolume& volume,Vec3 position) {
     visitCrossings(volume,position,direction,1.e30,[&](const FogTriangle& triangle,double) {
         winding += dot(triangle.inward,direction) < 0 ? 1 : -1;
     });
-    return winding > 0;
+    return winding;
 }
+bool fogContains(const FogVolume& volume,Vec3 position) { return fogWinding(volume,position) > 0; }
 float fogRayStart(const View& view,Vec3 endpoint) {
     validateView(view);
     if (view.fog_path_origin == FogPathOrigin::Camera) return 0;
@@ -322,5 +323,24 @@ float fogSegmentLength(const FogVolume& volume,Vec3 eye,Vec3 endpoint,bool eye_i
         accumulated += (length-(std::max)(double(start_distance),distance))*(dot(triangle.inward,direction) > 0 ? 1 : -1);
     });
     return static_cast<float>(std::max(0.0,std::min(interval,accumulated)));
+}
+float fogOccupiedLength(const FogVolume& volume,Vec3 eye,Vec3 endpoint,int winding,float start_distance) {
+    if (!std::isfinite(start_distance) || start_distance < 0) throw std::invalid_argument("Invalid fog interval start");
+    const auto delta = sub(endpoint,eye); const double length = std::sqrt(dot(delta,delta));
+    if (!(length > start_distance)) return 0;
+    const Vec3 direction{float(delta.x/length),float(delta.y/length),float(delta.z/length)};
+    std::vector<std::pair<double,int>> crossings;
+    visitCrossings(volume,eye,direction,length,[&](const FogTriangle& triangle,double distance) {
+        crossings.emplace_back(distance,dot(triangle.inward,direction) > 0 ? 1 : -1);
+    });
+    std::sort(crossings.begin(),crossings.end());
+    double previous = start_distance,occupied = 0;
+    for (const auto& crossing : crossings) {
+        const double distance = std::max(double(start_distance),crossing.first);
+        if (winding > 0) occupied += distance-previous;
+        winding += crossing.second; previous = distance;
+    }
+    if (winding > 0) occupied += length-previous;
+    return float(occupied);
 }
 }

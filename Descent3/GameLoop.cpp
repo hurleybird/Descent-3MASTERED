@@ -239,7 +239,11 @@ struct automated_capture_state
 	bool realtime;
 	bool force_forward;
 	bool force_tricord;
+	bool force_up;
 	bool force_heading;
+	int forward_until_frame;
+	int up_from_frame;
+	int heading_until_frame;
 	bool force_primary_fire;
 	int force_primary_until_frame;
 	bool place_scorch;
@@ -367,7 +371,7 @@ bool AutomatedCaptureSuppressesInput()
 bool AutomatedCaptureForcesForwardInput()
 {
 	return Automated_capture.gameplay_frame_active &&
-		Automated_capture.force_forward;
+		Automated_capture.force_forward && Automated_capture.gameplay_frame <= Automated_capture.forward_until_frame;
 }
 
 bool AutomatedCaptureForcesTricordInput()
@@ -376,10 +380,16 @@ bool AutomatedCaptureForcesTricordInput()
 		Automated_capture.force_tricord;
 }
 
+bool AutomatedCaptureForcesUpInput()
+{
+	return Automated_capture.gameplay_frame_active && Automated_capture.force_up &&
+		Automated_capture.gameplay_frame >= Automated_capture.up_from_frame;
+}
+
 bool AutomatedCaptureForcesHeadingInput()
 {
 	return Automated_capture.gameplay_frame_active &&
-		Automated_capture.force_heading;
+		Automated_capture.force_heading && Automated_capture.gameplay_frame <= Automated_capture.heading_until_frame;
 }
 
 bool AutomatedCaptureForcesPrimaryFireInput()
@@ -501,7 +511,21 @@ static void InitAutomatedCapture()
 	Automated_capture.realtime = FindArg("-capture-realtime") != 0;
 	Automated_capture.force_forward = FindArg("-capture-forward") != 0;
 	Automated_capture.force_tricord = FindArg("-capture-tricord") != 0;
+	Automated_capture.force_up = FindArg("-capture-up") != 0;
 	Automated_capture.force_heading = FindArg("-capture-heading") != 0;
+	const auto capture_frame_option = [](const char* name, int fallback) {
+		const int arg = FindArg(const_cast<char*>(name));
+		if (!arg) return fallback;
+		const char* value = GetArg(arg + 1);
+		char* end = nullptr;
+		const long frame = value ? strtol(value, &end, 10) : -1;
+		if (!value || end == value || *end != '\0' || frame < 0 || frame > 1000000)
+			Error("Invalid capture frame option %s", name);
+		return int(frame);
+	};
+	Automated_capture.forward_until_frame = capture_frame_option("-capture-forward-until", INT_MAX);
+	Automated_capture.up_from_frame = capture_frame_option("-capture-up-from", 0);
+	Automated_capture.heading_until_frame = capture_frame_option("-capture-heading-until", INT_MAX);
 	Automated_capture.force_primary_fire =
 		FindArg("-capture-fire-primary") != 0;
 	Automated_capture.place_scorch = FindArg("-capture-scorch") != 0;

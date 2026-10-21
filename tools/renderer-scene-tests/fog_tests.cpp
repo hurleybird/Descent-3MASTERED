@@ -127,6 +127,18 @@ int runFogTests() {
         "Fog material revision mutated held scene data");
     frame.rooms[0].fog_color.x = .2f;
     check(d3scene::fogContains(volume,{0,0,3}),"Fog containment missed inside point");
+    check(d3scene::fogWinding(volume,{0,0,3}) == 1,"Closed fog winding is not one inside");
+    {
+        auto overlapping = volume;
+        overlapping.boundary.insert(overlapping.boundary.end(),volume.boundary.begin(),volume.boundary.end());
+        d3scene::buildFogAcceleration(overlapping);
+        check(d3scene::fogWinding(overlapping,{0,0,3}) == 2,"Fog occupancy lost overlapping boundary winding");
+        check(d3scene::fogContains(overlapping,{0,0,3}),"Overlapping fog boundaries lost containment");
+        check(near(d3scene::fogOccupiedLength(overlapping,{0,0,3},{0,0,10},2),1),
+            "Positive-occupancy reference cancelled the overlapping interior interval");
+        check(near(d3scene::fogOccupiedLength(overlapping,{0,0,0},{0,0,10},0),2),
+            "Positive-occupancy reference doubled overlapping fog density");
+    }
     check(!d3scene::fogContains(volume,{0,0,0}),"Fog containment included outside point");
     check(near(d3scene::fogSegmentLength(volume,{0,0,0},{0,0,10},false),2),"Diagonal crossing counted fog triangles twice");
     check(near(d3scene::fogSegmentLength(volume,{0,0,0},{0,0,3},false),1),"Entry fog path is incorrect");
@@ -151,6 +163,8 @@ int runFogTests() {
             (std::max)(0.f,8.f-(std::max)(6.f,start));
         check(near(d3scene::fogSegmentLength(separated,{0,0,0},{0,0,10},false,start),expected),
             "Trimmed fog interval lost pre-start containment");
+        check(near(d3scene::fogOccupiedLength(separated,{0,0,0},{0,0,10},0,start),expected),
+            "Positive-occupancy reference lost a disconnected or clipped interval");
         check(near(d3scene::fogSegmentLength(separated,{0,0,10},{0,0,0},false,start),expected),
             "Trimmed fog interval depends on ray orientation");
     }

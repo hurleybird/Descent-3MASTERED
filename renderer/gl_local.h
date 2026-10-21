@@ -155,6 +155,7 @@ class GL4Renderer : public IRenderer
 		GLint specular_texture = -1;
 		GLint scene_fog = -1;
 		GLint fog_field_range = -1;
+		GLint fog_debug = -1;
 		GLint surface_prepass = -1;
 		GLint scene_occlusion_enabled = -1;
 		GLint scene_occlusion = -1;
@@ -197,8 +198,24 @@ class GL4Renderer : public IRenderer
 	GLuint scene_fog_buffer = 0, scene_fog_texture = 0;
 	ShaderProgram scene_fog_field_shader;
 	GLint scene_fog_field_range = -1;
+	GLint scene_fog_jitter = -1;
+	ShaderProgram scene_fog_temporal_shader, scene_fog_integrate_shader;
+	GLint scene_fog_temporal_range = -1, scene_fog_previous_range = -1;
+	GLint scene_fog_previous_matrix = -1, scene_fog_history_weight = -1, scene_fog_integrate_range = -1;
+	GLint scene_fog_integrate_scale = -1;
+	float scene_fog_density_scale = 1;
+	uint64_t scene_fog_history_retire_sequence = 0;
+	GLuint scene_fog_density_texture = 0;
 	GLuint scene_fog_field_texture = 0;
 	int scene_fog_field_width = 0, scene_fog_field_height = 0;
+	struct SceneFogDensityHistory {
+		GLuint density[2] = {};
+		int width = 0, height = 0, latest = 0;
+		float range = 1;
+		uint64_t sequence = 0;
+		d3scene::AssetId asset;
+	};
+	std::map<std::pair<d3scene::ViewKind,uint64_t>,SceneFogDensityHistory> scene_fog_histories;
 	d3scene::AssetId scene_fog_id;
 	struct SceneDepthSnapshot {
 		GLuint texture = 0, framebuffer = 0;
@@ -748,6 +765,7 @@ public:
 	d3scene::VisibilityReport RenderSceneView(const d3scene::PreparedView&) override;
 	void RenderForeground(const d3scene::Presentation&, const d3scene::ForegroundLayer&) override;
 	void RenderViewImage(const d3scene::Presentation&, const d3scene::ViewImageRequest&) override;
+	d3scene::ImageMip ReadViewImage(const d3scene::Presentation&, uint64_t image) override;
 
 	//INITIALIZATION
 

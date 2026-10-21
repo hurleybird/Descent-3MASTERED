@@ -395,6 +395,8 @@ void ReadPlayerControls(game_controls *controls)
 		}
 		else if (AutomatedCaptureForcesForwardInput())
 			controls->forward_thrust = LIMIT_FORWARD;
+		if (AutomatedCaptureForcesUpInput())
+			controls->vertical_thrust = LIMIT_VERT;
 		if (AutomatedCaptureForcesHeadingInput())
 			controls->heading_thrust = LIMIT_HEADING;
 		const bool capture_primary_down =

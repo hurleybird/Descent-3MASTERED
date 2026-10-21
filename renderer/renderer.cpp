@@ -53,6 +53,10 @@ void d3scene::renderForeground(const Presentation& frame, const ForegroundLayer&
 	for (const auto& view : layer.display_views) if (!view.geometry_inspection) frame.requireExecutable();
 	renderer_inst->RenderForeground(frame,layer);
 }
+d3scene::ImageMip d3scene::readViewImage(const Presentation& frame,uint64_t image)
+{
+	return renderer_inst->ReadViewImage(frame,image);
+}
 static renderer_preferred_state Renderer_last_preferred_state;
 static bool Renderer_last_preferred_state_valid = false;
 static uint32_t Renderer_generation = 0;

@@ -35,8 +35,12 @@ private:
 const std::vector<FogVolume>& fogVolumes(const FrameData&);
 void buildFogAcceleration(FogVolume&);
 bool fogContains(const FogVolume&,Vec3);
+int fogWinding(const FogVolume&,Vec3);
 // Start distance trims the optical interval, but crossings before that distance
 // still establish containment. No per-fragment containment query is necessary.
 float fogSegmentLength(const FogVolume&,Vec3 eye,Vec3 endpoint,bool eye_inside,float start_distance = 0);
+// Slow independent reference for field audits/tests: sort crossings and integrate
+// positive occupancy, including overlapping sheets. Not a per-frame CPU query.
+float fogOccupiedLength(const FogVolume&,Vec3 eye,Vec3 endpoint,int eye_winding,float start_distance = 0);
 float fogRayStart(const View&,Vec3 endpoint);
 }

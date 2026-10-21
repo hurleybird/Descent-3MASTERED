@@ -18,6 +18,7 @@
 
 #include "gamesave.h"
 #include "SceneExtraction.h"
+#include "../renderer/SceneView.h"
 #include "args.h"
 #include "descent.h"
 #include "newui.h"
@@ -1292,27 +1293,29 @@ static void MakeSnapshotOpaque(int bm_handle)
 
 void SGSSnapshot(CFILE* fp)
 {
-	extern void ResetFacings();								// render.cpp 
-
 	const int SGSSNAP_WIDTH = 160,
 		SGSSNAP_HEIGHT = 120;
 	int oldfilepos, bm_handle;
 
 	oldfilepos = cftell(fp);
+	// A save is an independent render request, not a callback inside GameRender.
+	// Own its published scene explicitly; never borrow the module callback scope
+	// or advance gameplay presentation/foreground animation just for a thumbnail.
+	const auto presentation = PrepareGamePresentation(false);
 
-	//Set up for rendering
-	StartFrame(0, 0, Max_window_w, Max_window_h);
-	g3_StartFrame(&Viewer_object->pos, &Viewer_object->orient, HUD_RENDER_ZOOM);
-
-	// Reset facings for mine stuff
-	ResetFacings();
-
-	//Render the world
-	RenderModuleSceneView(Viewer_object, &Viewer_object->pos, Viewer_object->roomnum, &Viewer_object->orient, Render_zoom, false);
-
-	//Done rendering
-	g3_EndFrame();
-	EndFrame();
+	// Independent image production is valid even after display composition, and
+	// neither overwrites the live frame nor presents the thumbnail to the player.
+	d3scene::ViewImageRequest image;
+	image.image = 0x534156455448554dull;
+	image.view = MakeGameSceneView(d3scene::ViewKind::SaveThumbnail, image.image,
+		Viewer_object, Viewer_object->pos, Viewer_object->roomnum, Viewer_object->orient,
+		Render_zoom, false, {0, 0, Max_window_w, Max_window_h}, {0, 0, Max_window_w, Max_window_h});
+	image.view.geometry_inspection = SceneGeometryInspection();
+	auto plan = d3scene::planPlanarViews(*presentation,image.view);
+	image.view = plan.consumer.view();
+	plan.images.push_back(image);
+	d3scene::renderViewImages(*presentation,plan.images);
+	const auto pixels = d3scene::readViewImage(*presentation,image.image);
 
 	bm_handle = bm_AllocBitmap(Max_window_w, Max_window_h, 0);
 
@@ -1320,8 +1323,11 @@ void SGSSnapshot(CFILE* fp)
 
 	if (bm_handle > 0)
 	{
-		// Tell our renderer lib to take a screen shot
-		rend_Screenshot(bm_handle);
+		auto* destination = bm_data(bm_handle,0);
+		for (uint32_t y = 0; y < pixels.height; ++y) for (uint32_t x = 0; x < pixels.width; ++x) {
+			const auto* rgba = pixels.pixels.data()+(size_t(y)*pixels.width+x)*4;
+			destination[(pixels.height-1-y)*pixels.width+x] = GR_RGB16(rgba[0],rgba[1],rgba[2]);
+		}
 		bm_ChangeSize(bm_handle, SGSSNAP_WIDTH, SGSSNAP_HEIGHT);
 		MakeSnapshotOpaque(bm_handle);
 
@@ -1342,5 +1348,4 @@ void SGSSnapshot(CFILE* fp)
 		bm_FreeBitmap(bm_handle);
 	}
 
-	rend_Flip();
 }
