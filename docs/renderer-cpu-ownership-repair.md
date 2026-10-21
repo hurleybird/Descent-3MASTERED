@@ -2,6 +2,17 @@
 
 ## October 20 continuation
 
+Portal lists now have a sealed copy-on-write lifetime independent of frame room
+scalars. Extraction compares the complete authored connection tuple before
+reusing storage; traversal/two-sided policy detaches only when it changes.
+Published material policy is reused for unchanged portal surfaces. Tests cover
+source reconnection/flags, shared unchanged topology, held-frame edits and mutable
+builder aliases. Existing door/cycle/exterior tests pass. Combined probe matches
+exactly. Dense/save005/small trials are 3.943/2.854/1.173 ms; no net speedup claim.
+Save005's remaining measured CPU is dominated by preparation (~2.02 ms), including
+models ~0.65, resources ~0.56 (procedural simulation ~0.32), freeze ~0.32 and
+extraction ~0.17 ms. View execution is ~0.59 ms. These stages are nested, not additive.
+
 Instance ambient light, tint and opacity are now separate from immutable model
 materials. Effective blend/depth policy is derived for visibility/submission,
 not baked into a fresh surface table whenever an instance fades. All eight

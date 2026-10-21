@@ -589,6 +589,22 @@ int runSceneViewTests() {
     portals.rooms[2].portals.push_back({0,1}); // cycle must converge without a depth cutoff
     auto portal_view = view(); portal_view.room = 0;
     auto portal_frame = d3scene::Presentation::freeze(portals);
+    {
+        auto retained = portal_frame->data();
+        const auto next = d3scene::Presentation::freeze(retained);
+        check(&next->data().rooms[0].portals.read() == &portal_frame->data().rooms[0].portals.read(),
+            "Unchanged portal topology was copied");
+        retained.rooms[0].portals[0].traversable = false;
+        const auto changed = d3scene::Presentation::freeze(retained);
+        check(!changed->data().rooms[0].portals[0].traversable && portal_frame->data().rooms[0].portals[0].traversable,
+            "Traversal edit mutated held portal topology");
+        auto builder = portals;
+        auto& borrowed = builder.rooms[0].portals[0];
+        const auto published = d3scene::Presentation::freeze(builder);
+        borrowed.destination_room = 3;
+        check(published->data().rooms[0].portals[0].destination_room == 1,
+            "Unsealed portal builder retained a mutable alias after freeze");
+    }
     check(!d3scene::queryPortalVisibility(*portal_frame,portal_view,d3scene::prepareCamera(portal_view)).exterior.visible,
         "Enclosed portal graph admitted exterior observations");
     auto windows = d3scene::queryPortalVisibility(*portal_frame,portal_view,d3scene::prepareCamera(portal_view)).rooms;

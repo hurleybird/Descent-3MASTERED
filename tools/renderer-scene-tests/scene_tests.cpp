@@ -325,6 +325,19 @@ void extractionTests() {
     const auto retained = ExtractGamePresentation(2.7,0,false,false,after_thumbnail.get());
     check(retained->data().rooms[0].surfaces.data() == after_thumbnail->data().rooms[0].surfaces.data(),
         "Unchanged room appearance lost published storage");
+    {
+        portal connection{}; connection.portal_face = 0; connection.croom = -1; connection.cportal = -1; connection.combine_master = -1;
+        source.num_portals = 1; source.portals = &connection;
+        const auto first = ExtractGamePresentation(2.71,0,false,false,retained.get());
+        const auto next = ExtractGamePresentation(2.72,0,false,false,first.get());
+        check(&first->data().rooms[0].portals.read() == &next->data().rooms[0].portals.read(),
+            "Extraction rebuilt unchanged portal topology");
+        connection.croom = 0; connection.flags = 1;
+        const auto changed = ExtractGamePresentation(2.73,0,false,false,next.get());
+        check(changed->data().rooms[0].portals[0].destination_room == 0 && changed->data().rooms[0].portals[0].flags == 1 &&
+            first->data().rooms[0].portals[0].destination_room == -1,"Portal reconnection was stale or changed a held frame");
+        source.num_portals = 0; source.portals = nullptr;
+    }
     surface.flags |= FF_SCORCHED; // effect bookkeeping is not a material input
     const auto bookkeeping = d3scene::Presentation::freeze(ExtractGameFrame(2.8,0,false,false,retained.get(),true));
     check(bookkeeping->data().rooms[0].surfaces.data() == retained->data().rooms[0].surfaces.data(),

@@ -684,15 +684,20 @@ d3scene::PresentationRef PrepareGamePresentation() {
     }
     PrepareGameSceneResources(data);
     { PERF_MARKER_SCOPE("Scene.PrepareLights"); PrepareGameSceneLights(data); }
-    for (auto& room : data.rooms) for (auto& portal : room.portals) {
+    for (auto& room : data.rooms) for (size_t p = 0; p < room.portals.size(); ++p) {
+        const auto& portal = room.portals.read()[p];
         // Exterior door apertures have authored winding conventions that are
         // not interior-facing portal planes. Compile this once, not in queries.
-        portal.two_sided = room.exterior && portal.destination_room >= 0 &&
+        const bool two_sided = room.exterior && portal.destination_room >= 0 &&
             portal.destination_room < MAX_ROOMS && (Rooms[portal.destination_room].flags & RF_DOOR);
         const auto& surface = room.surfaces.read()[portal.polygon];
-        const auto material = d3scene::compileMaterialPolicy(surface,room.asset->geometry().polygons[portal.polygon]);
-        portal.traversable = !(portal.flags & PF_RENDER_FACES) || material.allowsBehind() ||
+        const auto material = room.surfaces.published() ? surface.material :
+            d3scene::compileMaterialPolicy(surface,room.asset->geometry().polygons[portal.polygon]);
+        const bool traversable = !(portal.flags & PF_RENDER_FACES) || material.allowsBehind() ||
             (GameTextures[surface.texture].flags & TF_PROCEDURAL);
+        if (portal.two_sided != two_sided || portal.traversable != traversable) {
+            auto& changed = room.portals[p]; changed.two_sided = two_sided; changed.traversable = traversable;
+        }
     }
     { PERF_MARKER_SCOPE("Scene.PublishFog"); data.fog = d3scene::assets().publishFog(data.rooms); }
     if (SceneGeometryInspection() && FindArg("-scene-lod-probe") && Player_object) {

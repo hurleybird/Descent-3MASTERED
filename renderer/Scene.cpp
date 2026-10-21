@@ -888,6 +888,7 @@ PresentationRef Presentation::complete(FrameData data) {
     for (auto& patch : prepared->data_.terrain.patches) for (auto& surface : patch)
         surface.material = compileMaterialPolicy(surface,MeshPolygon{});
     for (auto& room : prepared->data_.rooms) {
+        room.portals.seal();
         if (room.surfaces.publishedForRoom(room.asset->id(),room.mirrors)) continue;
         for (size_t face = 0; face < room.surfaces.size(); ++face)
             room.surfaces[face].material = compileMaterialPolicy(room.surfaces[face],room.asset->geometry().polygons[face]);

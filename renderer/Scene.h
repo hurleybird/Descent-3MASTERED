@@ -345,6 +345,36 @@ struct Portal {
     bool traversable = true;
     bool two_sided = false; // aperture policy, independent of surface winding
 };
+class RoomPortals {
+    using Storage = std::vector<Portal>;
+    std::shared_ptr<Storage> values_;
+    bool sealed_ = false;
+    Storage& edit() {
+        if (!values_) values_ = std::make_shared<Storage>();
+        else if (sealed_ || values_.use_count() != 1) values_ = std::make_shared<Storage>(*values_);
+        sealed_ = false; return *values_;
+    }
+    void seal() { sealed_ = true; }
+    friend class Presentation;
+public:
+    RoomPortals() = default;
+    RoomPortals(std::initializer_list<Portal> values) : values_(std::make_shared<Storage>(values)) {}
+    RoomPortals(const RoomPortals& other) : values_(!other.values_ || other.sealed_ ? other.values_ :
+        std::make_shared<Storage>(*other.values_)),sealed_(other.sealed_) {}
+    RoomPortals& operator=(const RoomPortals& other) { if (this != &other) { RoomPortals copy(other); *this = std::move(copy); } return *this; }
+    RoomPortals(RoomPortals&&) = default;
+    RoomPortals& operator=(RoomPortals&&) = default;
+    const Storage& read() const { static const Storage empty; return values_ ? *values_ : empty; }
+    size_t size() const { return read().size(); }
+    bool empty() const { return read().empty(); }
+    const Portal& operator[](size_t i) const { return read()[i]; }
+    Portal& operator[](size_t i) { return edit()[i]; }
+    auto begin() const { return read().begin(); }
+    auto end() const { return read().end(); }
+    auto begin() { return edit().begin(); }
+    auto end() { return edit().end(); }
+    void push_back(Portal portal) { edit().push_back(portal); }
+};
 struct PlanarSurface {
     Plane plane;
     std::vector<uint32_t> polygons;
@@ -423,7 +453,7 @@ struct RoomState {
     bool uses_room_illumination = false;
     bool light_influences_prepared = false;
     std::vector<uint32_t> light_candidates; // conservative room set; refined after visibility
-    std::vector<Portal> portals;
+    RoomPortals portals;
     uint32_t authored_flags = 0;
     float fog_depth = 0;
     Vec3 fog_color;
