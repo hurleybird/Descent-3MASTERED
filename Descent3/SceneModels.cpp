@@ -367,7 +367,11 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::Presenta
             variant.previous_deformation = history ? history->deformation : effect.deformation;
             variant.deformation_owner = owner.handle;
             PerfMarkersEnd("Scene.Models.Pose");
-            variant.binding_inputs.appearance = {{float(directional),float(source->rtype.pobj_info.tmap_override),
+            // RT_WEAPON never consumed the polymodel texture override. Older
+            // weapon objects (including saves) leave it zero, which is the
+            // random diagnostic texture, not an authored material override.
+            const int texture_override = source->render_type == RT_POLYOBJ ? source->rtype.pobj_info.tmap_override : -1;
+            variant.binding_inputs.appearance = {{float(directional),float(texture_override),
                 float(effect.custom_texture),float(effect.has_player_color),effect.player_color.x,
                 effect.player_color.y,effect.player_color.z,float(player_color_texture)}};
             variant.binding_inputs.baked_layout_revision = baked ? layout_revision : 0;
@@ -451,7 +455,10 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::Presenta
                     const int slot = asset_part.polygon_materials[j];
                     if (slot >= 0) binding.texture = variant.asset->geometry().textures[slot];
                     else binding.base_color = asset_part.polygon_colors[j];
-                    if (source->rtype.pobj_info.tmap_override != -1) binding.texture = source->rtype.pobj_info.tmap_override;
+                    if (texture_override != -1) binding.texture = texture_override;
+                    if (source->type == OBJ_WEAPON && FindArg("-capture-fire-flare"))
+                        AutomatedCaptureLog("weapon material model=%s slot=%d authored=%d override=%d resolved=%d",model->name,slot,
+                            slot >= 0 ? variant.asset->geometry().textures[slot] : -1,texture_override,binding.texture);
                     if ((asset_part.authored_flags & SOF_CUSTOM) && effect.custom_texture >= 0 && binding.texture >= 0)
                         binding.texture = effect.custom_texture;
                     if (effect.has_player_color && binding.texture >= 0 && binding.texture == player_color_texture) {

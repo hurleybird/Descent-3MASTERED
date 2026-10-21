@@ -803,6 +803,18 @@ d3scene::VisibilityReport RenderGameSceneView(const d3scene::Presentation& frame
             view.exterior_origin = true;
         }
     }
+    if (FindArg("-scene-weapon-view-probe") && AutomatedCaptureFrameIndex() >= 0) {
+        for (const auto& object : frame.data().objects) if (object.type == OBJ_WEAPON) {
+            const auto& p = object.current.position;
+            const auto& f = view.camera.forward;
+            view.camera.position = {p.x-f.x*4,p.y-f.y*4,p.z-f.z*4};
+            view.room = object.room; view.attached_camera = false;
+            view.exclude_camera_rig = false; view.excluded_objects.clear();
+            view.portal_visibility = false;
+            view.exterior_origin = object.room != -1 && ROOMNUM_OUTSIDE(object.room);
+            break;
+        }
+    }
     const int heading_arg = FindArg("-scene-camera-heading");
     if (heading_arg && AutomatedCaptureFrameIndex() >= 0 && GetArg(heading_arg+1)) {
         const float angle = float(std::atof(GetArg(heading_arg+1)))*.01745329252f;

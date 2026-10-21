@@ -694,6 +694,12 @@ static void BeginAutomatedCaptureFrame()
 		AutomatedCaptureLog("capture headlight enabled");
 	}
 	PlaceAutomatedCaptureScorch();
+	if (Automated_capture.gameplay_frame == 10 && FindArg("-capture-fire-flare") &&
+		Player_object && Player_num >= 0 && Player_num < MAX_PLAYERS)
+	{
+		FireFlareFromPlayer(Player_object);
+		AutomatedCaptureLog("capture flare fired");
+	}
 	if (!Automated_capture.primary_slot_applied &&
 		Automated_capture.force_primary_slot >= 0)
 	{

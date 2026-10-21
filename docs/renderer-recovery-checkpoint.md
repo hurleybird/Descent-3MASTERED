@@ -1,5 +1,36 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## Active 2026-10-21 flare regression investigation
+
+User reports v3 fog looks clean in roof room, but flares show random coloured
+noise (clipboard-41724c53-9832-4822-b897-abdbfacdcabd.png). Priority is reproduce
+and fix this regression; continue work, do not yield unprompted. V3 remains
+immutable. Added capture-only -capture-fire-flare at frame10 for reproduction.
+Source baseline is v3 7e179a0 plus that capture hook.
+
+CONFIRMED/FIXED: RT_WEAPON initialization leaves tmap_override zero; old weapon
+draw never consumed it. Migrated SceneModels applied it to every face. Flare
+trace authored textures50/880/901/902 all resolved0; bitmap0 is intentionally
+random diagnostic pixels (bitmap/bitmain.cpp). Resolve override only for
+RT_POLYOBJ, including the material cache key. Saved weapons also corrected.
+Capture-only -scene-weapon-view-probe places camera4units behind first weapon.
+Before/fixed closeups flare-before-closeup/flare-fixed-closeup visually confirm
+random triangle becomes authored yellow material. flare-fixed-loaded verifies
+saved weapon (seeds/savegame/flareprobe20261021). Ordinary save002120frame image
+flare-before-regression002 vs flare-fix-regression002 pixel-identical. Scene
+contract tests pass (flare-material-tests.log). Fixed exe preserved temporarily
+out/flare-fixed-qualified.exe; final build needed after diagnostic before toggle
+was restored in source. No fog changes in this fix.
+
+Unverified model batching experiment preserved in stash commit
+b0a96f2bb1919ca4c89c9490f1bc2a4eb5024ebf, named "Paused unverified model batching
+for flare regression isolation". Seven renderer/test files; no unrelated edits.
+It moves per-face light lists to primitive data and groups opaque undeformed
+same-material model runs. Tests pass, primitive-light-only images005/007 exact
+but no timing gain; material-run runtime validation still outstanding. Not in v3.
+Restore only after flare isolation, preserving intervening changes. lib/gitinfo.h
+is unrelated, never stage. Last usage 27% consumed, credits unchanged.
+
 ## Current handoff state — view-level fog pipelines verified
 
 LATEST USER: continuous fog through ceiling space requested (async answer), and
@@ -47,8 +78,24 @@ Fresh500frame4K save002 paired old/new CPU3.10/2.15 GPU2.64/2.54ms; withAO/bloom
 CPU3.59/2.41 GPU12.52/11.96ms. Modest GPU win, effects not strictly identical.
 Raw fog-refine-paired-{old4k,new4k,old4k-effects,new4k-effects}.
 Contract tests fog-refinement-tests.log pass. Runtime currently refined320.
-Qualification running/next: fog-refine-roof-continuous{4k,-exact4k},
-fog-refine-msaa-multiview. No new packaged preview yet; v2 untouched.
+Qualification completed: fog-refine-roof-continuous{4k,-exact4k},
+fog-refine-msaa-multiview (1920x1080SSAA2MSAA4AO/bloom with auxiliary image,
+deformation/resource/geometry/image audits). All visually inspected; continuous
+roof vs exact meanRGB.202904,max4,>2 pixels .008365%. No claim exact.
+
+V3 DELIVERED via commentary links: C:/tmp/D3RendererVerification/
+fog-field-preview-20261021-v3/Launch Roof Preview.cmd (continuous), plus
+Launch Clear Ceiling Test.cmd (original boundary, sampling improvement only).
+Also Launch Fog Preview.cmd (save002,continuous), Launch Roof Reference.cmd
+(exact current rewrite,continuous; NOT old renderer). New isolated2.18GB copy,
+v2/Candidate/main untouched, no desktop files. Exe7e179a0 SHA256
+D2D8CB7C6C461F767D81CB6E7261BB2E8E51EF49827D0E727EC18B2CA7562871.
+Build fog-preview-v3-build.log; packaged smoke fog-preview-v3-smoke visually
+inspected; JEFF.plt restored from v2 AFTER smoke harness overwrote it with seed.
+No timer/audits/forcedgraphics settings on interactive launchers. Authoring room
+override now scoped to initial scene_lifetime; loading/travelling/restarting
+disables it to avoid changing unrelated levels. Relaunch to inspect it again.
+No updates to this delivered preview without a new explicitly separate artifact.
 
 LATEST: bounded compact optical-field storage. Field remains opt-in, exact fog
 remains default. The field now selects RGBA16F when a conservative optical-depth
