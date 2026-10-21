@@ -12,6 +12,12 @@
 #include <set>
 
 namespace d3scene {
+static ViewVisibility queryResolvedView(const Presentation&,const View&);
+PreparedView prepareView(const Presentation& frame,const View& request) {
+    auto view = resolveView(frame,request);
+    auto visibility = queryResolvedView(frame,view);
+    return PreparedView(frame.shared_from_this(),std::move(view),std::move(visibility));
+}
 Rect rasterViewport(Rect logical, int32_t raster_height, int32_t scale, int32_t offset_x, int32_t offset_y) {
     if (raster_height <= 0 || scale <= 0 || logical.width <= 0 || logical.height <= 0)
         throw std::invalid_argument("Invalid raster viewport extent");
@@ -392,11 +398,11 @@ PlanarViewPlan planPlanarViews(const Presentation& frame,const View& parent,uint
     validateView(parent);
     if (samples != 0 && samples != 2 && samples != 4 && samples != 8)
         throw std::invalid_argument("Invalid planar image sample count");
-    PlanarViewPlan plan; plan.consumer = parent;
+    PlanarViewPlan plan{prepareView(frame,parent),{}};
     if (parent.reflections == ReflectionPolicy::SurfaceFilm || parent.collection) return plan;
     if (parent.has_clip_plane || parent.kind == ViewKind::Mirror)
         throw std::invalid_argument("Reflected producers must declare terminal surface-film policy");
-    const auto visible = queryView(frame,parent);
+    const auto& visible = plan.consumer.visibility();
     std::unordered_set<uint64_t> slots;
     for (const auto& surface : visible.surfaces) {
         const auto slot = visibleSurfaceBinding(frame,surface).material.planar_slot;
@@ -421,13 +427,18 @@ PlanarViewPlan planPlanarViews(const Presentation& frame,const View& parent,uint
         ViewImageRequest image; image.image = identity; image.view = std::move(child); image.samples = samples;
         validateViewImage(image);
         plan.images.push_back(std::move(image));
-        plan.consumer.image_inputs.push_back({slot,identity});
+        plan.consumer.view_.image_inputs.push_back({slot,identity});
     }
-    validateView(plan.consumer);
+    validateView(plan.consumer.view_);
+    std::sort(plan.consumer.view_.image_inputs.begin(),plan.consumer.view_.image_inputs.end(),
+        [](const ViewImageInput& a,const ViewImageInput& b) { return a.slot < b.slot; });
     return plan;
 }
 ViewVisibility queryView(const Presentation& frame, const View& request) {
     const auto view = resolveView(frame,request);
+    return queryResolvedView(frame,view);
+}
+static ViewVisibility queryResolvedView(const Presentation& frame,const View& view) {
     ViewVisibility result;
     result.ordering = view.ordering;
     result.camera = prepareCamera(view);

@@ -891,8 +891,9 @@ void GL4Renderer::RenderViewImage(const d3scene::Presentation& presentation,cons
         image.buffer.Update(request.view.viewport.width*request.scale,request.view.viewport.height*request.scale,request.samples);
         image.buffer.ClearAll();
         const auto raster = d3scene::rasterViewport(request.view.viewport,image.buffer.Height(),request.scale);
-        ExecuteSceneView(presentation,request.view,{image.buffer,raster,SceneOutputRole::Image,image.depth,image.history});
-        image.matrices = d3scene::viewMatrices(d3scene::prepareCamera(d3scene::resolveView(presentation,request.view)));
+        const auto prepared = d3scene::prepareView(presentation,request.view);
+        ExecuteSceneView(prepared,{image.buffer,raster,SceneOutputRole::Image,image.depth,image.history});
+        image.matrices = d3scene::viewMatrices(prepared.visibility().camera);
         image.sequence = sequence;
         if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
             AutomatedCaptureLog("scene view image key=%llu size=%ux%u samples=%u sequence=%llu",
@@ -901,8 +902,9 @@ void GL4Renderer::RenderViewImage(const d3scene::Presentation& presentation,cons
     } catch (...) { restore(); throw; }
     restore();
 }
-d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentation& presentation,
-    const d3scene::View& view) {
+d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::PreparedView& prepared) {
+    const auto& presentation = prepared.frame();
+    const auto& view = prepared.view();
     EnsureSceneLifetime(presentation);
     const bool display_target = view.target == d3scene::ViewTarget::Display;
     if (!framebuffer_ok || modal_ui_frame_active ||
@@ -914,7 +916,7 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::Presentati
     const auto raster = d3scene::rasterViewport(view.viewport,output.Height(),
         display_target ? 1 : SupersamplingFactor(),display_target ? 0 : framebuffer_logical_offset_x,
         display_target ? 0 : framebuffer_logical_offset_y);
-    return ExecuteSceneView(presentation,view,{output,raster,display_target ? SceneOutputRole::Display :
+    return ExecuteSceneView(prepared,{output,raster,display_target ? SceneOutputRole::Display :
         (view.kind == d3scene::ViewKind::Main ? SceneOutputRole::MainWorld : SceneOutputRole::SceneLayer),
         scene_depth_snapshots[{view.kind,view.history_key}],scene_view_history});
 }
@@ -924,10 +926,10 @@ void GL4Renderer::EnsureSceneLifetime(const d3scene::Presentation& presentation)
         scene_asset_lifetime = presentation.data().scene_lifetime;
     }
 }
-d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::Presentation& presentation,
-    const d3scene::View& request,const SceneRasterTarget& target) {
+d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedView& prepared,const SceneRasterTarget& target) {
     PERF_MARKER_SCOPE("Scene.ExecuteView");
-    const auto view = d3scene::resolveView(presentation,request);
+    const auto& presentation = prepared.frame();
+    const auto& view = prepared.view();
     if (!view.geometry_inspection)
         Error("Scene executor migration incomplete: only explicit geometry inspection is currently supported.");
     if (scene_asset_lifetime != presentation.data().scene_lifetime)
@@ -937,7 +939,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::Presentat
     const auto raster = target.raster;
     const bool owns_world_products = target.role == SceneOutputRole::MainWorld;
     const bool writes_protection = owns_world_products || target.role == SceneOutputRole::SceneLayer;
-    const auto visibility = [&] { PERF_MARKER_SCOPE("Scene.QueryView"); return d3scene::queryView(presentation,view); }();
+    const auto& visibility = prepared.visibility();
     if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
         AutomatedCaptureLog("scene view collection=%llu target=%u projection=%u surfaces=%u",
             static_cast<unsigned long long>(view.collection),static_cast<unsigned>(view.target),
@@ -1221,7 +1223,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::Presentat
 
         const auto& gpu = *mesh;
         const auto instance_modulation = item.model ?
-            presentation.data().modelsFor(item.model_instance_index)[item.model_variant].modulation : d3scene::SurfaceModulation{};
+            presentation.resolvedModel(item.model_instance_index,item.model_variant).modulation : d3scene::SurfaceModulation{};
         const auto modulation = d3scene::modulatedSurface(surface,instance_modulation);
         const auto policy = d3scene::modulatedMaterialPolicy(surface,instance_modulation.alpha);
         const bool planar_image = policy.planar_slot && view.reflections == d3scene::ReflectionPolicy::Images;

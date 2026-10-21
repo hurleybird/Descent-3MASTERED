@@ -2,6 +2,40 @@
 
 ## October 20 continuation
 
+October 21: executable views now own their immutable presentation, resolved
+camera and visibility results. Planar scheduling retains that consumer result;
+the GL executor accepts PreparedView, never re-queries its visibility. Raw-view
+convenience entry prepares once. Image producers and foregrounds use the same
+boundary. Tests cover retained frame ownership, same-sequence publications,
+camera-input mutation, single camera-shake application and planar scheduling.
+No shadow work. Runtime binary `out/perf-checkpoints/prepared-view.exe`.
+
+Model ambient is now sparse captured field input shared by an instance's LODs,
+not whole-level trilinear sampling during preparation. Actual sampling occurs
+with visible pose resolution. Volume/terrain revisions, pulse and transition
+inputs are owned; no game-state access during resolution. Tests include source
+replacement, absent room geometry, fallback white, modifiers and bad indices.
+Constant lighting allocates no field record; frame storage recycles its capacity.
+
+Build/tests: `cpu-prepared-view-{build,tests}.log` and final test log (camera
+shake test). One direct test rebuild omitted vcvars and failed to find cstdint;
+the proper vcvars rebuild subsequently passed. Eight current captures are exact
+to ambient-sparse except the known 000 moving-object and 002 pickup variations.
+Combined audited multi-view and SSAA2/MSAA4 outdoor probes are pixel-exact to
+ambient-demand; the combined headlight/cockpit/HUD image was visually inspected.
+
+Interleaved prepared-view vs ambient-sparse means: dense 2.457 vs 2.710 ms,
+wall 1.566 vs 1.606 ms. Fresh short current/old pairs (ms): 000 1.761/1.525,
+001 1.255/1.788, 002 2.208/2.477, 003 3.031/2.810, 004 1.077/0.919,
+005 1.701/1.433, 006 0.961/0.938, 007 1.850/1.186. Two ahead, six behind
+in this noisy short corpus; NOT goal achieved. The legacy wall timing itself
+rose substantially versus earlier runs, so longer interleaved measurements are
+needed before attributing every difference to code. Raw folders `cpu-prepared-*`.
+
+Full-render sampling (not timing evidence): `out/cpu-full-stack-saveg00{3,5}.txt`.
+It exposed the duplicate query above and a remaining whole-level reflection
+dependency traversal in GPU table preparation. All sampling helpers have exited.
+
 October 21: RoomSurfaces and ModelParts now each carry one shared table owner;
 values and publication metadata have the same lifetime. Handles shrink to 16
 bytes, with no repeated metadata resets on unpublished builder access. Existing

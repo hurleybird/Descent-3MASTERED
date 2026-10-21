@@ -158,15 +158,31 @@ int runSceneViewTests() {
             "Layered mirror film was compiled as a translucent hole");
         auto parent = view(); parent.room = 0;
         const auto plan = planPlanarViews(*frame,parent);
+        check(&plan.consumer.frame() == frame.get() && plan.consumer.visibility().surfaces.size() == queryView(*frame,parent).surfaces.size(),
+            "Planar schedule did not retain the consumer visibility");
+        {
+            auto owner = Presentation::freeze(data);
+            std::weak_ptr<const Presentation> lifetime = owner;
+            auto request = parent;
+            const auto prepared = prepareView(*owner,request);
+            const auto* identity = owner.get();
+            owner.reset(); request.camera.position.x = 1000;
+            check(!lifetime.expired() && &prepared.frame() == identity && prepared.view().camera.position.x == parent.camera.position.x,
+                "Prepared view lost frame ownership or retained mutable camera input");
+            check(prepared.visibility().surfaces.size() == queryView(prepared.frame(),prepared.view()).surfaces.size(),
+                "Prepared visibility differs from its immutable camera");
+            const auto replacement = Presentation::freeze(data);
+            check(&prepared.frame() != replacement.get(),"Prepared view substituted another publication with the same sequence");
+        }
         check(planPlanarViews(*frame,parent,4).images[0].samples == 4,
             "Planar producer lost explicit antialiasing quality");
-        check(plan.images.size() == 1 && plan.consumer.image_inputs.size() == 1,
+        check(plan.images.size() == 1 && plan.consumer.view().image_inputs.size() == 1,
             "Visible mirror group did not schedule one image");
         const auto& child = plan.images[0];
         check(child.view.reflections == ReflectionPolicy::SurfaceFilm && child.view.feedback == NoFeedback &&
             child.view.excluded_surfaces.size() == 1 && queryView(*frame,child.view).surfaces.empty(),
             "Reflected producer retained its own film or recursive policy");
-        check(viewImageSource(plan.consumer,material.planar_slot) == child.image &&
+        check(viewImageSource(plan.consumer.view(),material.planar_slot) == child.image &&
             orderViewImages(plan.images) == std::vector<size_t>({0}),"Mirror consumer has no scheduled producer");
         check(planPlanarViews(*frame,child.view).images.empty(),"Terminal reflection scheduled recursion");
         auto moved = parent; moved.camera.position.x = .25f;
@@ -735,6 +751,10 @@ int runSceneViewTests() {
     check(d3scene::resolveView(*shake_frame,resolved).camera.forward.x == 1,"Resolved camera applied shake twice");
     check(attached.camera.forward.z == 1,"Camera preparation mutated input");
     check(d3scene::queryView(*shake_frame,attached).camera.transform.forward.x == 1,"Visibility ignored prepared camera");
+    const auto prepared_shake = d3scene::prepareView(*shake_frame,attached);
+    check(!prepared_shake.view().attached_camera && prepared_shake.view().camera.forward.x == 1 &&
+        prepared_shake.visibility().camera.transform.forward.x == 1,
+        "Executable preparation applied camera shake twice or queried another camera");
     attached.camera_owner = 43;
     check(d3scene::resolveView(*shake_frame,attached).camera.forward.z == 1,"Shake leaked into another object's camera");
     attached.camera_owner = 42; attached.attached_camera = false;

@@ -20,6 +20,7 @@
 
 #include "renderer.h"
 #include "Scene.h"
+#include "SceneView.h"
 
 //Base renderer interface. 
 //Renderer.cpp will call into this abstractly. 
@@ -31,8 +32,7 @@ public:
 	// Required replacement entry. No default that replays game draw commands.
 	// GL4 currently implements an explicit geometry-inspection executor; normal
 	// presentation remains rejected while preparation domains are pending.
-	virtual d3scene::VisibilityReport RenderSceneView(const d3scene::Presentation& frame,
-		const d3scene::View& view) = 0;
+	virtual d3scene::VisibilityReport RenderSceneView(const d3scene::PreparedView& view) = 0;
 	virtual void RenderForeground(const d3scene::Presentation&, const d3scene::ForegroundLayer&) = 0;
 	virtual void RenderViewImage(const d3scene::Presentation&, const d3scene::ViewImageRequest&) = 0;
 

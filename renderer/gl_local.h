@@ -233,7 +233,7 @@ class GL4Renderer : public IRenderer
 		SceneDepthSnapshot& depth;
 		d3scene::ViewHistory& history;
 	};
-	d3scene::VisibilityReport ExecuteSceneView(const d3scene::Presentation&,const d3scene::View&,const SceneRasterTarget&);
+	d3scene::VisibilityReport ExecuteSceneView(const d3scene::PreparedView&,const SceneRasterTarget&);
 	//MAIN
 	oeApplication* ParentApplication = nullptr;
 
@@ -740,7 +740,7 @@ private:
 
 public:
 	GL4Renderer();
-	d3scene::VisibilityReport RenderSceneView(const d3scene::Presentation&, const d3scene::View&) override;
+	d3scene::VisibilityReport RenderSceneView(const d3scene::PreparedView&) override;
 	void RenderForeground(const d3scene::Presentation&, const d3scene::ForegroundLayer&) override;
 	void RenderViewImage(const d3scene::Presentation&, const d3scene::ViewImageRequest&) override;
 

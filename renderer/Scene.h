@@ -642,6 +642,17 @@ struct ObjectState {
 };
 // A renderable model is not a simulation object. Ownership is optional (e.g.
 // cockpit/preview), while identity and pose belong to this presentation domain.
+struct ModelAmbientInput {
+    enum class Source : uint8_t { Constant, RoomVolume, Terrain };
+    Source source = Source::Constant;
+    RoomAssetRef volume, previous_volume;
+    TerrainAssetRef terrain;
+    Vec3 previous_position;
+    float volume_scalar = 1, previous_scalar = 1;
+    float previous_weight = 0, minimum = 0, multiplier = 1;
+    uint32_t terrain_cell = 0;
+    bool blend_previous = false, clamp_after_multiplier = false;
+};
 struct ModelInstance {
     uint64_t identity = 0; // stable nonzero presentation identity; unique within a scene
     uint64_t collection = 0;
@@ -650,6 +661,9 @@ struct ModelInstance {
     int32_t room = -1;
     Transform current, previous;
     bool has_previous = false;
+    // Capture inputs, not whole-level volume samples. Resolution uses only
+    // this presentation's owned room/terrain data, after view visibility.
+    uint32_t ambient_input = UINT32_MAX;
     // All eligible variants exist before any camera query. LOD selection is
     // view-local; prepared attachments identify their owning variant as well.
     uint32_t model_begin = 0, model_count = 0;
@@ -810,6 +824,21 @@ struct FrameData {
     std::vector<ObjectState> objects;
     std::vector<ModelInstance> model_instances;
     std::vector<PreparedModel> model_variants;
+    // Only sampled ambient fields occupy storage. Constant-lit instances carry
+    // no resource handles or field payload; all LODs share the instance input.
+    std::vector<ModelAmbientInput> model_ambient_inputs;
+    const ModelAmbientInput& ambientFor(const ModelInstance& instance) const {
+        static const ModelAmbientInput constant;
+        if (instance.ambient_input == UINT32_MAX) return constant;
+        if (instance.ambient_input >= model_ambient_inputs.size()) throw std::invalid_argument("Missing model ambient input");
+        return model_ambient_inputs[instance.ambient_input];
+    }
+    uint32_t appendAmbientInput(ModelAmbientInput input) {
+        if (input.source == ModelAmbientInput::Source::Constant) return UINT32_MAX;
+        if (model_ambient_inputs.size() >= UINT32_MAX) throw std::invalid_argument("Too many model ambient inputs");
+        const auto index = uint32_t(model_ambient_inputs.size());
+        model_ambient_inputs.push_back(std::move(input)); return index;
+    }
     // Dynamic animation samples belong to the frame, not separately allocated
     // reference-counted vectors on each model. Ranges survive vector growth.
     std::vector<float> model_pose_inputs;
@@ -897,7 +926,7 @@ struct SceneCollection {
     SceneIndexSpan models,meshes;
     bool has_receivers = false;
 };
-class Presentation final {
+class Presentation final : public std::enable_shared_from_this<Presentation> {
 public:
     ~Presentation();
     // Copies at the publication boundary so a caller retaining a mutable

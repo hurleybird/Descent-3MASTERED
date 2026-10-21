@@ -145,51 +145,43 @@ ModelAppearance appearance(const object& source) {
     result.alpha = std::max(0.f,std::min(1.f,result.alpha));
     return result;
 }
-d3scene::Vec3 volumeColor(const RoomTable& rooms, int number, const vector& position) {
-    const auto found = rooms.find(number);
-    if (found == rooms.end() || found->second->asset->volume().colors.empty()) return {1,1,1};
-    const auto& room = *found->second;
-    auto color = d3scene::sampleVolume(room.asset->volume(),value(position));
-    return {color.x*room.light_scalar,color.y*room.light_scalar,color.z*room.light_scalar};
-}
-d3scene::Vec3 ambientColor(const object& source, const RoomTable& rooms, const d3scene::TerrainState& terrain) {
-    d3scene::Vec3 color{1,1,1};
+d3scene::ModelAmbientInput ambientInput(const object& source,const RoomTable& rooms,const d3scene::TerrainState& terrain) {
+    d3scene::ModelAmbientInput input;
+    using Source = d3scene::ModelAmbientInput::Source;
     const bool outside = OBJECT_OUTSIDE(&source);
     const bool volume = source.effect_info && (source.effect_info->type_flags & EF_VOLUME_LIT);
     if (outside) {
-        if (source.type == OBJ_POWERUP) return color;
-        const float scalar = d3scene::sampleTerrainExposure(terrain.asset->grid(),
-            {source.pos.x,source.pos.y,source.pos.z},CELLNUM(source.roomnum));
-        color = {scalar,scalar,scalar};
+        if (source.type == OBJ_POWERUP) return input;
+        input.source = Source::Terrain; input.terrain_cell = CELLNUM(source.roomnum);
+        input.terrain = terrain.asset;
     } else {
         if (source.lighting_render_type == LRT_STATIC ||
-            !(source.lighting_render_type == LRT_GOURAUD || NoLightmaps) || !volume) return color;
+            !(source.lighting_render_type == LRT_GOURAUD || NoLightmaps) || !volume) return input;
         const auto found = rooms.find(source.roomnum);
-        if (found == rooms.end() || (found->second->authored_flags & RF_EXTERNAL)) return color;
-        color = volumeColor(rooms,source.roomnum,source.pos);
+        if (found == rooms.end() || (found->second->authored_flags & RF_EXTERNAL)) return input;
+        input.source = Source::RoomVolume;
+        input.volume = found->second->asset; input.volume_scalar = found->second->light_scalar;
         const auto& effect = *source.effect_info;
         if (effect.type_flags & EF_VOLUME_CHANGING) {
-            const auto old = volumeColor(rooms,effect.volume_old_room,effect.volume_old_pos);
-            const float t = effect.volume_change_time;
-            color = {old.x*t+color.x*(1-t),old.y*t+color.y*(1-t),old.z*t+color.z*(1-t)};
+            input.blend_previous = true;
+            const auto old = rooms.find(effect.volume_old_room);
+            if (old != rooms.end()) { input.previous_volume = old->second->asset; input.previous_scalar = old->second->light_scalar; }
+            input.previous_position = value(effect.volume_old_pos); input.previous_weight = effect.volume_change_time;
         }
     }
     if (volume) {
-        if (source.type == OBJ_ROBOT) {
-            const float minimum = outside ? .25f : .1f;
-            color = {std::max(minimum,color.x),std::max(minimum,color.y),std::max(minimum,color.z)};
-        }
+        if (source.type == OBJ_ROBOT) input.minimum = outside ? .25f : .1f;
         if (source.type == OBJ_PLAYER) {
             if ((Players[source.id].flags & PLAYER_FLAGS_HEADLIGHT) ||
-                ((Game_mode & GM_MULTI) && (Netgame.flags & NF_BRIGHT_PLAYERS))) return {1,1,1};
+                ((Game_mode & GM_MULTI) && (Netgame.flags & NF_BRIGHT_PLAYERS))) return {};
             if (!outside && (Game_mode & GM_MULTI)) {
                 vector velocity = source.mtype.phys_info.velocity;
-                const float speed = 1+std::min(vm_GetMagnitudeFast(&velocity)/20.f,1.f);
-                color = {std::min(1.f,color.x*speed),std::min(1.f,color.y*speed),std::min(1.f,color.z*speed)};
+                input.multiplier = 1+std::min(vm_GetMagnitudeFast(&velocity)/20.f,1.f);
+                input.clamp_after_multiplier = true;
             }
         }
     }
-    return color;
+    return input;
 }
 }
 
@@ -221,6 +213,7 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::Presenta
     data.model_instances.reserve(data.objects.size()+3);
     data.model_variants.reserve(previous_frame ? previous->model_variants.size() : data.objects.size());
     if (previous_frame) data.model_pose_inputs.reserve(previous->model_pose_inputs.size());
+    if (previous_frame) data.model_ambient_inputs.reserve(previous->model_ambient_inputs.size());
     const bool audit_geometry = FindArg("-scene-geometry-revision-audit") != 0;
     const bool lod_probe = SceneGeometryInspection() && FindArg("-scene-lod-probe");
     const bool deformation_probe = SceneGeometryInspection() && FindArg("-scene-deformation-probe");
@@ -261,6 +254,9 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::Presenta
         instance.identity = uint64_t(owner.handle)+1;
         instance.owner = owner.handle; instance.has_owner = true; instance.room = owner.room;
         instance.current = owner.current; instance.previous = owner.previous; instance.has_previous = owner.has_previous;
+        instance.ambient_input = data.appendAmbientInput(ambientInput(*source,rooms,data.terrain));
+        auto effect = appearance(*source);
+        if (deformation_probe) effect.deformation = .2f;
         int model_number = source->type == OBJ_MARKER ? Marker_polynum : source->rtype.pobj_info.model_num;
         if (source->type == OBJ_BUILDING && (source->flags & OF_USE_DESTROYED_POLYMODEL) &&
             Object_info[source->id].lo_render_handle >= 0) model_number = Object_info[source->id].lo_render_handle;
@@ -312,12 +308,7 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::Presenta
             const d3scene::PreparedModel* history = nullptr;
             if (old) for (const auto& previous_variant : previous->modelsFor(old->second))
                 if (previous_variant.asset->id() == variant.asset->id()) { history = &previous_variant; break; }
-            const auto ambient = ambientColor(*source,rooms,data.terrain);
-            auto effect = appearance(*source);
-            // Explicit inspection fixture: exercises prepared-position uploads even
-            // when a saved scene has no active cloak/deformation. Never mutates game state.
-            if (deformation_probe) effect.deformation = .2f;
-            variant.modulation = {ambient,effect.color,effect.alpha};
+            variant.modulation = {{1,1,1},effect.color,effect.alpha};
             const bool directional = source->lighting_render_type != LRT_STATIC &&
                 (source->lighting_render_type == LRT_GOURAUD || NoLightmaps);
             // The saved per-object UV layout is not the shared model's topology.

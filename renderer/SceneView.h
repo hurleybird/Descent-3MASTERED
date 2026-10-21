@@ -40,7 +40,7 @@ bool excludesObject(const View&,uint32_t handle);
 bool excludesSurface(const View&,RoomSurfaceId);
 uint64_t viewImageSource(const View&,uint64_t slot);
 std::vector<size_t> orderViewImages(const std::vector<ViewImageRequest>&);
-struct PlanarViewPlan { View consumer; std::vector<ViewImageRequest> images; };
+struct PlanarViewPlan;
 // Single-bounce image schedule from the consumer's visible planar groups.
 // Child cameras include the camera rig, exclude their own film and render other
 // mirrors as opaque authored films. No simulation or shared material mutation.
@@ -82,6 +82,25 @@ struct ViewVisibility {
     ViewQueryStats stats;
     bool exterior_visible = false;
 };
+// Executable view preparation owns the exact immutable frame it queried.
+// Consumers cannot replace its camera/collection while retaining old results.
+// Image scheduling may bind producer images, which do not change visibility.
+class PreparedView {
+    PresentationRef frame_;
+    View view_;
+    ViewVisibility visibility_;
+    PreparedView(PresentationRef frame,View view,ViewVisibility visibility) :
+        frame_(std::move(frame)),view_(std::move(view)),visibility_(std::move(visibility)) {}
+    friend PreparedView prepareView(const Presentation&,const View&);
+    friend PlanarViewPlan planPlanarViews(const Presentation&,const View&,uint32_t);
+public:
+    const Presentation& frame() const { return *frame_; }
+    const View& view() const { return view_; }
+    const ViewVisibility& visibility() const { return visibility_; }
+};
+PreparedView prepareView(const Presentation&,const View&);
+VisibilityReport renderView(const PreparedView&);
+struct PlanarViewPlan { PreparedView consumer; std::vector<ViewImageRequest> images; };
 enum class ViewPassKind { Background, OpaqueWorld, SnapshotOpaqueDepth, ExportOpaqueScene, LateWorld, EvaluateWorldOcclusion, CompositeSurfaces, DepthSurface };
 struct ViewProducts { bool opaque_scene = false, occlusion = false; };
 struct ViewPass {

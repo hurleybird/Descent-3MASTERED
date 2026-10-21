@@ -2,6 +2,16 @@
 
 ## October 21 resumed work — supersedes restart pause below
 
+Newest state: prepared-view handoff and sparse demand-resolved model ambient
+are built, tested and image-compared. Verification uses `prepared-view.exe`.
+No captures or samplers running at this checkpoint. The fresh short corpus is
+still two ahead/six behind, with considerable timing noise; target NOT achieved.
+Continue CPU work; do not yield unless requested or included usage reaches 0.
+Last usage check 33% remaining. Exact evidence is at the top of
+`renderer-cpu-ownership-repair.md`. Main checkout/Candidate/Previous untouched.
+Next: separate frame-constant GPU tables from per-view stream uploads; profile
+reflection dependency traversal. Use longer paired timings for contested gains.
+
 Latest: compact terrain patch/material separation and support/rest bounds are
 built and image-verified. Current binary `out/perf-checkpoints/terrain-bindings.exe`.
 Latest paired corpus has three scenes ahead, five behind; exact evidence and

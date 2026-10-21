@@ -11,6 +11,7 @@ void appendSurfaceLightIndices(const FrameData&,LightCandidateRange candidates,
 float lightAttenuation(const Light&, Vec3 world);
 uint32_t visualNoise(double time, uint32_t key, uint32_t salt);
 Vec3 sampleVolume(const VolumeGrid&,Vec3 position);
+Vec3 resolveModelAmbient(const ModelAmbientInput&,Vec3 position,Vec3 constant);
 // Borrowed input for simulation adapters only; never retained in a presentation.
 struct VolumeGridView {
     Vec3 origin;

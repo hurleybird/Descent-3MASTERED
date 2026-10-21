@@ -2526,7 +2526,7 @@ void GL4Renderer::RenderForeground(const d3scene::Presentation& frame,
 		GL4ClearBuffers(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 		cockpit_scene_frame_active = true;
 		try {
-			for (const auto& view : layer.scene_views) RenderSceneView(frame,view);
+			for (const auto& view : layer.scene_views) RenderSceneView(d3scene::prepareView(frame,view));
 			ClearPostPresentAlpha();
 			if (!ResolveCockpitLayerToPostComposite()) Error("Foreground image resolve failed");
 			BlendPostCompositeOverPostPresent();
@@ -2536,7 +2536,7 @@ void GL4Renderer::RenderForeground(const d3scene::Presentation& frame,
 		}
 		cockpit_scene_frame_active = false;
 	}
-	for (const auto& view : layer.display_views) RenderSceneView(frame,view);
+	for (const auto& view : layer.display_views) RenderSceneView(d3scene::prepareView(frame,view));
 	UseDrawVAO();
 }
 

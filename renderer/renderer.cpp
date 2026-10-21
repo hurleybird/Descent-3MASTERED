@@ -32,8 +32,12 @@ d3scene::VisibilityReport d3scene::renderView(const Presentation& frame, const V
 {
 	if (!view.geometry_inspection)
 		frame.requireExecutable();
-	validateView(view);
-	return renderer_inst->RenderSceneView(frame, view);
+	return renderView(prepareView(frame,view));
+}
+d3scene::VisibilityReport d3scene::renderView(const PreparedView& prepared)
+{
+	if (!prepared.view().geometry_inspection) prepared.frame().requireExecutable();
+	return renderer_inst->RenderSceneView(prepared);
 }
 static oeApplication* Renderer_app;
 void d3scene::renderViewImages(const Presentation& frame,const std::vector<ViewImageRequest>& images)

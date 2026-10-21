@@ -6,6 +6,31 @@
 #include <cmath>
 
 namespace d3scene {
+Vec3 resolveModelAmbient(const ModelAmbientInput& input,Vec3 position,Vec3 constant) {
+    if (input.source == ModelAmbientInput::Source::Constant) return constant;
+    const auto volume = [](const RoomAssetRef& asset,float scalar,Vec3 position) {
+        if (!asset || asset->volume().colors.empty()) return Vec3{1,1,1};
+        const auto color = sampleVolume(asset->volume(),position);
+        return Vec3{color.x*scalar,color.y*scalar,color.z*scalar};
+    };
+    Vec3 color;
+    if (input.source == ModelAmbientInput::Source::Terrain) {
+        const float scalar = sampleTerrainExposure(input.terrain->grid(),position,input.terrain_cell);
+        color = {scalar,scalar,scalar};
+    } else {
+        color = volume(input.volume,input.volume_scalar,position);
+        if (input.blend_previous) {
+            const auto old = volume(input.previous_volume,input.previous_scalar,input.previous_position);
+            const float t = input.previous_weight;
+            color = {old.x*t+color.x*(1-t),old.y*t+color.y*(1-t),old.z*t+color.z*(1-t)};
+        }
+    }
+    if (input.minimum > 0)
+        color = {std::max(input.minimum,color.x),std::max(input.minimum,color.y),std::max(input.minimum,color.z)};
+    if (input.clamp_after_multiplier)
+        color = {std::min(1.f,color.x*input.multiplier),std::min(1.f,color.y*input.multiplier),std::min(1.f,color.z*input.multiplier)};
+    return color;
+}
 float roomLightScalar(float time, uint8_t pulse, uint8_t offset, uint32_t room, bool strobe, bool flicker, bool editor) {
     if (editor) return 1;
     float scalar = 1;

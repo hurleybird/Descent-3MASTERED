@@ -671,6 +671,33 @@ int runModelSceneTests() {
             if (!held) held = published;
         }
         auto next_inputs = held->data();
+        {
+            auto ambient_inputs = held->data();
+            VolumeGrid grid; grid.width = grid.height = grid.depth = 1; grid.colors = {255};
+            ambient_inputs.model_ambient_inputs.resize(1);
+            ambient_inputs.model_instances[0].ambient_input = 0;
+            auto& ambient = ambient_inputs.model_ambient_inputs[0];
+            ambient.source = ModelAmbientInput::Source::RoomVolume;
+            ambient.volume = assets.publishRoom(95,modelGeometry().parts[0].geometry,grid);
+            ambient.volume_scalar = .375f;
+            const auto unresolved = Presentation::freeze(ambient_inputs);
+            grid.colors[0] = 0;
+            assets.publishRoom(95,modelGeometry().parts[0].geometry,grid);
+            ambient.volume_scalar = 0;
+            check(unresolved->data().rooms.empty() && unresolved->resolvedModel(0,0).modulation.ambient.x == .375f,
+                "Deferred ambient borrowed mutable or removed room data");
+            check(unresolved->data().modelsFor(0)[0].modulation.ambient.x == 1,
+                "Ambient resolution mutated captured model inputs");
+            ambient.minimum = -1;
+            rejects([&] { Presentation::freeze(ambient_inputs); });
+            ambient = {}; ambient.source = ModelAmbientInput::Source::Terrain;
+            rejects([&] { Presentation::freeze(ambient_inputs); });
+            ambient = {}; ambient_inputs.model_instances[0].ambient_input = 1;
+            rejects([&] { Presentation::freeze(ambient_inputs); });
+            FrameData constant;
+            check(constant.appendAmbientInput({}) == UINT32_MAX && constant.model_ambient_inputs.empty(),
+                "Constant lighting allocated an ambient field record");
+        }
         next_inputs.simulation_time += .1;
         next_inputs.modelsFor(0)[0].previous_draw_mask = 1;
         const auto next_frame = Presentation::freeze(next_inputs);

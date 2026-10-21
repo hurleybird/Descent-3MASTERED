@@ -6,6 +6,7 @@
 #include "SceneFog.h"
 #include "SceneGeometry.h"
 #include "SceneDependencies.h"
+#include "SceneLighting.h"
 #include <atomic>
 #include <cmath>
 #include <limits>
@@ -538,10 +539,13 @@ void compileModelBounds(const Transform& placement,PreparedModel& model) {
 const PreparedModel& Presentation::resolvedModel(size_t instance,size_t variant) const {
     const auto& object = data_.model_instances.at(instance);
     const auto& source = data_.variants(object).at(variant);
-    if (!source.deferred_pose) return source;
+    const auto& ambient = data_.ambientFor(object);
+    if (!source.deferred_pose && ambient.source == ModelAmbientInput::Source::Constant) return source;
     auto& cached = resolved_models_.at(source.resolved_index);
     if (cached) return *cached;
     auto result = std::make_unique<PreparedModel>(source);
+    result->modulation.ambient = resolveModelAmbient(ambient,object.current.position,source.modulation.ambient);
+    if (source.deferred_pose) {
     const auto& animation = *source.asset->geometry().animation;
     const auto input = [&](PoseInputRange range) { return data_.poseInputs(range).data(); };
     const auto& rest = source.asset->geometry().rest_pose;
@@ -572,6 +576,7 @@ const PreparedModel& Presentation::resolvedModel(size_t instance,size_t variant)
     }
     result->deferred_pose = false;
     compileModelBounds(object.current,*result);
+    }
     cached = std::move(result);
     return *cached;
 }
@@ -609,6 +614,7 @@ Presentation::~Presentation() {
     reclaim(data_.model_instances,clean.model_instances);
     reclaim(data_.model_variants,clean.model_variants);
     reclaim(data_.model_pose_inputs,clean.model_pose_inputs);
+    reclaim(data_.model_ambient_inputs,clean.model_ambient_inputs);
     reclaim(data_.lights,clean.lights);
     reclaim(data_.light_candidate_indices,clean.light_candidate_indices);
     reclaim(data_.images,clean.images);
@@ -845,11 +851,26 @@ PresentationRef Presentation::complete(FrameData data) {
     for (const auto& object : data.objects)
         for (const auto hidden : object.camera_hidden_objects)
             require(objects.count(hidden) != 0,"Camera rig references a missing object allocation");
+    for (const auto& ambient : data.model_ambient_inputs) {
+        require(ambient.source == ModelAmbientInput::Source::Constant ||
+            ambient.source == ModelAmbientInput::Source::RoomVolume || ambient.source == ModelAmbientInput::Source::Terrain,
+            "Invalid ambient source");
+        require(finite(ambient.previous_position) && std::isfinite(ambient.previous_weight) &&
+            std::isfinite(ambient.minimum) && ambient.minimum >= 0 && std::isfinite(ambient.multiplier) &&
+            std::isfinite(ambient.volume_scalar) && ambient.volume_scalar >= 0 &&
+            std::isfinite(ambient.previous_scalar) && ambient.previous_scalar >= 0,
+            "Invalid ambient inputs");
+        for (const auto* volume : {ambient.volume.get(),ambient.previous_volume.get()})
+            require(!volume || volume->id().lifetime == data.scene_lifetime,"Stale ambient volume");
+        require(ambient.source != ModelAmbientInput::Source::Terrain || ambient.terrain,"Missing ambient terrain");
+        require(!ambient.terrain || ambient.terrain->id().lifetime == data.scene_lifetime,"Stale ambient terrain");
+    }
     size_t model_end = 0;
     for (const auto& object : data.model_instances) {
         require(object.identity && model_instances.emplace(object.identity,size_t(&object-data.model_instances.data())).second,"Duplicate or absent model instance identity");
         require(!object.has_owner || objects.count(object.owner),"Model owner is not part of this presentation");
         require(finite(object.current) && finite(object.previous),"Invalid model placement");
+        data.ambientFor(object);
         require(object.model_count && object.model_begin == model_end,"Model variants must partition frame storage");
         const auto variants = data.variants(object);
         model_end += variants.size();

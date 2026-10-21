@@ -881,8 +881,9 @@ d3scene::VisibilityReport RenderGameSceneView(const d3scene::Presentation& frame
     // Diagnostic views do not mark rooms explored or tell AI it was observed.
     // The gameplay feedback compiler barrier remains until the normal executor
     // and its visibility policy have been migrated.
-    auto planar = d3scene::planPlanarViews(frame,view,Render_preferred_state.msaa_samples);
-    view = std::move(planar.consumer);
+    auto planar = [&] { PERF_MARKER_SCOPE("Scene.PrepareView");
+        return d3scene::planPlanarViews(frame,view,Render_preferred_state.msaa_samples); }();
+    view = planar.consumer.view();
     if (FindArg("-scene-view-image-probe") && view.kind == d3scene::ViewKind::Main) {
         d3scene::ViewImageRequest image;
         image.image = SceneViewImageProbe; image.view = view;
@@ -899,7 +900,7 @@ d3scene::VisibilityReport RenderGameSceneView(const d3scene::Presentation& frame
         planar.images.push_back(std::move(copy)); planar.images.push_back(std::move(image));
     }
     d3scene::renderViewImages(frame,planar.images);
-    auto observations = d3scene::renderView(frame, view);
+    auto observations = d3scene::renderView(planar.consumer);
     if (FindArg("-scene-observation-probe") &&
         (view.kind == d3scene::ViewKind::Main || view.kind == d3scene::ViewKind::Auxiliary)) {
         auto inspection = view;

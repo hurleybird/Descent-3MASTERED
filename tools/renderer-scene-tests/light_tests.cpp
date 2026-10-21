@@ -73,6 +73,21 @@ int runLightTests() {
     mesh.vertices = {{-1,-1,5},{0,1,5},{1,-1,5}};
     mesh.polygons.push_back({{0,0,-1},{{0},{1},{2}}});
     auto volume_asset = assets.publishRoom(8,mesh,grid);
+    {
+        ModelAmbientInput input;
+        const Vec3 authored{.2f,.4f,.6f};
+        check(resolveModelAmbient(input,{},authored).z == authored.z,"Constant model ambient changed");
+        input.source = ModelAmbientInput::Source::RoomVolume;
+        input.volume = volume_asset; input.volume_scalar = .5f;
+        check(resolveModelAmbient(input,{},authored).x == .5f,"Deferred ambient lost captured room pulse");
+        input.blend_previous = true; input.previous_weight = .25f;
+        input.previous_volume = volume_asset; input.previous_scalar = .25f;
+        check(resolveModelAmbient(input,{},authored).x == .4375f,"Deferred volume transition changed operation order");
+        input.minimum = .6f; input.clamp_after_multiplier = true; input.multiplier = 2;
+        check(resolveModelAmbient(input,{},authored).x == 1,"Deferred ambient lost minimum/speed clamp");
+        input = {}; input.source = ModelAmbientInput::Source::RoomVolume; input.volume_scalar = 0;
+        check(resolveModelAmbient(input,{},authored).x == 1,"Missing volume applied room pulse to fallback white");
+    }
     check(assets.publishRoom(8,mesh,grid) == volume_asset,"Unchanged light volume lost revision");
     grid.colors[0] = 0;
     check(assets.publishRoom(8,mesh,grid)->id() != volume_asset->id() && volume_asset->volume().colors[0] == 255,

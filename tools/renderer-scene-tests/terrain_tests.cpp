@@ -129,6 +129,16 @@ int runTerrainTests() {
     clipped.cells[0].clip_plane = 2; rejects(clipped);
     const uint8_t exposure[] = {1,2,4,8};
     const TerrainExposureView field{exposure,2,2,16,43};
+    {
+        TerrainGrid small; small.width = small.depth = 2; small.heights.resize(4);
+        small.cells.resize(1); small.materials.push_back({7,2});
+        small.sky_visibility.assign(exposure,exposure+4);
+        ModelAmbientInput ambient; ambient.source = ModelAmbientInput::Source::Terrain;
+        ambient.terrain = assets.publishTerrain(small); ambient.minimum = .3f;
+        check(resolveModelAmbient(ambient,{8,0,8},{1,1,1}).x == .3f);
+        small.sky_visibility.assign(4,255); assets.publishTerrain(small);
+        check(resolveModelAmbient(ambient,{8,0,8},{1,1,1}).x == .3f);
+    }
     check(sampleTerrainExposure(field,{0,0,0},0) == 1);
     check(sampleTerrainExposure(field,{0,21.5f,0},0) == .5f);
     check(sampleTerrainExposure(field,{8,0,8},0) == .25f);
