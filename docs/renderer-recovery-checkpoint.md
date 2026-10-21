@@ -27,10 +27,28 @@ convert each to visible contribution before bilinear XY blending. Four reads
 instead of one; roof720motion error/flicker .676838/.777628, effectively unchanged.
 Raw fog-series-edge-motion-visible320, out/fog-visible320-metrics.csv. Saturation
 order does not explain the roof undersampling in this test.
-Current UNCOMMITTED shader experiment: positive cubic B-spline XY reconstruction,
-four trilinear reads; depth law unchanged. Build fog-cubic-filter-build.log.
-Running/next metrics: fog-series-edge-motion-cubic320 /out/fog-cubic320-metrics.csv.
-Do not claim fixed; decide from motion/edge error and GPU cost, remove if rejected.
+Rejected cubic B-spline reconstruction (removed): four trilinear reads, unchanged
+depth law. Roof720motion error/flicker .917781/1.024906, worse than linear.
+Raw fog-series-edge-motion-cubic320 /out/fog-cubic320-metrics.csv.
+
+NEW selective fog refinement: field shader reads four neighbouring columns at
+the endpoint depth, compares visible RGB/opacity contribution ranges, and uses
+the exact boundary integrator if any range exceeds max(1/255,25% of maximum).
+Otherwise bilinear field reconstruction remains. Positive contrast heuristic,
+NOT a guaranteed error bound (thin features missed by every ray can evade it).
+No history/jitter. Exact/no-fog programs retain their specialized paths.
+Initial absolute-only1/255 rule improved quality but cost4.54ms4K. Relative rule
+retains almost all quality and costs2.50ms4K. 720pmotion error/flicker .068799/.098485
+vs linear .676760/.777600; full64frame4K .069469/.099052 vs .668850/.769273 (~90%/87%
+reductions). Raw fog-series-{edge-motion,roof4k-motion}-relative320, metrics in
+out/fog-relative{320,4k320}-metrics.csv. Initial absolute trial adaptive320 and
+adaptive4k*; normal4K image visually inspected with original clear boundary.
+Fresh500frame4K save002 paired old/new CPU3.10/2.15 GPU2.64/2.54ms; withAO/bloom
+CPU3.59/2.41 GPU12.52/11.96ms. Modest GPU win, effects not strictly identical.
+Raw fog-refine-paired-{old4k,new4k,old4k-effects,new4k-effects}.
+Contract tests fog-refinement-tests.log pass. Runtime currently refined320.
+Qualification running/next: fog-refine-roof-continuous{4k,-exact4k},
+fog-refine-msaa-multiview. No new packaged preview yet; v2 untouched.
 
 LATEST: bounded compact optical-field storage. Field remains opt-in, exact fog
 remains default. The field now selects RGBA16F when a conservative optical-depth

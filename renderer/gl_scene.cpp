@@ -281,6 +281,7 @@ vec3 applySceneFog(vec3 radiance,out float transmission) {
     }
     float optical_depth = 0.0;
     vec3 weighted_color = vec3(0);
+    bool refine_fog = true;
 #if SCENE_FOG_MODE == 2
     {
         float z = max(0.0,dot(delta,camera_forward));
@@ -290,10 +291,27 @@ vec3 applySceneFog(vec3 radiance,out float transmission) {
         float low_z = sample_index*sample_index/(slices*slices)*fog_field_range;
         float high_z = (sample_index+1.0)*(sample_index+1.0)/(slices*slices)*fog_field_range;
         float fraction = clamp((z-low_z)/(high_z-low_z),0.0,1.0);
-        vec4 integrated = texture(scene_fog_field,vec3(uv*0.5+0.5,(sample_index+fraction+0.5)/(slices+1.0)));
+        vec2 dimensions = vec2(textureSize(scene_fog_field,0).xy);
+        vec2 location = (uv*0.5+0.5)*dimensions-0.5;
+        vec2 base = floor(location), blend = fract(location);
+        float layer = (sample_index+fraction+0.5)/(slices+1.0);
+        vec4 integrated = vec4(0), minimum = vec4(1.e30), maximum = vec4(-1.e30);
+        for (int y = 0; y < 2; ++y) for (int x = 0; x < 2; ++x) {
+            vec4 column = texture(scene_fog_field,vec3((base+vec2(x,y)+0.5)/dimensions,layer));
+            integrated += column*(x == 0 ? 1.0-blend.x : blend.x)*(y == 0 ? 1.0-blend.y : blend.y);
+            vec4 visible = column/max(1.0,column.a);
+            minimum = min(minimum,visible); maximum = max(maximum,visible);
+        }
+        // Refine strong relative transitions, not ordinary smooth gradients.
+        // This is a contrast heuristic, not a bound on unsampled thin features.
+        // The absolute floor avoids chasing sub-code-value quantization noise.
+        refine_fog = any(greaterThan(maximum-minimum,max(vec4(1.0/255.0),maximum*0.25)));
         optical_depth = integrated.a; weighted_color = integrated.rgb;
     }
-#elif SCENE_FOG_MODE == 1
+#endif
+#if SCENE_FOG_MODE != 0
+    if (refine_fog) {
+    optical_depth = 0.0; weighted_color = vec3(0);
     for (int candidate = 0; candidate < fog_volume_count; ++candidate) {
         int entry = fog_volume_offset+candidate*3;
         int volume = texelFetch(scene_influences,entry).r;
@@ -326,6 +344,7 @@ vec3 applySceneFog(vec3 radiance,out float transmission) {
         // only the part of the ray actually inside connected fog space.
         float amount = clamp(path,0.0,interval)*forward_scale/appearance.w;
         optical_depth += amount; weighted_color += appearance.rgb*amount;
+    }
     }
 #endif
     if (optical_depth > 0.0) {
