@@ -2,6 +2,14 @@
 
 ## October 21 resumed work — supersedes restart pause below
 
+STOPPED AT INCLUDED USAGE 0% (tool reported100% used). User allows only a small
+accidental overrun; do not resume without renewed user direction/allowance.
+Final finalbase-* benchmark loop and its exact capture child were stopped.
+That sweep is PARTIAL and must not be reported as a completed comparison.
+No active sampler/build. Runtime debug-opt-in.exe remains isolated and matches
+the last compiled PDB. Main/Candidate/Previous Candidate untouched. Goal NOT met.
+Last complete full comparison and subsequent two-scene results are below.
+
 Latest runtime debug-opt-in.exe separates -scene-inspection renderer selection
 from synchronous GL debug callbacks. Explicit -scene-gl-debug or existing
 -scene-geometry-revision-audit enables those diagnostics. Unconditional GL error
