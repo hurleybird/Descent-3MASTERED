@@ -177,6 +177,7 @@ class GL4Renderer : public IRenderer
 	} scene_uniforms;
 	GLuint scene_light_buffer = 0, scene_light_texture = 0;
 	GLuint scene_draw_buffer = 0;
+	size_t scene_draw_record_bytes = 0;
 	struct SceneDrawPacket { const d3scene::SurfaceBinding* binding; GLuint vao; ElementRange range; d3scene::MaterialPolicy policy; };
 	std::vector<SceneDrawPacket> scene_draw_packets;
 	std::vector<float> scene_draw_records;
@@ -202,9 +203,10 @@ class GL4Renderer : public IRenderer
 		void Destroy();
 	};
 	std::map<std::pair<d3scene::ViewKind,uint64_t>,SceneDepthSnapshot> scene_depth_snapshots;
-	uint64_t scene_frame_sequence = 0;
+	std::weak_ptr<const d3scene::Presentation> scene_frame_owner;
 	std::vector<ElementRange> scene_mesh_position_ranges;
-	void UploadSceneFrame(const d3scene::Presentation&, const d3scene::ViewVisibility* demand = nullptr);
+	void PrepareSceneViewTables(const d3scene::PreparedView&);
+	void BindSceneTables();
 	struct SceneImageGpu {
 		d3scene::AssetId id;
 		GLuint texture = 0;

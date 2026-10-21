@@ -498,7 +498,8 @@ void GL4Renderer::DestroySceneResources() {
     scene_reflection_buffer = scene_reflection_texture = 0;
     scene_reflection_assets.clear(); scene_reflection_dependencies.clear();
     scene_light_buffer = scene_influence_buffer = scene_light_texture = scene_influence_texture = 0;
-    scene_frame_sequence = 0;
+    scene_frame_owner.reset();
+    scene_draw_record_bytes = 0;
     scene_asset_lifetime = 0;
     scene_shader.Destroy();
 }
@@ -561,18 +562,30 @@ void GL4Renderer::BindSceneImage(const d3scene::ImageAsset& image,int unit,bool 
     glBindSampler(unit,sampler.sampler);
 }
 
-void GL4Renderer::UploadSceneFrame(const d3scene::Presentation& frame, const d3scene::ViewVisibility* demand) {
+void GL4Renderer::PrepareSceneViewTables(const d3scene::PreparedView& prepared) {
     PERF_MARKER_SCOPE("Scene.UploadFrame");
+    const auto& frame = prepared.frame();
+    const auto& demand = prepared.visibility();
+    const auto resident = scene_frame_owner.lock();
+    const bool new_frame = resident.get() != &frame;
     if (!scene_light_buffer) {
-        glGenBuffers(1,&scene_light_buffer); glGenTextures(1,&scene_light_texture);
-        glGenBuffers(1,&scene_influence_buffer); glGenTextures(1,&scene_influence_texture);
-        glGenBuffers(1,&scene_uv_buffer); glGenTextures(1,&scene_uv_texture);
-        glGenBuffers(1,&scene_position_buffer); glGenTextures(1,&scene_position_texture);
-        glGenBuffers(1,&scene_reflection_buffer); glGenTextures(1,&scene_reflection_texture);
+        const auto create = [](GLuint& buffer,GLuint& texture,GLenum format,GLuint unit) {
+            glGenBuffers(1,&buffer); glBindBuffer(GL_TEXTURE_BUFFER,buffer);
+            glBufferData(GL_TEXTURE_BUFFER,16,nullptr,GL_STREAM_DRAW);
+            glGenTextures(1,&texture); glActiveTexture(GL_TEXTURE0+unit);
+            glBindTexture(GL_TEXTURE_BUFFER,texture); glTexBuffer(GL_TEXTURE_BUFFER,format,buffer);
+        };
+        // A texture-buffer association follows the buffer object across data
+        // store replacements. Establish it once; later views only bind it.
+        create(scene_light_buffer,scene_light_texture,GL_RGBA32F,2);
+        create(scene_influence_buffer,scene_influence_texture,GL_R32I,3);
+        create(scene_uv_buffer,scene_uv_texture,GL_RG32F,4);
+        create(scene_position_buffer,scene_position_texture,GL_RGB32F,5);
+        create(scene_reflection_buffer,scene_reflection_texture,GL_RGB32F,9);
     }
     // Every view owns its submission tables. Binding restores below do not
     // rebuild them; auxiliary views supply their own visibility, never the main view's.
-    if (demand) {
+    {
         static thread_local std::vector<uint8_t> rooms, meshes, surfaces;
         static thread_local std::vector<const d3scene::PreparedModelPart*> parts;
         static thread_local std::vector<std::pair<uint32_t,uint32_t>> visible_models;
@@ -581,7 +594,7 @@ void GL4Renderer::UploadSceneFrame(const d3scene::Presentation& frame, const d3s
         surfaces.assign(frame.data().compiled_surface_count,0);
         parts.clear();
         visible_models.clear();
-        for (const auto& item : demand->surfaces) {
+        for (const auto& item : demand.surfaces) {
             if (item.model) {
                 parts.push_back(&frame.resolvedModel(item.model_instance_index,item.model_variant).parts[item.part_index]);
                 visible_models.emplace_back(item.model_instance_index,item.model_variant);
@@ -603,6 +616,7 @@ void GL4Renderer::UploadSceneFrame(const d3scene::Presentation& frame, const d3s
         };
         PerfMarkersBegin("Scene.Upload.Tables");
         static thread_local std::vector<float> lights;
+        if (new_frame) {
         lights.clear();
         for (const auto& light : frame.data().lights) {
             const float record[16] = {light.position.x,light.position.y,light.position.z,light.radius,
@@ -612,6 +626,7 @@ void GL4Renderer::UploadSceneFrame(const d3scene::Presentation& frame, const d3s
             lights.insert(lights.end(),record,record+16);
         }
         if (lights.empty()) lights.resize(16,0);
+        }
         static thread_local std::vector<int32_t> indices;
         static thread_local std::vector<d3scene::Vec2> uvs;
         static thread_local std::vector<d3scene::Vec3> reflections;
@@ -624,7 +639,7 @@ void GL4Renderer::UploadSceneFrame(const d3scene::Presentation& frame, const d3s
             else for (const auto& surface : table) collect(surface);
         };
         bool rebuild_reflections = false;
-        if (scene_frame_sequence != frame.data().sequence) {
+        if (new_frame) {
         scene_meshes.releaseExpired([](SceneMeshGpu& mesh) {
             if (mesh.vao) glDeleteVertexArrays(1,&mesh.vao);
             if (mesh.buffer) glDeleteBuffers(1,&mesh.buffer);
@@ -634,8 +649,8 @@ void GL4Renderer::UploadSceneFrame(const d3scene::Presentation& frame, const d3s
         for (const auto& room : frame.data().rooms) collectTable(room.surfaces);
         for (const auto& surface : frame.data().terrain.materials) collect(surface);
         for (const auto& mesh : frame.data().meshes) collect(mesh.surface);
-        for (const auto& model : frame.data().model_variants) for (const auto& part : model.parts)
-            collectTable(part.surfaces);
+        for (const auto& model : frame.data().model_variants)
+            scene_reflection_dependencies.add(model.parts.summary()->reflections);
         rebuild_reflections = scene_reflection_dependencies.finish();
         }
         if (rebuild_reflections) { scene_reflection_assets.clear(); scene_room_bindings.clear(); }
@@ -812,25 +827,25 @@ void GL4Renderer::UploadSceneFrame(const d3scene::Presentation& frame, const d3s
         if (uvs.empty()) uvs.push_back({0,0});
         glBindBuffer(GL_TEXTURE_BUFFER,scene_uv_buffer);
         glBufferData(GL_TEXTURE_BUFFER,uvs.size()*sizeof(d3scene::Vec2),uvs.data(),GL_STREAM_DRAW);
-        glBindBuffer(GL_TEXTURE_BUFFER,scene_light_buffer);
-        glBufferData(GL_TEXTURE_BUFFER,lights.size()*sizeof(float),lights.data(),GL_STREAM_DRAW);
+        if (new_frame) {
+            glBindBuffer(GL_TEXTURE_BUFFER,scene_light_buffer);
+            glBufferData(GL_TEXTURE_BUFFER,lights.size()*sizeof(float),lights.data(),GL_STREAM_DRAW);
+        }
         glBindBuffer(GL_TEXTURE_BUFFER,scene_influence_buffer);
         glBufferData(GL_TEXTURE_BUFFER,indices.size()*sizeof(int32_t),indices.data(),GL_STREAM_DRAW);
-        scene_frame_sequence = frame.data().sequence;
+        if (new_frame) scene_frame_owner = frame.shared_from_this();
         PerfMarkersEnd("Scene.Upload.GLBuffers");
-        if (AutomatedCapturePending()) AutomatedCaptureLog("profile upload bindings=%u positions=%u uvs=%u influences=%u reflection_rebuild=%d",
-            unsigned(scene_surface_ranges.size()),unsigned(positions.size()),unsigned(uvs.size()),unsigned(indices.size()),rebuild_reflections);
+        if (AutomatedCapturePending()) AutomatedCaptureLog("profile upload bindings=%u positions=%u uvs=%u influences=%u reflection_rebuild=%d frame_constants=%d",
+            unsigned(scene_surface_ranges.size()),unsigned(positions.size()),unsigned(uvs.size()),unsigned(indices.size()),rebuild_reflections,new_frame);
     }
+    BindSceneTables();
+}
+void GL4Renderer::BindSceneTables() {
     glActiveTexture(GL_TEXTURE2); glBindTexture(GL_TEXTURE_BUFFER,scene_light_texture);
-    glTexBuffer(GL_TEXTURE_BUFFER,GL_RGBA32F,scene_light_buffer);
     glActiveTexture(GL_TEXTURE3); glBindTexture(GL_TEXTURE_BUFFER,scene_influence_texture);
-    glTexBuffer(GL_TEXTURE_BUFFER,GL_R32I,scene_influence_buffer);
     glActiveTexture(GL_TEXTURE4); glBindTexture(GL_TEXTURE_BUFFER,scene_uv_texture);
-    glTexBuffer(GL_TEXTURE_BUFFER,GL_RG32F,scene_uv_buffer);
     glActiveTexture(GL_TEXTURE5); glBindTexture(GL_TEXTURE_BUFFER,scene_position_texture);
-    glTexBuffer(GL_TEXTURE_BUFFER,GL_RGB32F,scene_position_buffer);
     glActiveTexture(GL_TEXTURE9); glBindTexture(GL_TEXTURE_BUFFER,scene_reflection_texture);
-    glTexBuffer(GL_TEXTURE_BUFFER,GL_RGB32F,scene_reflection_buffer);
     glActiveTexture(GL_TEXTURE0); Last_texel_unit_set = 0;
 }
 
@@ -1033,7 +1048,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         glUniform1i(scene_uniforms.scene_occlusion,11);
         glUniform1i(scene_uniforms.opaque_depth,7);
     }
-    UploadSceneFrame(presentation,&visibility);
+    PrepareSceneViewTables(prepared);
     check_scene_error("frame upload");
 
     // The pass owns depth/blend/culling policy. No game draw-state capture and
@@ -1128,7 +1143,8 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     glUniform2f(scene_uniforms.scene_raster_extent,float(output.Width()),float(output.Height()));
     const auto& fog_volumes = d3scene::fogVolumes(presentation.data());
     const auto fog_id = presentation.data().fog ? presentation.data().fog->id() : d3scene::AssetId{};
-    const bool upload_fog = !scene_fog_buffer || scene_fog_id != fog_id;
+    const bool new_fog_buffer = !scene_fog_buffer;
+    const bool upload_fog = new_fog_buffer || scene_fog_id != fog_id;
     if (!scene_fog_buffer) { glGenBuffers(1,&scene_fog_buffer); glGenTextures(1,&scene_fog_texture); }
     glBindBuffer(GL_TEXTURE_BUFFER,scene_fog_buffer);
     if (upload_fog) {
@@ -1159,7 +1175,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         glBufferSubData(GL_TEXTURE_BUFFER,(index*16+12)*sizeof(float),sizeof(float),&inside);
     }
     glActiveTexture(GL_TEXTURE6); glBindTexture(GL_TEXTURE_BUFFER,scene_fog_texture);
-    glTexBuffer(GL_TEXTURE_BUFFER,GL_RGBA32F,scene_fog_buffer);
+    if (new_fog_buffer) glTexBuffer(GL_TEXTURE_BUFFER,GL_RGBA32F,scene_fog_buffer);
     glUniform1i(scene_uniforms.fog_volume_count,view.collection == 0 ? static_cast<GLint>(fog_volumes.size()) : 0);
     const auto& exterior_fog = presentation.data().exterior_fog;
     vec(scene_uniforms.exterior_fog_color,exterior_fog.color);
@@ -1176,9 +1192,12 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     // Build compact GPU draw records once, then submit by buffer offset. The
     // program no longer receives dozens of individually named uniforms per face.
     auto& packets = scene_draw_packets; packets.resize(visibility.surfaces.size());
-    GLint record_alignment = 16;
-    glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT,&record_alignment);
-    const size_t record_bytes = ((22*16+size_t(record_alignment)-1)/size_t(record_alignment))*size_t(record_alignment);
+    if (!scene_draw_record_bytes) {
+        GLint alignment = 16;
+        glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT,&alignment);
+        scene_draw_record_bytes = ((22*16+size_t(alignment)-1)/size_t(alignment))*size_t(alignment);
+    }
+    const size_t record_bytes = scene_draw_record_bytes;
     auto& records = scene_draw_records; records.assign(visibility.surfaces.size()*(record_bytes/sizeof(float)),0);
     {
     PERF_MARKER_SCOPE("Scene.DrawRecords");
@@ -1344,7 +1363,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
             ao_preferences.ao_debug_preview = true;
         const auto estimate = ao.Evaluate(inputs,ao_preferences);
         if (!estimate.ao_texture) Error("Scheduled occlusion estimate is missing");
-        UploadSceneFrame(presentation);
+        BindSceneTables();
         glActiveTexture(GL_TEXTURE6); glBindTexture(GL_TEXTURE_BUFFER,scene_fog_texture);
         glActiveTexture(GL_TEXTURE7); glBindTexture(GL_TEXTURE_2D,depth.texture);
         GL_BindFramebufferTexture(estimate.ao_texture,11,GL_LINEAR);
@@ -1435,7 +1454,7 @@ void main() {
         glViewport(viewport[0],viewport[1],viewport[2],viewport[3]);
         // Image-space resolve owns its own bindings. Resume the scene pipeline
         // explicitly, including buffer textures used by both shader stages.
-        UploadSceneFrame(presentation);
+        BindSceneTables();
         glActiveTexture(GL_TEXTURE6); glBindTexture(GL_TEXTURE_BUFFER,scene_fog_texture);
         glActiveTexture(GL_TEXTURE7); glBindTexture(GL_TEXTURE_2D,depth.texture);
         scene_shader.Use();

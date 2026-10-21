@@ -2,6 +2,20 @@
 
 ## October 20 continuation
 
+October 21: GPU table preparation and rebinding are separate operations.
+Frame light records upload once per publication (weak ownership identifies the
+exact frame, not just a sequence integer). View streams remain view-local.
+Buffer-texture associations and uniform-record alignment are established once
+per context, not every view/restore. Model publication also unites reflection
+dependencies, eliminating the GL-side all-part traversal. Tests cover summary
+deduplication, disabled specular and held revisions. Build/tests pass:
+`out/cpu-frame-tables-{build,tests}.log`; binary `frame-tables.exe`.
+Combined probe logs show ONE frame-constant upload across 13 view preparations.
+Probe and both 500-frame dense/wall images are pixel-exact to prepared-view.
+Long interleaved means, frames 100-449: dense parent/current 2.041/2.023 ms;
+wall 1.525/1.487 ms. Small/noisy improvement, not a large claimed speedup.
+Raw `cpu-frame-tables-long-*`; no build overlapped measurements.
+
 October 21: executable views now own their immutable presentation, resolved
 camera and visibility results. Planar scheduling retains that consumer result;
 the GL executor accepts PreparedView, never re-queries its visibility. Raw-view

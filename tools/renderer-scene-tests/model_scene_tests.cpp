@@ -672,6 +672,22 @@ int runModelSceneTests() {
         }
         auto next_inputs = held->data();
         {
+            auto reflective = held->data();
+            ReflectionData reflection; reflection.sources.push_back({{0,1,0},{1,1,1}});
+            const auto asset = assets.publishReflection(19,reflection);
+            for (auto& part : reflective.modelsFor(0)[0].parts) {
+                part.surfaces[0].reflection = asset; part.surfaces[0].specular_strength = 1;
+            }
+            const auto reflected = Presentation::freeze(reflective);
+            const auto& dependencies = *reflected->data().modelsFor(0)[0].parts.summary()->reflections;
+            check(dependencies == std::vector<uint64_t>{asset->id().revision},
+                "Model reflection summary failed to unite part dependencies");
+            for (auto& part : reflective.modelsFor(0)[0].parts) part.surfaces[0].specular_strength = 0;
+            const auto unreflected = Presentation::freeze(reflective);
+            check(unreflected->data().modelsFor(0)[0].parts.summary()->reflections->empty() && dependencies.size() == 1,
+                "Reflection summary changed a held frame or retained disabled specular");
+        }
+        {
             auto ambient_inputs = held->data();
             VolumeGrid grid; grid.width = grid.height = grid.depth = 1; grid.colors = {255};
             ambient_inputs.model_ambient_inputs.resize(1);

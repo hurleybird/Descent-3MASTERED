@@ -72,6 +72,7 @@ void ModelParts::seal(const ModelAsset& asset) {
     auto* summary = &compiled;
     summary->asset = asset.id();
     std::vector<RoomSurfaces::ImageDependency> images;
+    std::vector<uint64_t> reflections;
     for (size_t i = 0; i < size(); ++i) {
         const auto& part = read()[i];
         const auto& geometry = asset.geometry().parts[i];
@@ -94,6 +95,7 @@ void ModelParts::seal(const ModelAsset& asset) {
             }
         }
         images.insert(images.end(),part.surfaces.images().begin(),part.surfaces.images().end());
+        reflections.insert(reflections.end(),part.surfaces.reflections().begin(),part.surfaces.reflections().end());
     }
     const auto key = [](const RoomSurfaces::ImageDependency& d) {
         return std::make_tuple(d.binding,d.handle,d.texture,d.baked,d.format,d.wrap,d.u_scale,d.v_scale,d.classify_alpha);
@@ -101,6 +103,9 @@ void ModelParts::seal(const ModelAsset& asset) {
     std::sort(images.begin(),images.end(),[&](const auto& a,const auto& b) { return key(a)<key(b); });
     images.erase(std::unique(images.begin(),images.end(),[&](const auto& a,const auto& b) { return key(a)==key(b); }),images.end());
     summary->images = std::make_shared<const std::vector<RoomSurfaces::ImageDependency>>(std::move(images));
+    std::sort(reflections.begin(),reflections.end());
+    reflections.erase(std::unique(reflections.begin(),reflections.end()),reflections.end());
+    summary->reflections = std::make_shared<const std::vector<uint64_t>>(std::move(reflections));
     table_->publication = std::move(compiled); table_->sealed = true;
 }
 namespace {

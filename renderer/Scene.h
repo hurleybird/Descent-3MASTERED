@@ -545,6 +545,7 @@ public:
         Bounds rest_bounds;
         bool has_rest_bounds = false;
         std::shared_ptr<const std::vector<RoomSurfaces::ImageDependency>> images;
+        std::shared_ptr<const std::vector<uint64_t>> reflections;
     };
 private:
     using Storage = std::vector<PreparedModelPart>;
