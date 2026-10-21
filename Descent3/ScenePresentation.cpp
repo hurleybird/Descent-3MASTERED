@@ -197,8 +197,12 @@ void prepareImages(d3scene::FrameData& data,MaterialResolution& resolution) {
                 size_t(lightmap.width)*lightmap.height*2});
         } else {
             const int width = bm_w(handle,0), height = bm_h(handle,0); // make resident before borrowing data
+            source.deferred = bm_DeferredPixels(handle);
             const auto* rgba = bm_data_truecolor(handle);
-            if (rgba) {
+            if (source.deferred) {
+                source.format = bm_format(handle) == BITMAP_FORMAT_4444 ? d3scene::ImageFormat::ARGB4444 : d3scene::ImageFormat::ARGB1555;
+                source.mips.push_back({uint32_t(width),uint32_t(height),nullptr,size_t(width)*height*2});
+            } else if (rgba) {
                 source.format = d3scene::ImageFormat::RGBA8;
                 source.mips.push_back({static_cast<uint32_t>(width),static_cast<uint32_t>(height),rgba,size_t(width)*height*4});
                 if (bm_mipped(handle)) source.generated_levels = NUM_MIP_LEVELS;

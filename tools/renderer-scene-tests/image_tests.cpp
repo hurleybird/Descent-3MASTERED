@@ -2,6 +2,7 @@
 #include "../../renderer/SceneImages.h"
 #include "../../renderer/SceneDependencies.h"
 #include "../../renderer/SceneGpuCache.h"
+#include "../../renderer/SceneWaterImage.h"
 #include "../../Descent3/TextureNamePolicy.h"
 #include <stdexcept>
 namespace {
@@ -16,6 +17,81 @@ template<class F> void rejects(F f) {
 int runSceneImageTests() {
     using namespace d3scene;
     checks = 0;
+    {
+        struct CountedPixels final : ImmutablePixels {
+            std::shared_ptr<int> calls;
+            explicit CountedPixels(std::shared_ptr<int> count) : ImmutablePixels(2),calls(std::move(count)) {}
+            std::vector<uint8_t> evaluate() const override { ++*calls; return {17,128}; }
+        };
+        auto calls = std::make_shared<int>(0);
+        ImageSource source; source.content_revision = 1;
+        source.mips = {{1,1,nullptr,2}}; source.deferred = std::make_shared<CountedPixels>(calls);
+        SceneAssets assets;
+        const auto held = assets.publishImage(0,source);
+        check(*calls == 0 && assets.publishImage(0,source) == held,"Image publication evaluated deferred pixels");
+        source.deferred = std::make_shared<CountedPixels>(calls); source.content_revision = 2;
+        const auto next = assets.publishImage(0,source);
+        check(next != held && *calls == 0,"New recipe aliased old pixels or evaluated during publication");
+        const auto raw = next->mips()[0].pixels;
+        source.deferred.reset(); source.mips[0].pixels = raw.data();
+        check(assets.publishImage(0,source) == next,"Reading recipe through bitmap storage changed its identity");
+        *calls = 0;
+        assets.reset(); source.deferred.reset();
+        check(held->mips()[0].pixels == std::vector<uint8_t>({17,128}) && *calls == 1,"Held recipe lost its owned input");
+        check(held->mips()[0].pixels[0] == 17 && *calls == 1,"Pixel recipe evaluated more than once");
+        const auto bytes = next->mips()[0].pixels;
+        source.mips[0].pixels = bytes.data();
+        check(assets.publishImage(0,source)->mips()[0].pixels == bytes,"Materialized recipe changed bytes");
+        source.deferred = std::make_shared<CountedPixels>(calls); source.mips[0].bytes = 4;
+        rejects([&] { assets.publishImage(1,source); });
+        source.mips[0].bytes = 2; source.format = ImageFormat::RGBA8;
+        rejects([&] { assets.publishImage(1,source); });
+    }
+    {
+        // Independent legacy scalar reference, including wrapped edge samples,
+        // signed 32-bit gradients, shade clamping and both packed lookup halves.
+        constexpr int side = 128;
+        std::vector<int16_t> heights(side*side);
+        std::vector<uint16_t> base(side*side);
+        uint32_t random = 76543;
+        const auto next = [&] { random = random*1664525u+1013904223u; return random; };
+        for (size_t i = 0; i < heights.size(); ++i) { heights[i] = int16_t(next()>>16); base[i] = uint16_t(next()>>16); }
+        auto shading = std::make_shared<WaterShading>();
+        for (auto& row : shading->high) for (auto& value : row) value = uint16_t(next());
+        for (auto& row : shading->low) for (auto& value : row) value = uint8_t(next());
+        auto pixels = std::make_shared<CopiedPixels>(reinterpret_cast<const uint8_t*>(base.data()),base.size()*2);
+        for (int light : {-1,0,1,4,8,15,31}) {
+            WaterImage image(side,side,heights.data(),pixels,light,shading);
+            std::vector<uint16_t> expected(base.size());
+            for (int y = 0; y < side; ++y) for (int x = 0; x < side; ++x) {
+                const int offset = y*side+x;
+                int dx,dy;
+                if (light < 0) {
+                    dx = heights[offset]-heights[y*side+(x+1)%side];
+                    dy = heights[offset]-heights[((y+1)%side)*side+x];
+                    if (dx < 0) dx = 0;
+                    if (dy < 0) dy = 0;
+                } else {
+                    dx = heights[y*side+(x+side-1)%side]-heights[y*side+(x+1)%side];
+                    dy = heights[((y+side-1)%side)*side+x]-heights[((y+1)%side)*side+x];
+                }
+                auto color = base[((y+(dy>>3))&(side-1))*side+((x+(dx>>3))&(side-1))];
+                if (light >= 0) {
+                    const int shade = std::max(0,std::min(63,32-(dx>>light)));
+                    color &= 0x7fff; color = shading->high[shade][color>>8]+shading->low[shade][color&255];
+                }
+                expected[offset] = color;
+            }
+            check(image.bytes().size() == expected.size()*2 &&
+                std::memcmp(image.bytes().data(),expected.data(),image.bytes().size()) == 0,"Deferred water differs from legacy pixels");
+        }
+        WaterImage held(side,side,heights.data(),pixels,-1,{});
+        WaterImage control(side,side,heights.data(),pixels,-1,{});
+        const auto frozen = control.bytes();
+        std::fill(heights.begin(),heights.end(),0); std::fill(base.begin(),base.end(),0); pixels.reset();
+        check(held.bytes() == frozen,"Water image borrowed mutable source storage");
+        rejects([&] { WaterImage bad(3,3,heights.data(),{},0,{}); });
+    }
     {
         SceneGpuCache<ImageAsset,unsigned> gpu;
         SceneAssets source,other_source;

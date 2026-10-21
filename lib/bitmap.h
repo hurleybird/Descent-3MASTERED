@@ -20,6 +20,7 @@
 #define PSBITMAP_H
 #include "pstypes.h"
 #include <cstdint>
+#include "ImmutablePixels.h"
 #include "CFILE.H"
 #ifdef __LINUX__
 #include "linux/linux_fix.h" //needed for stricmp's throughout bitmap lib
@@ -81,6 +82,11 @@ extern bms_bitmap GameBitmaps[MAX_BITMAPS];
 // renderer and are not an image identity. Revisions survive slot recycling.
 void bm_MarkChanged(int handle);
 uint64_t bm_ContentRevision(int handle);
+// Single-level packed pixel values. Deferred values remain readable through
+// bm_data; freeing/reusing a bitmap never changes an already-held snapshot.
+ImmutablePixelsRef bm_SnapshotPixels(int handle);
+ImmutablePixelsRef bm_DeferredPixels(int handle);
+void bm_SetDeferredPixels(int handle,ImmutablePixelsRef);
 extern ulong Bitmap_memory_used;
 extern ubyte Memory_map[];
 

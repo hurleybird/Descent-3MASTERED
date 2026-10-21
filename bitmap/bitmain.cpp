@@ -41,8 +41,10 @@
 int Num_of_bitmaps = 0;
 bms_bitmap GameBitmaps[MAX_BITMAPS];
 static uint64_t Bitmap_content_revisions[MAX_BITMAPS] = {};
+static ImmutablePixelsRef Bitmap_deferred_pixels[MAX_BITMAPS], Bitmap_pixel_snapshots[MAX_BITMAPS];
 void bm_MarkChanged(int handle) {
 	ASSERT(handle >= 0 && handle < MAX_BITMAPS);
+	Bitmap_pixel_snapshots[handle].reset();
 	if (++Bitmap_content_revisions[handle] == 0) Error("Bitmap content revision exhausted");
 	GameBitmaps[handle].flags |= BF_CHANGED;
 }
@@ -51,6 +53,23 @@ uint64_t bm_ContentRevision(int handle) {
 	// the producer revision. This does not consume the GPU's dirty flag.
 	(void)bm_w(handle,0);
 	return Bitmap_content_revisions[handle];
+}
+ImmutablePixelsRef bm_DeferredPixels(int handle) { return Bitmap_deferred_pixels[handle]; }
+void bm_SetDeferredPixels(int handle,ImmutablePixelsRef pixels) {
+    if (!pixels || bm_mipped(handle) || pixels->size() != size_t(bm_w(handle,0))*bm_h(handle,0)*2)
+        throw std::invalid_argument("Deferred bitmap extent differs from storage");
+    Bitmap_deferred_pixels[handle] = std::move(pixels);
+    bm_MarkChanged(handle);
+}
+ImmutablePixelsRef bm_SnapshotPixels(int handle) {
+    if (Bitmap_deferred_pixels[handle]) return Bitmap_deferred_pixels[handle];
+    auto& snapshot = Bitmap_pixel_snapshots[handle];
+    if (!snapshot) {
+        const auto* pixels = reinterpret_cast<const uint8_t*>(bm_data(handle,0));
+        if (!pixels) throw std::runtime_error("Cannot snapshot absent bitmap pixels");
+        snapshot = std::make_shared<CopiedPixels>(pixels,size_t(bm_w(handle,0))*bm_h(handle,0)*2);
+    }
+    return snapshot;
 }
 ulong Bitmap_memory_used = 0;
 ubyte Bitmaps_initted = 0;
@@ -466,6 +485,7 @@ void bm_FreeBitmap(int handle)
 //simply frees up a bitmap
 void bm_FreeBitmapData(int handle)
 {
+	Bitmap_deferred_pixels[handle].reset(); Bitmap_pixel_snapshots[handle].reset();
 	if (GameBitmaps[handle].data16 != NULL && !(GameBitmaps[handle].flags & BF_NOT_RESIDENT))
 	{
 		if (!(GameBitmaps[handle].flags & BF_NOT_RESIDENT))
@@ -1187,6 +1207,12 @@ ushort* bm_data(int handle, int miplevel)
 			return NULL;
 
 	d = GameBitmaps[handle].data16;
+	if (Bitmap_deferred_pixels[handle]) {
+		const auto pixels = Bitmap_deferred_pixels[handle];
+		const auto& bytes = pixels->bytes();
+		memcpy(d,bytes.data(),bytes.size());
+		Bitmap_deferred_pixels[handle].reset();
+	}
 	for (i = 0; i < miplevel; i++) {
 		d += (GameBitmaps[handle].width >> i) * (GameBitmaps[handle].height >> i);
 	}

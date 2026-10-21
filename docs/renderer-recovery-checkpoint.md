@@ -2,6 +2,14 @@
 
 ## October 21 resumed work — supersedes restart pause below
 
+Newest: water-owned pixel recipes built/tested, all eight save images and combined
+probe exact. Long paired dense/wall CPU wins; full old/current baseline repeats
+are running under `cpu-water-baseline-*` (three rounds). Do not build while those
+captures run. Verification uses water-owned.exe. No samplers running. Last usage
+check 29% remaining. Goal NOT achieved. Continue until requested stop/0% included.
+Indirect batching was tested and removed because its measured tradeoff was not
+good enough; ignored patch/binaries retain the experiment. No Candidate changes.
+
 Newest state: prepared-view handoff and sparse demand-resolved model ambient
 are built, tested and image-compared. Verification uses `prepared-view.exe`.
 No captures or samplers running at this checkpoint. The fresh short corpus is

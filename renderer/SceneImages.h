@@ -15,6 +15,7 @@ struct ImageSource {
     uint64_t content_revision = 0; // zero: unversioned caller, compare contents
     ImageFormat format = ImageFormat::ARGB1555;
     std::vector<ImageMipSource> mips;
+    ImmutablePixelsRef deferred; // one packed mip, metadata without borrowed pixels
     uint32_t generated_levels = 0;
     uint32_t padded_extent = 0; // authored lightmap storage square; padding is defined zero
 };

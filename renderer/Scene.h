@@ -1,6 +1,7 @@
 // Descent 3MASTERED - GPL-3.0-or-later
 #pragma once
 #include "SceneLookup.h"
+#include "../lib/ImmutablePixels.h"
 
 // The scene boundary deliberately has no game, OpenGL, g3, or renderer-state
 // dependencies. Owned values cross it; pointers into the simulation do not.
@@ -142,7 +143,7 @@ class ImageAsset final {
 public:
     AssetId id() const { return id_; }
     ImageFormat format() const { return format_; }
-    const std::vector<ImageMip>& mips() const { return mips_; }
+    const std::vector<ImageMip>& mips() const;
     uint32_t generatedLevels() const { return generated_levels_; }
     uint32_t paddedExtent() const { return padded_extent_; }
 private:
@@ -150,7 +151,9 @@ private:
     ImageAsset(AssetId,const ImageSource&);
     AssetId id_;
     ImageFormat format_;
-    std::vector<ImageMip> mips_;
+    mutable std::vector<ImageMip> mips_;
+    ImmutablePixelsRef deferred_;
+    mutable std::once_flag pixels_ready_;
     uint32_t generated_levels_ = 0;
     uint32_t padded_extent_ = 0;
 };

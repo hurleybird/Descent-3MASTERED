@@ -50,12 +50,16 @@ void expandImageRgba(ImageFormat format,const uint8_t* source,size_t count,uint8
     }
 }
 ImageAsset::ImageAsset(AssetId id,const ImageSource& source)
-    : id_(id),format_(source.format),generated_levels_(source.generated_levels),padded_extent_(source.padded_extent) {
+    : id_(id),format_(source.format),deferred_(source.deferred),generated_levels_(source.generated_levels),padded_extent_(source.padded_extent) {
     for (const auto& mip : source.mips) {
         ImageMip copy; copy.width = mip.width; copy.height = mip.height;
-        copy.pixels.assign(mip.pixels,mip.pixels+mip.bytes);
+        if (!deferred_) copy.pixels.assign(mip.pixels,mip.pixels+mip.bytes);
         mips_.push_back(std::move(copy));
     }
+}
+const std::vector<ImageMip>& ImageAsset::mips() const {
+    if (deferred_) std::call_once(pixels_ready_,[this] { mips_[0].pixels = deferred_->bytes(); });
+    return mips_;
 }
 ImageAssetRef SceneAssets::image(uint32_t slot) const { return slot < images_.size() ? images_[slot] : nullptr; }
 ImageAssetRef SceneAssets::image(uint32_t slot,uint64_t revision) const {
@@ -66,6 +70,9 @@ ImageAssetRef SceneAssets::publishImage(uint32_t slot,const ImageSource& source)
         (source.format != ImageFormat::ARGB1555 && source.format != ImageFormat::ARGB4444 && source.format != ImageFormat::RGBA8))
         throw std::invalid_argument("Invalid image format or mip count");
     const size_t pixel_bytes = source.format == ImageFormat::RGBA8 ? 4 : 2;
+    if (source.deferred && (source.mips.size() != 1 || source.generated_levels || source.padded_extent ||
+        source.format == ImageFormat::RGBA8 || source.deferred->size() != source.mips[0].bytes))
+        throw std::invalid_argument("Invalid deferred image recipe");
     if (uint64_t(source.padded_extent)*source.padded_extent > std::numeric_limits<size_t>::max()/4)
         throw std::invalid_argument("Image storage extent overflows");
     if (source.padded_extent && (source.mips.size() != 1 || source.generated_levels ||
@@ -75,7 +82,7 @@ ImageAssetRef SceneAssets::publishImage(uint32_t slot,const ImageSource& source)
         throw std::invalid_argument("Invalid generated image mip chain");
     for (size_t i = 0; i < source.mips.size(); ++i) {
         const auto& mip = source.mips[i];
-        if (!mip.width || !mip.height || !mip.pixels || uint64_t(mip.width)*mip.height > std::numeric_limits<size_t>::max()/pixel_bytes ||
+        if (!mip.width || !mip.height || (!mip.pixels && !source.deferred) || uint64_t(mip.width)*mip.height > std::numeric_limits<size_t>::max()/pixel_bytes ||
             size_t(mip.width)*mip.height*pixel_bytes != mip.bytes)
             throw std::invalid_argument("Invalid image mip dimensions or bytes");
         if (i && (mip.width != std::max(1u,source.mips[i-1].width/2) || mip.height != std::max(1u,source.mips[i-1].height/2)))
@@ -84,11 +91,11 @@ ImageAssetRef SceneAssets::publishImage(uint32_t slot,const ImageSource& source)
     auto previous = image(slot);
     bool matches = previous && previous->format() == source.format && previous->generatedLevels() == source.generated_levels &&
         previous->paddedExtent() == source.padded_extent &&
-        previous->mips().size() == source.mips.size();
+        previous->mips_.size() == source.mips.size();
     for (size_t i = 0; matches && i < source.mips.size(); ++i) {
-        const auto& a = previous->mips()[i]; const auto& b = source.mips[i];
-        matches = a.width == b.width && a.height == b.height && a.pixels.size() == b.bytes &&
-            std::memcmp(a.pixels.data(),b.pixels,b.bytes) == 0;
+        const auto& a = source.deferred ? previous->mips_[i] : previous->mips()[i]; const auto& b = source.mips[i];
+        matches = a.width == b.width && a.height == b.height && (source.deferred ? previous->deferred_ == source.deferred :
+            (a.pixels.size() == b.bytes && std::memcmp(a.pixels.data(),b.pixels,b.bytes) == 0));
     }
     if (matches) {
         if (slot >= image_source_revisions_.size()) image_source_revisions_.resize(size_t(slot)+1);

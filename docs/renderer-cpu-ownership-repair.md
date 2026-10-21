@@ -2,6 +2,32 @@
 
 ## October 20 continuation
 
+October 21: water simulation now publishes an owned height/base/shading recipe;
+pixel expansion is demand-resolved once, without advancing simulation. Bitmap
+readers materialize the same value through bm_data, while scene publication
+retains it without generating hidden images. Source mutation/free and retained
+frame lifetime are separate. Generic immutable pixel values own inputs; deferred
+image publication compares recipe identity without forcing evaluation.
+Scalar-reference tests cover wrapped edges, full-range signed heights, seven
+lighting shifts, packed lookup arithmetic, held source values, publication reuse
+and invalid extents. Build/tests pass (`cpu-water-owned-*.log`). All eight save
+images, combined AO/bloom/auxiliary/resource audit, and dense/wall 500-frame
+images match portal-policy exactly. save007 visually inspected.
+Long interleaved CPU means (100-449): dense parent 1.94/2.06 ms, new 1.75/1.76;
+wall parent 1.47/1.52, new 1.34/1.22. GPU times essentially unchanged.
+Binary `water-owned.exe`; raw `cpu-water-*`. Full old/current repeats pending.
+
+Rejected experiment: indexed SSBO draw records and consecutive indirect batches
+reduced dense submissions 1444 -> 629, with exact images across eight saves.
+Fragment SSBO reads added ~10% GPU cost in SSAA2/MSAA4/AO/bloom; flat material
+varyings reduced that penalty to ~2-3%, but the eight-save CPU results remained
+mixed. This implementation was removed, not left behind a toggle. Patch and new
+header retained under ignored `out/cpu-indirect-experiment.patch` and
+`out/SceneSubmission-experiment.h`; executables `indirect.exe`/`indirect-flat.exe`.
+Fresh sampled run after batching found 234/922 preparation samples in procedural
+water, 175 in pixel expansion, motivating the ownership change above. Sampling
+runs are diagnostic only, never timing evidence.
+
 October 21: portal traversal is compiled after final material publication,
 including mirror film policy. A portal table retains its material proof and
 shares one owner, so unchanged rooms need no whole-level policy recomputation.

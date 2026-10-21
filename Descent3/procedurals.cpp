@@ -32,6 +32,7 @@
 #include "config.h"
 #include "gameloop.h"
 #include "../renderer/SceneProcedural.h"
+#include "../renderer/SceneWaterImage.h"
 
 #define BRIGHT_COLOR	254
 #define PROC_SIZE	128
@@ -982,100 +983,23 @@ void CalcWater(int handle, int density)
         static_cast<int16_t*>(procedural->proc2),PROC_SIZE,PROC_SIZE,unsigned(density));
 }
 
-void DrawWaterNoLight(int handle)
+void PublishWaterImage(int handle)
 {
-	int dx, dy;
-	int x, y;
-	int offset = 0;
-	proc_struct* procedural = GameTextures[handle].procedural;
-	int dest_bitmap = procedural->procedural_bitmap;
-	ushort* dest_data = (ushort*)bm_data(dest_bitmap, 0);
-	ushort* src_data = (ushort*)bm_data(GameTextures[handle].bm_handle, 0);
-	short* ptr = (short*)procedural->proc1;
-	for (y = 0; y < PROC_SIZE; y++)
-	{
-		for (x = 0; x < PROC_SIZE; x++, offset++)
-		{
-			if (x == PROC_SIZE - 1)
-				dx = ptr[offset] - ptr[offset - (PROC_SIZE - 1)];
-			else
-				dx = ptr[offset] - ptr[offset + 1];
-			if (y == PROC_SIZE - 1)
-				dy = ptr[offset] - ptr[offset - ((PROC_SIZE - 1) * PROC_SIZE)];
-			else
-				dy = ptr[offset] - ptr[offset + PROC_SIZE];
-			if (dy < 0)
-				dy = 0;
-			if (dx < 0)
-				dx = 0;
-
-			int yoffset = (y + (dy >> 3)) % PROC_SIZE;
-			int xoffset = (x + (dx >> 3)) % PROC_SIZE;
-			dest_data[offset] = src_data[yoffset * PROC_SIZE + xoffset];
-
-		}
-	}
-}
-
-void DrawWaterWithLight(int handle, int lightval)
-{
-	int dx, dy;
-	int x, y;
-	ushort c;
-	int offset = 0;
-	proc_struct* procedural = GameTextures[handle].procedural;
-	int dest_bitmap = procedural->procedural_bitmap;
-	ushort* dest_data = (ushort*)bm_data(dest_bitmap, 0);
-	ushort* src_data = (ushort*)bm_data(GameTextures[handle].bm_handle, 0);
-	short* ptr = (short*)procedural->proc1;
-	for (y = 0; y < PROC_SIZE; y++)
-	{
-		int ychange, ychange2;
-		if (y == PROC_SIZE - 1)
-		{
-			ychange = PROC_SIZE;
-			ychange2 = ((PROC_SIZE - 1) * PROC_SIZE);
-		}
-		else if (y == 0)
-		{
-			ychange = -((PROC_SIZE - 1) * PROC_SIZE);
-			ychange2 = -PROC_SIZE;
-		}
-		else
-		{
-			ychange = PROC_SIZE;
-			ychange2 = -PROC_SIZE;
-		}
-
-		for (x = 0; x < PROC_SIZE; x++, offset++)
-		{
-			if (x == PROC_SIZE - 1)
-				dx = ptr[offset - 1] - ptr[offset - (PROC_SIZE - 1)];
-			else if (x == 0)
-				dx = ptr[offset + (PROC_SIZE - 1)] - ptr[offset + 1];
-			else
-				dx = ptr[offset - 1] - ptr[offset + 1];
-			dy = ptr[offset - ychange] - ptr[offset - ychange2];
-
-			int yoffset = (y + (dy >> 3));
-			int xoffset = (x + (dx >> 3));
-			yoffset &= (PROC_SIZE - 1);
-			xoffset &= (PROC_SIZE - 1);
-			ASSERT(yoffset >= 0);
-			ASSERT(xoffset >= 0);
-			c = src_data[yoffset * PROC_SIZE + xoffset];
-			int l = (NUM_WATER_SHADES / 2) - (dx >> lightval);
-			if (l > (NUM_WATER_SHADES - 1))
-				l = NUM_WATER_SHADES - 1;
-			if (l < 0)
-				l = 0;
-			c &= ~OPAQUE_FLAG;
-
-			c = WaterProcTableHi[l][c >> 8] + WaterProcTableLo[l][c & 0xFF];
-
-			dest_data[offset] = c;
-		}
-	}
+    const auto* procedural = GameTextures[handle].procedural;
+    // These authored lookup tables are initialized once. A retained recipe owns
+    // a frozen copy, never a pointer to mutable global appearance data.
+    static const auto shading = [] {
+        auto value = std::make_shared<d3scene::WaterShading>();
+        for (size_t i = 0; i < 64; ++i) for (size_t c = 0; c < 256; ++c) {
+            value->high[i][c] = WaterProcTableHi[i][c];
+            value->low[i][c] = WaterProcTableLo[i][c];
+        }
+        return std::shared_ptr<const d3scene::WaterShading>(std::move(value));
+    }();
+    bm_SetDeferredPixels(procedural->procedural_bitmap,
+        std::make_shared<d3scene::WaterImage>(PROC_SIZE,PROC_SIZE,
+            static_cast<const int16_t*>(procedural->proc1),
+            bm_SnapshotPixels(GameTextures[handle].bm_handle),int(procedural->light)-1,shading));
 }
 
 void AddProcHeightBlob(ProceduralEvaluation& context, static_proc_element* proc, int handle)
@@ -1275,10 +1199,7 @@ void EvaluateWaterProcedural(ProceduralEvaluation& context, int handle)
 	}
 
 	// Calculate the water on the current texture
-	if (!procedural->light)
-		DrawWaterNoLight(handle);
-	else
-		DrawWaterWithLight(handle, procedural->light - 1);
+	PublishWaterImage(handle);
 	int thickness = procedural->thickness;
 	if (procedural->osc_time > 0)
 	{
