@@ -20,6 +20,7 @@
 #include <math.h>
 #include <memory.h>
 #include <algorithm>
+#include <array>
 
 #include "procedurals.h"
 #include "bitmap.h"
@@ -32,10 +33,17 @@
 #include "config.h"
 #include "gameloop.h"
 #include "../renderer/SceneProcedural.h"
+#include "../renderer/SceneProceduralStamp.h"
 #include "../renderer/SceneWaterImage.h"
 
 #define BRIGHT_COLOR	254
 #define PROC_SIZE	128
+// Source-owned compiled kernels, released with the static procedural elements.
+// No simulation pixels or pointers to game state are retained here.
+static std::array<std::vector<d3scene::ProceduralSineStamp>,MAX_TEXTURES> Sine_stamps;
+void ReleaseProceduralKernels(int texture) {
+    std::vector<d3scene::ProceduralSineStamp>().swap(Sine_stamps[texture]);
+}
 #define TABSIZE          256
 #define TABMASK          (TABSIZE-1)
 #define PERM(x)          perm[(x)&TABMASK]
@@ -1086,38 +1094,11 @@ void AddProcSineBlob(ProceduralEvaluation& context, static_proc_element* proc, i
 	int procnum = proc - GameTextures[handle].procedural->static_proc_elements;
 	if (proc->frequency && ((context.tick + procnum) % proc->frequency))
 		return;
-	int x = proc->x1;
-	int y = proc->y1;
-	int cx, cy;
-	int left, top, right, bottom;
-	int square, dist;
-	int radius = proc->size;
-	int radsquare = radius * radius;
-	float length = (1024.0 / (float)radius) * (1024.0 / (float)radius);
-	short* dest_data = (short*)GameTextures[handle].procedural->proc1;
-	int height = proc->speed;
-	radsquare = (radius * radius);
-	left = -radius; right = radius;
-	top = -radius; bottom = radius;
-	// Perform edge clipping...
-	if (x - radius < 1) left -= (x - radius - 1);
-	if (y - radius < 1) top -= (y - radius - 1);
-	if (x + radius > PROC_SIZE - 1) right -= (x + radius - PROC_SIZE + 1);
-	if (y + radius > PROC_SIZE - 1) bottom -= (y + radius - PROC_SIZE + 1);
-	for (cy = top; cy < bottom; cy++)
-	{
-		for (cx = left; cx < right; cx++)
-		{
-			square = cy * cy + cx * cx;
-			if (square < radsquare)
-			{
-				dist = sqrt(square * length);
-				int addval = (FixCos(dist % 65536) * (float)height);
-				addval /= 8;
-				dest_data[PROC_SIZE * (cy + y) + cx + x] += addval;
-			}
-		}
-	}
+    auto& kernels = Sine_stamps[handle];
+    kernels.resize(GameTextures[handle].procedural->num_static_elements);
+    auto& stamp = kernels[procnum];
+    stamp.prepare(proc->size,proc->speed,[](int distance) { return FixCos(angle(distance)); });
+    stamp.apply(static_cast<int16_t*>(GameTextures[handle].procedural->proc1),PROC_SIZE,PROC_SIZE,proc->x1,proc->y1);
 }
 
 void AllocateMemoryForWaterProcedural(int handle)

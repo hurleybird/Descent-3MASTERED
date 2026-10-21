@@ -283,6 +283,7 @@ void AllocateStaticProceduralsForTexture(int handle, int num_elements)
 // Frees the memory used by static procedural elements
 void FreeStaticProceduralsForTexture(int handle)
 {
+    ReleaseProceduralKernels(handle);
 	if (GameTextures[handle].procedural->static_proc_elements)
 		mem_free(GameTextures[handle].procedural->static_proc_elements);
 	GameTextures[handle].procedural->static_proc_elements = NULL;

@@ -81,6 +81,8 @@ void ClearAllProceduralsFromTexture (int texnum);
 
 // Does a procedural for this texture
 void EvaluateProcedural(int texnum, int visual_tick);
+// Retire immutable compiled shapes when their authored source is released.
+void ReleaseProceduralKernels(int texnum);
 
 // Returns the next free procelement
 int ProcElementAllocate ();

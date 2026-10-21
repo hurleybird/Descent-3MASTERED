@@ -1,5 +1,7 @@
 // Descent 3MASTERED - GPL-3.0-or-later
 #include "../../renderer/SceneProcedural.h"
+#include "../../renderer/SceneProceduralStamp.h"
+#include "../../lib/fix.h"
 #include "../../renderer/SceneAnimation.h"
 #include "../../lib/ImmutablePixels.h"
 #include <stdexcept>
@@ -9,6 +11,43 @@ int runProceduralTests() {
     using namespace d3scene;
     int checks = 0;
     const auto check = [&](bool value) { ++checks; if (!value) throw std::runtime_error("Procedural clock/random contract"); };
+    {
+        // The pose suite initializes the shared authored trig tables first.
+        ProceduralSineStamp stamp;
+        int evaluations = 0;
+        const auto cosine = [&](int distance) { ++evaluations; return FixCos(angle(distance)); };
+        for (const int radius : {0,1,2,7,16,32,64,127,128,255}) for (const int strength : {0,7,8,31,255}) {
+            stamp.prepare(uint8_t(radius),uint8_t(strength),cosine);
+            const int compiled = evaluations;
+            stamp.prepare(uint8_t(radius),uint8_t(strength),cosine);
+            check(evaluations == compiled);
+            for (const auto center : {std::pair<int,int>{0,0},{1,127},{64,64},{255,255}}) {
+                std::vector<int16_t> reference(128*128),actual;
+                for (size_t i = 0; i < reference.size(); ++i) reference[i] = int16_t(i*1237);
+                actual = reference;
+                stamp.apply(actual.data(),128,128,center.first,center.second);
+                if (radius) {
+                    const float length = (1024.0 / float(radius)) * (1024.0 / float(radius));
+                    const int x = center.first,y = center.second;
+                    int left = -radius,right = radius,top = -radius,bottom = radius;
+                    if (x-radius < 1) left -= x-radius-1;
+                    if (y-radius < 1) top -= y-radius-1;
+                    if (x+radius > 127) right -= x+radius-127;
+                    if (y+radius > 127) bottom -= y+radius-127;
+                    for (int cy = top; cy < bottom; ++cy) for (int cx = left; cx < right; ++cx) {
+                        const int square = cy*cy+cx*cx;
+                        if (square < radius*radius) {
+                            const int distance = int(std::sqrt(square*length));
+                            int addition = int(FixCos(angle(distance % 65536))*float(strength));
+                            addition /= 8;
+                            reference[128*(cy+y)+cx+x] += addition;
+                        }
+                    }
+                }
+                check(actual == reference);
+            }
+        }
+    }
     {
         std::array<uint8_t,769> indices;
         std::array<uint16_t,256> palette;

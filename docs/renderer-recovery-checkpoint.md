@@ -2,6 +2,23 @@
 
 ## Active 2026-10-21 flare regression investigation
 
+LATEST HEAD698aadb commits validated owner hints. New sine-stamp change compiled
+and tested: authored water sine disturbances compile integer additions once per
+source element/radius/height; positions/ticks remain execution inputs. Kernels
+retire with FreeStaticProceduralsForTexture; no steady-state pixel allocation.
+SceneProceduralStamp.h pure tests compare original sqrt/FixCos/truncation and
+clipping at radius0..255, strength0..255, edge/outside positions and signed wrap.
+sine-stamp-tests2.log PASS; sine-stamp-build.log PASS. First test run failed
+because test called InitMathTables twice and hit intentional RNG guard; removed
+redundant test-only initialization (pose suite already initializes math).
+Fresh images sine-pinned007 (700frames), sine-stamp005 (500), sine-stamp003
+(90frames, resource/image audit) EXACT against controls.007 visually inspected.
+Isolated kernel benchmark out/sine-stamp-benchmark.cpp:2000 radius64 stamps
+legacy64.8-65.4ms vs compiled15.4-16.1ms,4.07-4.22x; exact final integer grids.
+Pinned007 ABBA wholeframe CPU stamp1.315/1.222 vs control1.600/1.431ms; GPU
+~.69ms both. CPU drift still means do NOT treat raw ratio as robust game gain.
+Runtime scene-view-test has sine stamp candidate. Deliveredv3.1 untouched.
+
 CURRENT HEAD4b648d6 commits indexed whole-material groups and producer palettes.
 Owner hint qualification complete:005/007 and roof flare EXACT. Pinned007
 ABBA CPU hints1.405/1.349 vs controls1.404/1.415ms; small/noisy, not major win.
