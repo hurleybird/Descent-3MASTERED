@@ -2,6 +2,35 @@
 
 ## October 21 resumed work — supersedes restart pause below
 
+Newest source replaces one-VBO/VAO-per-geometry with shared geometry pages.
+SceneGeometryAllocator owns free vertex ranges, coalesces retirements and uses
+size classes for oversized allocations. GL owns one VAO/VBO per page; mesh GPU
+records borrow names/ranges. Local polygon offsets are converted to page draw
+offsets; all dynamic position/UV/reflection stream addresses account for them.
+No shader math/ordering changes. Expired mesh assets and revised geometry return
+ranges; scene teardown deletes pages once. Tests cover fragmentation, random
+non-overlap, oversized ranges, retirement validation and reset. Tests/build PASS.
+Temporary runtime geometry-arena-sized.exe (matches latest PDB); gas-probe exact.
+ga-* eight short images, combined probe, quality and mirror exact on repeats.
+First000 had the known alternate Buddybot pose/position; ga-repeat000 EXACT.
+Long ga-* ABBA parent/new CPU:003(1.872,2.055)/(1.804,1.864),
+005(1.454,1.251)/(1.221,1.227),007(1.360,1.738)/(1.325,1.356). GPU unchanged.
+Observed uploaded geometry fits one1MiB page in sampled scenes. No general
+all-baselines victory: gabase-* four short old/new pairs yield005 old.895 new1.163,
+007 old1.132 new1.389. Preserve all rounds; variation remains substantial.
+Full pre-arena iibase-* 3round normal-cap CPU new/old:
+0001.342/1.544;0011.002/1.709;0021.666/2.295;0031.989/2.600;
+004.543/.835;0051.140/.939;006.669/.872;0071.363/1.166.
+Thus six of eight wins in that sweep, two misses; goal NOT achieved.
+Fog GPU regressions still unresolved (0012.329/.905,0022.437/1.356,
+006.954/.448,0071.785/.527 ms new/old). Do not conflate CPU and GPU results.
+Newest sampler out/cpu-identity-stack005.txt completed normally before arena:
+616 preparation samples/1247 total rendering; resources163,publication147,
+models144,extraction39; foregrounds330,driver203,viewquery184. Driver leaf
+nearest VAO binding30 samples motivated pooling; no post-arena sampler yet.
+No active captures/builds/samplers at checkpoint. Latest included usage2%.
+Main/Candidate/Previous Candidate untouched; unrelated lib/gitinfo.h untracked.
+
 Newest SOURCE adds SceneIdentityIndex: exact ordered-key proofs retain room,
 object and model lookup compilation across recycled frames. No source/asset
 pointers retained. Inventory edits rebuild; failed compilation invalidates its

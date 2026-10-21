@@ -28,6 +28,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <vector>
+#include "SceneGeometryAllocator.h"
 #include <glad/gl.h>
 #ifndef GL_TEXTURE_MAX_ANISOTROPY_EXT
 #define GL_TEXTURE_MAX_ANISOTROPY_EXT 0x84FE
@@ -127,14 +128,19 @@ class GL4Renderer : public IRenderer
 {
 	struct SceneMeshGpu {
 		d3scene::AssetId id;
-		GLuint vao = 0, buffer = 0;
+		GLuint vao = 0;
+		d3scene::SceneGeometryAllocator::Allocation vertices;
 		std::vector<ElementRange> polygons;
 	};
+	struct SceneGeometryPage { GLuint vao = 0, buffer = 0; };
+	d3scene::SceneGeometryAllocator scene_geometry_allocator;
+	std::vector<SceneGeometryPage> scene_geometry_pages;
 	std::vector<SceneMeshGpu> scene_rooms;
 	std::vector<std::vector<SceneMeshGpu>> scene_models;
 	std::vector<std::vector<SceneMeshGpu>> scene_terrain;
 	d3scene::SceneGpuCache<d3scene::MeshAsset,SceneMeshGpu> scene_meshes;
 	void UploadSceneMesh(SceneMeshGpu&, d3scene::AssetId, const d3scene::MeshGeometry&);
+	void ReleaseSceneMesh(SceneMeshGpu&);
 	uint64_t scene_asset_lifetime = 0;
 	ShaderProgram scene_shader;
 	struct SceneUniformLocations {

@@ -1,6 +1,7 @@
 // Descent 3MASTERED - GPL-3.0-or-later
 #include "../../renderer/Scene.h"
 #include "../../renderer/SceneGeometry.h"
+#include "../../renderer/SceneGeometryAllocator.h"
 #include "../../Descent3/SceneExtraction.h"
 #include "room.h"
 #include "object.h"
@@ -40,6 +41,43 @@ d3scene::MeshGeometry triangle() {
 }
 void storageTests() {
     using namespace d3scene;
+    {
+        SceneGeometryAllocator ranges(16);
+        auto a = ranges.allocate(5), b = ranges.allocate(7), c = ranges.allocate(4);
+        check(a.page == b.page && b.page == c.page && a.offset == 0 && b.offset == 5 && c.offset == 12,
+            "Geometry allocator failed packed page allocation");
+        auto large = ranges.allocate(35);
+        check(large.page == 1 && ranges.capacity(1) == 64,"Oversized mesh allocation failed");
+        ranges.release(b); ranges.release(a); ranges.release(c);
+        auto whole = ranges.allocate(16);
+        check(whole.page == 0 && whole.offset == 0 && ranges.pageCount() == 2,"Retired geometry did not coalesce");
+        ranges.release(whole);
+        rejects([&] { ranges.release(whole); },"Double geometry retirement accepted");
+        rejects([&] { ranges.release({0,15,2}); },"Out-of-bounds geometry retirement accepted");
+        ranges.release(large);
+        std::vector<SceneGeometryAllocator::Allocation> live;
+        uint32_t random = 937;
+        for (int i = 0; i < 2000; ++i) {
+            random = random*1664525u+1013904223u;
+            if (!live.empty() && (random&3) == 0) {
+                const auto index = (random>>8)%live.size();
+                ranges.release(live[index]); live.erase(live.begin()+index);
+            } else {
+                const auto allocation = ranges.allocate(1+(random>>16)%13);
+                for (const auto old : live) check(old.page != allocation.page ||
+                    old.offset+old.count <= allocation.offset || allocation.offset+allocation.count <= old.offset,
+                    "Live geometry allocations overlap");
+                live.push_back(allocation);
+            }
+        }
+        for (const auto allocation : live) ranges.release(allocation);
+        const auto pages = ranges.pageCount();
+        for (uint32_t page = 0; page < pages; ++page) {
+            const auto allocation = ranges.allocate(ranges.capacity(page));
+            check(allocation.page == page && !allocation.offset,"Geometry page was lost to fragmentation");
+        }
+        ranges.clear(); check(ranges.pageCount() == 0 && ranges.allocate(16).page == 0,"Geometry reset retained old pages");
+    }
     {
         SceneIdentityIndex<uint64_t> index;
         std::vector<std::pair<uint64_t,int>> inventory{{0,10},{UINT64_MAX,20},{17,30}};

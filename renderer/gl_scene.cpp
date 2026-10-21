@@ -468,25 +468,15 @@ void GL4Renderer::DestroySceneResources() {
         if (sampler.sampler) glDeleteSamplers(1,&sampler.sampler);
         sampler = {};
     }
-    for (auto& room : scene_rooms) {
-        if (room.vao) glDeleteVertexArrays(1, &room.vao);
-        if (room.buffer) glDeleteBuffers(1, &room.buffer);
-    }
     scene_rooms.clear();
-    for (auto& model : scene_models) for (auto& mesh : model) {
-        if (mesh.vao) glDeleteVertexArrays(1,&mesh.vao);
-        if (mesh.buffer) glDeleteBuffers(1,&mesh.buffer);
-    }
     scene_models.clear();
-    for (auto& patch : scene_terrain) for (auto& mesh : patch) {
-        if (mesh.vao) glDeleteVertexArrays(1,&mesh.vao);
-        if (mesh.buffer) glDeleteBuffers(1,&mesh.buffer);
-    }
     scene_terrain.clear();
-    scene_meshes.clear([](SceneMeshGpu& mesh) {
-        if (mesh.vao) glDeleteVertexArrays(1,&mesh.vao);
-        if (mesh.buffer) glDeleteBuffers(1,&mesh.buffer);
-    });
+    scene_meshes.clear([](SceneMeshGpu&) {});
+    for (auto& page : scene_geometry_pages) {
+        if (page.vao) glDeleteVertexArrays(1,&page.vao);
+        if (page.buffer) glDeleteBuffers(1,&page.buffer);
+    }
+    scene_geometry_pages.clear(); scene_geometry_allocator.clear();
     if (scene_fog_buffer) glDeleteBuffers(1,&scene_fog_buffer);
     if (scene_fog_texture) glDeleteTextures(1,&scene_fog_texture);
     scene_fog_buffer = scene_fog_texture = 0;
@@ -685,10 +675,7 @@ void GL4Renderer::PrepareSceneViewTables(const d3scene::PreparedView& prepared) 
         };
         bool rebuild_reflections = false;
         if (new_frame) {
-        scene_meshes.releaseExpired([](SceneMeshGpu& mesh) {
-            if (mesh.vao) glDeleteVertexArrays(1,&mesh.vao);
-            if (mesh.buffer) glDeleteBuffers(1,&mesh.buffer);
-        });
+        scene_meshes.releaseExpired([&](SceneMeshGpu& mesh) { ReleaseSceneMesh(mesh); });
         scene_reflection_dependencies.begin();
         scene_reflection_dependencies.addValue(0); // initialize the empty GPU buffer once
         for (const auto& room : frame.data().rooms) collectTable(room.surfaces);
@@ -941,12 +928,13 @@ void GL4Renderer::BindSceneTables() {
     glActiveTexture(GL_TEXTURE0); Last_texel_unit_set = 0;
 }
 
+void GL4Renderer::ReleaseSceneMesh(SceneMeshGpu& gpu) {
+    scene_geometry_allocator.release(gpu.vertices);
+    gpu = {};
+}
 void GL4Renderer::UploadSceneMesh(SceneMeshGpu& gpu, d3scene::AssetId id, const d3scene::MeshGeometry& geometry) {
     if (gpu.id == id) return;
-    if (gpu.vao) glDeleteVertexArrays(1,&gpu.vao);
-    if (gpu.buffer) glDeleteBuffers(1,&gpu.buffer);
-    gpu = {};
-    gpu.id = id;
+    ReleaseSceneMesh(gpu);
     std::vector<SceneVertex> vertices;
     for (const auto& polygon : geometry.polygons) {
         const uint32_t first = static_cast<uint32_t>(vertices.size());
@@ -959,15 +947,28 @@ void GL4Renderer::UploadSceneMesh(SceneMeshGpu& gpu, d3scene::AssetId id, const 
         });
         gpu.polygons.emplace_back(first,static_cast<uint32_t>(vertices.size())-first);
     }
-    glGenVertexArrays(1,&gpu.vao); glGenBuffers(1,&gpu.buffer);
-    glBindVertexArray(gpu.vao); glBindBuffer(GL_ARRAY_BUFFER,gpu.buffer);
-    glBufferData(GL_ARRAY_BUFFER,vertices.size()*sizeof(SceneVertex),vertices.data(),GL_STATIC_DRAW);
-    const int counts[7] = {3,2,2,1,3,3,2};
-    const size_t offsets[7] = {offsetof(SceneVertex,position),offsetof(SceneVertex,u),offsetof(SceneVertex,lu),offsetof(SceneVertex,alpha),offsetof(SceneVertex,normal),offsetof(SceneVertex,color),offsetof(SceneVertex,raster_offset)};
-    for (GLuint attribute = 0; attribute < 7; ++attribute) {
-        glEnableVertexAttribArray(attribute);
-        glVertexAttribPointer(attribute,counts[attribute],GL_FLOAT,GL_FALSE,sizeof(SceneVertex),reinterpret_cast<void*>(offsets[attribute]));
+    if (vertices.size() > INT32_MAX) throw std::overflow_error("Scene geometry exceeds draw address range");
+    if (!vertices.empty()) {
+        gpu.vertices = scene_geometry_allocator.allocate(uint32_t(vertices.size()));
+        if (scene_geometry_pages.size() <= gpu.vertices.page) scene_geometry_pages.resize(gpu.vertices.page+1);
+        auto& page = scene_geometry_pages[gpu.vertices.page];
+        if (!page.vao) {
+            glGenVertexArrays(1,&page.vao); glGenBuffers(1,&page.buffer);
+            glBindVertexArray(page.vao); glBindBuffer(GL_ARRAY_BUFFER,page.buffer);
+            glBufferData(GL_ARRAY_BUFFER,size_t(scene_geometry_allocator.capacity(gpu.vertices.page))*sizeof(SceneVertex),nullptr,GL_STATIC_DRAW);
+            const int counts[7] = {3,2,2,1,3,3,2};
+            const size_t offsets[7] = {offsetof(SceneVertex,position),offsetof(SceneVertex,u),offsetof(SceneVertex,lu),offsetof(SceneVertex,alpha),offsetof(SceneVertex,normal),offsetof(SceneVertex,color),offsetof(SceneVertex,raster_offset)};
+            for (GLuint attribute = 0; attribute < 7; ++attribute) {
+                glEnableVertexAttribArray(attribute);
+                glVertexAttribPointer(attribute,counts[attribute],GL_FLOAT,GL_FALSE,sizeof(SceneVertex),reinterpret_cast<void*>(offsets[attribute]));
+            }
+        } else glBindBuffer(GL_ARRAY_BUFFER,page.buffer);
+        // GL preserves queued readers of a reused range. Static assets upload
+        // once; only revised/retired geometry participates in allocator traffic.
+        glBufferSubData(GL_ARRAY_BUFFER,size_t(gpu.vertices.offset)*sizeof(SceneVertex),vertices.size()*sizeof(SceneVertex),vertices.data());
+        gpu.vao = page.vao;
     }
+    gpu.id = id;
 }
 
 void GL4Renderer::RenderViewImage(const d3scene::Presentation& presentation,const d3scene::ViewImageRequest& request) {
@@ -1394,7 +1395,8 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         { const auto value = surface.raster_stripe; record[48] = value.x; record[49] = value.y; record[50] = value.z; }
         record[51] = modulation.alpha;
         record[3] = float(surface.effect_depth_offset);
-        const auto range = item.terrain || item.mesh ? ElementRange(0,gpu.polygons.back().offset+gpu.polygons.back().count) : gpu.polygons[item.polygon_index];
+        auto range = item.terrain || item.mesh ? ElementRange(0,gpu.vertices.count) : gpu.polygons[item.polygon_index];
+        range.offset += gpu.vertices.offset;
         const auto uv_range = ranges.uv;
         const auto texture_uv_range = ranges.texture_uv;
         const auto normals = ranges.normals;
@@ -1408,7 +1410,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         record[23] = float(texture_uv_range.count != 0);
         record[27] = float(static_cast<int>(texture_uv_range.offset)-static_cast<int>(range.offset));
         record[7] = float(prepared_positions.count != 0);
-        record[11] = float(prepared_positions.offset);
+        record[11] = float(int64_t(prepared_positions.offset)-gpu.vertices.offset);
         // Disabled streams have no address. Canonical records let adjacent
         // draws share a UBO without introducing fragment-side draw indirection.
         for (const auto pair : {std::pair<int,int>{15,19},{23,27},{31,35},{39,43},{7,11},{63,62},{78,77}})
@@ -1742,6 +1744,11 @@ void main() {
     }
     if (measure_passes) {
         glQueryCounter(pass_queries.back(),GL_TIMESTAMP);
+        uint64_t geometry_bytes = 0;
+        for (uint32_t page = 0; page < scene_geometry_allocator.pageCount(); ++page)
+            geometry_bytes += uint64_t(scene_geometry_allocator.capacity(page))*sizeof(SceneVertex);
+        AutomatedCaptureLog("scene geometry pages=%u bytes=%llu",unsigned(scene_geometry_pages.size()),
+            static_cast<unsigned long long>(geometry_bytes));
         GLuint64 previous = 0;
         glGetQueryObjectui64v(pass_queries[0],GL_QUERY_RESULT,&previous);
         for (size_t i = 0; i < passes.size(); ++i) {
