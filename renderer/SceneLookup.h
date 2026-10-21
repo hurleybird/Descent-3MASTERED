@@ -67,4 +67,29 @@ public:
         return entry->second;
     }
 };
+// An identity-to-position index belongs to an ordered inventory, not its
+// changing payload. Own only keys and positions; no scene/asset/source pointers.
+// Exact comparison admits reuse across recycled frames without hash signatures.
+template<class Key> class SceneIdentityIndex {
+    std::vector<Key> order_;
+    SceneLookup<Key,size_t> lookup_;
+    bool valid_ = true;
+public:
+    template<class Range,class Identity> bool assign(const Range& source,Identity identity) {
+        bool same = valid_ && order_.size() == source.size();
+        for (size_t i = 0; same && i < source.size(); ++i) same = order_[i] == identity(source[i]);
+        if (same) return false;
+        // Failed allocation/duplicate validation cannot leave a reusable proof.
+        valid_ = false; order_.clear(); lookup_.clear();
+        order_.reserve(source.size()); lookup_.reserve(source.size());
+        for (size_t i = 0; i < source.size(); ++i) {
+            const Key key = identity(source[i]);
+            if (!lookup_.emplace(key,i).second) throw std::invalid_argument("Duplicate scene identity");
+            order_.push_back(key);
+        }
+        valid_ = true;
+        return true;
+    }
+    const SceneLookup<Key,size_t>& lookup() const { return lookup_; }
+};
 }

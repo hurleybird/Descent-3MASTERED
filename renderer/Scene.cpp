@@ -22,9 +22,10 @@ namespace d3scene {
 // Compilation storage follows the snapshot lifetime, just like its input
 // arrays. Recycle only after the last reader releases the presentation.
 struct FrameCompilationStorage {
-    SceneLookup<int32_t,size_t> room_indices_;
-    SceneLookup<uint32_t,size_t> object_indices_;
-    SceneLookup<uint64_t,size_t> model_indices_,collection_indices_;
+    SceneIdentityIndex<int32_t> room_indices_;
+    SceneIdentityIndex<uint32_t> object_indices_;
+    SceneIdentityIndex<uint64_t> model_indices_;
+    SceneLookup<uint64_t,size_t> collection_indices_;
     std::vector<uint32_t> image_slots_;
     std::vector<ResolvedModel> resolved_models_;
     std::vector<PreparedModelPart> resolved_parts_;
@@ -37,7 +38,7 @@ struct FrameCompilationStorage {
     std::vector<CollectionRange> collections_;
     std::vector<uint32_t> collection_models_,collection_meshes_;
     void clear() {
-        room_indices_.clear(); object_indices_.clear(); model_indices_.clear(); collection_indices_.clear();
+        collection_indices_.clear();
         image_slots_.clear(); resolved_models_.clear(); releasePoses(); resolved_model_indices_.clear(); collections_.clear();
         collection_models_.clear(); collection_meshes_.clear();
     }
@@ -52,9 +53,9 @@ struct FrameCompilationStorage {
         resolved_part_count_ = 0;
     }
 };
-const SceneLookup<int32_t,size_t>& Presentation::roomIndices() const { return storage_->room_indices_; }
-const SceneLookup<uint32_t,size_t>& Presentation::objectIndices() const { return storage_->object_indices_; }
-const SceneLookup<uint64_t,size_t>& Presentation::modelIndices() const { return storage_->model_indices_; }
+const SceneLookup<int32_t,size_t>& Presentation::roomIndices() const { return storage_->room_indices_.lookup(); }
+const SceneLookup<uint32_t,size_t>& Presentation::objectIndices() const { return storage_->object_indices_.lookup(); }
+const SceneLookup<uint64_t,size_t>& Presentation::modelIndices() const { return storage_->model_indices_.lookup(); }
 bool RoomSurfaces::publishedForRoom(AssetId asset,const std::vector<PlanarSurface>& planar) const {
     if (!publishedFor(asset)) return false;
     if (table_->planar.size() != planar.size()) return false;
@@ -712,7 +713,8 @@ Presentation::~Presentation() {
     reclaim(data_.terrain.materials,clean.terrain.materials);
     reclaim(data_.terrain.patches,clean.terrain.patches);
     // Drop frame-owned pose/asset references now; retain only allocation
-    // capacity. Indices are reset once when the next builder compiles.
+    // capacity and asset-free identity indexes. Each ordered inventory is
+    // checked exactly before its index can be reused by a subsequent frame.
     storage_->resolved_models_.clear();
     storage_->releasePoses();
     clean.compilation_storage_ = std::move(storage_);
@@ -889,12 +891,12 @@ PresentationRef Presentation::complete(FrameData data) {
         require(data.terrain.patches.size() == data.terrain.asset->patches().size(),"Incomplete terrain patch bindings");
         for (const auto& patch : data.terrain.patches) data.lightCandidates(patch.light_candidates);
     } else require(data.terrain.materials.empty() && data.terrain.patches.empty(),"Terrain materials have no grid");
-    auto& rooms = storage->room_indices_;
-    rooms.reserve(data.rooms.size());
+    storage->room_indices_.assign(data.rooms,[](const RoomState& room) { return room.number; });
+    const auto& rooms = storage->room_indices_.lookup();
     data.has_planar_surfaces = false;
     for (const auto& room : data.rooms) {
         data.has_planar_surfaces = data.has_planar_surfaces || !room.mirrors.empty();
-        require(room.number >= 0 && rooms.emplace(room.number,size_t(&room-data.rooms.data())).second, "Duplicate or invalid scene room");
+        require(room.number >= 0,"Invalid scene room identity");
         require(room.asset && room.asset->id().lifetime == data.scene_lifetime &&
             room.asset->id().slot == static_cast<uint32_t>(room.number), "Room asset identity mismatch");
         require(room.surfaces.size() == room.asset->geometry().polygons.size(), "Incomplete room surface bindings");
@@ -921,9 +923,12 @@ PresentationRef Presentation::complete(FrameData data) {
         data.lightCandidates(room.light_candidates);
         require(finite(room.fog_color) && std::isfinite(room.fog_depth), "Invalid room fog");
         require(std::isfinite(room.light_scalar) && room.light_scalar >= 0, "Invalid room illumination");
-        for (const auto& portal : room.portals)
-            require(portal.polygon >= 0 && static_cast<size_t>(portal.polygon) < room.surfaces.size(),
-                "Portal references missing polygon");
+        // A sealed portal table owns the exact surface table against which
+        // its polygon references were checked. Editing either detaches it.
+        if (!room.portals.publishedFor(room.surfaces))
+            for (const auto& portal : room.portals)
+                require(portal.polygon >= 0 && static_cast<size_t>(portal.polygon) < room.surfaces.size(),
+                    "Portal references missing polygon");
     }
     for (const auto& mesh : data.meshes) {
         require(mesh.receiver_polygon >= -1,"Invalid mesh receiver polygon");
@@ -932,10 +937,9 @@ PresentationRef Presentation::complete(FrameData data) {
         require(room != rooms.end() && static_cast<size_t>(mesh.receiver_polygon) < data.rooms[room->second].surfaces.size() &&
             mesh.collection == 0 && mesh.surface.layer == RenderLayer::World,"Mesh receiver is not a world surface");
     }
-    auto& objects = storage->object_indices_;
-    objects.reserve(data.objects.size());
+    storage->object_indices_.assign(data.objects,[](const ObjectState& object) { return object.handle; });
+    const auto& objects = storage->object_indices_.lookup();
     for (const auto& object : data.objects) {
-        require(objects.emplace(object.handle,size_t(&object-data.objects.data())).second, "Duplicate object lifetime in scene");
         require(finite(object.current) && finite(object.previous) && std::isfinite(object.radius) && object.radius >= 0,
             "Invalid object transform or radius");
         if (data.observation_inputs_prepared && object.observation_eligible) {
@@ -946,8 +950,8 @@ PresentationRef Presentation::complete(FrameData data) {
                 "Invalid simulation observation volume");
         }
     }
-    auto& model_instances = storage->model_indices_;
-    model_instances.reserve(data.model_instances.size());
+    storage->model_indices_.assign(data.model_instances,[](const ModelInstance& model) { return model.identity; });
+    const auto& model_instances = storage->model_indices_.lookup();
     for (const auto& object : data.objects)
         for (const auto hidden : object.camera_hidden_objects)
             require(objects.count(hidden) != 0,"Camera rig references a missing object allocation");
@@ -969,7 +973,7 @@ PresentationRef Presentation::complete(FrameData data) {
         require(finite(transform),"Invalid composed model transform");
     size_t model_end = 0;
     for (const auto& object : data.model_instances) {
-        require(object.identity && model_instances.emplace(object.identity,size_t(&object-data.model_instances.data())).second,"Duplicate or absent model instance identity");
+        require(object.identity,"Absent model instance identity");
         require(!object.has_owner || objects.count(object.owner),"Model owner is not part of this presentation");
         require(finite(object.current) && finite(object.previous),"Invalid model placement");
         data.ambientFor(object);

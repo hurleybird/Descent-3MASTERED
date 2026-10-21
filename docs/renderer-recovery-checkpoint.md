@@ -2,6 +2,25 @@
 
 ## October 21 resumed work — supersedes restart pause below
 
+Newest SOURCE adds SceneIdentityIndex: exact ordered-key proofs retain room,
+object and model lookup compilation across recycled frames. No source/asset
+pointers retained. Inventory edits rebuild; failed compilation invalidates its
+proof. Sealed portal references no longer revalidate unchanged polygon indices.
+Tests/build PASS (reorder/removal/generation/duplicate/exception/held-frame and
+portal mutation coverage). identity-index.exe and ii-probe images EXACT.
+Normal-cap long ABBA ii-* parent/new CPU:003(2.295,2.067)/(1.830,2.249),
+005(1.443,1.192)/(1.539,1.256),007(1.425,1.630)/(1.701,1.357). Mixed.
+Room-only predecessor room-index.exe/ri-* retained as diagnostic evidence.
+High-cap diagnostic iifast-* (1500frames,avg300..1199,framecap1000) parent/new:
+003(1.201,1.302)/(1.325,1.203),005(1.068,.747)/(.796,.766). Both images exact.
+Simulation timings also vary:005 .070/.041 parent vs .050/.043 new. Raising cap
+changes absolute costs but does NOT eliminate variation. Do not substitute it
+for normal-cap qualification or attribute all changes to the renderer patch.
+Isolated /O2 same-process benchmark out/identity-index-bench.cpp/.txt,8rounds:
+2200 room keys11.35us->.92us,500object keys2.30us->.20us,500model keys2.23us->.20us.
+This establishes ~14.5us eliminated indexing work, NOT a whole-frame victory.
+Latest usage4% remaining. Main/Candidate untouched. Continue baseline comparison.
+
 Newest source shares a published model material palette between instances of
 the same asset/appearance. Transaction-local borrowed canonical source; baked
 per-object UV layouts are excluded. Pose/history/modulation/light candidates

@@ -40,6 +40,28 @@ d3scene::MeshGeometry triangle() {
 }
 void storageTests() {
     using namespace d3scene;
+    {
+        SceneIdentityIndex<uint64_t> index;
+        std::vector<std::pair<uint64_t,int>> inventory{{0,10},{UINT64_MAX,20},{17,30}};
+        const auto key = [](const std::pair<uint64_t,int>& entry) { return entry.first; };
+        check(index.assign(inventory,key) && !index.assign(inventory,key),"Identity index rebuilt unchanged ordering");
+        inventory[1].second = 99;
+        check(!index.assign(inventory,key),"Identity index depends on mutable payload");
+        std::swap(inventory[0],inventory[2]);
+        check(index.assign(inventory,key) && index.lookup().at(17) == 0 && index.lookup().at(0) == 2,
+            "Identity index ignored reordered keys");
+        inventory[2].first = 18;
+        check(index.assign(inventory,key) && !index.lookup().count(0) && index.lookup().at(18) == 2,
+            "Identity index retained replaced generation");
+        inventory[2].first = 17;
+        rejects([&] { index.assign(inventory,key); },"Identity index accepted duplicate keys");
+        inventory.resize(2);
+        check(index.assign(inventory,key) && index.lookup().size() == 2 && !index.lookup().count(18),
+            "Interrupted identity compilation reused partial state");
+        inventory.clear();
+        check(index.assign(inventory,key) && !index.assign(inventory,key) && index.lookup().size() == 0,
+            "Identity index failed empty inventory transition");
+    }
     SceneAssets assets;
     auto source = acquireFrameData();
     source.sequence = 1; source.scene_lifetime = assets.lifetime();
@@ -87,6 +109,32 @@ void storageTests() {
     }
 }
 void assetTests() {
+    {
+        using namespace d3scene;
+        SceneAssets assets;
+        const auto a = assets.publishRoom(3,triangle()), b = assets.publishRoom(47,triangle());
+        const auto publish = [&](std::initializer_list<int32_t> numbers) {
+            auto data = acquireFrameData(); data.sequence = 1; data.scene_lifetime = assets.lifetime();
+            for (const auto number : numbers) {
+                RoomState room; room.number = number; room.asset = number == 3 ? a : b;
+                room.surfaces.resize(1); data.rooms.push_back(std::move(room));
+            }
+            return Presentation::publish(std::move(data));
+        };
+        for (int round = 0; round < 5; ++round) {
+            { const auto frame = publish({3,47});
+              check(frame->roomIndices().at(3) == 0 && frame->roomIndices().at(47) == 1,"Room index failed stable layout"); }
+            { const auto frame = publish({47,3});
+              check(frame->roomIndices().at(47) == 0 && frame->roomIndices().at(3) == 1,"Room index failed reordered layout"); }
+            { const auto frame = publish({47});
+              check(frame->roomIndices().at(47) == 0 && !frame->roomIndices().count(3),"Room index retained removed room"); }
+            rejects([&] { publish({3,3}); },"Retained room layout accepted duplicate identity");
+            rejects([&] { publish({-1}); },"Retained room layout accepted negative identity");
+            { const auto frame = publish({}); check(frame->roomIndices().size() == 0,"Empty room layout retained entries"); }
+        }
+        const auto held = publish({3,47}); const auto reordered = publish({47,3});
+        check(held->roomIndices().at(3) == 0 && reordered->roomIndices().at(3) == 1,"Room index changed a held frame");
+    }
     // Plane membership is owned by the frozen scene, not recovered from mutable rooms.
     {
         using namespace d3scene;
@@ -192,6 +240,11 @@ void frameTests() {
         const auto stable = d3scene::Presentation::freeze(rebound->data());
         check(&stable->data().rooms[0].portals.read() == &rebound->data().rooms[0].portals.read(),
             "Unchanged portal material proof was rebuilt");
+        auto invalid_portal = stable->data();
+        invalid_portal.rooms[0].portals[0].polygon = 1;
+        rejects([&] { d3scene::Presentation::freeze(invalid_portal); },"Edited sealed portal bypassed polygon validation");
+        invalid_portal = stable->data(); invalid_portal.rooms[0].portals[0].polygon = -1;
+        rejects([&] { d3scene::Presentation::freeze(invalid_portal); },"Edited sealed portal accepted negative polygon");
         combined.rooms[0].portals[0].surface_controls_visibility = false;
         combined.rooms[0].portals[0].traversable = true;
         combined.rooms[0].surfaces = solid->data().rooms[0].surfaces;
