@@ -2,6 +2,26 @@
 
 ## Active 2026-10-21 flare regression investigation
 
+LATEST after572463c: room surface BVH experiment REJECTED and all source/tests
+removed. Conservative correctness and exact heavy image passed, but both corner
+and interval node tests regressed CPU. out/rejected-room-index.txt has evidence.
+Do not resurrect without a different cost model. Existing comparator now holds
+572463c semantics, SHA FB5956BB66AED50FB4FFDB4E5CDE9428304C772311A1C7B7175F9813FAA207CE.
+
+Uncommitted: FindArg no longer allocates a temporary string per lookup. Preserve
+live exported GameArgs edits; no stale-result cache. Also bound lookup/GetArg
+indices. New standalone argument tests cover duplicate/case/long/missing options,
+live mutations, full table bounds and zero allocations across60000 lookups;
+Windows and GNU spelling branches pass, as do scene contracts. Heavy multiview
+image is exact. args005 new/control/control/new CPU1.202974/1.134726/1.161596/1.050180,
+GPU .143328/.148486/.144218/.145634. Drift prevents a firm speedup claim.
+Current runtime/build hold this candidate; no BVH remains. Source args_tests.cpp
+is untracked and must be staged with args.cpp/CMakeLists on checkpoint.
+Benchmark runs have been paced120FPS; next compare sustained throughput using
+-limitframe 0 on BOTH renderers, fixed capture dt remains unchanged. Do not
+compare those timings directly with earlier paced runs. No OS power changes.
+Usage59% used, credits unchanged. Continue, do not stop after checkpoints.
+
 CURRENT uncommitted after 0e93c7f: model asset lookup is a bounded touched-slot
 array, and previous-instance identity is resolved once per object (checked
 ordinal with full-identity fallback), not once per LOD. Capture-only mesh

@@ -31,7 +31,7 @@ char GameArgs[MAX_ARGS][MAX_CHARS_PER_ARG];
 
 const char* GetArg(int index)
 {
-	if (index >= TotalArgs || index == 0)
+	if (index >= TotalArgs || index <= 0 || index >= MAX_ARGS)
 		return NULL;
 	return GameArgs[index];
 }
@@ -105,34 +105,30 @@ int FindArg(char* which)
 	if (which == NULL)
 		return(0);
 
-	char* argBuf = new char[strlen(which) + 3];
-	int i;
-
-	argBuf[0] = '\0';  // blank buffer.
-
+    // Argument storage is exported to modules, so do not cache mutable table
+    // contents. Comparing the caller's spelling needs no temporary allocation.
 #ifdef __LINUX__
-	if ((*which == '-') || (*which == '+'))  // change D3 args to GNU type.
-	{
-		strcpy(argBuf, "--");
-		which++;
-	} // if
+    const bool gnu_prefix = (*which == '-') || (*which == '+');
 #endif
-
-	strcat(argBuf, which);
-
-	for (i = 1; i <= TotalArgs; i++)
+	for (int i = 1; i < TotalArgs && i < MAX_ARGS; i++)
 	{
-		if (strcasecmp(argBuf, GameArgs[i]) == 0)
+        const char* query = which;
+        const char* candidate = GameArgs[i];
+#ifdef __LINUX__
+        if (gnu_prefix) {
+            if (candidate[0] != '-' || candidate[1] != '-') continue;
+            ++query; candidate += 2;
+        }
+#endif
+		if (strcasecmp(query, candidate) == 0)
 		{
 			mprintf((0, "FindArg: Found [%s] at argument index (%d).",
-				argBuf, i));
-			delete[] argBuf;
+				which, i));
 			return (i);
 		} // if
 	} // for
 
-	mprintf((0, "FindArg: Did not find [%s] on command line.\n", argBuf));
-	delete[] argBuf;
+	mprintf((0, "FindArg: Did not find [%s] on command line.\n", which));
 	return (0);
 } // FindArg
 
@@ -142,7 +138,7 @@ int FindArg(char* which)
 int FindArgChar(char* which, char singleCharArg)
 {
 #ifdef __LINUX__
-	for (int i = 1; i <= TotalArgs; i++)
+	for (int i = 1; i < TotalArgs && i < MAX_ARGS; i++)
 	{
 		char* str = GameArgs[i];
 		if ((str[0] == '-') && (str[1] == singleCharArg) && (str[2] == '\0'))
