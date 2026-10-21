@@ -79,12 +79,12 @@ void main() {
         start = advance > 0.0 ? min(length,-origin_side/advance) : length;
     }
     for (int candidate=0;candidate<fog_volume_count;++candidate) {
-        int entry=fog_volume_offset+candidate*3;
+        int entry=fog_volume_offset+candidate*4;
         int volume=texelFetch(scene_influences,entry).r;
         int view_nodes=texelFetch(scene_influences,entry+1).r;
         int view_count=texelFetch(scene_influences,entry+2).r;
-        vec4 appearance=texelFetch(scene_fog,volume*4);
-        vec4 low=texelFetch(scene_fog,volume*4+1), high=texelFetch(scene_fog,volume*4+2);
+        vec4 appearance=texelFetch(scene_fog,volume*3);
+        vec4 low=texelFetch(scene_fog,volume*3+1), high=texelFetch(scene_fog,volume*3+2);
         if (!fogBounds(low.xyz,high.xyz,inverse_direction,parallel,length)) continue;
         // Each invocation owns an entire output column. Commit the preceding
         // volume before reading its prefix sums back for the next contribution.
@@ -113,7 +113,7 @@ void main() {
             }
             ++node;
         }
-        float winding=texelFetch(scene_fog,volume*4+3).z;
+        float winding=float(texelFetch(scene_influences,entry+3).r);
         float integrated_length=0.0;
         if (first_volume) imageStore(fog_field_output,ivec3(pixel,0),vec4(0));
         for (int slice=0;slice<FOG_SLICES;++slice) {

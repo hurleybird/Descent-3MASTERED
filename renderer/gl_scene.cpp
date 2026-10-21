@@ -335,15 +335,15 @@ vec3 applySceneFog(vec3 radiance,out float transmission) {
     if (refine_fog) {
     optical_depth = 0.0; weighted_color = vec3(0);
     for (int candidate = 0; candidate < fog_volume_count; ++candidate) {
-        int entry = fog_volume_offset+candidate*3;
+        int entry = fog_volume_offset+candidate*4;
         int volume = texelFetch(scene_influences,entry).r;
         int view_nodes = texelFetch(scene_influences,entry+1).r;
         int view_count = texelFetch(scene_influences,entry+2).r;
-        vec4 appearance = texelFetch(scene_fog,volume*4);
-        vec4 low = texelFetch(scene_fog,volume*4+1), high = texelFetch(scene_fog,volume*4+2);
+        vec4 appearance = texelFetch(scene_fog,volume*3);
+        vec4 low = texelFetch(scene_fog,volume*3+1), high = texelFetch(scene_fog,volume*3+2);
         if (!fogBounds(low.xyz,high.xyz,inverse_direction,parallel,distance)) continue;
-        vec4 state = texelFetch(scene_fog,volume*4+3);
-        float path = state.x*interval;
+        int winding = texelFetch(scene_influences,entry+3).r;
+        float path = winding > 0 ? interval : 0.0;
         int node = 0;
         while (node < view_count) {
             int source_node = texelFetch(scene_influences,view_nodes+node*2).r;
@@ -1007,7 +1007,10 @@ void GL4Renderer::PrepareSceneViewTables(const d3scene::PreparedView& prepared) 
             for (size_t i = 0; i < volumes.size(); ++i) {
                 if (!d3scene::fogMayIntersectView(volumes[i].bounds,demand.camera,optical_frustum)) continue;
                 d3scene::prepareFogViewNodes(volumes[i],demand.camera,optical_frustum,fog_nodes);
-                fog_entries.insert(fog_entries.end(),{int32_t(i),int32_t(indices.size()),int32_t(fog_nodes.size())});
+                // Source geometry is immutable. Camera containment belongs to
+                // this view's packed traversal entry, alongside its node range.
+                fog_entries.insert(fog_entries.end(),{int32_t(i),int32_t(indices.size()),int32_t(fog_nodes.size()),
+                    d3scene::fogWinding(volumes[i],demand.camera.transform.position)});
                 for (const auto& node : fog_nodes) { indices.push_back(int32_t(node.source)); indices.push_back(int32_t(node.escape)); }
                 scene_view_fog_volumes.push_back(uint32_t(i));
                 source_fog_nodes += volumes[i].nodes.size(); view_fog_nodes += fog_nodes.size();
@@ -1426,14 +1429,13 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     if (!scene_fog_buffer) { glGenBuffers(1,&scene_fog_buffer); glGenTextures(1,&scene_fog_texture); }
     glBindBuffer(GL_TEXTURE_BUFFER,scene_fog_buffer);
     if (upload_fog) {
-    std::vector<float> fog(fog_volumes.size()*16,0);
+    std::vector<float> fog(fog_volumes.size()*12,0);
     for (size_t index = 0; index < fog_volumes.size(); ++index) {
         const auto& volume = fog_volumes[index];
         const auto& low = volume.bounds.minimum; const auto& high = volume.bounds.maximum;
-        const float record[16] = {volume.color.x,volume.color.y,volume.color.z,volume.depth,
-            low.x,low.y,low.z,float(fog.size()/4),high.x,high.y,high.z,float(fog.size()/4+volume.nodes.size()*3),
-            0,float(volume.nodes.size()),0,0};
-        std::copy(record,record+16,fog.begin()+index*16);
+        const float record[12] = {volume.color.x,volume.color.y,volume.color.z,volume.depth,
+            low.x,low.y,low.z,float(fog.size()/4),high.x,high.y,high.z,float(fog.size()/4+volume.nodes.size()*3)};
+        std::copy(record,record+12,fog.begin()+index*12);
         for (const auto& node : volume.nodes) {
             const auto& a = node.bounds.minimum; const auto& b = node.bounds.maximum;
             fog.insert(fog.end(),{a.x,a.y,a.z,float(node.first),b.x,b.y,b.z,float(node.escape),float(node.count),0,0,0});
@@ -1449,17 +1451,16 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         }
     }
     if (fog.empty()) fog.resize(4,0);
-    glBufferData(GL_TEXTURE_BUFFER,fog.size()*sizeof(float),fog.data(),GL_DYNAMIC_DRAW);
+    glBufferData(GL_TEXTURE_BUFFER,fog.size()*sizeof(float),fog.data(),GL_STATIC_DRAW);
     scene_fog_id = fog_id;
     }
-    // Only containment depends on the view. Geometry and the traversal index
-    // stay resident until their scene asset revision changes.
+    // Normal execution never patches camera state into the geometry buffer.
+    // Revisit containment only for this explicit boundary diagnostic.
+    if (AutomatedCapturePending() && FindArg("-scene-fog-boundary-audit"))
     for (const auto index : scene_view_fog_volumes) {
         const int winding = d3scene::fogWinding(fog_volumes[index],camera.position);
         const float inside = winding > 0 ? 1.f : 0.f;
-        const float state[4] = {inside,float(fog_volumes[index].nodes.size()),float(winding),0};
-        glBufferSubData(GL_TEXTURE_BUFFER,(index*16+12)*sizeof(float),sizeof(state),state);
-        if (AutomatedCapturePending() && FindArg("-scene-fog-boundary-audit")) {
+        {
             const auto& volume = fog_volumes[index];
             const bool room_member = std::find(volume.rooms.begin(),volume.rooms.end(),view.room) != volume.rooms.end();
             AutomatedCaptureLog("fog boundary volume=%u room=%d member=%d contains=%d depth=%.9g triangles=%u eye=%.9g,%.9g,%.9g",

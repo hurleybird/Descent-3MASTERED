@@ -2,6 +2,32 @@
 
 ## Active 2026-10-21 flare regression investigation
 
+LATEST after e4983b1: camera winding now travels in the per-view fog traversal
+entry; immutable fog geometry no longer receives glBufferSubData per volume/view.
+Geometry headers shrink from four to three vec4 records. Exact fog retains its
+boolean-inside initial interval; field integration retains signed winding.
+Build and scene contract tests pass. fog-view-state-exact002, -multiview
+(SSAA2/MSAA4/AO/bloom plus auxiliary views), -roof and 1000-frame002/007 captures
+are pixel-exact against their controls. Heavy image visually inspected.
+ABBA007 CPU 1.108336/1.096470/1.080328/1.055240; GPU
+.595246/.640312/.596194/.640292. ABBA002 CPU
+1.471862/1.477848/1.464004/1.436532; GPU
+.724650/.702894/.746810/.706006 (control/split/split/control).
+These measurements do NOT demonstrate a timing improvement. Retain this as an
+ownership correction, not a performance win. Runtime holds tested split binary;
+out/empty-view-candidate.exe remains the preceding comparison binary. No extra
+executable copy was made. SceneFogShaders.h and gl_scene.cpp are the code scope.
+
+User confirmed they removed the missing historical benchmark during cleanup.
+Do not search indefinitely or substitute Candidate for that exact binary.
+Old source bfb59647a3c3b4a451c264b3941c441573ecc061 remains available; a rebuild
+would be a NEW baseline, explicitly labeled. Cleanup manifest
+out/renderer-artifact-cleanup-20261021.json was created, but deletion was blocked:
+NO files were deleted. User explicitly says do not delete via PowerShell.
+Do not retry that operation. Keep artifact creation bounded: active build plus
+one existing comparison executable, compact evidence, no new runtime clones.
+Usage51% consumed; credit balance unchanged62451.4387600000.
+
 LATEST current source: ExecuteSceneView plans passes before GPU preparation.
 Empty non-clearing views skip GPU uploads/setup, but still advance view history;
 depth clears, sky clears and exported main-world products continue executing.
