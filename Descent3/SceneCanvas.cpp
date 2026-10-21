@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstring>
 #include <stdexcept>
+#include <string>
 
 HUDCanvasLayout CompileHUDCanvasLayout(const HUDCanvasRequest& request) {
     if (request.world.width <= 0 || request.world.height <= 0 || request.display.width <= 0 || request.display.height <= 0)
@@ -103,14 +104,70 @@ SceneTextExtent MeasureSceneText(const char* text,const SceneTextStyle& style) {
 }
 void PrepareSceneText(d3scene::FrameData& frame,uint64_t collection,int32_t& next_order,
     int x,int y,const char* text,const SceneTextStyle& style) {
+    if (!text || style.font < 0 || !std::isfinite(style.scale) || style.scale <= 0 || style.tab_columns <= 0)
+        throw std::invalid_argument("Invalid prepared text input");
+    // The source compiler owns a bounded cache. Execution sees ordinary mesh
+    // assets, not a special text path. Font edits and scene resets invalidate
+    // source keys; held presentations still own their old geometry/pixels.
+    struct TextEntry {
+        std::string text;
+        int font = -1, x = 0, y = 0, tabs = 0;
+        float scale = 0;
+        d3scene::Vec3 color;
+        uint64_t used = 0;
+        std::vector<d3scene::PreparedMesh> runs;
+    };
+    static thread_local std::array<TextEntry,64> cache;
+    static thread_local uint64_t lifetime = 0, font_revision = 0, clock = 0;
+    const auto current_lifetime = d3scene::assets().lifetime(), current_font = grfont_LayoutRevision();
+    if (lifetime != current_lifetime || font_revision != current_font) {
+        for (auto& entry : cache) entry = {};
+        lifetime = current_lifetime; font_revision = current_font; clock = 0;
+    }
+    const auto emit = [&](const std::vector<d3scene::PreparedMesh>& runs) {
+        for (const auto& source : runs) {
+            auto mesh = source;
+            mesh.collection = collection; mesh.surface.composition_order = next_order++;
+            mesh.surface.alpha = style.alpha;
+            mesh.surface.blend = style.additive ? d3scene::BlendMode::Additive : d3scene::BlendMode::Alpha;
+            frame.meshes.push_back(std::move(mesh));
+        }
+    };
+    const size_t length = std::strlen(text);
+    const bool cacheable = length <= 128;
+    size_t replacement = 0;
+    if (cacheable) for (size_t i = 0; i < cache.size(); ++i) {
+        auto& entry = cache[i];
+        if (entry.used && entry.font == style.font && entry.x == x && entry.y == y && entry.tabs == style.tab_columns &&
+            entry.scale == style.scale && entry.color.x == style.color.x && entry.color.y == style.color.y &&
+            entry.color.z == style.color.z && entry.text == text) {
+            entry.used = ++clock; emit(entry.runs); return;
+        }
+        if (entry.used < cache[replacement].used) replacement = i;
+    }
+    std::vector<d3scene::PreparedMesh> compiled;
     d3scene::PreparedMesh run;
     const auto flush = [&] {
         if (run.vertices.empty()) return;
         const auto count = static_cast<uint32_t>(run.vertices.size()/4);
-        // Game mesh slots 257..384 are canonical quad-count templates. UVs and
-        // positions are frame attributes, never new assets for changing text.
-        run.asset = d3scene::assets().quadMesh(count);
-        frame.meshes.push_back(std::move(run)); run = {};
+        // Long uncached text uses canonical quad-count templates; short stable
+        // layouts publish owned positions/UVs once and retain their assets.
+        if (cacheable) {
+            auto geometry = d3scene::unitQuadBatch(count);
+            geometry.vertices = std::move(run.vertices);
+            for (auto& polygon : geometry.polygons) for (auto& corner : polygon.corners) {
+                const auto uv = run.texture_uvs[corner.vertex]; corner.u = uv.x; corner.v = uv.y;
+            }
+            run.texture_uvs.clear();
+            // Source mesh slots 512..8703 belong to these 64 bounded layouts,
+            // at most 128 atlas/color runs each; automap starts at 65536.
+            run.asset = d3scene::assets().publishMesh(512+uint32_t(replacement)*128+uint32_t(compiled.size()),std::move(geometry));
+            compiled.push_back(std::move(run));
+        } else {
+            run.asset = d3scene::assets().quadMesh(count);
+            frame.meshes.push_back(std::move(run));
+        }
+        run = {};
     };
     layoutSceneText(text,style,x,y,[&](const tFontGlyph& glyph,int x,int y,d3scene::Vec3 color) {
             const int right = int(x+glyph.width*style.scale), bottom = int(y+glyph.height*style.scale);
@@ -121,7 +178,7 @@ void PrepareSceneText(d3scene::FrameData& frame,uint64_t collection,int32_t& nex
                 if (run.vertices.empty()) {
                     run.collection = collection;
                     auto& surface = run.surface;
-                    surface.composition_order = next_order++;
+                    if (!cacheable) surface.composition_order = next_order++;
                     surface.bitmap = glyph.bitmap; surface.texture_alpha = true; surface.texture_wrap = false;
                     surface.unlit = true; surface.two_sided = true; surface.depth = d3scene::DepthMode::Disabled;
                     surface.blend = style.additive ? d3scene::BlendMode::Additive : d3scene::BlendMode::Alpha;
@@ -134,4 +191,11 @@ void PrepareSceneText(d3scene::FrameData& frame,uint64_t collection,int32_t& nex
             }
     });
     flush();
+    if (cacheable) {
+        auto& entry = cache[replacement];
+        entry.text = text; entry.font = style.font; entry.x = x; entry.y = y;
+        entry.tabs = style.tab_columns; entry.scale = style.scale; entry.color = style.color;
+        entry.runs = std::move(compiled); entry.used = ++clock;
+        emit(entry.runs);
+    }
 }

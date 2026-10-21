@@ -1,16 +1,20 @@
 // Descent 3MASTERED - GPL-3.0-or-later
 #include "../../Descent3/SceneCanvas.h"
 #include "grtext.h"
+#include "../../renderer/SceneGeometry.h"
 #include <stdexcept>
 #include <string>
 
 // Read-only font atlas fixture. The real canvas publisher links without any
 // grtext buffer, renderer state, draw function or game-window globals.
-int grfont_GetCharWidth(int,int ch) { return ch == ' ' ? 3 : 6; }
+namespace { uint64_t FontRevision = 1; int FontWidth = 6, GlyphCalls = 0; }
+uint64_t grfont_LayoutRevision() { return FontRevision; }
+int grfont_GetCharWidth(int,int ch) { return ch == ' ' ? 3 : FontWidth; }
 int grfont_GetHeight(int) { return 8; }
 int grfont_GetTracking(int) { return 0; }
 int grfont_GetKernedSpacing(int,int a,int b) { return a == 'A' && b == 'B' ? -1 : 0; }
 bool grfont_GetGlyph(int,int ch,tFontGlyph& glyph) {
+    ++GlyphCalls;
     glyph = {}; glyph.bitmap = ch == 'Z' ? 1 : 0;
     glyph.width = grfont_GetCharWidth(0,ch); glyph.height = 8;
     glyph.uv_width = .1f; glyph.uv_height = .2f;
@@ -58,19 +62,47 @@ int runCanvasTests() {
     d3scene::FrameData data; data.sequence = 1; data.scene_lifetime = d3scene::assets().lifetime();
     int32_t order = 0;
     PrepareSceneText(data,7,order,0,0,"AB",style);
-    check(data.meshes.size() == 1 && data.meshes[0].vertices.size() == 8 && data.meshes[0].vertices[4].x == 6,
+    const auto positions = [](const d3scene::PreparedMesh& mesh) -> const std::vector<d3scene::Vec3>& {
+        return mesh.vertices.empty() ? mesh.asset->geometry().vertices : mesh.vertices;
+    };
+    check(data.meshes.size() == 1 && positions(data.meshes[0]).size() == 8 && positions(data.meshes[0])[4].x == 6,
         "Canvas text execution disagrees with its metrics");
+    check(data.meshes[0].vertices.empty() && data.meshes[0].texture_uvs.empty() &&
+        data.meshes[0].asset->geometry().polygons[0].corners[2].v == .2f,
+        "Retained text still requires transient positions/UVs");
     const auto held = d3scene::Presentation::freeze(data);
+    {
+        const auto asset = data.meshes[0].asset;
+        const int glyph_calls = GlyphCalls;
+        data.meshes.clear(); order = 17;
+        auto changed_style = style; changed_style.alpha = .4f; changed_style.additive = true;
+        PrepareSceneText(data,9,order,0,0,"AB",changed_style);
+        check(data.meshes[0].asset == asset && GlyphCalls == glyph_calls && data.meshes[0].collection == 9 &&
+            data.meshes[0].surface.alpha == .4f && data.meshes[0].surface.blend == d3scene::BlendMode::Additive &&
+            data.meshes[0].surface.composition_order == 17 && order == 18,
+            "Text cache rebuilt geometry or retained instance composition state");
+        ++FontRevision; FontWidth = 7;
+        data.meshes.clear(); order = 0;
+        PrepareSceneText(data,7,order,0,0,"AB",style);
+        check(data.meshes[0].asset != asset && positions(data.meshes[0])[4].x == 7 &&
+            positions(held->data().meshes[0])[4].x == 6,"Font metric edit did not invalidate held text layout safely");
+        ++FontRevision; FontWidth = 6;
+        for (int i = 0; i < 80; ++i) {
+            data.meshes.clear(); order = 0;
+            PrepareSceneText(data,7,order,i*2,0,("Label "+std::to_string(i)).c_str(),style);
+        }
+        check(positions(held->data().meshes[0])[4].x == 6,"Text cache eviction mutated a held mesh");
+    }
     data.meshes.clear(); order = 0;
     PrepareSceneText(data,7,order,5,10,"A\tB",style);
-    check(data.meshes[0].vertices[4].x == 21 && data.meshes[0].vertices[6].x-5 == MeasureSceneText("A\tB",style).width,
+    check(positions(data.meshes[0])[4].x == 21 && positions(data.meshes[0])[6].x-5 == MeasureSceneText("A\tB",style).width,
         "Moving a canvas string changed its tab layout relative to measurement");
     data.meshes.clear(); order = 0;
     PrepareSceneText(data,7,order,0,0,"A\1\x10\x20\x30" "BZ",style);
     check(data.meshes.size() == 3 && data.meshes[1].surface.color_modulation.y == 32/255.f &&
-        data.meshes[1].vertices[0].x == 7 && data.meshes[2].surface.bitmap == 1,
+        positions(data.meshes[1])[0].x == 7 && data.meshes[2].surface.bitmap == 1,
         "Canvas color/atlas changes did not split owned glyph batches");
-    check(held->data().meshes[0].vertices.size() == 8 && held->data().meshes[0].surface.color_modulation.y == 1,
+    check(positions(held->data().meshes[0]).size() == 8 && held->data().meshes[0].surface.color_modulation.y == 1,
         "Later text preparation mutated a held frame");
     data.meshes.clear(); order = 0;
     PrepareSceneText(data,7,order,0,0,std::string(129,'A').c_str(),style);

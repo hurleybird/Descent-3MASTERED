@@ -1,5 +1,40 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## October 21 restart pause — latest state
+
+User requested a yield to restart. Do not resume until requested. Last included
+usage check had 39% remaining. Performance target below remains unmet.
+
+Latest checkpoint retains short text layouts as immutable mesh assets (bounded
+64-entry cache, font-layout revision invalidation). Generic GPU mesh storage is
+now keyed by asset lifetime/revision with weak ownership, so two retained revisions
+of a reused source slot cannot overwrite one another within a frame. Expired GPU
+storage is retired at frame boundaries; context teardown clears it explicitly.
+Tests cover text reuse/invalidation, held assets, eviction, and GPU revision ownership.
+Build and scene tests passed; logs: `out/cpu-text-assets-build.log` and
+`out/cpu-text-assets-tests.log`.
+
+Current verification executable and build matched SHA256
+`951BAAC39209F702C2B4C89E891BC34317060787F5BDF9695506640197D66F0F`.
+Retained executable: `out/perf-checkpoints/text-owned.exe`. No verification game
+process was running at pause. Candidate and Previous Candidate remain untouched.
+
+Completed captures under `C:/tmp/D3RendererVerification`:
+`cpu-text-owned-saveg003-20261021`, `cpu-text-owned-saveg005-20261021`,
+`cpu-text-owned-probe-20261021`, `cpu-text-msaa-owned-20261021`, and control
+`cpu-text-msaa-bounds-20261021`. The last two use SSAA2/MSAA4/AO/bloom.
+Final image comparisons and timing extraction are PENDING: do not claim these
+final captures demonstrate parity or a speedup. Earlier text-only captures before
+the GPU ownership fix matched bounds images for save003/save005; that does not
+substitute for checking the final build. Resume with these existing results,
+not by repeating the captures unnecessarily.
+
+Remaining architectural work includes the whole-world preparation cost (especially
+save005); camera-culling source snapshots would violate independent-view support.
+The generic mesh cache fix does not establish revision-safe ownership for all other
+GPU asset cache types. Preserve the Level 2 object-lightmap compatibility guard.
+Never stage unrelated `lib/gitinfo.h`.
+
 ## October 21 continuation (supersedes timings below)
 
 Active target is a **marked improvement over every pre-rewrite CPU baseline**,

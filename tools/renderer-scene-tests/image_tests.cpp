@@ -1,6 +1,7 @@
 // Descent 3MASTERED - GPL-3.0-or-later
 #include "../../renderer/SceneImages.h"
 #include "../../renderer/SceneDependencies.h"
+#include "../../renderer/SceneGpuCache.h"
 #include "../../Descent3/TextureNamePolicy.h"
 #include <stdexcept>
 namespace {
@@ -15,6 +16,29 @@ template<class F> void rejects(F f) {
 int runSceneImageTests() {
     using namespace d3scene;
     checks = 0;
+    {
+        SceneGpuCache<ImageAsset,unsigned> gpu;
+        SceneAssets source,other_source;
+        uint8_t pixels[] = {1,2,3,255};
+        ImageSource image; image.format = ImageFormat::RGBA8; image.mips = {{1,1,pixels,4}};
+        auto first = source.publishImage(0,image);
+        gpu.get(first) = 11;
+        pixels[0] = 9;
+        auto second = source.publishImage(0,image);
+        auto other = other_source.publishImage(0,image);
+        gpu.get(second) = 22; gpu.get(other) = 33;
+        check(gpu.size() == 3 && gpu.get(first) == 11 && gpu.get(second) == 22 && gpu.get(other) == 33,
+            "GPU cache aliased held revisions or different scene lifetimes");
+        unsigned retired = 0;
+        gpu.releaseExpired([&](unsigned value) { retired += value; });
+        check(retired == 0,"GPU cache retired an owned asset");
+        first.reset();
+        gpu.releaseExpired([&](unsigned value) { retired += value; });
+        check(retired == 11 && gpu.size() == 2,"GPU cache retained an unowned revision");
+        gpu.clear([&](unsigned value) { retired += value; });
+        check(retired == 66 && gpu.size() == 0 && gpu.get(second) == 0,
+            "GPU context reset retained storage or failed to destroy each resource once");
+    }
     {
         RetainedDependencies<uint64_t> dependencies;
         auto a = std::make_shared<const std::vector<uint64_t>>(std::initializer_list<uint64_t>{3,1,3});

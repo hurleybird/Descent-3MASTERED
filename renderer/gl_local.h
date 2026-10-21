@@ -50,6 +50,7 @@
 #include "pserror.h"
 #include "SceneView.h"
 #include "SceneDependencies.h"
+#include "SceneGpuCache.h"
 #include "SceneCompositing.h"
 #include "SceneHistory.h"
 #include "gl_shared.h"
@@ -132,7 +133,7 @@ class GL4Renderer : public IRenderer
 	std::vector<SceneMeshGpu> scene_rooms;
 	std::vector<std::vector<SceneMeshGpu>> scene_models;
 	std::vector<std::vector<SceneMeshGpu>> scene_terrain;
-	std::vector<SceneMeshGpu> scene_meshes;
+	d3scene::SceneGpuCache<d3scene::MeshAsset,SceneMeshGpu> scene_meshes;
 	void UploadSceneMesh(SceneMeshGpu&, d3scene::AssetId, const d3scene::MeshGeometry&);
 	uint64_t scene_asset_lifetime = 0;
 	ShaderProgram scene_shader;

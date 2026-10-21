@@ -466,11 +466,10 @@ void GL4Renderer::DestroySceneResources() {
         if (mesh.buffer) glDeleteBuffers(1,&mesh.buffer);
     }
     scene_terrain.clear();
-    for (auto& mesh : scene_meshes) {
+    scene_meshes.clear([](SceneMeshGpu& mesh) {
         if (mesh.vao) glDeleteVertexArrays(1,&mesh.vao);
         if (mesh.buffer) glDeleteBuffers(1,&mesh.buffer);
-    }
-    scene_meshes.clear();
+    });
     if (scene_fog_buffer) glDeleteBuffers(1,&scene_fog_buffer);
     if (scene_fog_texture) glDeleteTextures(1,&scene_fog_texture);
     scene_fog_buffer = scene_fog_texture = 0;
@@ -626,6 +625,10 @@ void GL4Renderer::UploadSceneFrame(const d3scene::Presentation& frame, const d3s
         };
         bool rebuild_reflections = false;
         if (scene_frame_sequence != frame.data().sequence) {
+        scene_meshes.releaseExpired([](SceneMeshGpu& mesh) {
+            if (mesh.vao) glDeleteVertexArrays(1,&mesh.vao);
+            if (mesh.buffer) glDeleteBuffers(1,&mesh.buffer);
+        });
         scene_reflection_dependencies.begin();
         scene_reflection_dependencies.addValue(0); // initialize the empty GPU buffer once
         for (const auto& room : frame.data().rooms) collectTable(room.surfaces);
@@ -1175,8 +1178,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::Presentat
         if (item.mesh) {
             const auto& instance = presentation.data().meshes[item.mesh_index];
             const auto id = instance.asset->id();
-            if (scene_meshes.size() <= id.slot) scene_meshes.resize(id.slot+1);
-            mesh = &scene_meshes[id.slot]; UploadSceneMesh(*mesh,id,instance.asset->geometry());
+            mesh = &scene_meshes.get(instance.asset); UploadSceneMesh(*mesh,id,instance.asset->geometry());
             binding = &instance.surface;
             prepared_positions = scene_mesh_position_ranges[item.mesh_index];
         } else if (item.terrain) {

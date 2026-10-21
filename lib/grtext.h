@@ -21,6 +21,7 @@
 
 #include "grdefs.h"
 #include "pstypes.h"
+#include <cstdint>
 
 #define GRTEXT_BUFLEN			16384
 #define GRTEXT_FORMAT_CHAR		0x2
@@ -170,6 +171,8 @@ struct tFontGlyph {
     float u = 0, v = 0, uv_width = 0, uv_height = 0;
 };
 bool grfont_GetGlyph(int font, int ch, tFontGlyph& glyph);
+// Changes whenever atlas placement or font metrics change, including reloads.
+uint64_t grfont_LayoutRevision();
 
 //	returns a font's height
 int grfont_GetHeight(int font);

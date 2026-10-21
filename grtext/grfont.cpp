@@ -166,11 +166,14 @@ void grfont_XlateMonoChar(int bmp_handle, int x, int y, int index, tFontFileInfo
 void grfont_XlateColorChar(int bmp_handle, int x, int y, int index, tFontFileInfo *ft, int width);
 void grfont_XlateColorGrayChar(int bmp_handle, int x, int y, int index, tFontFileInfo *ft, int width);
 void grfont_ClearBitmap(int bmp_handle);
+namespace { uint64_t Font_layout_revision = 1; }
+uint64_t grfont_LayoutRevision() { return Font_layout_revision; }
 
 
 //	clears out font buffer.
 void grfont_Reset()
 {
+    ++Font_layout_revision;
 	if (Font_init) 
 		grfont_Close(); //free all allocated fonts.
 	else 
@@ -341,6 +344,7 @@ int grfont_Load(char *fname)
 //	frees a loaded font
 void grfont_Free(int handle)
 {
+    ++Font_layout_revision;
 	ASSERT(Font_init);
 	ASSERT(handle > -1 && handle < MAX_FONTS);
 
@@ -629,6 +633,7 @@ bool grfont_SetTemplate(const char *pathname, const tFontTemplate *ft)
 // sets a font's template without saving...
 bool grfont_SetKerning(int font, ubyte *kern_data)
 {
+    ++Font_layout_revision;
 	tFontInfo *oldft = &Fonts[font];
 	int n_pairs=0;
 
@@ -666,6 +671,7 @@ bool grfont_SetKerning(int font, ubyte *kern_data)
 // sets a font's tracking
 bool grfont_SetTracking(int font, int tracking)
 {
+    ++Font_layout_revision;
 	ASSERT(font >= 0 && font < MAX_FONTS);
 
 	tFontInfo *oldft = &Fonts[font];
@@ -782,6 +788,7 @@ int grfont_GetHeight(int font)
 //	translates raw font data to bitmaps.
 void grfont_TranslateToBitmaps(int handle)
 {
+    ++Font_layout_revision;
 	int i;
 
 	tFontInfo* fnt = &Fonts[handle];
