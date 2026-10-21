@@ -24,11 +24,10 @@ struct SurfaceMotion {
     uint32_t identity = 0;
     bool valid = false;
 };
-inline SurfaceMotion surfaceMotion(const Presentation& frame,const VisibleSurface& item,bool camera_history) {
-    SurfaceMotion result; result.previous = item.world;
-    if (!item.model) return result; // static world uses camera reconstruction
-    const auto& object = frame.data().model_instances[item.model_instance_index];
-    const auto& part = frame.resolvedModel(item.model_instance_index,item.model_variant).parts[item.part_index];
+// Motion belongs to the placed part, not each of its polygons. Camera validity
+// is supplied by the consuming view, independently of object/part history.
+inline SurfaceMotion modelPartMotion(const ModelInstance& object,const PreparedModelPart& part,bool camera_history) {
+    SurfaceMotion result;
     result.previous = compose(object.previous,part.previous);
     // Preserve the canvas adapter's zero/static and high-bit blur-policy ABI.
     if (!object.has_owner) return result; // standalone model history is view/layer-owned
@@ -36,6 +35,11 @@ inline SurfaceMotion surfaceMotion(const Presentation& frame,const VisibleSurfac
     if (!result.identity) result.identity = 1;
     result.valid = camera_history && object.has_previous && part.has_previous;
     return result;
+}
+inline SurfaceMotion surfaceMotion(const Presentation& frame,const VisibleSurface& item,bool camera_history) {
+    if (!item.model) { SurfaceMotion result; result.previous = item.world; return result; }
+    return modelPartMotion(frame.data().model_instances[item.model_instance_index],
+        frame.resolvedModel(item.model_instance_index,item.model_variant).parts[item.part_index],camera_history);
 }
 struct MotionSample { Vec2 velocity; bool valid = false; };
 inline MotionSample projectMotion(ClipPosition current,ClipPosition previous,bool history) {

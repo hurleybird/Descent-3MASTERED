@@ -25,6 +25,24 @@ static_assert(static_cast<int>(d3scene::OcclusionClass::Default) == RENDERER_AO_
     static_cast<int>(d3scene::OcclusionClass::Mine) == RENDERER_AO_CLASS_MINE,"Canvas AO class adapter differs from scene contract");
 struct SceneVertex { d3scene::Vec3 position; float u, v, lu, lv, alpha; d3scene::Vec3 normal, color; d3scene::Vec2 raster_offset; };
 const char* SceneLightingShader = R"GLSL(#version 330 core
+layout(std140) uniform SceneViewBlock { vec4 view_params[14]; ivec4 view_options; };
+#define eye (view_params[0].xyz)
+#define near_distance (view_params[0].w)
+#define camera_right (view_params[1].xyz)
+#define orthographic_depth_scale (view_params[1].w)
+#define camera_up (view_params[2].xyz)
+#define camera_forward (view_params[3].xyz)
+#define world_clip_plane (view_params[4])
+#define fog_path_plane (view_params[5])
+#define projection (view_params[6])
+#define raster_pixel_scale (view_params[7].xy)
+#define scene_raster_extent (view_params[7].zw)
+#define previous_view_projection mat4(view_params[8],view_params[9],view_params[10],view_params[11])
+#define exterior_fog_color (view_params[12].xyz)
+#define exterior_fog_range (view_params[13].xy)
+#define lighting_per_pixel (view_options.x)
+#define fog_volume_count (view_options.y)
+#define fog_volume_offset (view_options.z)
 layout(std140) uniform SceneDrawBlock { vec4 draw_params[21]; uvec4 draw_identity; };
 #define model_position (draw_params[0].xyz)
 #define effect_depth_offset (draw_params[0].w)
@@ -80,7 +98,6 @@ layout(std140) uniform SceneDrawBlock { vec4 draw_params[21]; uvec4 draw_identit
 uniform samplerBuffer scene_lights;
 uniform isamplerBuffer scene_influences;
 
-uniform int lighting_per_pixel;
 float sceneEmitterAttenuation(int light,vec3 world_position,out vec3 incident) {
     vec4 position_radius = texelFetch(scene_lights,light);
     vec4 color_falloff = texelFetch(scene_lights,light+1);
@@ -117,7 +134,6 @@ layout(location=3) in float alpha;
 layout(location=4) in vec3 normal;
 layout(location=5) in vec3 vertex_color;
 layout(location=6) in vec2 raster_offset;
-uniform vec2 raster_pixel_scale;
 uniform samplerBuffer instance_uvs;
 
 
@@ -131,15 +147,9 @@ out vec3 field_centers[4], field_colors[4];
 out vec3 field_modulation;
 
 
-uniform vec3 eye, camera_right, camera_up, camera_forward;
-uniform vec4 world_clip_plane;
 
 
-uniform mat4 previous_view_projection;
 out vec4 current_clip, previous_clip;
-uniform vec4 projection;
-uniform float near_distance;
-uniform float orthographic_depth_scale;
 out vec2 texcoord, lightcoord;
 out float vertex_alpha;
 out vec3 world_position;
@@ -204,15 +214,9 @@ in vec4 current_clip, previous_clip;
 layout(location=1) out vec4 surface_motion; // XY displacement, Z history validity, W surface class
 layout(location=4) out uint surface_identity;
 uniform samplerBuffer scene_fog;
-uniform int fog_volume_count;
-uniform int fog_volume_offset;
-uniform vec4 fog_path_plane; // zero: camera origin; otherwise retained optical half-space
 
 uniform sampler2D opaque_depth;
-uniform float near_distance, orthographic_depth_scale;
 uniform ivec2 depth_snapshot_origin;
-uniform vec3 eye, camera_forward, exterior_fog_color;
-uniform vec2 exterior_fog_range;
 
 
 
@@ -245,7 +249,6 @@ uniform int surface_prepass, scene_occlusion_enabled;
 uniform sampler2D scene_occlusion;
 uniform float scene_occlusion_intensity, scene_highlight_gamma, scene_highlight_threshold;
 uniform int scene_highlight_suppression;
-uniform vec2 scene_raster_extent;
 vec2 fogProjectedPoint(vec3 p,int drop) {
     return drop == 0 ? p.yz : (drop == 1 ? p.zx : p.xy);
 }
@@ -500,6 +503,8 @@ void GL4Renderer::DestroySceneResources() {
     scene_uv_buffer = scene_uv_texture = 0;
     if (scene_draw_buffer) glDeleteBuffers(1,&scene_draw_buffer);
     scene_draw_buffer = 0;
+    if (scene_view_buffer) glDeleteBuffers(1,&scene_view_buffer);
+    scene_view_buffer = 0;
     scene_draw_packets.clear(); scene_draw_records.clear(); scene_room_bindings.clear();
     scene_surface_ranges.clear();
     scene_model_influences.clear();
@@ -796,6 +801,9 @@ void GL4Renderer::PrepareSceneViewTables(const d3scene::PreparedView& prepared) 
             if (!wantsPart(part)) continue;
             auto& part_ranges = scene_part_ranges[part.compiled_index];
             part_ranges = {};
+            const auto motion = d3scene::modelPartMotion(object,part,true);
+            part_ranges.previous_world = motion.previous;
+            part_ranges.motion_identity = motion.identity; part_ranges.motion_valid = motion.valid;
             for (size_t surface = 0; surface < part.surfaces.size(); ++surface)
                 add(part.surfaces[surface],part.surface_base+uint32_t(surface),part.surfaces[surface].light_indices);
             if (!part.light_candidates.empty()) {
@@ -885,6 +893,7 @@ void GL4Renderer::PrepareSceneViewTables(const d3scene::PreparedView& prepared) 
     BindSceneTables();
 }
 void GL4Renderer::BindSceneTables() {
+    if (scene_view_buffer) glBindBufferBase(GL_UNIFORM_BUFFER,8,scene_view_buffer);
     glActiveTexture(GL_TEXTURE2); glBindTexture(GL_TEXTURE_BUFFER,scene_light_texture);
     glActiveTexture(GL_TEXTURE3); glBindTexture(GL_TEXTURE_BUFFER,scene_influence_texture);
     glActiveTexture(GL_TEXTURE4); glBindTexture(GL_TEXTURE_BUFFER,scene_uv_texture);
@@ -1041,18 +1050,6 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     if (!scene_shader.Handle()) {
         scene_shader.AttachSource(SceneVertexShader.c_str(), SceneFragmentShader.c_str());
         // Resolve the shader interface at link time, never by string in a view.
-        scene_uniforms.eye = scene_shader.FindUniform("eye");
-        scene_uniforms.camera_right = scene_shader.FindUniform("camera_right");
-        scene_uniforms.camera_up = scene_shader.FindUniform("camera_up");
-        scene_uniforms.camera_forward = scene_shader.FindUniform("camera_forward");
-        scene_uniforms.world_clip_plane = scene_shader.FindUniform("world_clip_plane");
-        scene_uniforms.fog_path_plane = scene_shader.FindUniform("fog_path_plane");
-        scene_uniforms.projection = scene_shader.FindUniform("projection");
-        scene_uniforms.near_distance = scene_shader.FindUniform("near_distance");
-        scene_uniforms.orthographic_depth_scale = scene_shader.FindUniform("orthographic_depth_scale");
-        scene_uniforms.raster_pixel_scale = scene_shader.FindUniform("raster_pixel_scale");
-        scene_uniforms.previous_view_projection = scene_shader.FindUniform("previous_view_projection");
-        scene_uniforms.lighting_per_pixel = scene_shader.FindUniform("lighting_per_pixel");
         scene_uniforms.colortexture = scene_shader.FindUniform("colortexture");
         scene_uniforms.planar_texture = scene_shader.FindUniform("planar_texture");
         scene_uniforms.lightmaptexture = scene_shader.FindUniform("lightmaptexture");
@@ -1066,11 +1063,6 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         scene_uniforms.surface_prepass = scene_shader.FindUniform("surface_prepass");
         scene_uniforms.scene_occlusion_enabled = scene_shader.FindUniform("scene_occlusion_enabled");
         scene_uniforms.scene_occlusion = scene_shader.FindUniform("scene_occlusion");
-        scene_uniforms.scene_raster_extent = scene_shader.FindUniform("scene_raster_extent");
-        scene_uniforms.fog_volume_count = scene_shader.FindUniform("fog_volume_count");
-        scene_uniforms.fog_volume_offset = scene_shader.FindUniform("fog_volume_offset");
-        scene_uniforms.exterior_fog_color = scene_shader.FindUniform("exterior_fog_color");
-        scene_uniforms.exterior_fog_range = scene_shader.FindUniform("exterior_fog_range");
         scene_uniforms.scene_occlusion_intensity = scene_shader.FindUniform("scene_occlusion_intensity");
         scene_uniforms.scene_highlight_suppression = scene_shader.FindUniform("scene_highlight_suppression");
         scene_uniforms.scene_highlight_gamma = scene_shader.FindUniform("scene_highlight_gamma");
@@ -1079,6 +1071,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         scene_uniforms.depth_snapshot_origin = scene_shader.FindUniform("depth_snapshot_origin");
         scene_uniforms.planar_projection = scene_shader.FindUniform("planar_projection");
         glUniformBlockBinding(scene_shader.Handle(),glGetUniformBlockIndex(scene_shader.Handle(),"SceneDrawBlock"),7);
+        glUniformBlockBinding(scene_shader.Handle(),glGetUniformBlockIndex(scene_shader.Handle(),"SceneViewBlock"),8);
         scene_shader.Use();
         glUniform1i(scene_uniforms.colortexture,0);
         glUniform1i(scene_uniforms.planar_texture,10);
@@ -1167,25 +1160,12 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         if (!scissor) glDisable(GL_SCISSOR_TEST);
     }
     scene_shader.Use();
-    auto vec = [&](GLint location, d3scene::Vec3 v) { glUniform3f(location,v.x,v.y,v.z); };
     const auto& camera = visibility.camera.transform;
-    vec(scene_uniforms.eye,camera.position); vec(scene_uniforms.camera_right,camera.right);
-    vec(scene_uniforms.camera_up,camera.up); vec(scene_uniforms.camera_forward,camera.forward);
     const auto clip = view.has_clip_plane ? view.clip_plane : d3scene::Plane{};
-    glUniform4f(scene_uniforms.world_clip_plane,clip.normal.x,clip.normal.y,clip.normal.z,clip.constant);
     const auto fog_clip = view.fog_path_origin == d3scene::FogPathOrigin::ClipPlane ? clip : d3scene::Plane{};
-    glUniform4f(scene_uniforms.fog_path_plane,fog_clip.normal.x,fog_clip.normal.y,fog_clip.normal.z,fog_clip.constant);
     const auto& projection = visibility.camera.projection;
-    glUniform4f(scene_uniforms.projection,projection.x_scale,projection.y_scale,
-        projection.x_offset,projection.y_offset);
-    glUniform1f(scene_uniforms.near_distance,projection.near_distance);
-    glUniform1f(scene_uniforms.orthographic_depth_scale,projection.orthographic_depth_scale);
-    glUniform2f(scene_uniforms.raster_pixel_scale,2.f/view.viewport.width,2.f/view.viewport.height);
-    glUniformMatrix4fv(scene_uniforms.previous_view_projection,1,GL_FALSE,history.previous.view_projection.data());
-    glUniform1i(scene_uniforms.lighting_per_pixel,presentation.data().lighting_quality == d3scene::LightingQuality::Pixel);
     glUniform1i(scene_uniforms.surface_prepass,0);
     glUniform1i(scene_uniforms.scene_occlusion_enabled,0);
-    glUniform2f(scene_uniforms.scene_raster_extent,float(output.Width()),float(output.Height()));
     const auto& fog_volumes = d3scene::fogVolumes(presentation.data());
     const auto fog_id = presentation.data().fog ? presentation.data().fog->id() : d3scene::AssetId{};
     const bool new_fog_buffer = !scene_fog_buffer;
@@ -1220,11 +1200,25 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     }
     glActiveTexture(GL_TEXTURE6); glBindTexture(GL_TEXTURE_BUFFER,scene_fog_texture);
     if (new_fog_buffer) glTexBuffer(GL_TEXTURE_BUFFER,GL_RGBA32F,scene_fog_buffer);
-    glUniform1i(scene_uniforms.fog_volume_count,scene_view_fog.count);
-    glUniform1i(scene_uniforms.fog_volume_offset,scene_view_fog.offset);
     const auto& exterior_fog = presentation.data().exterior_fog;
-    vec(scene_uniforms.exterior_fog_color,exterior_fog.color);
-    glUniform2f(scene_uniforms.exterior_fog_range,exterior_fog.start,exterior_fog.end);
+    struct ViewRecord { std::array<float,56> values{}; std::array<int32_t,4> options{}; } view_record;
+    static_assert(sizeof(ViewRecord) == 15*16,"Scene view std140 layout mismatch");
+    const auto put = [&](size_t row,d3scene::Vec3 v,float w = 0) {
+        const float values[4] = {v.x,v.y,v.z,w}; std::copy_n(values,4,view_record.values.data()+row*4);
+    };
+    put(0,camera.position,projection.near_distance); put(1,camera.right,projection.orthographic_depth_scale);
+    put(2,camera.up); put(3,camera.forward);
+    put(4,clip.normal,clip.constant); put(5,fog_clip.normal,fog_clip.constant);
+    put(6,{projection.x_scale,projection.y_scale,projection.x_offset},projection.y_offset);
+    put(7,{2.f/view.viewport.width,2.f/view.viewport.height,float(output.Width())},float(output.Height()));
+    std::copy_n(history.previous.view_projection.data(),16,view_record.values.data()+32);
+    put(12,exterior_fog.color); put(13,{exterior_fog.start,exterior_fog.end,0});
+    view_record.options = {{int32_t(presentation.data().lighting_quality == d3scene::LightingQuality::Pixel),
+        int32_t(scene_view_fog.count),int32_t(scene_view_fog.offset),0}};
+    if (!scene_view_buffer) glGenBuffers(1,&scene_view_buffer);
+    glBindBuffer(GL_UNIFORM_BUFFER,scene_view_buffer);
+    glBufferData(GL_UNIFORM_BUFFER,sizeof(view_record),&view_record,GL_STREAM_DRAW);
+    glBindBufferBase(GL_UNIFORM_BUFFER,8,scene_view_buffer);
     const auto exteriorRoom = [&](int room) {
         if (room < 0) return true;
         const auto* found = presentation.roomIndices().find(room);
@@ -1331,7 +1325,13 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         record[72] = float(view.collection == 0 && exterior && exterior_fog.enabled);
         { const auto value = item.world.position; record[0] = value.x; record[1] = value.y; record[2] = value.z; } { const auto value = item.world.right; record[4] = value.x; record[5] = value.y; record[6] = value.z; }
         { const auto value = item.world.up; record[8] = value.x; record[9] = value.y; record[10] = value.z; } { const auto value = item.world.forward; record[12] = value.x; record[13] = value.y; record[14] = value.z; }
-        const auto motion = d3scene::surfaceMotion(presentation,item,history.previous_valid);
+        d3scene::SurfaceMotion motion;
+        motion.previous = item.world;
+        if (resolved_part) {
+            const auto& prepared = scene_part_ranges[resolved_part->compiled_index];
+            motion.previous = prepared.previous_world; motion.identity = prepared.motion_identity;
+            motion.valid = history.previous_valid && prepared.motion_valid;
+        }
         { const auto value = motion.previous.position; record[16] = value.x; record[17] = value.y; record[18] = value.z; } { const auto value = motion.previous.right; record[20] = value.x; record[21] = value.y; record[22] = value.z; }
         { const auto value = motion.previous.up; record[24] = value.x; record[25] = value.y; record[26] = value.z; } { const auto value = motion.previous.forward; record[28] = value.x; record[29] = value.y; record[30] = value.z; }
         { const uint32_t value = uint32_t(motion.identity); std::memcpy(record+84,&value,sizeof(value)); }

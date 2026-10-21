@@ -2,6 +2,28 @@
 
 ## October 21 resumed work — supersedes restart pause below
 
+Latest continuation: view-block-only.exe replaces separate camera/environment
+uniform calls with one 240-byte std140 block. Three long scene images EXACT;
+block+canvas experiment also matched combined probe/mirror/quality. No reliable
+general CPU win established. Canvas fusion was removed: added compatibility
+rules and mixed/noisy performance did not justify keeping it. Its binaries
+canvas-views/view-block remain as measurement artifacts, not current source.
+1000-FPS-cap exploratory timings are separate from the standard 120-FPS corpus.
+
+Current binary light-surface.exe: view UBO, motion once per demanded model part,
+polygon bounds once per light-candidate list. Unit tests/build pass, all eight
+short images + combined probe/mirror/SSAA2/MSAA4/AO/bloom EXACT to coalesced.
+Three long images exact. Sparse demand lists were removed entirely: both broad
+and narrowed experiments failed to establish a benefit. No dead experiment API.
+Standard long light-bound change improves save005 mean ~1.627 -> 1.532 ms;
+dense/fog mixed. Motion dense mean ~2.173 -> 2.070, others mixed. Not general wins.
+Current diagnostic pin-{1..4}-* captures compare part-demand/light-surface with
+ONLY the temporary game's main thread pinned to logical CPU2. No global or
+shipping affinity change. Wait for that loop before build/copy/sampling.
+Goal remains unmet (last full normal corpus six CPU wins/two misses).
+Last usage 19% remaining. No Candidate/main/desktop changes; lib/gitinfo.h is
+unrelated and must remain untouched. Continue, not a requested yield.
+
 Newest: part-demand.exe built, dense/wall/fog long images and combined probe
 exact. Dense CPU modestly improved, others mixed. Full coalesced vs legacy
 three-round CPU corpus still six ahead/two behind (005/007); see ownership doc.

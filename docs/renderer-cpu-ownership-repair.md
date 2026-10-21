@@ -2,6 +2,32 @@
 
 ## October 20 continuation
 
+October 21 continuation, `light-surface.exe`:
+
+- Camera/environment uniforms are one 240-byte std140 view block, bound again
+  after image-space consumers. Separate pass controls remain per pass. No
+  general speed claim: measured CPU changes are small/mixed, GPU similar.
+- Previous model-part world transform and motion identity are computed once
+  in part submission preparation, not once per face. Camera history still
+  gates each consuming view. Dense long paired mean 2.173 -> 2.070 ms; other
+  scenes mixed. Raw motion-{1..4}-*.
+- Surface/light refinement lazily constructs placed polygon bounds once for
+  all candidate lights. Directional back-plane rejection remains first;
+  original order/radius predicate unchanged. 512 placements x32 lights compare
+  exact candidate lists against the old per-light calculation in unit tests.
+  Save005 long paired mean 1.627 -> 1.532 ms; dense/fog mixed. Raw lights-*.
+- Tests/build pass. Eight short scenes, three long scenes, combined resource/
+  deformation/view probe, mirror, SSAA2/MSAA4/AO/bloom images all EXACT to their
+  controls. Quality image inspected. No visual feature removed.
+- Rejected: compatible canvas fusion (mixed performance vs added rules), sparse
+  demand membership lists (slower, including narrowed room/mesh-only version).
+  Those changes and their tests/APIs are removed, not dormant alternatives.
+- Timing noise remains substantial. Exploratory 1000-FPS cap runs are NOT mixed
+  into standard 120-FPS results. A diagnostic loop now pins only each temporary
+  game's initial/main thread to logical CPU2; no system/build policy changes.
+  Raw pin-* will assess whether this improves repeatability. Fresh normal
+  old/current corpus still required before updating the six-ahead/two-behind claim.
+
 October 21: fresh three-round coalesced/current versus pre-rewrite CPU corpus
 (90 frames, mean render_ms over 15-84): 000 1.3307/1.5256; 001 1.0275/1.6308;
 002 1.8465/2.4484; 003 2.1012/2.5930; 004 .6132/.7939; 005 1.3878/.9409;

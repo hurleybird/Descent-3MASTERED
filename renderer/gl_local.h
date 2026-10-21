@@ -138,18 +138,6 @@ class GL4Renderer : public IRenderer
 	uint64_t scene_asset_lifetime = 0;
 	ShaderProgram scene_shader;
 	struct SceneUniformLocations {
-		GLint eye = -1;
-		GLint camera_right = -1;
-		GLint camera_up = -1;
-		GLint camera_forward = -1;
-		GLint world_clip_plane = -1;
-		GLint fog_path_plane = -1;
-		GLint projection = -1;
-		GLint near_distance = -1;
-		GLint orthographic_depth_scale = -1;
-		GLint raster_pixel_scale = -1;
-		GLint previous_view_projection = -1;
-		GLint lighting_per_pixel = -1;
 		GLint colortexture = -1;
 		GLint planar_texture = -1;
 		GLint lightmaptexture = -1;
@@ -163,11 +151,6 @@ class GL4Renderer : public IRenderer
 		GLint surface_prepass = -1;
 		GLint scene_occlusion_enabled = -1;
 		GLint scene_occlusion = -1;
-		GLint scene_raster_extent = -1;
-		GLint fog_volume_count = -1;
-		GLint fog_volume_offset = -1;
-		GLint exterior_fog_color = -1;
-		GLint exterior_fog_range = -1;
 		GLint scene_occlusion_intensity = -1;
 		GLint scene_highlight_suppression = -1;
 		GLint scene_highlight_gamma = -1;
@@ -178,6 +161,7 @@ class GL4Renderer : public IRenderer
 	} scene_uniforms;
 	GLuint scene_light_buffer = 0, scene_light_texture = 0;
 	GLuint scene_draw_buffer = 0;
+    GLuint scene_view_buffer = 0;
 	size_t scene_draw_record_bytes = 0;
 	struct SceneDrawPacket { const d3scene::SurfaceBinding* binding; GLuint vao; ElementRange range; d3scene::MaterialPolicy policy; };
 	std::vector<SceneDrawPacket> scene_draw_packets;
@@ -192,7 +176,12 @@ class GL4Renderer : public IRenderer
 	std::vector<SceneSurfaceRanges> scene_surface_ranges;
 	struct SceneRoomBindings { d3scene::RoomSurfaces surfaces; std::vector<SceneSurfaceRanges> ranges; bool reusable = false; };
 	std::vector<SceneRoomBindings> scene_room_bindings;
-	struct ScenePartRanges { ElementRange polygons, positions; };
+	struct ScenePartRanges {
+        ElementRange polygons, positions;
+        d3scene::Transform previous_world;
+        uint32_t motion_identity = 0;
+        bool motion_valid = false;
+    };
 	std::vector<ScenePartRanges> scene_part_ranges;
 	std::vector<ElementRange> scene_model_influences;
 	struct SceneReflectionRanges { ElementRange sources, normals, field; };

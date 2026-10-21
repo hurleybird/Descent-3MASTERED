@@ -95,27 +95,49 @@ bool touchesBounds(const Light& light,const Bounds& b) {
     const float z = std::max(b.minimum.z-light.position.z,std::max(0.f,light.position.z-b.maximum.z));
     return x*x+y*y+z*z <= light.radius*light.radius;
 }
-bool touches(const Light& light, MeshView mesh, const MeshPolygon& polygon, const Transform& transform) {
-    Vec3 low = transformPoint(transform,mesh.positions[polygon.corners[0].vertex]), high = low;
-    if (light.directional) {
-        const auto normal = transformDirection(transform,polygon.normal);
-        if (normal.x*(light.position.x-low.x)+normal.y*(light.position.y-low.y)+normal.z*(light.position.z-low.z) < 0) return false;
+class LightSurface {
+    MeshView mesh_;
+    const MeshPolygon& polygon_;
+    const Transform& transform_;
+    Vec3 first_, normal_;
+    Bounds bounds_;
+    bool have_bounds_ = false, have_normal_ = false;
+public:
+    LightSurface(MeshView mesh,const MeshPolygon& polygon,const Transform& transform)
+        : mesh_(mesh),polygon_(polygon),transform_(transform),
+          first_(transformPoint(transform,mesh.positions[polygon.corners[0].vertex])) {}
+    bool touches(const Light& light) {
+        if (light.directional) {
+            if (!have_normal_) { normal_ = transformDirection(transform_,polygon_.normal); have_normal_ = true; }
+            if (normal_.x*(light.position.x-first_.x)+normal_.y*(light.position.y-first_.y)+
+                normal_.z*(light.position.z-first_.z) < 0) return false;
+        }
+        // Geometry depends on the placed surface, not the light. Build it once
+        // for all candidates, but keep the cheap back-plane rejection first.
+        if (!have_bounds_) {
+            auto& low = bounds_.minimum; auto& high = bounds_.maximum;
+            low = high = first_;
+            for (const auto& corner : polygon_.corners) {
+                const auto p = transformPoint(transform_,mesh_.positions[corner.vertex]);
+                low.x = std::min(low.x,p.x); low.y = std::min(low.y,p.y); low.z = std::min(low.z,p.z);
+                high.x = std::max(high.x,p.x); high.y = std::max(high.y,p.y); high.z = std::max(high.z,p.z);
+            }
+            have_bounds_ = true;
+        }
+        return touchesBounds(light,bounds_);
     }
-    for (const auto& corner : polygon.corners) {
-        const auto p = transformPoint(transform,mesh.positions[corner.vertex]);
-        low.x = std::min(low.x,p.x); low.y = std::min(low.y,p.y); low.z = std::min(low.z,p.z);
-        high.x = std::max(high.x,p.x); high.y = std::max(high.y,p.y); high.z = std::max(high.z,p.z);
-    }
-    const float x = std::max(low.x-light.position.x,std::max(0.f,light.position.x-high.x));
-    const float y = std::max(low.y-light.position.y,std::max(0.f,light.position.y-high.y));
-    const float z = std::max(low.z-light.position.z,std::max(0.f,light.position.z-high.z));
-    return x*x+y*y+z*z <= light.radius*light.radius;
+};
+bool touches(const Light& light,MeshView mesh,const MeshPolygon& polygon,const Transform& transform) {
+    return LightSurface(mesh,polygon,transform).touches(light);
 }
 }
 void appendSurfaceLightIndices(const FrameData& data,LightCandidateRange candidates,
     MeshView mesh,const MeshPolygon& polygon,const Transform& transform,std::vector<int32_t>& output) {
-    for (const auto index : data.lightCandidates(candidates))
-        if (touches(data.lights[index],mesh,polygon,transform)) output.push_back(static_cast<int32_t>(index));
+    const auto lights = data.lightCandidates(candidates);
+    if (lights.empty()) return;
+    LightSurface surface(mesh,polygon,transform);
+    for (const auto index : lights)
+        if (surface.touches(data.lights[index])) output.push_back(static_cast<int32_t>(index));
 }
 void prepareLightInfluences(FrameData& data) {
     auto& packed = data.light_candidate_indices;

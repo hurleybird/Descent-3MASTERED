@@ -116,6 +116,42 @@ int runLightTests() {
     appendSurfaceLightIndices(frame->data(),frame->data().rooms[0].light_candidates,
         MeshView(mesh),mesh.polygons[0],distant,submitted);
     check(submitted.empty(),"View refinement ignored posed polygon position");
+    {
+        FrameData candidates;
+        for (uint32_t i = 0; i < 32; ++i) {
+            Light light = point;
+            light.position = {float(int(i%7)-3)*7,float(int(i%5)-2)*9,float(int(i%11)-5)*3};
+            light.radius = 1.f+float(i%13)*3; light.directional = (i%3 == 0);
+            candidates.lights.push_back(light); candidates.light_candidate_indices.push_back(i);
+        }
+        const auto& polygon = mesh.polygons[0];
+        for (int trial = 0; trial < 512; ++trial) {
+            Transform placement;
+            const float angle = float(trial)*.037f;
+            placement.right = {std::cos(angle),0,std::sin(angle)};
+            placement.forward = {-std::sin(angle),0,std::cos(angle)};
+            placement.position = {float(trial%17)-8,float(trial%13)-6,float(trial%19)-9};
+            std::vector<int32_t> expected{123}, actual{123};
+            for (uint32_t i = 0; i < candidates.lights.size(); ++i) {
+                const auto& light = candidates.lights[i];
+                auto low = transformPoint(placement,mesh.vertices[polygon.corners[0].vertex]), high = low;
+                const auto normal = transformDirection(placement,polygon.normal);
+                if (light.directional && normal.x*(light.position.x-low.x)+normal.y*(light.position.y-low.y)+
+                    normal.z*(light.position.z-low.z) < 0) continue;
+                for (const auto& corner : polygon.corners) {
+                    const auto p = transformPoint(placement,mesh.vertices[corner.vertex]);
+                    low = {std::min(low.x,p.x),std::min(low.y,p.y),std::min(low.z,p.z)};
+                    high = {std::max(high.x,p.x),std::max(high.y,p.y),std::max(high.z,p.z)};
+                }
+                const float x = std::max(low.x-light.position.x,std::max(0.f,light.position.x-high.x));
+                const float y = std::max(low.y-light.position.y,std::max(0.f,light.position.y-high.y));
+                const float z = std::max(low.z-light.position.z,std::max(0.f,light.position.z-high.z));
+                if (x*x+y*y+z*z <= light.radius*light.radius) expected.push_back(int32_t(i));
+            }
+            appendSurfaceLightIndices(candidates,{0,32},MeshView(mesh),polygon,placement,actual);
+            check(actual == expected,"Shared surface bounds changed light coverage or candidate order");
+        }
+    }
     data.lights[0].color.x = 99;
     check(frame->data().lights[0].color.x == 1,"Published emitter was mutated");
     data = frame->data();
