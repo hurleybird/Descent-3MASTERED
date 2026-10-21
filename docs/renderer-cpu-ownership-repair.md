@@ -2,6 +2,13 @@
 
 ## October 20 continuation
 
+October 21: material preparation skips sealed whole-model tables (not just each
+part), shares one resolution transaction with image preparation, and uses bounded
+stack arrays instead of temporary vectors. Draw-record exterior classification
+uses the frame's room index instead of a linear room search per draw. Dense,
+save005 and combined probes remain pixel-exact; totals 3.215/2.116 ms in these
+marker-enabled trials. Captures: `cpu-material-scope-*-20261021`.
+
 October 21: current/previous normalized animation inputs use ranges in one
 frame-owned, recycled float array rather than separate shared vectors per model.
 Invalid ranges/counts/non-finite values reject; held-frame/rest/keyed/deformation

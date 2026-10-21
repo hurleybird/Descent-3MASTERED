@@ -147,9 +147,9 @@ bool roomMaterialInputsUnchanged() {
 // per-face work. Resolve once per texture for this preparation transaction.
 // Nothing survives the transaction, so edits/reloads/settings cannot go stale.
 struct MaterialResolution {
-    explicit MaterialResolution(float value) : time(value), bitmaps(MAX_TEXTURES,-2), occlusion(MAX_TEXTURES,-1) {}
+    explicit MaterialResolution(float value) : time(value) { bitmaps.fill(-2); occlusion.fill(-1); }
     float time;
-    std::vector<int> bitmaps, occlusion;
+    std::array<int,MAX_TEXTURES> bitmaps, occlusion;
     int bitmap(int texture) {
         auto& result = bitmaps[texture];
         if (result == -2) {
@@ -168,7 +168,7 @@ struct MaterialResolution {
     }
 };
 void resolveMaterial(d3scene::SurfaceBinding&,MaterialResolution&,bool model,bool exterior);
-void prepareImages(d3scene::FrameData& data) {
+void prepareImages(d3scene::FrameData& data,MaterialResolution& resolution) {
     // Source handles and resource names occupy bounded registries. Reuse index
     // scratch, not thousands of per-frame hash nodes/reference-counted entries.
     static thread_local std::array<int,MAX_BITMAPS+MAX_LIGHTMAPS> pixels;
@@ -176,7 +176,6 @@ void prepareImages(d3scene::FrameData& data) {
     static thread_local size_t previous_binding_count = 0;
     pixels.fill(-1); bindings.fill(-1);
     data.images.reserve(previous_binding_count);
-    MaterialResolution resolution(static_cast<float>(data.simulation_time));
     const bool audit_images = FindArg("-scene-image-revision-audit") != 0;
     size_t image_misses = 0, image_requests = 0;
     const auto image = [&](int handle,bool baked) -> d3scene::ImageAssetRef {
@@ -498,14 +497,17 @@ void PrepareGameSceneResources(d3scene::FrameData& data) {
     MaterialResolution resolution(static_cast<float>(data.simulation_time));
     { PERF_MARKER_SCOPE("Scene.Resources.Materials");
     for (auto& surface : data.terrain.materials) resolveMaterial(surface,resolution,false,true);
-    for (auto& model : data.model_variants) for (size_t p = 0; p < model.parts.size(); ++p) {
+    for (auto& model : data.model_variants) {
+      if (model.parts.publishedFor(model.asset->id())) continue;
+      for (size_t p = 0; p < model.parts.size(); ++p) {
         const auto& input = model.parts.read()[p];
         if (input.surfaces.publishedFor(model.asset->id(),uint32_t(p),input.material_palette)) continue;
         auto& part = model.parts[p];
         for (auto& surface : part.surfaces) resolveMaterial(surface,resolution,true);
+      }
     }
     }
-    prepareImages(data);
+    prepareImages(data,resolution);
     d3scene::prepareTerrainPatches(data.terrain);
 }
 

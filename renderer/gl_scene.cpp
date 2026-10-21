@@ -1151,8 +1151,8 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::Presentat
     glUniform2f(scene_uniforms.exterior_fog_range,exterior_fog.start,exterior_fog.end);
     const auto exteriorRoom = [&](int room) {
         if (room < 0) return true;
-        for (const auto& state : presentation.data().rooms) if (state.number == room) return state.exterior;
-        return true;
+        const auto* found = presentation.roomIndices().find(room);
+        return !found || presentation.data().rooms[found->second].exterior;
     };
 
     const auto passes = d3scene::buildViewPasses(presentation,visibility,products);
