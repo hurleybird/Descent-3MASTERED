@@ -1,5 +1,6 @@
 // Descent 3MASTERED - GPL-3.0-or-later
 #include "../../renderer/SceneImages.h"
+#include "../../Descent3/TextureNamePolicy.h"
 #include <stdexcept>
 namespace {
 int checks;
@@ -13,6 +14,20 @@ template<class F> void rejects(F f) {
 int runSceneImageTests() {
     using namespace d3scene;
     checks = 0;
+    {
+    TextureNamePolicy<16> policy;
+    char name[16] = "monitor";
+    int classifications = 0;
+    const auto classify = [&](const char* value) { ++classifications; return std::strcmp(value,"monitor") == 0; };
+    check(policy.resolve(name,classify) && policy.resolve(name,classify) && classifications == 1,
+        "Stable texture name was repeatedly classified");
+    std::strcpy(name,"wall");
+    check(!policy.resolve(name,classify) && classifications == 2,"Renamed texture retained old policy");
+    std::strcpy(name,"monitor");
+    check(policy.resolve(name,classify) && classifications == 3,"Reused texture slot retained old policy");
+    name[10] = 'x';
+    check(policy.resolve(name,classify) && classifications == 3,"Unused name padding changed policy identity");
+    }
     bool packed_matches = true;
     for (uint32_t pixel = 0; pixel < 65536; ++pixel) {
         const auto expand = [](uint32_t v,float maximum) { return static_cast<uint8_t>(255*(v/maximum)); };

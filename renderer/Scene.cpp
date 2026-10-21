@@ -59,6 +59,29 @@ void RoomSurfaces::seal(AssetId asset,uint32_t part,bool palette,const std::vect
     reflections_ = std::make_shared<const std::vector<uint64_t>>(reflections.begin(),reflections.end());
     planar_ = planar && !planar->empty() ? std::make_shared<const std::vector<PlanarSurface>>(*planar) : nullptr;
 }
+void ModelParts::seal(const ModelAsset& asset) {
+    if (publishedFor(asset.id())) return;
+    auto summary = std::make_shared<Summary>();
+    summary->asset = asset.id();
+    for (size_t i = 0; i < size(); ++i) {
+        const auto& part = read()[i];
+        const auto& geometry = asset.geometry().parts[i];
+        summary->surface_count += part.surfaces.size();
+        summary->required_light_count = std::max(summary->required_light_count,part.surfaces.requiredLightCount());
+        for (auto light : part.light_candidates)
+            summary->required_light_count = std::max(summary->required_light_count,uint64_t(light)+1);
+        if (part.draw && !geometry.geometry.polygons.empty()) {
+            summary->has_geometry = true;
+            summary->motion_radius = std::max(summary->motion_radius,geometry.motion_radius);
+        }
+        summary->images.insert(summary->images.end(),part.surfaces.images().begin(),part.surfaces.images().end());
+    }
+    const auto key = [](const RoomSurfaces::ImageDependency& d) { return std::make_tuple(d.binding,d.classify_alpha,d.format); };
+    auto& images = summary->images;
+    std::sort(images.begin(),images.end(),[&](const auto& a,const auto& b) { return key(a)<key(b); });
+    images.erase(std::unique(images.begin(),images.end(),[&](const auto& a,const auto& b) { return key(a)==key(b); }),images.end());
+    publication_ = std::move(summary);
+}
 namespace {
 std::atomic<uint64_t> NextLifetime{1};
 bool finite(Vec3 v) { return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z); }
@@ -422,7 +445,10 @@ void compileModelBounds(const Transform& placement,PreparedModel& model) {
     model.has_render_bounds = false;
     if (model.deferred_pose) {
         float radius = 0;
-        for (size_t i = 0; i < model.parts.size(); ++i) {
+        if (model.parts.publishedFor(model.asset->id())) {
+            radius = model.parts.summary()->motion_radius*(1+std::abs(model.deformation));
+            model.has_render_bounds = model.parts.summary()->has_geometry;
+        } else for (size_t i = 0; i < model.parts.size(); ++i) {
             const auto& pose = model.parts.read()[i];
             const auto& part = model.asset->geometry().parts[i];
             if (!pose.draw || part.geometry.polygons.empty()) continue;
@@ -717,17 +743,14 @@ PresentationRef Presentation::complete(FrameData data) {
             }
             require(model.parts.size() == model.asset->geometry().parts.size(), "Incomplete object pose");
             const bool retained_parts = model.parts.publishedFor(model.asset->id());
+            if (retained_parts) {
+                const auto& summary = *model.parts.summary();
+                require(summary.required_light_count <= data.lights.size(),"Model references missing emitter");
+                for (const auto& dependency : summary.images) validateDependency(dependency);
+                continue;
+            }
             for (size_t i = 0; i < model.parts.size(); ++i) {
                 const auto& part = model.parts[i];
-                if (retained_parts) {
-                    // Geometry, poses and binding shape were validated against
-                    // this exact asset at publication. Only frame-owned names
-                    // can change beneath an immutable part table.
-                    for (auto light : part.light_candidates) require(light < data.lights.size(),"Missing model light");
-                    require(part.surfaces.requiredLightCount() <= data.lights.size(),"Surface references missing emitter");
-                    for (const auto& dependency : part.surfaces.images()) validateDependency(dependency);
-                    continue;
-                }
                 require(finite(part.current) && finite(part.previous), "Invalid model instance transform");
                 const size_t vertex_count = model.asset->geometry().parts[i].geometry.vertices.size();
                 for (const auto* positions : {&part.vertices,&part.previous_vertices}) {
@@ -811,6 +834,11 @@ PresentationRef Presentation::complete(FrameData data) {
     for (auto& mesh : prepared->data_.meshes) index_surface(mesh.surface);
     for (auto& object : prepared->data_.model_instances) for (auto& model : object.models) {
         model.surface_base = surface_count;
+        if (model.deferred_pose && model.parts.publishedFor(model.asset->id())) {
+            require(model.parts.summary()->surface_count <= UINT32_MAX-surface_count,"Too many scene surfaces");
+            surface_count += uint32_t(model.parts.summary()->surface_count);
+            continue;
+        }
         for (size_t p = 0; p < model.parts.size(); ++p) {
             if (!model.deferred_pose) model.parts[p].surface_base = surface_count;
             surface_count += uint32_t(model.parts.read()[p].surfaces.size());
@@ -864,6 +892,7 @@ PresentationRef Presentation::complete(FrameData data) {
                 include(object.render_bounds,object.has_render_bounds,model.render_bounds.minimum);
                 include(object.render_bounds,object.has_render_bounds,model.render_bounds.maximum);
             }
+            if (model.parts.publishedFor(model.asset->id())) continue;
             for (size_t part = 0; part < model.parts.size(); ++part) {
                 const auto& input = model.parts.read()[part];
                 const auto& geometry = model.asset->geometry().parts[part].geometry;
@@ -876,7 +905,7 @@ PresentationRef Presentation::complete(FrameData data) {
                 pose.surfaces.seal(model.asset->id(),uint32_t(part),pose.material_palette);
                 }
             }
-            model.parts.seal(model.asset->id());
+            model.parts.seal(*model.asset);
         }
     }
     prepared->resolved_models_.resize(resolved_index);

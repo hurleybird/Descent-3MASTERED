@@ -470,19 +470,28 @@ struct PreparedModelPart {
 // Stable part bindings can outlive a frame. Publication seals the table;
 // mutation detaches it, so held presentations never observe a later edit.
 class ModelParts {
+public:
+    struct Summary {
+        AssetId asset;
+        uint64_t surface_count = 0, required_light_count = 0;
+        float motion_radius = 0;
+        bool has_geometry = false;
+        std::vector<RoomSurfaces::ImageDependency> images;
+    };
+private:
     using Storage = std::vector<PreparedModelPart>;
     std::shared_ptr<Storage> values_;
-    AssetId publication_;
+    std::shared_ptr<const Summary> publication_;
     Storage& edit() {
         if (!values_) values_ = std::make_shared<Storage>();
-        else if (publication_.revision || values_.use_count() != 1) values_ = std::make_shared<Storage>(*values_);
+        else if (publication_ || values_.use_count() != 1) values_ = std::make_shared<Storage>(*values_);
         publication_ = {}; return *values_;
     }
-    void seal(AssetId asset) { publication_ = asset; }
+    void seal(const ModelAsset& asset);
     friend class Presentation;
 public:
     ModelParts() = default;
-    ModelParts(const ModelParts& other) : values_(!other.values_ || other.publication_.revision ? other.values_ :
+    ModelParts(const ModelParts& other) : values_(!other.values_ || other.publication_ ? other.values_ :
         std::make_shared<Storage>(*other.values_)),publication_(other.publication_) {}
     ModelParts& operator=(const ModelParts& other) { if (this != &other) { ModelParts copy(other); *this = std::move(copy); } return *this; }
     ModelParts(ModelParts&&) = default;
@@ -490,7 +499,8 @@ public:
     const Storage& read() const { static const Storage empty; return values_ ? *values_ : empty; }
     size_t size() const { return read().size(); }
     bool empty() const { return read().empty(); }
-    bool publishedFor(AssetId asset) const { return publication_.revision && publication_ == asset; }
+    bool publishedFor(AssetId asset) const { return publication_ && publication_->asset == asset; }
+    const Summary* summary() const { return publication_.get(); }
     const PreparedModelPart& operator[](size_t i) const { return read()[i]; }
     PreparedModelPart& operator[](size_t i) { return edit()[i]; }
     auto begin() const { return read().begin(); }

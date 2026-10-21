@@ -19,6 +19,7 @@
 #include "grdefs.h"
 #include "pstypes.h"
 #include "gametexture.h"
+#include "TextureNamePolicy.h"
 #include "mono.h"
 #include "bitmap.h"
 #include "pserror.h"
@@ -329,6 +330,7 @@ static bool BloomProtectedTextureName(const char* name)
 }
 
 static bool BloomProtectedBitmaps[MAX_BITMAPS] = {};
+static TextureNamePolicy<PAGENAME_LEN> BloomTexturePolicies[MAX_TEXTURES];
 
 bool IsBloomProtectedTextureBitmap(int bitmap_handle)
 {
@@ -417,7 +419,7 @@ int GetTextureBitmapAtTime(int handle, int framenum, float presentation_time, bo
 	const int final_bitmap = GetHighResolutionTextureBitmap(handle, src_bitmap);
 	if (final_bitmap >= 0 && final_bitmap < MAX_BITMAPS)
 		BloomProtectedBitmaps[final_bitmap] =
-			BloomProtectedTextureName(GameTextures[handle].name);
+			BloomTexturePolicies[handle].resolve(GameTextures[handle].name,BloomProtectedTextureName);
 	return final_bitmap;
 
 }

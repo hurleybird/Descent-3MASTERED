@@ -151,7 +151,12 @@ struct MaterialResolution {
     std::vector<int> bitmaps, occlusion;
     int bitmap(int texture) {
         auto& result = bitmaps[texture];
-        if (result == -2) result = GetTextureBitmapAtTime(texture,0,time);
+        if (result == -2) {
+            if (GameTextures[texture].flags & TF_PROCEDURAL) {
+                PERF_MARKER_SCOPE("Scene.Resources.Procedural");
+                result = GetTextureBitmapAtTime(texture,0,time);
+            } else result = GetTextureBitmapAtTime(texture,0,time);
+        }
         return result;
     }
     d3scene::OcclusionClass roomOcclusion(int texture,bool exterior) {
@@ -181,6 +186,7 @@ void prepareImages(d3scene::FrameData& data) {
         if (resident && !audit_images) {
             return resident;
         }
+        PERF_MARKER_SCOPE("Scene.Resources.PublishPixels");
         if (!resident) ++image_misses;
         d3scene::ImageSource source;
         source.content_revision = revision;
@@ -322,6 +328,7 @@ void prepareImages(d3scene::FrameData& data) {
     bool dependencies_current = true;
     { PERF_MARKER_SCOPE("Scene.Resources.DependencyLayout");
     if (!layout_matches) {
+        PERF_MARKER_SCOPE("Scene.Resources.RebuildDependencies");
         dependency_owners.clear(); dependencies.clear(); dependency_owners.reserve(table_count);
         eachTable([&](const d3scene::RoomSurfaces& table) {
             dependency_owners.push_back(table.published() ? table.imageDependencies() : Dependencies{});

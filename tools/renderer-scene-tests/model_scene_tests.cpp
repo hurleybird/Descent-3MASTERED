@@ -496,6 +496,17 @@ int runModelSceneTests() {
         const auto next_frame = Presentation::freeze(next_inputs);
         check(next_frame->data().model_instances[0].models[0].parts.data() ==
             held->data().model_instances[0].models[0].parts.data(),"Unchanged bindings were copied for a new pose");
+        const auto* summary = held->data().model_instances[0].models[0].parts.summary();
+        check(summary && summary->surface_count == 2 && summary->has_geometry &&
+            next_frame->data().model_instances[0].models[0].parts.summary() == summary,
+            "Unchanged bindings rebuilt their compiled model summary");
+        auto hidden = held->data();
+        for (auto& part : hidden.model_instances[0].models[0].parts) part.draw = false;
+        check(!hidden.model_instances[0].models[0].parts.summary(),"Part edit retained stale summary");
+        const auto hidden_frame = Presentation::freeze(hidden);
+        check(!hidden_frame->data().model_instances[0].has_render_bounds &&
+            !hidden_frame->data().model_instances[0].models[0].parts.summary()->has_geometry && summary->has_geometry,
+            "Changed draw membership retained old conservative bounds or mutated held summary");
         const auto& next_pose = next_frame->resolvedModel(0,0);
         check(next_pose.parts[0].has_previous && !next_pose.parts[1].has_previous,
             "Shared bindings leaked a prior frame's part visibility history");

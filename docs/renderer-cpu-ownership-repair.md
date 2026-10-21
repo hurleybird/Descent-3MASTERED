@@ -2,6 +2,22 @@
 
 ## October 20 continuation
 
+Model publication now retains aggregate surface count, conservative motion radius,
+draw membership, required light count and unique image-validation dependencies.
+Held tables share the summary; any part edit invalidates it. Publication/validation
+in the dense probe drops approximately 0.70 -> 0.38 ms. The full summary corpus
+is 3.131, 2.430, 4.241, 4.414, 1.150, 3.052, 1.489, 3.774 ms. Still no all-baseline win.
+The combined effects/auxiliary/deformation/resource/audit capture is pixel-identical
+to the collection checkpoint. Contract tests cover shared summary identity and
+changed draw membership as well as previous stale-proof rejection cases.
+
+Texture-name bloom classification is cached against the exact name (not texture
+slot alone), preserving direct legacy rename/slot-reuse behavior without repeated
+name-list scans. New focused tests pass. Finer resource markers identify about
+0.23 ms of procedural simulation in the dense scene; pixel publication is only
+about 0.01 ms, and dependency-list rebuilding averages about 0.04 ms. Do not
+attribute the remaining resource cost primarily to allocation or pixel copies.
+
 Resource preparation now retains the exact union of immutable dependency lists,
 while still resolving current texture frames and producer revisions every frame.
 The resource-layout corpus is 3.46, 2.35, 4.58, 4.67, 1.06, 3.34, 1.30, 3.56 ms.
