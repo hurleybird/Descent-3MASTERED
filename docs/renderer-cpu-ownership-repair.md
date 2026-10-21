@@ -2,6 +2,32 @@
 
 ## October 20 continuation
 
+October 21, next checkpoint (`draw-coalesced.exe`):
+
+- Fire publishes owned indexed pixels and a copied palette; expansion is shared
+  on demand. All eight short and three long images exact. Save005 paired CPU
+  1.439/1.756 -> 1.329/1.271 ms; dense and 007 mixed. Not a general speed claim.
+- Visibility computes world points before backface rejection, but computes
+  clip codes only when surviving polygons require them. No new allocations or
+  changed rejection predicate. Paired CPU mostly mixed; 007 modestly lower.
+- Fog compilation uses 16-bin surface-area splits instead of centroid medians.
+  Tests verify leaf coverage, threaded traversal and 4000 brute-force segments.
+  Save007 long GPU 3.544/3.579 -> 1.600/1.602 ms; SSAA2/MSAA4/AO/bloom short GPU
+  19.267 -> 9.731 ms. Exact images, including the high-quality fog scene.
+- Adjacent draws with identical UBO contents, textures, geometry allocation and
+  raster state share glMultiDrawArrays. No reordering, SSBO draw lookup, extra
+  vertex attributes or changed shader path. Disabled stream offsets canonicalize
+  to zero. Dense capture had 257 compatible adjacent world pairs and 72 cockpit
+  pairs. Long CPU parent/new: dense 2.392/2.150 -> 2.153/2.263; 005 1.650/1.303
+  -> 1.457/1.300; 007 1.904/1.540 -> 1.408/1.475. There is temporal noise;
+  GPU unchanged. Do not extrapolate these component runs to the legacy goal.
+
+Combined checkpoint: unit tests/build pass; all eight images, combined resource/
+deformation/view probe, mirror surface and high-quality dense image EXACT.
+Save005 visually inspected. Evidence: cpu-indexed-*, cpu-lazy-clip-*, fog-sah-*,
+draw-coalesced-* in verification directory. Fresh old/current corpus is next.
+No Candidate, Previous Candidate, main checkout or desktop changes.
+
 October 21: fog traversal now prepares a view-local, threaded subset of the
 immutable boundary tree. Initial containment still uses the full tree; near
 and mirror clipping never remove optical prefixes. Tests compare 4000 random

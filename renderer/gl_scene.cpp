@@ -1364,6 +1364,10 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         record[27] = float(static_cast<int>(texture_uv_range.offset)-static_cast<int>(range.offset));
         record[7] = float(prepared_positions.count != 0);
         record[11] = float(prepared_positions.offset);
+        // Disabled streams have no address. Canonical records let adjacent
+        // draws share a UBO without introducing fragment-side draw indirection.
+        for (const auto pair : {std::pair<int,int>{15,19},{23,27},{31,35},{39,43},{7,11},{63,62},{78,77}})
+            if (!record[pair.first]) record[pair.second] = 0;
 
         packets[item_index] = {binding,gpu.vao,range,policy};
     }
@@ -1573,6 +1577,22 @@ void main() {
           BindSceneImage(presentation.image(image),unit,wrap,baked);
           previous = {image,wrap};
       };
+      const auto compatible = [&](uint32_t first,uint32_t next) {
+          const auto& a = packets[first]; const auto& b = packets[next];
+          const auto& x = *a.binding; const auto& y = *b.binding;
+          const auto& ia = visibility.surfaces[first]; const auto& ib = visibility.surfaces[next];
+          const auto images = [](const d3scene::SurfaceBinding& s) {
+              return std::make_tuple(s.color_image,s.baked_image,s.specular_image,s.texture_wrap,s.lightmap_wrap);
+          };
+          const auto raster = [](const d3scene::MaterialPolicy& p) { return std::make_tuple(p.layer,p.blend,p.depth); };
+          return a.vao == b.vao && images(x) == images(y) && raster(a.policy) == raster(b.policy) &&
+              (ia.terrain || (ia.mesh && !x.two_sided)) == (ib.terrain || (ib.mesh && !y.two_sided)) &&
+              !x.view_image_slot && !y.view_image_slot && !a.policy.planar_slot && !b.policy.planar_slot &&
+              std::memcmp(records.data()+first*(record_bytes/sizeof(float)),
+                  records.data()+next*(record_bytes/sizeof(float)),88*sizeof(float)) == 0;
+      };
+      static thread_local std::vector<GLint> draw_starts;
+      static thread_local std::vector<GLsizei> draw_counts;
       for (uint32_t item_index = pass.begin; item_index < pass.end; ++item_index) {
         const auto& item = visibility.surfaces[item_index];
         const auto& packet = packets[item_index];
@@ -1654,7 +1674,20 @@ void main() {
         previous_raster = raster_key; raster_bound = true;
         }
         if (packet.vao != previous_vao) { glBindVertexArray(packet.vao); previous_vao = packet.vao; }
-        glDrawArrays(GL_TRIANGLES,range.offset,range.count);
+        uint32_t end = item_index+1;
+        while (end < pass.end && compatible(item_index,end)) ++end;
+        if (end == item_index+1) glDrawArrays(GL_TRIANGLES,range.offset,range.count);
+        else {
+            // Same shader, UBO, textures, raster state and geometry allocation.
+            // Keep primitive order exactly; only eliminate redundant submissions.
+            draw_starts.clear(); draw_counts.clear();
+            for (uint32_t i = item_index; i < end; ++i) {
+                draw_starts.push_back(GLint(packets[i].range.offset));
+                draw_counts.push_back(GLsizei(packets[i].range.count));
+            }
+            glMultiDrawArrays(GL_TRIANGLES,draw_starts.data(),draw_counts.data(),GLsizei(draw_starts.size()));
+            item_index = end-1;
+        }
         rend_RecordDrawCall(RENDERER_DRAW_CALL_3D);
       }
       // Image-space consumers and the remaining canvas adapter own their

@@ -104,6 +104,22 @@ template<class Visitor> void visitCrossings(const FogVolume& volume,Vec3 eye,Vec
 void buildFogAcceleration(FogVolume& volume) {
     volume.nodes.clear();
     if (volume.boundary.empty()) { volume.bounds = {}; return; }
+    const auto merge = [](Bounds& bounds,const Bounds& other) {
+        bounds.minimum.x = std::min(bounds.minimum.x,other.minimum.x); bounds.maximum.x = std::max(bounds.maximum.x,other.maximum.x);
+        bounds.minimum.y = std::min(bounds.minimum.y,other.minimum.y); bounds.maximum.y = std::max(bounds.maximum.y,other.maximum.y);
+        bounds.minimum.z = std::min(bounds.minimum.z,other.minimum.z); bounds.maximum.z = std::max(bounds.maximum.z,other.maximum.z);
+    };
+    const auto triangleBounds = [&](const FogTriangle& t) {
+        Bounds bounds{t.a,t.a}; merge(bounds,{t.b,t.b}); merge(bounds,{t.c,t.c}); return bounds;
+    };
+    const auto area = [](const Bounds& bounds) {
+        const auto d = sub(bounds.maximum,bounds.minimum);
+        return double(d.x)*d.y+double(d.x)*d.z+double(d.y)*d.z;
+    };
+    const auto center = [](const FogTriangle& t,int axis) {
+        return axis == 0 ? (double(t.a.x)+t.b.x+t.c.x)/3 :
+            axis == 1 ? (double(t.a.y)+t.b.y+t.c.y)/3 : (double(t.a.z)+t.b.z+t.c.z)/3;
+    };
     std::function<void(uint32_t,uint32_t)> build = [&](uint32_t first,uint32_t count) {
         const uint32_t index = static_cast<uint32_t>(volume.nodes.size());
         FogNode node; node.bounds.minimum = node.bounds.maximum = volume.boundary[first].a;
@@ -113,15 +129,45 @@ void buildFogAcceleration(FogVolume& volume) {
             node.bounds.minimum.z = std::min(node.bounds.minimum.z,p.z); node.bounds.maximum.z = std::max(node.bounds.maximum.z,p.z);
         }
         volume.nodes.push_back(node);
-        if (count <= 8) { volume.nodes[index].first = first; volume.nodes[index].count = count; }
+        int best_axis = -1,best_split = 0;
+        double best_low = 0,best_scale = 0,best_cost = area(node.bounds)*count;
+        // Spend compilation work once on spatial quality, not every pixel on
+        // overlapping median partitions. The cost includes one node traversal.
+        constexpr int bins = 16;
+        if (count > 2) for (int axis = 0; axis < 3; ++axis) {
+            double low = center(volume.boundary[first],axis),high = low;
+            for (uint32_t i = first+1; i < first+count; ++i) {
+                const double value = center(volume.boundary[i],axis); low = std::min(low,value); high = std::max(high,value);
+            }
+            if (!(high > low)) continue;
+            const double scale = bins/(high-low);
+            struct Bin { Bounds bounds{}; uint32_t count = 0; } bucket[bins],prefix[bins];
+            for (uint32_t i = first; i < first+count; ++i) {
+                auto& b = bucket[std::min(bins-1,int((center(volume.boundary[i],axis)-low)*scale))];
+                const auto bounds = triangleBounds(volume.boundary[i]);
+                if (b.count++) merge(b.bounds,bounds); else b.bounds = bounds;
+            }
+            const auto append = [&](Bin& to,const Bin& from) {
+                if (!from.count) return;
+                if (to.count) merge(to.bounds,from.bounds); else to.bounds = from.bounds;
+                to.count += from.count;
+            };
+            Bin left;
+            for (int b = 0; b < bins; ++b) { append(left,bucket[b]); prefix[b] = left; }
+            Bin right;
+            for (int b = bins-1; b > 0; --b) {
+                append(right,bucket[b]); const auto& l = prefix[b-1];
+                if (!l.count || !right.count) continue;
+                const double cost = area(node.bounds)+area(l.bounds)*l.count+area(right.bounds)*right.count;
+                if (cost < best_cost) { best_cost = cost; best_axis = axis; best_split = b; best_low = low; best_scale = scale; }
+            }
+        }
+        if (best_axis < 0) { volume.nodes[index].first = first; volume.nodes[index].count = count; }
         else {
-            const auto size = sub(node.bounds.maximum,node.bounds.minimum);
-            const int axis = size.x >= size.y && size.x >= size.z ? 0 : (size.y >= size.z ? 1 : 2);
-            const auto center = [axis](const FogTriangle& t) { return axis == 0 ? t.a.x+t.b.x+t.c.x : (axis == 1 ? t.a.y+t.b.y+t.c.y : t.a.z+t.b.z+t.c.z); };
-            const auto middle = first+count/2;
-            std::nth_element(volume.boundary.begin()+first,volume.boundary.begin()+middle,volume.boundary.begin()+first+count,
-                [&](const FogTriangle& a,const FogTriangle& b) { return center(a) < center(b); });
-            build(first,count/2); build(middle,count-count/2);
+            const auto middle = std::partition(volume.boundary.begin()+first,volume.boundary.begin()+first+count,
+                [&](const FogTriangle& t) { return std::min(bins-1,int((center(t,best_axis)-best_low)*best_scale)) < best_split; });
+            const auto left = uint32_t(middle-(volume.boundary.begin()+first));
+            build(first,left); build(first+left,count-left);
         }
         volume.nodes[index].escape = static_cast<uint32_t>(volume.nodes.size());
     };

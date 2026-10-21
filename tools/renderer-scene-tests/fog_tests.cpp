@@ -60,6 +60,17 @@ int runFogTests() {
             }
         }
         buildFogAcceleration(many);
+        auto flat = many;
+        flat.nodes.resize(1); flat.nodes[0].bounds = many.bounds;
+        flat.nodes[0].first = 0; flat.nodes[0].count = uint32_t(flat.boundary.size()); flat.nodes[0].escape = 1;
+        std::vector<unsigned> coverage(many.boundary.size());
+        for (size_t i = 0; i < many.nodes.size(); ++i) {
+            const auto& node = many.nodes[i];
+            check(node.escape > i && node.escape <= many.nodes.size(),"Fog tree escape is not forward/bounded");
+            check(size_t(node.first)+node.count <= many.boundary.size(),"Fog tree leaf exceeds geometry");
+            for (uint32_t t = node.first; t < node.first+node.count; ++t) ++coverage[t];
+        }
+        for (auto count : coverage) check(count == 1,"Fog tree lost or duplicated a boundary triangle");
         View request; request.history_key = 1; request.viewport = request.projection_anchor = {0,0,800,600};
         std::vector<FogViewNode> nodes;
         auto camera = prepareCamera(request);
@@ -83,6 +94,9 @@ int runFogTests() {
             for (int i = 0; i < 2000; ++i) {
                 const auto end = unproject(camera,sample()*2-1,sample()*2-1,.5f+sample()*.499f);
                 const float start = sample()*5;
+                check(fogSegmentLength(many,request.camera.position,end,inside,start) ==
+                    fogSegmentLength(flat,request.camera.position,end,inside,start),
+                    "Fog acceleration changed brute-force integration");
                 check(fogSegmentLength(many,request.camera.position,end,inside,start) ==
                     fogSegmentLength(narrowed,request.camera.position,end,inside,start),
                     "Pruned fog traversal changed exact optical integration");

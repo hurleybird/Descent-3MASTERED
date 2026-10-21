@@ -1,6 +1,7 @@
 // Descent 3MASTERED - GPL-3.0-or-later
 #include "../../renderer/SceneProcedural.h"
 #include "../../renderer/SceneAnimation.h"
+#include "../../lib/ImmutablePixels.h"
 #include <stdexcept>
 #include <climits>
 #include <vector>
@@ -8,6 +9,25 @@ int runProceduralTests() {
     using namespace d3scene;
     int checks = 0;
     const auto check = [&](bool value) { ++checks; if (!value) throw std::runtime_error("Procedural clock/random contract"); };
+    {
+        std::array<uint8_t,769> indices;
+        std::array<uint16_t,256> palette;
+        for (size_t i = 0; i < indices.size(); ++i) indices[i] = uint8_t(i*17);
+        for (size_t i = 0; i < palette.size(); ++i) palette[i] = uint16_t(i*251);
+        const auto source = indices; const auto colors = palette;
+        IndexedPixels16 pixels(indices.data(),indices.size(),palette.data());
+        indices.fill(0); palette.fill(0); // retained image owns BOTH inputs
+        check(pixels.size() == source.size()*2);
+        const auto& result = pixels.bytes();
+        check(&result == &pixels.bytes());
+        for (size_t i = 0; i < source.size(); ++i) {
+            uint16_t color; std::memcpy(&color,result.data()+i*2,2);
+            check(color == colors[source[i]]);
+        }
+        bool rejected = false;
+        try { IndexedPixels16 invalid(nullptr,1,colors.data()); } catch (const std::invalid_argument&) { rejected = true; }
+        check(rejected);
+    }
     for (int heat = 0; heat < 256; ++heat) {
         std::vector<uint8_t> pixels(258,99);
         for (int i = 0; i < 256; ++i) pixels[i+1] = uint8_t(i);

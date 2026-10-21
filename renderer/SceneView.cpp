@@ -105,7 +105,7 @@ bool boundsOutside(const Camera& camera,const Bounds& bounds,PortalWindow window
     return left || right || bottom || top;
 }
 namespace {
-struct ProjectedVertex { Vec3 world; uint16_t outside = 0; uint64_t generation = 0; };
+struct ProjectedVertex { Vec3 world; uint16_t outside = UINT16_MAX; uint64_t generation = 0; };
 struct ProjectionScratch { std::vector<ProjectedVertex> vertices; uint64_t generation = 0; };
 // One cache per geometry placement/aperture, not per face or clip plane.
 // Scratch retains capacity only; generation separates every view and placement.
@@ -130,6 +130,16 @@ public:
         auto& result = scratch_.vertices[index];
         if (result.generation == generation_) return result;
         result.world = transformPoint(placement_,geometry_.positions[index]);
+        result.outside = UINT16_MAX; // uncomputed; valid clip codes use ten bits
+        result.generation = generation_;
+        return result;
+    }
+    uint16_t clipCode(uint32_t index) {
+        // A plane-side/backface query needs only the world point. Do not pay
+        // projection and aperture tests until a surviving polygon asks for them.
+        vertex(index);
+        auto& result = scratch_.vertices[index];
+        if (result.outside != UINT16_MAX) return result.outside;
         uint16_t outside = 0;
         for (size_t i = 0; i < camera_.planes.size(); ++i) {
             const auto& plane = camera_.planes[i];
@@ -141,15 +151,15 @@ public:
         if (p.x > window_.right*p.w+epsilon) outside |= 1<<7;
         if (p.y < window_.bottom*p.w-epsilon) outside |= 1<<8;
         if (p.y > window_.top*p.w+epsilon) outside |= 1<<9;
-        result.outside = outside; result.generation = generation_;
-        return result;
+        result.outside = outside;
+        return outside;
     }
     bool outside(const MeshPolygon& polygon) {
         // AND, not OR: vertices outside different planes do not prove that
         // the polygon is outside. Keep the original conservative predicate.
         uint16_t common = (1<<10)-1;
         for (const auto& corner : polygon.corners) {
-            common &= vertex(corner.vertex).outside;
+            common &= clipCode(corner.vertex);
             if (!common) return false;
         }
         return true;

@@ -1349,14 +1349,10 @@ void EvaluateFireProcedural(ProceduralEvaluation& context, int handle)
 
 	// blend the current texture
 	BlendProcTexture(handle);
-	context.destination = (ubyte*)procedural->proc2;
-	int total = PROC_SIZE * PROC_SIZE;
-	ushort* data = bm_data(dest_bitmap, 0);
-	ushort* pal = procedural->palette;
-	for (int i = 0; i < total; i++, data++, context.destination++)
-	{
-		*data = pal[*context.destination];
-	}
+    // Publish the compact simulation result. Pixel expansion is independent of
+    // simulation and is shared by every consumer of this exact image value.
+    bm_SetDeferredPixels(dest_bitmap,std::make_shared<IndexedPixels16>(
+        static_cast<const uint8_t*>(procedural->proc2),PROC_SIZE*PROC_SIZE,procedural->palette));
 
 	// Swap for next time
 	ubyte* temp = (ubyte*)procedural->proc1;

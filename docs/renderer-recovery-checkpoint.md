@@ -2,6 +2,15 @@
 
 ## October 21 resumed work — supersedes restart pause below
 
+Newest: draw-coalesced.exe qualified against all eight images, combined probe,
+mirror, high-quality dense scene; all EXACT. Includes owned indexed fire pixels,
+lazy clip codes, SAH fog asset compilation, adjacent equal-UBO multidraw.
+Fog-heavy high-quality image exact too; GPU 19.27 -> 9.73 ms from SAH alone.
+Long base fog007 GPU now ~1.60 ms, still not legacy parity. CPU improvements
+mixed; fresh full old/current comparison next, goal not established.
+No active captures/samplers at checkpoint. Last included usage 23% remaining.
+Evidence and exact component timings at top of renderer-cpu-ownership-repair.md.
+
 Newest: fog-ray.exe is built/tested and all eight images, long save007, combined
 probe, mirror and SSAA2/MSAA4/AO/bloom are exact. View-pruned boundary traversal,
 explicit triangle edges and shared inverse-ray setup reduce long save007 GPU
