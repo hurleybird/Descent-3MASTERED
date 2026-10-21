@@ -2,6 +2,16 @@
 
 ## October 20 continuation
 
+October 21: world model material inputs now describe the entire binding table,
+not identical records constructed for every part. Unchanged published tables
+reuse directly; changed inputs rebuild without copying the old parts first.
+Dynamic attachments/pose remain independent, and per-object lightmap topology
+validation plus the baked-UV revision audit are preserved. Contract tests cover
+each appearance input, exact subobject masks, palette/layout changes and absent
+history. Combined audit/effects probe and save005 image match exactly. Initial
+save005 trial: 2.601 ms total, models ~0.51 ms, parts ~0.14 ms (previous portal
+trial 2.854 / ~0.65 / ~0.23). These are single-run measurements, not a final win.
+
 Portal lists now have a sealed copy-on-write lifetime independent of frame room
 scalars. Extraction compares the complete authored connection tuple before
 reusing storage; traversal/two-sided policy detaches only when it changes.

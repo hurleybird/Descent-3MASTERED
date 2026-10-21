@@ -347,17 +347,25 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::Presenta
             variant.deformation_owner = owner.handle;
             PerfMarkersEnd("Scene.Models.Pose");
             const auto roles = ResolveSceneModelRoles(*variant.asset,source->rtype.pobj_info.subobj_flags,effect.custom_texture >= 0);
-            if (history) variant.parts = history->parts;
+            variant.binding_inputs.appearance = {{float(directional),float(source->rtype.pobj_info.tmap_override),
+                float(effect.custom_texture),float(effect.has_player_color),effect.player_color.x,
+                effect.player_color.y,effect.player_color.z,float(player_color_texture)}};
+            variant.binding_inputs.baked_layout_revision = baked ? ObjectLightmapLayoutRevision() : 0;
+            variant.binding_inputs.subobject_mask = source->rtype.pobj_info.subobj_flags;
+            variant.binding_inputs.material_palette = !baked;
+            variant.binding_inputs.valid = true;
+            const bool reuse_materials = retain_materials && history &&
+                history->binding_inputs == variant.binding_inputs && history->parts.publishedFor(variant.asset->id());
+            if (reuse_materials) variant.parts = history->parts;
             else variant.parts.resize(variant.asset->geometry().parts.size());
             variant.previous_draw_mask = 0;
             PERF_MARKER_SCOPE("Scene.Models.Parts");
             for (size_t i = 0; i < variant.asset->geometry().parts.size(); ++i) {
                 const auto& asset_part = variant.asset->geometry().parts[i];
-                d3scene::PreparedModelPart part;
-                part.has_previous = history && history->parts[i].draw && instance.has_previous;
-                if (part.has_previous) variant.previous_draw_mask |= uint32_t(1)<<i;
+                const bool has_previous = history && history->parts[i].draw && instance.has_previous;
+                if (has_previous) variant.previous_draw_mask |= uint32_t(1)<<i;
                 const auto role = roles[i];
-                part.draw = role == SceneModelPartRole::Surface;
+                const bool draw = role == SceneModelPartRole::Surface;
                 const auto attachment_begin = data.meshes.size();
                 if (role == SceneModelPartRole::Facing)
                     prepareFacingPart(data,&owner,*model,i,{});
@@ -368,29 +376,27 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::Presenta
                     data.meshes[attachment].model_variant = static_cast<int32_t>(variant_index);
                     data.meshes[attachment].model_part = static_cast<int32_t>(i);
                 }
-                part.material_palette = !baked;
-                part.baked_layout_revision = baked ? ObjectLightmapLayoutRevision() : 0;
-                part.appearance_inputs = {{float(directional),float(source->rtype.pobj_info.tmap_override),float(effect.custom_texture),float(effect.has_player_color),
-                    effect.player_color.x,effect.player_color.y,effect.player_color.z,float(player_color_texture),float(part.draw)}};
                 const auto* old_part = history ? &history->parts[i] : nullptr;
-                bool reuse_materials = retain_materials && old_part && old_part->material_palette == part.material_palette &&
-                    old_part->appearance_inputs == part.appearance_inputs && old_part->baked_layout_revision == part.baked_layout_revision &&
-                    old_part->surfaces.publishedFor(variant.asset->id(),uint32_t(i),part.material_palette);
-                if (reuse_materials && baked && part.draw && audit_geometry) {
-                    for (size_t face = 0; reuse_materials && face < asset_part.geometry.polygons.size(); ++face) {
+                if (reuse_materials && baked && draw && audit_geometry) {
+                    bool matches = true;
+                    for (size_t face = 0; matches && face < asset_part.geometry.polygons.size(); ++face) {
                         const auto& source_face = source->lm_object.lightmap_faces[i][face];
                         const auto& retained = old_part->surfaces[face];
-                        reuse_materials = retained.lightmap == source_face.lmi_handle &&
+                        matches = retained.lightmap == source_face.lmi_handle &&
                             retained.lightmap_bitmap == LightmapInfo[source_face.lmi_handle].lm_handle &&
                             retained.baked_uvs.size() == asset_part.geometry.polygons[face].corners.size();
-                        for (size_t corner = 0; reuse_materials && corner < retained.baked_uvs.size(); ++corner)
-                            reuse_materials = retained.baked_uvs[corner].x == source_face.u2[corner] && retained.baked_uvs[corner].y == source_face.v2[corner];
+                        for (size_t corner = 0; matches && corner < retained.baked_uvs.size(); ++corner)
+                            matches = retained.baked_uvs[corner].x == source_face.u2[corner] && retained.baked_uvs[corner].y == source_face.v2[corner];
                     }
-                    if (!reuse_materials) throw std::logic_error("Object lightmap layout changed without producer invalidation");
+                    if (!matches) throw std::logic_error("Object lightmap layout changed without producer invalidation");
                 }
                 if (reuse_materials) {
                     continue;
                 }
+                d3scene::PreparedModelPart part;
+                part.has_previous = has_previous;
+                part.draw = draw;
+                part.material_palette = !baked;
                 const size_t surface_count = part.material_palette ? asset_part.surface_polygons.size() : asset_part.geometry.polygons.size();
                 part.surfaces.reserve(surface_count);
                 for (size_t material = 0; material < surface_count; ++material) {

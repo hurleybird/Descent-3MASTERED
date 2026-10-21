@@ -34,6 +34,24 @@ d3scene::ModelGeometry modelGeometry() {
 int runModelSceneTests() {
     using namespace d3scene;
     checks = 0;
+    {
+        ModelBindingInputs key;
+        check(!(key == key),"Uninitialized producer binding inputs permitted reuse");
+        key.valid = true; key.subobject_mask = UINT32_MAX; key.material_palette = true;
+        check(key == key,"Unchanged complete model binding inputs failed reuse");
+        for (size_t i = 0; i < key.appearance.size(); ++i) {
+            auto changed = key; changed.appearance[i] = 1;
+            check(!(key == changed),"Model binding reuse ignored an appearance input");
+        }
+        auto changed = key; changed.subobject_mask ^= 0x80000000u;
+        check(!(key == changed),"Model binding reuse rounded a subobject mask");
+        changed = key; changed.baked_layout_revision = 1;
+        check(!(key == changed),"Model binding reuse ignored saved UV layout revision");
+        changed = key; changed.material_palette = false;
+        check(!(key == changed),"Model binding reuse confused baked and palette surfaces");
+        changed = key; changed.valid = false;
+        check(!(key == changed),"Model binding reuse accepted uninitialized history");
+    }
     // Instance opacity must produce the same pipeline as baking it into each
     // surface, without changing the immutable binding table.
     for (auto blend : {BlendMode::Solid,BlendMode::Alpha,BlendMode::Additive,BlendMode::Multiply})

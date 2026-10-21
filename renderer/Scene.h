@@ -497,7 +497,6 @@ struct PreparedModelPart {
     uint32_t surface_base = 0;
     bool light_influences_prepared = false;
     std::array<float,16> appearance_inputs{};
-    uint64_t baked_layout_revision = 0;
     std::vector<uint32_t> light_candidates; // conservative part set; refined after visibility
     const SurfaceBinding& surface(const ModelPart& asset,size_t polygon) const {
         return surfaces[material_palette ? asset.surface_for_polygon[polygon] : polygon];
@@ -549,8 +548,22 @@ public:
     void resize(size_t n) { edit().resize(n); }
     void push_back(PreparedModelPart value) { edit().push_back(std::move(value)); }
 };
+// Producer inputs for a complete model binding table. Pose, placement and
+// instance modulation do not participate in the lifetime of that table.
+struct ModelBindingInputs {
+    std::array<float,8> appearance{};
+    uint64_t baked_layout_revision = 0;
+    uint32_t subobject_mask = 0;
+    bool material_palette = false, valid = false;
+    bool operator==(const ModelBindingInputs& other) const {
+        return valid && other.valid && appearance == other.appearance &&
+            baked_layout_revision == other.baked_layout_revision &&
+            subobject_mask == other.subobject_mask && material_palette == other.material_palette;
+    }
+};
 struct PreparedModel {
     ModelAssetRef asset;
+    ModelBindingInputs binding_inputs;
     SurfaceModulation modulation;
     uint64_t pose_source_revision = 0;
     std::shared_ptr<const std::vector<float>> pose_inputs;
