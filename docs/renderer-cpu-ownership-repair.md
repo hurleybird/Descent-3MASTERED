@@ -2,6 +2,16 @@
 
 ## October 20 continuation
 
+October 21: GL raster state is shared across consecutive identical policies within
+each pass (ordering is unchanged, and external/image passes cannot poison the
+cache). Shader uniform locations and fixed sampler bindings are resolved at link
+time, rather than queried by name for every view. Submission drops about
+0.53 -> 0.29 ms in the dense scene. Full raster/interface corpus: 2.892, 2.071,
+3.810, 3.883, 1.025, 2.673, 1.131, 3.180 ms. Six captures exactly match the
+preceding corpus; save000/save002 reproduce their known local moving-object
+variants. Combined AO/bloom/auxiliary/resource/source-audit probe matches exactly.
+The old-renderer target remains unmet.
+
 Prepared model parts now have frame-local packed indices. GPU preparation uses
 reusable arrays for per-part light/position ranges and per-mesh position ranges,
 and appends deformed positions directly into the upload buffer. No transient

@@ -14,6 +14,7 @@
 #include <cmath>
 #include <string>
 #include <algorithm>
+#include <tuple>
 extern int Last_texel_unit_set;
 
 namespace {
@@ -955,7 +956,57 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::Presentat
     }
     if (!scene_shader.Handle()) {
         scene_shader.AttachSource(SceneVertexShader.c_str(), SceneFragmentShader.c_str());
+        // Resolve the shader interface at link time, never by string in a view.
+        scene_uniforms.eye = scene_shader.FindUniform("eye");
+        scene_uniforms.camera_right = scene_shader.FindUniform("camera_right");
+        scene_uniforms.camera_up = scene_shader.FindUniform("camera_up");
+        scene_uniforms.camera_forward = scene_shader.FindUniform("camera_forward");
+        scene_uniforms.world_clip_plane = scene_shader.FindUniform("world_clip_plane");
+        scene_uniforms.fog_path_plane = scene_shader.FindUniform("fog_path_plane");
+        scene_uniforms.projection = scene_shader.FindUniform("projection");
+        scene_uniforms.near_distance = scene_shader.FindUniform("near_distance");
+        scene_uniforms.orthographic_depth_scale = scene_shader.FindUniform("orthographic_depth_scale");
+        scene_uniforms.raster_pixel_scale = scene_shader.FindUniform("raster_pixel_scale");
+        scene_uniforms.previous_view_projection = scene_shader.FindUniform("previous_view_projection");
+        scene_uniforms.lighting_per_pixel = scene_shader.FindUniform("lighting_per_pixel");
+        scene_uniforms.colortexture = scene_shader.FindUniform("colortexture");
+        scene_uniforms.planar_texture = scene_shader.FindUniform("planar_texture");
+        scene_uniforms.lightmaptexture = scene_shader.FindUniform("lightmaptexture");
+        scene_uniforms.scene_lights = scene_shader.FindUniform("scene_lights");
+        scene_uniforms.scene_influences = scene_shader.FindUniform("scene_influences");
+        scene_uniforms.instance_uvs = scene_shader.FindUniform("instance_uvs");
+        scene_uniforms.instance_positions = scene_shader.FindUniform("instance_positions");
+        scene_uniforms.scene_reflections = scene_shader.FindUniform("scene_reflections");
+        scene_uniforms.specular_texture = scene_shader.FindUniform("specular_texture");
+        scene_uniforms.scene_fog = scene_shader.FindUniform("scene_fog");
+        scene_uniforms.surface_prepass = scene_shader.FindUniform("surface_prepass");
+        scene_uniforms.scene_occlusion_enabled = scene_shader.FindUniform("scene_occlusion_enabled");
+        scene_uniforms.scene_occlusion = scene_shader.FindUniform("scene_occlusion");
+        scene_uniforms.scene_raster_extent = scene_shader.FindUniform("scene_raster_extent");
+        scene_uniforms.fog_volume_count = scene_shader.FindUniform("fog_volume_count");
+        scene_uniforms.exterior_fog_color = scene_shader.FindUniform("exterior_fog_color");
+        scene_uniforms.exterior_fog_range = scene_shader.FindUniform("exterior_fog_range");
+        scene_uniforms.scene_occlusion_intensity = scene_shader.FindUniform("scene_occlusion_intensity");
+        scene_uniforms.scene_highlight_suppression = scene_shader.FindUniform("scene_highlight_suppression");
+        scene_uniforms.scene_highlight_gamma = scene_shader.FindUniform("scene_highlight_gamma");
+        scene_uniforms.scene_highlight_threshold = scene_shader.FindUniform("scene_highlight_threshold");
+        scene_uniforms.opaque_depth = scene_shader.FindUniform("opaque_depth");
+        scene_uniforms.depth_snapshot_origin = scene_shader.FindUniform("depth_snapshot_origin");
+        scene_uniforms.planar_projection = scene_shader.FindUniform("planar_projection");
         glUniformBlockBinding(scene_shader.Handle(),glGetUniformBlockIndex(scene_shader.Handle(),"SceneDrawBlock"),7);
+        scene_shader.Use();
+        glUniform1i(scene_uniforms.colortexture,0);
+        glUniform1i(scene_uniforms.planar_texture,10);
+        glUniform1i(scene_uniforms.lightmaptexture,1);
+        glUniform1i(scene_uniforms.scene_lights,2);
+        glUniform1i(scene_uniforms.scene_influences,3);
+        glUniform1i(scene_uniforms.instance_uvs,4);
+        glUniform1i(scene_uniforms.instance_positions,5);
+        glUniform1i(scene_uniforms.scene_reflections,9);
+        glUniform1i(scene_uniforms.specular_texture,8);
+        glUniform1i(scene_uniforms.scene_fog,6);
+        glUniform1i(scene_uniforms.scene_occlusion,11);
+        glUniform1i(scene_uniforms.opaque_depth,7);
     }
     UploadSceneFrame(presentation,&visibility);
     check_scene_error("frame upload");
@@ -1031,36 +1082,25 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::Presentat
         if (!scissor) glDisable(GL_SCISSOR_TEST);
     }
     scene_shader.Use();
-    auto vec = [&](const char* name, d3scene::Vec3 v) { glUniform3f(scene_shader.FindUniform(name),v.x,v.y,v.z); };
+    auto vec = [&](GLint location, d3scene::Vec3 v) { glUniform3f(location,v.x,v.y,v.z); };
     const auto& camera = visibility.camera.transform;
-    vec("eye",camera.position); vec("camera_right",camera.right);
-    vec("camera_up",camera.up); vec("camera_forward",camera.forward);
+    vec(scene_uniforms.eye,camera.position); vec(scene_uniforms.camera_right,camera.right);
+    vec(scene_uniforms.camera_up,camera.up); vec(scene_uniforms.camera_forward,camera.forward);
     const auto clip = view.has_clip_plane ? view.clip_plane : d3scene::Plane{};
-    glUniform4f(scene_shader.FindUniform("world_clip_plane"),clip.normal.x,clip.normal.y,clip.normal.z,clip.constant);
+    glUniform4f(scene_uniforms.world_clip_plane,clip.normal.x,clip.normal.y,clip.normal.z,clip.constant);
     const auto fog_clip = view.fog_path_origin == d3scene::FogPathOrigin::ClipPlane ? clip : d3scene::Plane{};
-    glUniform4f(scene_shader.FindUniform("fog_path_plane"),fog_clip.normal.x,fog_clip.normal.y,fog_clip.normal.z,fog_clip.constant);
+    glUniform4f(scene_uniforms.fog_path_plane,fog_clip.normal.x,fog_clip.normal.y,fog_clip.normal.z,fog_clip.constant);
     const auto& projection = visibility.camera.projection;
-    glUniform4f(scene_shader.FindUniform("projection"),projection.x_scale,projection.y_scale,
+    glUniform4f(scene_uniforms.projection,projection.x_scale,projection.y_scale,
         projection.x_offset,projection.y_offset);
-    glUniform1f(scene_shader.FindUniform("near_distance"),projection.near_distance);
-    glUniform1f(scene_shader.FindUniform("orthographic_depth_scale"),projection.orthographic_depth_scale);
-    glUniform2f(scene_shader.FindUniform("raster_pixel_scale"),2.f/view.viewport.width,2.f/view.viewport.height);
-    glUniformMatrix4fv(scene_shader.FindUniform("previous_view_projection"),1,GL_FALSE,history.previous.view_projection.data());
-    glUniform1i(scene_shader.FindUniform("lighting_per_pixel"),presentation.data().lighting_quality == d3scene::LightingQuality::Pixel);
-    glUniform1i(scene_shader.FindUniform("colortexture"),0);
-    glUniform1i(scene_shader.FindUniform("planar_texture"),10);
-    glUniform1i(scene_shader.FindUniform("lightmaptexture"),1);
-    glUniform1i(scene_shader.FindUniform("scene_lights"),2);
-    glUniform1i(scene_shader.FindUniform("scene_influences"),3);
-    glUniform1i(scene_shader.FindUniform("instance_uvs"),4);
-    glUniform1i(scene_shader.FindUniform("instance_positions"),5);
-    glUniform1i(scene_shader.FindUniform("scene_reflections"),9);
-    glUniform1i(scene_shader.FindUniform("specular_texture"),8);
-    glUniform1i(scene_shader.FindUniform("scene_fog"),6);
-    glUniform1i(scene_shader.FindUniform("surface_prepass"),0);
-    glUniform1i(scene_shader.FindUniform("scene_occlusion_enabled"),0);
-    glUniform1i(scene_shader.FindUniform("scene_occlusion"),11);
-    glUniform2f(scene_shader.FindUniform("scene_raster_extent"),float(output.Width()),float(output.Height()));
+    glUniform1f(scene_uniforms.near_distance,projection.near_distance);
+    glUniform1f(scene_uniforms.orthographic_depth_scale,projection.orthographic_depth_scale);
+    glUniform2f(scene_uniforms.raster_pixel_scale,2.f/view.viewport.width,2.f/view.viewport.height);
+    glUniformMatrix4fv(scene_uniforms.previous_view_projection,1,GL_FALSE,history.previous.view_projection.data());
+    glUniform1i(scene_uniforms.lighting_per_pixel,presentation.data().lighting_quality == d3scene::LightingQuality::Pixel);
+    glUniform1i(scene_uniforms.surface_prepass,0);
+    glUniform1i(scene_uniforms.scene_occlusion_enabled,0);
+    glUniform2f(scene_uniforms.scene_raster_extent,float(output.Width()),float(output.Height()));
     const auto& fog_volumes = d3scene::fogVolumes(presentation.data());
     const auto fog_id = presentation.data().fog ? presentation.data().fog->id() : d3scene::AssetId{};
     const bool upload_fog = !scene_fog_buffer || scene_fog_id != fog_id;
@@ -1095,10 +1135,10 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::Presentat
     }
     glActiveTexture(GL_TEXTURE6); glBindTexture(GL_TEXTURE_BUFFER,scene_fog_texture);
     glTexBuffer(GL_TEXTURE_BUFFER,GL_RGBA32F,scene_fog_buffer);
-    glUniform1i(scene_shader.FindUniform("fog_volume_count"),view.collection == 0 ? static_cast<GLint>(fog_volumes.size()) : 0);
+    glUniform1i(scene_uniforms.fog_volume_count,view.collection == 0 ? static_cast<GLint>(fog_volumes.size()) : 0);
     const auto& exterior_fog = presentation.data().exterior_fog;
-    vec("exterior_fog_color",exterior_fog.color);
-    glUniform2f(scene_shader.FindUniform("exterior_fog_range"),exterior_fog.start,exterior_fog.end);
+    vec(scene_uniforms.exterior_fog_color,exterior_fog.color);
+    glUniform2f(scene_uniforms.exterior_fog_range,exterior_fog.start,exterior_fog.end);
     const auto exteriorRoom = [&](int room) {
         if (room < 0) return true;
         for (const auto& state : presentation.data().rooms) if (state.number == room) return state.exterior;
@@ -1280,12 +1320,12 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::Presentat
         glActiveTexture(GL_TEXTURE7); glBindTexture(GL_TEXTURE_2D,depth.texture);
         GL_BindFramebufferTexture(estimate.ao_texture,11,GL_LINEAR);
         scene_shader.Use();
-        glUniform1i(scene_shader.FindUniform("scene_occlusion_enabled"),1);
-        glUniform1f(scene_shader.FindUniform("scene_occlusion_intensity"),estimate.debug_display ? 1.f :
+        glUniform1i(scene_uniforms.scene_occlusion_enabled,1);
+        glUniform1f(scene_uniforms.scene_occlusion_intensity,estimate.debug_display ? 1.f :
             (std::max)(0.f,(std::min)(4.f,OpenGL_preferred_state.ao_intensity)));
-        glUniform1i(scene_shader.FindUniform("scene_highlight_suppression"),OpenGL_preferred_state.bloom_enabled && !estimate.debug_display);
-        glUniform1f(scene_shader.FindUniform("scene_highlight_gamma"),OpenGL_preferred_state.gamma != 0 ? 1.f/OpenGL_preferred_state.gamma : 1.f);
-        glUniform1f(scene_shader.FindUniform("scene_highlight_threshold"),OpenGL_preferred_state.bloom_threshold);
+        glUniform1i(scene_uniforms.scene_highlight_suppression,OpenGL_preferred_state.bloom_enabled && !estimate.debug_display);
+        glUniform1f(scene_uniforms.scene_highlight_gamma,OpenGL_preferred_state.gamma != 0 ? 1.f/OpenGL_preferred_state.gamma : 1.f);
+        glUniform1f(scene_uniforms.scene_highlight_threshold,OpenGL_preferred_state.bloom_threshold);
         glDepthFunc(GL_LEQUAL);
         bind_outputs();
         glViewport(raster.x,raster.y,raster.width,raster.height);
@@ -1409,8 +1449,7 @@ void main() {
         const auto snapshot_error = glGetError();
         if (snapshot_error != GL_NO_ERROR) Error("Scene opaque-depth snapshot failed: GL 0x%x source=%d viewport=%d,%d,%d,%d",
             snapshot_error,previous_draw,viewport[0],viewport[1],viewport[2],viewport[3]);
-        glUniform1i(scene_shader.FindUniform("opaque_depth"),7);
-        glUniform2i(scene_shader.FindUniform("depth_snapshot_origin"),viewport[0],viewport[1]);
+        glUniform2i(scene_uniforms.depth_snapshot_origin,viewport[0],viewport[1]);
         continue;
       }
       // Image consumers do not write clip distances; never leak this state.
@@ -1424,9 +1463,16 @@ void main() {
           glViewport(raster.x,raster.y,raster.width,raster.height);
           if (output.Samples() >= 2) glEnable(GL_MULTISAMPLE); else glDisable(GL_MULTISAMPLE);
       }
-      glUniform1i(scene_shader.FindUniform("surface_prepass"),depth_prepass);
+      glUniform1i(scene_uniforms.surface_prepass,depth_prepass);
       if (view.has_clip_plane) glEnable(GL_CLIP_DISTANCE0);
       else glDisable(GL_CLIP_DISTANCE0);
+      // State is scoped to this pass, not guessed from a prior view or an
+      // image-space consumer. Preserve draw order while sharing consecutive
+      // raster policies; texture/geometry identities do not change that policy.
+      using RasterKey = std::tuple<d3scene::RenderLayer,d3scene::BlendMode,d3scene::DepthMode,bool,bool>;
+      RasterKey previous_raster;
+      bool raster_bound = false;
+      GLuint previous_vao = 0;
       for (uint32_t item_index = pass.begin; item_index < pass.end; ++item_index) {
         const auto& item = visibility.surfaces[item_index];
         const auto& packet = packets[item_index];
@@ -1459,12 +1505,16 @@ void main() {
         if (planar_image) {
             const auto& image = bind_view_image(surface.material.planar_slot,10);
             scene_shader.Use();
-            glUniformMatrix4fv(scene_shader.FindUniform("planar_projection"),1,GL_FALSE,image.matrices.view_projection.data());
+            glUniformMatrix4fv(scene_uniforms.planar_projection,1,GL_FALSE,image.matrices.view_projection.data());
         }
         if (surface.baked_image) BindSceneImage(presentation.image(surface.baked_image),1,surface.lightmap_wrap,true);
         if (surface.specular_image) BindSceneImage(presentation.image(surface.specular_image),8,surface.texture_wrap,false);
         scene_shader.Use();
         glBindBufferRange(GL_UNIFORM_BUFFER,7,scene_draw_buffer,item_index*record_bytes,22*16);
+        const bool cull = item.terrain || (item.mesh && !surface.two_sided);
+        const bool clockwise = cull && (d3scene::reversesWinding(camera) != d3scene::reversesWinding(item.world));
+        const RasterKey raster_key{surface.material.layer,surface.material.blend,surface.material.depth,cull,clockwise};
+        if (!raster_bound || raster_key != previous_raster) {
         if(surface.material.blended()) {
             glEnablei(GL_BLEND,0);
             if (surface.material.blend == d3scene::BlendMode::Multiply) glBlendFuncSeparatei(0,GL_DST_COLOR,GL_ZERO,GL_ZERO,GL_ONE);
@@ -1492,13 +1542,15 @@ void main() {
         }
         glDepthMask(surface.material.writesDepth() ? GL_TRUE : GL_FALSE);
         if (surface.material.testsDepth()) glEnable(GL_DEPTH_TEST); else glDisable(GL_DEPTH_TEST);
-        glBindVertexArray(packet.vao);
-        if (item.terrain || (item.mesh && !surface.two_sided)) {
+        if (cull) {
             glEnable(GL_CULL_FACE);
-            glFrontFace(d3scene::reversesWinding(camera) != d3scene::reversesWinding(item.world) ? GL_CW : GL_CCW);
+            glFrontFace(clockwise ? GL_CW : GL_CCW);
             glCullFace(GL_BACK);
         }
         else glDisable(GL_CULL_FACE);
+        previous_raster = raster_key; raster_bound = true;
+        }
+        if (packet.vao != previous_vao) { glBindVertexArray(packet.vao); previous_vao = packet.vao; }
         glDrawArrays(GL_TRIANGLES,range.offset,range.count);
         rend_RecordDrawCall(RENDERER_DRAW_CALL_3D);
       }
