@@ -172,7 +172,9 @@ class GL4Renderer : public IRenderer
 		GLint planar_projection = -1;
 	};
 	struct SceneProgram { ShaderProgram shader; SceneUniformLocations uniforms; };
-	std::array<SceneProgram,3> scene_programs; // no interior fog, exact boundaries, optical field
+	// Fog mode x particle-layer interface. Views without a layer retain the
+	// ordinary fragment shader, including native-resolution and image views.
+	std::array<SceneProgram,6> scene_programs;
 	GLuint scene_light_buffer = 0, scene_light_texture = 0;
 	GLuint scene_draw_buffer = 0;
     GLuint scene_view_buffer = 0;
@@ -219,10 +221,9 @@ class GL4Renderer : public IRenderer
 		void Destroy();
 	};
 	std::map<std::pair<d3scene::ViewKind,uint64_t>,SceneDepthSnapshot> scene_depth_snapshots;
-	GLuint scene_volume_texture = 0, scene_volume_framebuffer = 0;
-	int scene_volume_width = 0, scene_volume_height = 0;
 	ShaderProgram scene_volume_composite;
-	GLint scene_volume_rectangle = -1;
+	GLuint scene_volume_sampler = 0;
+	GLint scene_volume_rectangle = -1, scene_volume_extent = -1;
 	GLint scene_volume_mapping = -1, scene_volume_edge = -1, scene_volume_depth_origin = -1;
 	std::weak_ptr<const d3scene::Presentation> scene_frame_owner;
 	std::vector<ElementRange> scene_mesh_position_ranges;

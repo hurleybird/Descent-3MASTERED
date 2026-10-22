@@ -937,10 +937,15 @@ std::vector<ViewPass> buildViewPasses(const Presentation& frame,const ViewVisibi
     while (index < view.surfaces.size()) {
         const auto first = index;
         const bool soft = soft_volume(index);
+        const auto blend = visibleSurfacePolicy(frame,view.surfaces[index]).blend;
         do {
             late_depth_changed = late_depth_changed || visibleSurfacePolicy(frame,view.surfaces[index]).writesDepth();
             ++index;
-        } while (index < view.surfaces.size() && soft_volume(index) == soft);
+        } while (index < view.surfaces.size() && soft_volume(index) == soft &&
+            // The scene destination clamps normalized color between draws.
+            // An additive run followed by alpha cannot share one floating-
+            // point accumulator: intervening saturation would be lost.
+            (!soft || visibleSurfacePolicy(frame,view.surfaces[index]).blend == blend));
         passes.push_back({soft ? ViewPassKind::SoftVolumes : ViewPassKind::LateWorld,first,index});
     }
     return passes;

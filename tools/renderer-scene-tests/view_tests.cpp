@@ -1350,15 +1350,16 @@ int runSceneViewTests() {
         auto glass = volume; glass.raster_domain = d3scene::RasterDomain::Surface;
         auto depth_writer = glass; depth_writer.surface.depth = d3scene::DepthMode::ReadWrite;
         auto additive = volume; additive.surface.blend = d3scene::BlendMode::Additive;
-        volume_data.meshes = {volume,additive,glass,volume,depth_writer,volume};
+        volume_data.meshes = {volume,volume,additive,glass,volume,depth_writer,volume};
         volume_frame = d3scene::Presentation::freeze(volume_data);
         const auto grouped = d3scene::buildViewPasses(*volume_frame,d3scene::queryView(*volume_frame,view()),{false,false,true});
-        check(grouped.size() == 5 && grouped[1].kind == d3scene::ViewPassKind::SoftVolumes &&
+        check(grouped.size() == 6 && grouped[1].kind == d3scene::ViewPassKind::SoftVolumes &&
             grouped[1].begin == 0 && grouped[1].end == 2 &&
-            grouped[2].kind == d3scene::ViewPassKind::LateWorld && grouped[2].begin == 2 && grouped[2].end == 3 &&
-            grouped[3].kind == d3scene::ViewPassKind::SoftVolumes && grouped[3].begin == 3 && grouped[3].end == 4 &&
-            grouped[4].kind == d3scene::ViewPassKind::LateWorld && grouped[4].begin == 4 && grouped[4].end == 6,
-            "Particle grouping reordered transparency or crossed a depth-writing barrier");
+            grouped[2].kind == d3scene::ViewPassKind::SoftVolumes && grouped[2].begin == 2 && grouped[2].end == 3 &&
+            grouped[3].kind == d3scene::ViewPassKind::LateWorld && grouped[3].begin == 3 && grouped[3].end == 4 &&
+            grouped[4].kind == d3scene::ViewPassKind::SoftVolumes && grouped[4].begin == 4 && grouped[4].end == 5 &&
+            grouped[5].kind == d3scene::ViewPassKind::LateWorld && grouped[5].begin == 5 && grouped[5].end == 7,
+            "Particle grouping crossed blend saturation, transparency or depth-writing barriers");
     }
     {
         auto read_only = solid; read_only.surface.depth = d3scene::DepthMode::ReadOnly;

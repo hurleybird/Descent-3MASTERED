@@ -170,6 +170,8 @@ PreparedImagePlan prepareViewImages(const Presentation&,const std::vector<ViewIm
 VisibilityReport renderView(const PreparedView&);
 struct PlanarViewPlan { PreparedView consumer; std::vector<ViewImageRequest> images; };
 enum class ViewPassKind { Background, OpaqueWorld, SnapshotOpaqueDepth, ExportOpaqueScene, LateWorld, EvaluateWorldOcclusion, CompositeSurfaces, DepthSurface, SoftVolumes };
+// A soft-volume layer is a main-world, pre-reduction consumer. The executor
+// supplies logical-resolution scratch; image and compositing views never own it.
 struct ViewProducts { bool opaque_scene = false, occlusion = false, soft_volume_layer = false; };
 struct ViewPass {
     ViewPassKind kind;

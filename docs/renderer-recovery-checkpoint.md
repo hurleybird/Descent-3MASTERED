@@ -1,5 +1,74 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## October 22 — display-resolution soft particles qualified for testing
+
+User selected scaling idea 2 only: display-resolution soft particles. No other
+scaling ideas, shadows, cockpit or unrelated regression work. Source parent
+0cb2f5c; active worktree remains renderer-rearchitecture. Unrelated untracked
+lib/gitinfo.h preserved. Candidate, Previous Candidate, desktop, main checkout
+and older delivered previews untouched.
+
+Enabled the repaired particle layer for supersampled main-world views. Native
+resolution (even with MSAA), image views, auxiliary coverage and ineligible
+materials keep their ordinary schedule. -scene-native-particles selects the
+full-raster reference. Old -scene-display-particles is no longer needed.
+Scene shader variants now follow the actual pass interface, not a global flag:
+views without a SoftVolumes pass compile the ordinary fragment shader.
+
+The existing opt-in prototype initially LOST at 4K: whole frame about54ms vs48ms,
+despite saving particle-pass time. An additional4109x2312 RGBA16F image (~76MB)
+coincided with much slower later resolves/reductions. WDDM counters also showed
+more shared memory. Memory pressure/driver residency is an inference, not a
+proven driver diagnosis. Reusing the existing RGBA16F SSAA-reduction destination
+removed the extra allocation and the downstream slowdown. Its color is idle
+during this main-world phase: clear/render ordered particles, composite them
+onto the distinct scene target, then normal reduction overwrites the scratch.
+Opaque depth remains separate. No precision reduction, new image allocation,
+frame-to-frame storage churn, atomics or readback. Sampling policy uses a scoped
+linear/clamp sampler, not mutations of the borrowed image's texture parameters.
+
+Preserved depth-edge full-resolution repair, conservative bounds, sorted order,
+multiplicative exclusion and late-depth barriers. Added alpha/additive transition
+barriers: normalized destination saturation must occur before subsequent alpha
+blends, rather than allowing an HDR accumulator to carry that excess forward.
+Tests cover adjacent same-blend grouping plus those barriers. AO debug output
+also skips the new late-world pass, just as it skips ordinary transparency.
+
+Final tested binary out/particle-scaling-candidate.exe and owned scene-view-test
+runtime SHA25665A8C3E66964920EDAD5FA19D4E4102F40FE61A6BDE3C88BF524B41A93C9686C.
+Built before this checkpoint commit (pre-commit version stamp). Tests3/3 pass.
+Launch Particle Scaling.cmd and Launch Native Particles Reference.cmd are in
+C:/tmp/D3RendererVerification/scene-view-test. Both start saved007; no timer,
+forced graphics settings or desktop changes. Use SSAA>1 to exercise the layer.
+
+Whole-frame intervals, never CPU+GPU sums, fixed simulation/seed, headlight on,
+render thread CPU2, frame cap off, 2xSSAA/4xMSAA/AO/bloom:
+- Same-binary 4K toggle ABBA,300frames, mean100..249: native48.690/48.090ms;
+  display46.457/46.403ms. Means48.390->46.430ms (~4.1%). These isolate the path.
+- Dense0071080p frozen0cb2f5c vs final,1000frames, mean400..899, ABBA:
+  old8.743/8.842ms; new8.215/8.114ms (~7.1% faster). GPU8.113->7.514ms.
+- Sparse0021080p two reversed pairs: old7.009/6.969ms; new7.031/7.081ms.
+  Small cost, not a win (~0.067ms). Do not claim every scene is faster.
+- Native720p path unchanged;5000-frame reversed comparison warmed old1.234ms
+  vs new1.204ms, GPU~.509ms both, screenshots EXACT. Earlier CPU timings drifted
+  upward/downward across launches, so no native CPU speedup claim.
+Earlier frozen-executable 4K ABBA suggested12%; DO NOT present that as the
+isolated gain. Same-binary toggle above gives the more conservative result.
+
+Quality: final moving002/007 frames996..1000 (heading begins990), all max3/255;
+mean RGB errors .014..044 and .125..137 respectively. Inspected platform/smoke
+and steam/wall images. 4K static max3,720p4xSSAA max3, offset/offscreen fixtures
+max3, SSAA2 single-sample max2, exact fog mode max2, AO debug EXACT. No logged
+scene GL errors in qualification runs. Not a guarantee for every effect/scene.
+
+Raw evidence under C:/tmp/D3RendererVerification: particle-final-perf-*,
+particle-toggle-4k-*, particle-final-qa-*, particle-final-exact-fog-*,
+particle-final-motion-*, particle-native-confirm-*, particle-sparse-confirm-*.
+IGNORE particle-reuse-4k-reuse1: its copy raced the linker; it actually ran the
+old opt-in binary while compilation was finishing. It was discarded, never
+used as new-path timing/quality evidence. Later profiles record verified hashes.
+All owned capture processes exited; runtime restored to the final candidate.
+
 ## October 22 — focused slot007 GPU regression repaired and verified
 
 User requests fixing only the ~45% native GPU regression, keeping the modern
