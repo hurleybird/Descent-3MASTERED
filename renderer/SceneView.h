@@ -5,6 +5,15 @@
 
 namespace d3scene {
 
+struct PortalWindow {
+    double left = -1, bottom = -1, right = 1, top = 1;
+    bool visible = false;
+};
+struct PortalVisibility {
+    std::vector<PortalWindow> rooms;
+    PortalWindow exterior;
+};
+
 // Logical top-left view rectangle to bottom-left raster coordinates. Target
 // allocation owns scale/overscan; canvas state is not an input to execution.
 Rect rasterViewport(Rect logical, int32_t raster_height, int32_t scale,
@@ -96,6 +105,7 @@ struct ViewVisibility {
     }
     std::vector<uint32_t> object_indices;
     std::vector<uint32_t> room_indices;
+    PortalVisibility spatial; // same aperture result used by geometry and observation policy
     ViewGeometryDemand geometry;
     ViewQueryStats stats;
     bool exterior_visible = false;

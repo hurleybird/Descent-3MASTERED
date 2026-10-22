@@ -1,5 +1,35 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## October 22 continuation — prepared observation apertures
+
+Active continuation is already the requested Sol6.1/high fork. Do not fork again.
+Moving heading captures90frames in002/003/006/007 exposed two legacy false
+results; the new policy was not changed to reproduce them:
+* 007 object4168: radius11.69999. Legacy cached-camera top distance12.23606
+  rejects it. Fresh g3 camera gives11.52247; new explicit camera gives11.52087.
+  Cached eye is one camera update behind. Evidence observe-sphere-fresh007-old
+  and observe-diagnostic007-new. All other ordered object lists match.
+* 002 room184: only facing entry from188 (face271) is outside the frustum.
+  Independently clipping logged homogeneous vertices gives an empty polygon.
+  Legacy portal code emits rectangle[0,-992.38,3698.70,720] against1280x720,
+  admitting it. Evidence observe-entry002-new and observe-combined002-old.
+  Other room sets match. New/old camera images inspected and agree geometrically.
+
+ViewVisibility now owns the portal windows/exterior aperture already computed
+for geometry. The query fills recycled view storage; observation inspection takes
+a PreparedView and requested diagnostic domains, reusing its camera/apertures and
+the frame's room identity index. No second portal walk or rebuilt room map.
+Original standalone inspection stays as an independent reference API. Tests cover
+prepared/reference parity, held main/auxiliary views, and invalid domain masks.
+All3 contract targets pass. Four moving captures observe-shared-heading{002,003,
+006,007} have identical reports AND exact images against observe-heading*-new.
+AI/automap remain uncommitted: exterior, real auxiliary and mirror policies still
+need qualification. Temporary numeric probes removed; baseline source is clean.
+Baseline-diagnostic executable currently contains temporary numeric probes only;
+rebuild generic observation instrumentation before using it for further audits.
+Frozen pre-rewrite timing comparator remains out/baseline-pre-rewrite.exe.
+Included usage last5% consumed, credits unchanged62044.8730600000 in this fork.
+
 ## October 22 checkpoint — observation comparison
 
 User reset usage, but has a smaller allowance. Requested continuation only to

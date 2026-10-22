@@ -74,9 +74,9 @@ PortalWindow viewCoverage(const View& view) {
     return {2.0*c.x/view.viewport.width-1,1-2.0*(c.y+c.height)/view.viewport.height,
         2.0*(c.x+c.width)/view.viewport.width-1,1-2.0*c.y/view.viewport.height,true};
 }
-PortalVisibility queryPortalVisibility(const Presentation& frame,const View& view,const Camera& camera) {
+void queryPortalVisibility(const Presentation& frame,const View& view,const Camera& camera,PortalVisibility& result) {
     const auto& rooms = frame.data().rooms;
-    PortalVisibility result; result.rooms.resize(rooms.size());
+    result.rooms.assign(rooms.size(),{}); result.exterior = {};
     auto& windows = result.rooms;
     const auto& indices = frame.roomIndices();
     const auto root = indices.find(view.room);
@@ -84,7 +84,7 @@ PortalVisibility queryPortalVisibility(const Presentation& frame,const View& vie
     if (!view.portal_visibility || (root == indices.end() && !view.exterior_origin)) {
         for (auto& window : windows) window = coverage;
         result.exterior = coverage;
-        return result;
+        return;
     }
     // Scratch is query-local in meaning and never escapes into the result.
     // The queued bit bounds simultaneous entries by the number of rooms.
@@ -145,6 +145,10 @@ PortalVisibility queryPortalVisibility(const Presentation& frame,const View& vie
         else result.exterior = {std::min(result.exterior.left,window.left),std::min(result.exterior.bottom,window.bottom),
             std::max(result.exterior.right,window.right),std::max(result.exterior.top,window.top),true};
     }
+}
+PortalVisibility queryPortalVisibility(const Presentation& frame,const View& view,const Camera& camera) {
+    PortalVisibility result;
+    queryPortalVisibility(frame,view,camera,result);
     return result;
 }
 }

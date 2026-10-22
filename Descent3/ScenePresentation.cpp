@@ -1025,9 +1025,8 @@ d3scene::VisibilityReport RenderGameSceneView(const d3scene::Presentation& frame
     observations = CollectSceneEffectEligibility(planar.consumer);
     if (FindArg("-scene-observation-probe") &&
         (view.kind == d3scene::ViewKind::Main || view.kind == d3scene::ViewKind::Auxiliary)) {
-        auto inspection = view;
-        inspection.feedback = d3scene::Automap | d3scene::ObjectVisibility | d3scene::EffectEligibility;
-        const auto candidate = InspectSceneObservations(frame,inspection);
+        const auto candidate = InspectSceneObservations(planar.consumer,
+            d3scene::Automap | d3scene::ObjectVisibility | d3scene::EffectEligibility);
         // Inspection of AI/automap remains read-only. Do not replace the
         // separately qualified effect-admission report with diagnostic domains.
         if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0) {

@@ -19,6 +19,7 @@ struct ViewStoragePool {
         std::vector<Transform> placements;
         std::vector<uint32_t> objects,rooms;
         ViewGeometryDemand geometry;
+        PortalVisibility spatial;
     };
     std::array<Buffers,4> spare;
     size_t count = 0;
@@ -32,6 +33,7 @@ ViewVisibility::ViewVisibility() {
         surfaces.swap(buffers.surfaces); object_indices.swap(buffers.objects); room_indices.swap(buffers.rooms);
         placements.swap(buffers.placements);
         std::swap(geometry,buffers.geometry);
+        std::swap(spatial,buffers.spatial);
     }
 }
 ViewVisibility::~ViewVisibility() {
@@ -44,6 +46,7 @@ ViewVisibility::~ViewVisibility() {
     placements.clear(); placements.swap(buffers.placements);
     surfaces.swap(buffers.surfaces); object_indices.swap(buffers.objects); room_indices.swap(buffers.rooms);
     geometry.clear(); std::swap(geometry,buffers.geometry);
+    spatial.rooms.clear(); spatial.exterior = {}; std::swap(spatial,buffers.spatial);
 }
 static ViewVisibility queryResolvedView(const Presentation&,const View&);
 PreparedView prepareView(const Presentation& frame,const View& request) {
@@ -525,8 +528,8 @@ static ViewVisibility queryResolvedView(const Presentation& frame,const View& vi
     const auto& rooms = frame.data().rooms;
     const bool world_content = view.collection == 0;
     const auto collection = frame.collection(view.collection);
-    PortalVisibility spatial;
-    if (world_content) spatial = queryPortalVisibility(frame,view,result.camera);
+    auto& spatial = result.spatial;
+    if (world_content) queryPortalVisibility(frame,view,result.camera,spatial);
     const auto& windows = spatial.rooms;
     const auto& room_indices = frame.roomIndices();
     const auto& exterior_window = spatial.exterior;

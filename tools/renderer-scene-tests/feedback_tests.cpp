@@ -80,6 +80,12 @@ int runFeedbackTests() {
     auto candidate = InspectSceneObservations(*observed_frame,view);
     check(candidate.report.rooms == std::vector<int32_t>{7}); // disconnected room not explored
     check(candidate.report.objects == std::vector<uint32_t>({200,100})); // includes before near plane
+    const auto prepared_observation = prepareView(*observed_frame,view);
+    const auto shared_observation = InspectSceneObservations(prepared_observation,view.feedback);
+    check(shared_observation.report.rooms == candidate.report.rooms &&
+        shared_observation.report.objects == candidate.report.objects);
+    check(InspectSceneObservations(prepared_observation,NoFeedback).report.objects.empty());
+    rejects([&] { InspectSceneObservations(prepared_observation,128); });
     check(!candidate.exterior_pending && !candidate.mirrors_pending && !candidate.report.terrain);
     view.excluded_objects = {200};
     check(InspectSceneObservations(*observed_frame,view).report.objects == std::vector<uint32_t>{100});
@@ -114,6 +120,16 @@ int runFeedbackTests() {
     candidate = InspectSceneObservations(*portal_frame,view);
     check(candidate.report.rooms == std::vector<int32_t>({7,9}));
     check(candidate.report.objects == std::vector<uint32_t>{200}); // sphere visible, portal AABB rejected
+    const auto narrow_prepared = prepareView(*portal_frame,view);
+    const auto narrow_report = InspectSceneObservations(narrow_prepared,view.feedback);
+    check(narrow_report.report.objects == candidate.report.objects && narrow_report.report.rooms == candidate.report.rooms);
+    auto other_view = view; other_view.kind = ViewKind::Auxiliary; other_view.history_key = 2;
+    other_view.camera.position.x = 100;
+    const auto other_prepared = prepareView(*portal_frame,other_view);
+    const auto other_report = InspectSceneObservations(other_prepared,other_view.feedback);
+    check(other_report.report.objects == InspectSceneObservations(*portal_frame,other_view).report.objects);
+    check(InspectSceneObservations(narrow_prepared,view.feedback).report.objects == narrow_report.report.objects);
+    check(other_prepared.visibility().spatial.rooms.size() == portal_frame->data().rooms.size());
     portal_data.rooms[1].observation_unclipped = true;
     portal_frame = Presentation::freeze(portal_data);
     check(InspectSceneObservations(*portal_frame,view).report.objects.size() == 2);

@@ -13,6 +13,9 @@ struct SceneObservationInspection {
 // Candidate compatibility query, not a permission to commit gameplay state.
 // Full exterior qualification and reflected observations remain coverage gaps.
 SceneObservationInspection InspectSceneObservations(const d3scene::Presentation&,d3scene::View);
+// Inspection of an executable view reuses its resolved camera and apertures.
+// Requested domains describe the diagnostic report; they do not authorize commit.
+SceneObservationInspection InspectSceneObservations(const d3scene::PreparedView&,uint8_t feedback);
 
 // Effect admission is conservative room visibility, not an AI observation or
 // proof that a surface produced pixels. Reuse the immutable portal query that

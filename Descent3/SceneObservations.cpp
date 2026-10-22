@@ -28,35 +28,34 @@ d3scene::VisibilityReport CollectSceneEffectEligibility(const d3scene::PreparedV
     return report;
 }
 
-SceneObservationInspection InspectSceneObservations(const d3scene::Presentation& frame,d3scene::View request) {
+static SceneObservationInspection inspectObservations(const d3scene::Presentation& frame,const d3scene::View& view,
+    const d3scene::Camera& camera,const d3scene::PortalVisibility& spatial,uint8_t feedback) {
     using namespace d3scene;
-    const auto view = resolveView(frame,request);
     SceneObservationInspection result;
     auto& report = result.report;
     report.frame_sequence = frame.data().sequence; report.scene_lifetime = frame.data().scene_lifetime;
-    report.view_history_key = view.history_key; report.feedback = view.feedback;
-    if (!view.feedback) return result;
+    report.view_history_key = view.history_key; report.feedback = feedback;
+    if (feedback & ~(Automap | ObjectVisibility | EffectEligibility))
+        throw std::invalid_argument("Unknown observation domains");
+    if (!feedback) return result;
     if (!frame.data().observation_inputs_prepared || view.collection != 0 || view.has_clip_plane ||
         view.target != ViewTarget::Scene || view.ordering != ViewOrdering::Depth ||
         view.projection != ViewProjection::Perspective ||
         (view.kind != ViewKind::Main && view.kind != ViewKind::Auxiliary) || !view.portal_visibility)
         throw std::invalid_argument("Unsupported observation query contract");
-    const auto camera = prepareCamera(view);
-    const auto spatial = queryPortalVisibility(frame,view,camera);
     const auto& windows = spatial.rooms;
-    std::unordered_map<int32_t,size_t> rooms;
-    for (size_t i = 0; i < frame.data().rooms.size(); ++i) rooms.emplace(frame.data().rooms[i].number,i);
-    if (!view.exterior_origin && !rooms.count(view.room))
+    const auto& rooms = frame.roomIndices();
+    if (!view.exterior_origin && rooms.find(view.room) == rooms.end())
         throw std::invalid_argument("Observation view has no spatial root");
     result.exterior_pending = spatial.exterior.visible;
-    report.terrain = spatial.exterior.visible && (view.feedback & EffectEligibility);
+    report.terrain = spatial.exterior.visible && (feedback & EffectEligibility);
     for (size_t i = 0; i < windows.size(); ++i) if (windows[i].visible) {
         const auto& room = frame.data().rooms[i];
         result.exterior_pending = result.exterior_pending || room.exterior;
         result.mirrors_pending = result.mirrors_pending || !room.mirrors.empty();
-        if (view.feedback & (Automap | EffectEligibility)) report.rooms.push_back(room.number);
+        if (feedback & (Automap | EffectEligibility)) report.rooms.push_back(room.number);
     }
-    if (!(view.feedback & ObjectVisibility)) return result;
+    if (!(feedback & ObjectVisibility)) return result;
     struct Observed { uint32_t handle; float depth; bool front_to_back; };
     std::vector<Observed> observed;
     for (const auto& object : frame.data().objects) {
@@ -115,4 +114,15 @@ SceneObservationInspection InspectSceneObservations(const d3scene::Presentation&
     });
     for (const auto& object : observed) report.objects.push_back(object.handle);
     return result;
+}
+
+SceneObservationInspection InspectSceneObservations(const d3scene::Presentation& frame,d3scene::View request) {
+    const auto view = d3scene::resolveView(frame,request);
+    const auto camera = d3scene::prepareCamera(view);
+    const auto spatial = d3scene::queryPortalVisibility(frame,view,camera);
+    return inspectObservations(frame,view,camera,spatial,view.feedback);
+}
+SceneObservationInspection InspectSceneObservations(const d3scene::PreparedView& prepared,uint8_t feedback) {
+    return inspectObservations(prepared.frame(),prepared.view(),prepared.visibility().camera,
+        prepared.visibility().spatial,feedback);
 }
