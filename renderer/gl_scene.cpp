@@ -234,6 +234,7 @@ layout(location=4) out uint surface_identity;
 uniform samplerBuffer scene_fog;
 uniform samplerBuffer scene_fog_nodes;
 uniform sampler3D scene_fog_field;
+uniform vec4 fragment_mapping; // raster pixel -> owning scene pixel (scale, offset)
 uniform float fog_field_range;
 uniform vec4 fog_field_color; // W selects scalar optical depth; RGB is shared fog color.
 uniform int fog_debug;
@@ -379,6 +380,7 @@ vec3 applySceneFog(vec3 radiance,out float transmission) {
 }
 void main() {
     vec2 material_uv=texcoord*texture_scale+texture_offset;
+    vec2 scene_pixel = gl_FragCoord.xy*fragment_mapping.xy+fragment_mapping.zw;
     vec4 base=use_texture != 0 ? texture(colortexture,material_uv) : vec4(base_color,1);
     base.a=(use_texture_alpha != 0 ? base.a : 1.0)*vertex_alpha*material_alpha;
     if (raster_stripe.x > 0.0) {
@@ -387,7 +389,7 @@ void main() {
     }
     if (soft_depth_range > 0.0) {
         ivec2 size = textureSize(opaque_depth,0);
-        ivec2 pixel = clamp(ivec2(gl_FragCoord.xy)-depth_snapshot_origin,ivec2(0),size-ivec2(1));
+        ivec2 pixel = clamp(ivec2(scene_pixel)-depth_snapshot_origin,ivec2(0),size-ivec2(1));
         float depth = texelFetch(opaque_depth,pixel,0).r;
         if (depth < 1.0) {
             float surface_depth = orthographic_depth_scale > 0.0 ? near_distance+2.0*depth/orthographic_depth_scale :
@@ -471,7 +473,7 @@ void main() {
     color.rgb = applySceneFog(color.rgb,transmission);
     if (fog_debug != 0 && fog_enabled != 0) color.rgb = vec3(1.0-transmission);
     if (scene_occlusion_enabled != 0) {
-        vec4 estimate = texture(scene_occlusion,gl_FragCoord.xy/scene_raster_extent);
+        vec4 estimate = texture(scene_occlusion,scene_pixel/scene_raster_extent);
         float ao = clamp(estimate.x,0,1);
         if (scene_highlight_suppression != 0) {
             vec3 display_color = pow(max(color.rgb,vec3(0)),vec3(scene_highlight_gamma));
@@ -604,6 +606,12 @@ void GL4Renderer::DestroySceneResources() {
     scene_view_fog = {}; scene_view_fog_volumes.clear();
     for (auto& depth : scene_depth_snapshots) depth.second.Destroy();
     scene_depth_snapshots.clear();
+    if (scene_volume_texture) glDeleteTextures(1,&scene_volume_texture);
+    if (scene_volume_framebuffer) glDeleteFramebuffers(1,&scene_volume_framebuffer);
+    scene_volume_texture = scene_volume_framebuffer = 0;
+    scene_volume_width = scene_volume_height = 0;
+    scene_volume_composite.Destroy();
+    scene_volume_rectangle = -1;
     if (scene_light_buffer) glDeleteBuffers(1,&scene_light_buffer);
     if (scene_influence_buffer) glDeleteBuffers(1,&scene_influence_buffer);
     if (scene_light_texture) glDeleteTextures(1,&scene_light_texture);
@@ -1272,7 +1280,9 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     static const bool audit_scene_gl = FindArg("-scene-gl-audit") != 0;
 #endif
     const d3scene::ViewProducts products{owns_world_products,
-        owns_world_products && OpenGL_preferred_state.ao_enabled && framebuffer_ok};
+        owns_world_products && OpenGL_preferred_state.ao_enabled && framebuffer_ok,
+        owns_world_products && !target.coverage.width && FindArg("-scene-display-particles") &&
+            (SupersamplingFactor() > 1 || output.Samples() >= 2)};
     const auto passes = d3scene::buildViewPasses(presentation,visibility,products);
     const auto history = target.history.prepare(presentation.data(),view,visibility.camera);
     const bool clears_sky = visibility.exterior_visible && presentation.data().sky_enabled;
@@ -1354,6 +1364,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         scene_uniforms.scene_highlight_threshold = scene_shader.FindUniform("scene_highlight_threshold");
         scene_uniforms.opaque_depth = scene_shader.FindUniform("opaque_depth");
         scene_uniforms.depth_snapshot_origin = scene_shader.FindUniform("depth_snapshot_origin");
+        scene_uniforms.fragment_mapping = scene_shader.FindUniform("fragment_mapping");
         scene_uniforms.planar_projection = scene_shader.FindUniform("planar_projection");
         glUniformBlockBinding(scene_shader.Handle(),glGetUniformBlockIndex(scene_shader.Handle(),"SceneDrawBlock"),7);
         glUniformBlockBinding(scene_shader.Handle(),glGetUniformBlockIndex(scene_shader.Handle(),"SceneViewBlock"),8);
@@ -1448,6 +1459,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     const auto fog_clip = view.fog_path_origin == d3scene::FogPathOrigin::ClipPlane ? clip : d3scene::Plane{};
     const auto& projection = visibility.camera.projection;
     glUniform1i(scene_uniforms.surface_prepass,0);
+    glUniform4f(scene_uniforms.fragment_mapping,1,1,0,0);
     glUniform1i(scene_uniforms.scene_occlusion_enabled,0);
     const auto& fog_volumes = d3scene::fogVolumes(presentation.data());
     const auto fog_id = presentation.data().fog ? presentation.data().fog->id() : d3scene::AssetId{};
@@ -2009,6 +2021,7 @@ void main() {
       }
       // Image consumers do not write clip distances; never leak this state.
       depth_prepass = pass.kind == d3scene::ViewPassKind::DepthSurface;
+      const bool volume_layer = pass.kind == d3scene::ViewPassKind::SoftVolumes;
       bind_outputs();
       if (target.coverage.width) {
           glEnable(GL_SCISSOR_TEST);
@@ -2023,6 +2036,30 @@ void main() {
           if (output.Samples() >= 2) glEnable(GL_MULTISAMPLE); else glDisable(GL_MULTISAMPLE);
       }
       glUniform1i(scene_uniforms.surface_prepass,depth_prepass);
+      if (volume_layer) {
+          const int width = (std::max)(1,raster.width/SupersamplingFactor());
+          const int height = (std::max)(1,raster.height/SupersamplingFactor());
+          if (!scene_volume_texture) glGenTextures(1,&scene_volume_texture);
+          if (!scene_volume_framebuffer) glGenFramebuffers(1,&scene_volume_framebuffer);
+          glActiveTexture(GL_TEXTURE14); glBindTexture(GL_TEXTURE_2D,scene_volume_texture);
+          glBindFramebuffer(GL_DRAW_FRAMEBUFFER,scene_volume_framebuffer);
+          if (width != scene_volume_width || height != scene_volume_height) {
+              glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA16F,width,height,0,GL_RGBA,GL_FLOAT,nullptr);
+              glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
+              glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+              glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);
+              glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
+              glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,scene_volume_texture,0);
+              glDrawBuffer(GL_COLOR_ATTACHMENT0);
+              if (glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) Error("Soft volume target incomplete");
+              scene_volume_width = width; scene_volume_height = height;
+          }
+          glDrawBuffer(GL_COLOR_ATTACHMENT0); glDisable(GL_SCISSOR_TEST);
+          glColorMaski(0,GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);
+          const GLfloat clear[4]{}; glClearBufferfv(GL_COLOR,0,clear);
+          glViewport(0,0,width,height); glDisable(GL_MULTISAMPLE);
+          glUniform4f(scene_uniforms.fragment_mapping,float(raster.width)/width,float(raster.height)/height,float(raster.x),float(raster.y));
+      }
       if (view.has_clip_plane) glEnable(GL_CLIP_DISTANCE0);
       else glDisable(GL_CLIP_DISTANCE0);
       // State is scoped to this pass, not guessed from a prior view or an
@@ -2123,7 +2160,7 @@ void main() {
         glColorMaski(1,motion_write,motion_write,motion_write,motion_write);
         glColorMaski(4,motion_write,motion_write,motion_write,motion_write);
         glDepthMask(policy.writesDepth() ? GL_TRUE : GL_FALSE);
-        if (policy.testsDepth()) glEnable(GL_DEPTH_TEST); else glDisable(GL_DEPTH_TEST);
+        if (policy.testsDepth() && !volume_layer) glEnable(GL_DEPTH_TEST); else glDisable(GL_DEPTH_TEST);
         if (cull) {
             glEnable(GL_CULL_FACE);
             glFrontFace(clockwise ? GL_CW : GL_CCW);
@@ -2158,6 +2195,32 @@ void main() {
       // texture policies. Scene samplers must not override those policies.
       glBindSampler(0,0); glBindSampler(1,0); glBindSampler(8,0);
       glDisable(GL_CLIP_DISTANCE0);
+      if (volume_layer) {
+          if (!scene_volume_composite.Handle()) {
+              extern const char* blitVertexSrc;
+              scene_volume_composite.AttachSource(blitVertexSrc,R"GLSL(#version 330 core
+uniform sampler2D particles;
+uniform vec4 rectangle;
+out vec4 color;
+void main() { color = texture(particles,(gl_FragCoord.xy-rectangle.xy)/rectangle.zw); }
+)GLSL");
+              scene_volume_composite.Use();
+              glUniform1i(scene_volume_composite.FindUniform("particles"),14);
+              scene_volume_rectangle = scene_volume_composite.FindUniform("rectangle");
+          }
+          glBindFramebuffer(GL_DRAW_FRAMEBUFFER,output.Handle()); glDrawBuffer(GL_COLOR_ATTACHMENT0);
+          glViewport(raster.x,raster.y,raster.width,raster.height);
+          if (output.Samples() >= 2) glEnable(GL_MULTISAMPLE);
+          glDisable(GL_DEPTH_TEST); glDepthMask(GL_FALSE); glDisable(GL_CULL_FACE);
+          glEnablei(GL_BLEND,0);
+          glBlendFuncSeparatei(0,GL_ONE,GL_ONE_MINUS_SRC_ALPHA,GL_ONE,GL_ONE_MINUS_SRC_ALPHA);
+          scene_volume_composite.Use();
+          glUniform4f(scene_volume_rectangle,float(raster.x),float(raster.y),float(raster.width),float(raster.height));
+          glActiveTexture(GL_TEXTURE14); glBindTexture(GL_TEXTURE_2D,scene_volume_texture); glBindSampler(14,0);
+          glBindVertexArray(GL_GetFramebufferVAO()); glDrawArrays(GL_TRIANGLES,0,3);
+          rend_RecordDrawCall(RENDERER_DRAW_CALL_POSTPROCESS);
+          scene_shader.Use(); glUniform4f(scene_uniforms.fragment_mapping,1,1,0,0);
+      }
     }
     if (measure_passes) {
         glQueryCounter(pass_queries.back(),GL_TIMESTAMP);

@@ -245,6 +245,7 @@ struct automated_capture_state
 	int forward_until_frame;
 	int up_from_frame;
 	int heading_until_frame;
+	int heading_from_frame;
 	bool force_primary_fire;
 	int force_primary_until_frame;
 	bool place_scorch;
@@ -390,7 +391,8 @@ bool AutomatedCaptureForcesUpInput()
 bool AutomatedCaptureForcesHeadingInput()
 {
 	return Automated_capture.gameplay_frame_active &&
-		Automated_capture.force_heading && Automated_capture.gameplay_frame <= Automated_capture.heading_until_frame;
+		Automated_capture.force_heading && Automated_capture.gameplay_frame >= Automated_capture.heading_from_frame &&
+		Automated_capture.gameplay_frame <= Automated_capture.heading_until_frame;
 }
 
 bool AutomatedCaptureForcesPrimaryFireInput()
@@ -527,6 +529,7 @@ static void InitAutomatedCapture()
 	Automated_capture.forward_until_frame = capture_frame_option("-capture-forward-until", INT_MAX);
 	Automated_capture.up_from_frame = capture_frame_option("-capture-up-from", 0);
 	Automated_capture.heading_until_frame = capture_frame_option("-capture-heading-until", INT_MAX);
+	Automated_capture.heading_from_frame = capture_frame_option("-capture-heading-from", 0);
 	Automated_capture.series_from_frame = capture_frame_option("-capture-series-from", INT_MAX);
 	Automated_capture.force_primary_fire =
 		FindArg("-capture-fire-primary") != 0;

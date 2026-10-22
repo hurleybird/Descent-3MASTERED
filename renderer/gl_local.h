@@ -167,6 +167,7 @@ class GL4Renderer : public IRenderer
 		GLint scene_highlight_threshold = -1;
 		GLint opaque_depth = -1;
 		GLint depth_snapshot_origin = -1;
+		GLint fragment_mapping = -1;
 		GLint planar_projection = -1;
 	};
 	struct SceneProgram { ShaderProgram shader; SceneUniformLocations uniforms; };
@@ -213,6 +214,10 @@ class GL4Renderer : public IRenderer
 		void Destroy();
 	};
 	std::map<std::pair<d3scene::ViewKind,uint64_t>,SceneDepthSnapshot> scene_depth_snapshots;
+	GLuint scene_volume_texture = 0, scene_volume_framebuffer = 0;
+	int scene_volume_width = 0, scene_volume_height = 0;
+	ShaderProgram scene_volume_composite;
+	GLint scene_volume_rectangle = -1;
 	std::weak_ptr<const d3scene::Presentation> scene_frame_owner;
 	std::vector<ElementRange> scene_mesh_position_ranges;
 	void PrepareSceneViewTables(const d3scene::PreparedView&);

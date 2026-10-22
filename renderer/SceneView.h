@@ -121,8 +121,8 @@ public:
 PreparedView prepareView(const Presentation&,const View&);
 VisibilityReport renderView(const PreparedView&);
 struct PlanarViewPlan { PreparedView consumer; std::vector<ViewImageRequest> images; };
-enum class ViewPassKind { Background, OpaqueWorld, SnapshotOpaqueDepth, ExportOpaqueScene, LateWorld, EvaluateWorldOcclusion, CompositeSurfaces, DepthSurface };
-struct ViewProducts { bool opaque_scene = false, occlusion = false; };
+enum class ViewPassKind { Background, OpaqueWorld, SnapshotOpaqueDepth, ExportOpaqueScene, LateWorld, EvaluateWorldOcclusion, CompositeSurfaces, DepthSurface, SoftVolumes };
+struct ViewProducts { bool opaque_scene = false, occlusion = false, soft_volume_layer = false; };
 struct ViewPass {
     ViewPassKind kind;
     uint32_t begin = 0, end = 0; // half-open range in this view's visible surfaces

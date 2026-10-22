@@ -1207,6 +1207,35 @@ int runSceneViewTests() {
         exported[4].kind == d3scene::ViewPassKind::LateWorld,"Opaque image product includes translucent consumers");
     const auto empty_frame = d3scene::Presentation::freeze(shaken);
     {
+        auto volume = soft;
+        volume.raster_domain = d3scene::RasterDomain::SoftVolume;
+        volume.surface.unlit = true;
+        volume.surface.blend = d3scene::BlendMode::Alpha;
+        auto volume_data = scheduled; volume_data.meshes = {volume};
+        auto volume_frame = d3scene::Presentation::freeze(volume_data);
+        auto volume_view = d3scene::queryView(*volume_frame,view());
+        check(d3scene::buildViewPasses(*volume_frame,volume_view).back().kind == d3scene::ViewPassKind::LateWorld,
+            "Soft volume changed the default raster schedule");
+        check(d3scene::buildViewPasses(*volume_frame,volume_view,{false,false,true}).back().kind == d3scene::ViewPassKind::SoftVolumes,
+            "Explicit soft volume was not scheduled into its layer");
+        volume_data.meshes[0].surface.blend = d3scene::BlendMode::Multiply;
+        volume_frame = d3scene::Presentation::freeze(volume_data);
+        check(d3scene::buildViewPasses(*volume_frame,d3scene::queryView(*volume_frame,view()),{false,false,true}).back().kind == d3scene::ViewPassKind::LateWorld,
+            "Multiplicative material entered scalar-coverage particle layer");
+        auto glass = volume; glass.raster_domain = d3scene::RasterDomain::Surface;
+        auto depth_writer = glass; depth_writer.surface.depth = d3scene::DepthMode::ReadWrite;
+        auto additive = volume; additive.surface.blend = d3scene::BlendMode::Additive;
+        volume_data.meshes = {volume,additive,glass,volume,depth_writer,volume};
+        volume_frame = d3scene::Presentation::freeze(volume_data);
+        const auto grouped = d3scene::buildViewPasses(*volume_frame,d3scene::queryView(*volume_frame,view()),{false,false,true});
+        check(grouped.size() == 5 && grouped[1].kind == d3scene::ViewPassKind::SoftVolumes &&
+            grouped[1].begin == 0 && grouped[1].end == 2 &&
+            grouped[2].kind == d3scene::ViewPassKind::LateWorld && grouped[2].begin == 2 && grouped[2].end == 3 &&
+            grouped[3].kind == d3scene::ViewPassKind::SoftVolumes && grouped[3].begin == 3 && grouped[3].end == 4 &&
+            grouped[4].kind == d3scene::ViewPassKind::LateWorld && grouped[4].begin == 4 && grouped[4].end == 6,
+            "Particle grouping reordered transparency or crossed a depth-writing barrier");
+    }
+    {
         auto read_only = solid; read_only.surface.depth = d3scene::DepthMode::ReadOnly;
         auto no_depth_overlay = solid; no_depth_overlay.surface.depth = d3scene::DepthMode::Disabled;
         auto depth_scene = scheduled; depth_scene.meshes = {no_depth_overlay,solid,read_only};

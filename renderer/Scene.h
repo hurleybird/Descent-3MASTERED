@@ -350,8 +350,12 @@ struct TerrainState {
     const SurfaceBinding& surface(size_t patch,size_t batch) const;
 };
 enum class MeshAlignment : uint8_t { World, Camera, FacingEye, CameraUpright, Axis };
+// Author permits display-resolution sampling for low-frequency volume sprites.
+// The view scheduler must still establish safe depth and compositing semantics.
+enum class RasterDomain : uint8_t { Surface, SoftVolume };
 struct PreparedMesh {
     MeshAssetRef asset;
+    RasterDomain raster_domain = RasterDomain::Surface;
     bool light_influences_prepared = false;
     LightCandidateRange light_candidates;
     uint64_t collection = 0; // zero is the world; other collections are isolated view content

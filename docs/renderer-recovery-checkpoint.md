@@ -2,6 +2,31 @@
 
 ## Current recovery continuation — 2026-10-21 (supersedes hypotheses below)
 
+Opt-in display-resolution smoke prototype: -scene-display-particles. NOT default
+and NOT globally qualified. Extraction explicitly tags non-planar FT_SMOKE with
+soft depth as RasterDomain::SoftVolume. Planner preserves sorted transparency,
+groups only adjacent eligible draws, and stops using the layer after any late
+depth writer. Alpha/additive use premultiplied color+coverage; multiply excluded.
+Display-resolution RGBA16F layer uses the opaque-depth snapshot, then composites
+onto the SSAA/MSAA target. Default schedule retains its original fast path.
+Tests cover default behavior, mixed alpha/additive grouping, glass boundaries,
+and late depth barriers. All 3 test suites pass.
+
+Evidence particles007-{full,display}{,-repeat}, 1080p SSAA2 MSAA4 AO/bloom,
+1000 frames / mean400..899: repeat CPU1.58 vs1.59ms; GPU8.83 vs7.01ms;
+whole frame9.46 vs7.63ms. Static frame1000 max channel difference3/255.
+Corrected moving captures particles007-edge-{full,display}, heading starts990,
+frames996..999: max3/255, mean RGB error .125..135. Inspected steam/wall edges.
+Earlier particles007-motion-* turned away from steam: NOT quality evidence.
+New capture-only -capture-heading-from supports delayed motion tests.
+
+IMPORTANT: particles002-{full,display} only saves7.06->6.91ms GPU and exposes
+localized max27/255 difference at smoke/platform intersection (x1528..1631,
+y766..796). Bilinear upsampling is NOT fully qualified; investigate edge-aware
+reconstruction or full-resolution edge fallback before enabling. Delivered
+previews, Candidate and Previous Candidate remain untouched. Particle-control
+binary out/particle-control.exe preserves pre-prototype03c1adc implementation.
+
 Opaque-depth MSAA snapshot now borrows the framebuffer's separate resolved
 texture for the duration of LateWorld, avoiding the second full-resolution copy.
 Single-sample targets still copy (sampling attached draw depth would be feedback).

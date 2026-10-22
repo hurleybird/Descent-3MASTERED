@@ -400,6 +400,11 @@ void PrepareGameEffects(d3scene::FrameData& frame) {
             vm_TransposeMatrix(&spin); sprite.world = basis(spin); sprite.alignment = d3scene::MeshAlignment::Camera;
         }
         sprite.world.position = value(effect.pos);
+        // Smoke is a low-frequency volume, not cutout geometry or flying debris.
+        // Declare this at extraction rather than guessing from a finished image.
+        if (definition.type == FT_SMOKE && !(effect.flags & VF_PLANAR) &&
+            sprite.surface.soft_depth_range > 0 && sprite.surface.blend != d3scene::BlendMode::Multiply)
+            sprite.raster_domain = d3scene::RasterDomain::SoftVolume;
         const auto publish = [&](int bitmap,float weight) {
             if (bitmap <= BAD_BITMAP_HANDLE || bitmap >= MAX_BITMAPS || !GameBitmaps[bitmap].used || weight <= .001f) return;
             const int width = bm_w(bitmap,0), height = bm_h(bitmap,0);

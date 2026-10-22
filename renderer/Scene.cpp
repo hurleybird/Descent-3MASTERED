@@ -862,6 +862,8 @@ PresentationRef Presentation::complete(FrameData data) {
     // Fog topology is immutable and validated by its publishing owner. Only
     // the asset lifetime belongs to this frame's validation boundary.
     for (const auto& mesh : data.meshes) {
+        require(mesh.raster_domain == RasterDomain::Surface || mesh.raster_domain == RasterDomain::SoftVolume,
+            "Invalid prepared mesh raster domain");
         require(mesh.asset && mesh.asset->id().lifetime == data.scene_lifetime,"Stale generic mesh");
         data.lightCandidates(mesh.light_candidates);
         require(mesh.vertices.empty() || mesh.vertices.size() == mesh.asset->geometry().vertices.size(),

@@ -803,7 +803,7 @@ MaterialPolicy visibleSurfacePolicy(const Presentation& frame,const VisibleSurfa
 }
 std::vector<ViewPass> buildViewPasses(const Presentation& frame,const ViewVisibility& view,ViewProducts products) {
     if (view.ordering == ViewOrdering::Compositing) {
-        if (products.opaque_scene || products.occlusion)
+        if (products.opaque_scene || products.occlusion || products.soft_volume_layer)
             throw std::invalid_argument("Compositing surfaces cannot export opaque world products");
         for (const auto& item : view.surfaces) {
             const auto& surface = visibleSurfaceBinding(frame,item);
@@ -832,7 +832,32 @@ std::vector<ViewPass> buildViewPasses(const Presentation& frame,const ViewVisibi
         depth_required = depth_required || visibleSurfaceBinding(frame,view.surfaces[i]).soft_depth_range > 0;
     if (depth_required) passes.push_back({ViewPassKind::SnapshotOpaqueDepth,index,index});
     if (products.opaque_scene && !products.occlusion) passes.push_back({ViewPassKind::ExportOpaqueScene,index,index});
-    if (index < view.surfaces.size()) passes.push_back({ViewPassKind::LateWorld,index,static_cast<uint32_t>(view.surfaces.size())});
+    if (!products.soft_volume_layer) {
+        if (index < view.surfaces.size()) passes.push_back({ViewPassKind::LateWorld,index,static_cast<uint32_t>(view.surfaces.size())});
+        return passes;
+    }
+    bool late_depth_changed = false;
+    const auto soft_volume = [&](uint32_t i) {
+        const auto& item = view.surfaces[i];
+        if (late_depth_changed || !item.mesh ||
+            frame.data().meshes[item.mesh_index].raster_domain != RasterDomain::SoftVolume) return false;
+        const auto& surface = visibleSurfaceBinding(frame,item);
+        const auto policy = visibleSurfacePolicy(frame,item);
+        return surface.unlit && surface.soft_depth_range > 0 && policy.depth == DepthMode::ReadOnly &&
+            (policy.blend == BlendMode::Alpha || policy.blend == BlendMode::Additive);
+    };
+    // Preserve the exact sorted sequence, including intervening glass/models.
+    // A late depth writer is a barrier: the opaque snapshot alone can no longer
+    // stand in for depth testing, so later draws stay on the scene target.
+    while (index < view.surfaces.size()) {
+        const auto first = index;
+        const bool soft = soft_volume(index);
+        do {
+            late_depth_changed = late_depth_changed || visibleSurfacePolicy(frame,view.surfaces[index]).writesDepth();
+            ++index;
+        } while (index < view.surfaces.size() && soft_volume(index) == soft);
+        passes.push_back({soft ? ViewPassKind::SoftVolumes : ViewPassKind::LateWorld,first,index});
+    }
     return passes;
 }
 } // namespace d3scene
