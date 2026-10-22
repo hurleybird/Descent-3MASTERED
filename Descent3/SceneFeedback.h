@@ -11,7 +11,7 @@ struct SceneObservationInspection {
     bool exterior_pending = false, mirrors_pending = false;
 };
 // Candidate compatibility query, not a permission to commit gameplay state.
-// Full exterior qualification and reflected observations remain coverage gaps.
+// Exterior and reflected observations still require runtime qualification.
 SceneObservationInspection InspectSceneObservations(const d3scene::Presentation&,d3scene::View);
 // Inspection of an executable view reuses its resolved camera and apertures.
 // Requested domains describe the diagnostic report; they do not authorize commit.

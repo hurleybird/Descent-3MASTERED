@@ -38,11 +38,23 @@ static SceneObservationInspection inspectObservations(const d3scene::Presentatio
     if (feedback & ~(Automap | ObjectVisibility | EffectEligibility))
         throw std::invalid_argument("Unknown observation domains");
     if (!feedback) return result;
-    if (!frame.data().observation_inputs_prepared || view.collection != 0 || view.has_clip_plane ||
+    const bool mirror = view.kind == ViewKind::Mirror;
+    const bool mirror_contract = mirror && view.has_clip_plane && view.reflections == ReflectionPolicy::SurfaceFilm &&
+        view.fog_path_origin == FogPathOrigin::ClipPlane && !(feedback & Automap);
+    if (!frame.data().observation_inputs_prepared || view.collection != 0 ||
+        (view.has_clip_plane && !mirror_contract) ||
         view.target != ViewTarget::Scene || view.ordering != ViewOrdering::Depth ||
         view.projection != ViewProjection::Perspective ||
-        (view.kind != ViewKind::Main && view.kind != ViewKind::Auxiliary) || !view.portal_visibility)
+        (view.kind != ViewKind::Main && view.kind != ViewKind::Auxiliary && !mirror_contract) || !view.portal_visibility)
         throw std::invalid_argument("Unsupported observation query contract");
+    const auto outside_mirror = [&](const Bounds& bounds) {
+        if (!mirror) return false;
+        const auto& plane = view.clip_plane;
+        const auto& n = plane.normal;
+        const Vec3 support{n.x >= 0 ? bounds.maximum.x : bounds.minimum.x,
+            n.y >= 0 ? bounds.maximum.y : bounds.minimum.y,n.z >= 0 ? bounds.maximum.z : bounds.minimum.z};
+        return double(n.x)*support.x+double(n.y)*support.y+double(n.z)*support.z+plane.constant < 0;
+    };
     const auto& windows = spatial.rooms;
     const auto& rooms = frame.roomIndices();
     if (!view.exterior_origin && rooms.find(view.room) == rooms.end())
@@ -51,15 +63,18 @@ static SceneObservationInspection inspectObservations(const d3scene::Presentatio
     report.terrain = spatial.exterior.visible && (feedback & EffectEligibility);
     for (size_t i = 0; i < windows.size(); ++i) if (windows[i].visible) {
         const auto& room = frame.data().rooms[i];
+        if (outside_mirror(room.asset->bounds())) continue;
         result.exterior_pending = result.exterior_pending || room.exterior;
-        result.mirrors_pending = result.mirrors_pending || !room.mirrors.empty();
+        result.mirrors_pending = result.mirrors_pending || (!mirror && !room.mirrors.empty());
         if (feedback & (Automap | EffectEligibility)) report.rooms.push_back(room.number);
     }
     if (!(feedback & ObjectVisibility)) return result;
-    struct Observed { uint32_t handle; float depth; bool front_to_back; };
-    std::vector<Observed> observed;
+    struct Observed { uint32_t handle; float depth; bool front_to_back; size_t ordinal; };
+    static thread_local std::vector<Observed> observed;
+    observed.clear();
     for (const auto& object : frame.data().objects) {
         if (!object.observation_eligible || excludesObject(view,object.handle)) continue;
+        if (outside_mirror(object.observation_bounds)) continue;
         const auto found = rooms.find(object.room);
         const bool exterior = object.room < -1;
         const RoomState* room = found == rooms.end() ? nullptr : &frame.data().rooms[found->second];
@@ -89,7 +104,7 @@ static SceneObservationInspection inspectObservations(const d3scene::Presentatio
             if (outside) continue;
         }
         if ((exterior && !object.observation_unbounded) ||
-            (!exterior && room->number != view.room && !room->observation_unclipped)) {
+            (!exterior && (mirror || (room->number != view.room && !room->observation_unclipped)))) {
             const auto& bounds = object.observation_bounds;
             const auto& window = exterior ? spatial.exterior : windows[found->second];
             bool left = true, right = true, bottom = true, top = true, crosses_eye = false;
@@ -104,12 +119,13 @@ static SceneObservationInspection inspectObservations(const d3scene::Presentatio
             }
             if (!crosses_eye && (left || right || bottom || top)) continue;
         }
-        observed.push_back({object.handle,depth,object.observation_front_to_back});
+        observed.push_back({object.handle,depth,object.observation_front_to_back,observed.size()});
     }
     // Legacy polygon observations were front-to-back; other objects followed
     // in the reverse postrender order. Equal depths retain publication order.
-    std::stable_sort(observed.begin(),observed.end(),[](const Observed& a,const Observed& b) {
+    std::sort(observed.begin(),observed.end(),[](const Observed& a,const Observed& b) {
         if (a.front_to_back != b.front_to_back) return a.front_to_back;
+        if (a.depth == b.depth) return a.ordinal < b.ordinal;
         return a.front_to_back ? a.depth < b.depth : a.depth > b.depth;
     });
     for (const auto& object : observed) report.objects.push_back(object.handle);

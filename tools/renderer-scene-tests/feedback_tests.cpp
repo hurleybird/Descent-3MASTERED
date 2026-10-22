@@ -112,6 +112,30 @@ int runFeedbackTests() {
         check(InspectSceneObservations(narrow_view,view.feedback).report.objects == std::vector<uint32_t>{200});
     }
     check(!candidate.exterior_pending && !candidate.mirrors_pending && !candidate.report.terrain);
+    {
+        auto mirror_data = data;
+        MeshGeometry shell; shell.vertices = {{-1,-1,0},{1,1,6}};
+        mirror_data.rooms[0].asset = assets.publishRoom(7,shell);
+        const auto mirror_frame = Presentation::freeze(mirror_data);
+        auto mirror_view = view;
+        mirror_view.kind = ViewKind::Mirror; mirror_view.feedback = NoFeedback;
+        mirror_view.has_clip_plane = true; mirror_view.clip_plane = {{0,0,1},-3};
+        mirror_view.fog_path_origin = FogPathOrigin::ClipPlane;
+        mirror_view.reflections = ReflectionPolicy::SurfaceFilm;
+        const auto reflected = prepareView(*mirror_frame,mirror_view);
+        const auto reflected_report = InspectSceneObservations(reflected,ObjectVisibility | EffectEligibility);
+        check(reflected_report.report.objects == std::vector<uint32_t>{100});
+        check(reflected_report.report.rooms == std::vector<int32_t>{7});
+        rejects([&] { InspectSceneObservations(reflected,Automap); });
+        mirror_view.coverage = {600,0,200,600};
+        check(InspectSceneObservations(prepareView(*mirror_frame,mirror_view),ObjectVisibility).report.objects.empty());
+        auto equal_depth = data;
+        equal_depth.objects[0].current = equal_depth.objects[1].current;
+        equal_depth.objects[0].observation_bounds = equal_depth.objects[1].observation_bounds;
+        std::swap(equal_depth.objects[0],equal_depth.objects[1]);
+        const auto equal_frame = Presentation::freeze(equal_depth);
+        check(InspectSceneObservations(prepareView(*equal_frame,view),ObjectVisibility).report.objects == std::vector<uint32_t>({200,100}));
+    }
     view.excluded_objects = {200};
     check(InspectSceneObservations(*observed_frame,view).report.objects == std::vector<uint32_t>{100});
     view.excluded_objects.clear();

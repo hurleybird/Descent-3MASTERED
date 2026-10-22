@@ -1,5 +1,28 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## October 22 continuation — mirror inspection contract
+
+Read-only prepared-view observation inspection now accepts terminal mirror
+producers with an explicit physical clip plane and aperture. Objects wholly
+behind that plane or outside the aperture are excluded, including in the spatial
+root room. Mirror automap feedback is explicitly rejected. Main/auxiliary policy
+unchanged. Gameplay commits remain disabled. Capture diagnostics inspect mirror
+requests under existing -scene-observation-probe only; the extra diagnostic query
+is NOT part of the normal production path. Future commit integration must consume
+the actual prepared image producer rather than add a second production query.
+
+Inspection scratch now retains capacity and uses source ordinal tie-breaks with
+std::sort, avoiding stable_sort's scratch allocation while preserving equal-depth
+AI order. Tests cover this, mirror clip/aperture rejection and domain ownership;
+all3 contract suites pass. observe-mirror006 (static2frames) matches the previous
+image EXACTLY. Actual mirror shows player2048 and object2088; inspection reports
+both (image inspected). observe-mirror-heading006 includes real rear view and GL
+audit: terminal mirror reports remain stable; no logged GL errors.
+
+All8 benchmark saves were checked for exterior coverage: they are indoors.
+Asked user asynchronously for an existing outdoor save; exterior qualification
+is still pending. Continue independent work while awaiting that answer.
+
 ## October 22 continuation — real cockpit auxiliary view crash fixed
 
 FOLLOW-UP:007 rear difference is explained by another legacy global-camera leak.
