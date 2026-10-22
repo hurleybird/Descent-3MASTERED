@@ -96,6 +96,21 @@ int runFeedbackTests() {
         shared_observation.report.objects == candidate.report.objects);
     check(InspectSceneObservations(prepared_observation,NoFeedback).report.objects.empty());
     rejects([&] { InspectSceneObservations(prepared_observation,128); });
+    {
+        auto zoom_data = data;
+        auto& edge_object = zoom_data.objects[0];
+        edge_object.current.position = {0,-48.8f,72.3f}; edge_object.observation_radius = 7;
+        edge_object.observation_bounds = {edge_object.current.position,edge_object.current.position};
+        const auto zoom_frame = Presentation::freeze(zoom_data);
+        auto narrow = view; narrow.kind = ViewKind::Auxiliary;
+        narrow.viewport = narrow.projection_anchor = {0,0,142,142}; narrow.zoom = .726f;
+        auto wide = narrow; wide.kind = ViewKind::Main; wide.zoom = 1;
+        const auto narrow_view = prepareView(*zoom_frame,narrow);
+        const auto wide_view = prepareView(*zoom_frame,wide);
+        check(InspectSceneObservations(narrow_view,view.feedback).report.objects == std::vector<uint32_t>{200});
+        check(InspectSceneObservations(wide_view,view.feedback).report.objects == std::vector<uint32_t>({200,100}));
+        check(InspectSceneObservations(narrow_view,view.feedback).report.objects == std::vector<uint32_t>{200});
+    }
     check(!candidate.exterior_pending && !candidate.mirrors_pending && !candidate.report.terrain);
     view.excluded_objects = {200};
     check(InspectSceneObservations(*observed_frame,view).report.objects == std::vector<uint32_t>{100});

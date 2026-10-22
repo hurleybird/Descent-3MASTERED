@@ -2,6 +2,15 @@
 
 ## October 22 continuation — real cockpit auxiliary view crash fixed
 
+FOLLOW-UP:007 rear difference is explained by another legacy global-camera leak.
+IsPointVisible derives sphere planes from global Render_FOV=90 even in the rear
+window using zoom=.726. Actual rear projection scales=1.83655; object6330 radius
+7.00691 is8.32669 outside its bottom plane and correctly rejected. Evidence
+observe-aux6330-new and observe-aux-fov-old. Added an independent-view zoom test.
+Temporary probes removed again. No modern observation policy change was needed.
+out/observation-baseline.exe retains generic view/room/object diagnostics; the
+baseline-diagnostic build output now has only the temporary FOV trace instead.
+
 Real rear-window fixture exposed a crash: SmallViews queried legacy gauge->pts,
 which migrated cockpit rendering never populates. Invalid monitor viewport then
 failed validateView. Replaced that upstream dependency with immutable ViewRegion
@@ -18,8 +27,8 @@ observe-rear-hq007 also completes with heading,1080pSSAA2MSAA4AO/bloom and GL au
 image inspected, no logged GL errors. region-default007 image is EXACT against
 observe-heading007-new without a rear window. Candidate/Previous untouched.
 002 main+rear room sets and ordered objects match legacy.007 main matches;
-rear room sets match but legacy includes object6330 and new does not (4vs5),
-still an unqualified boundary case. Do not enable AI/automap commits yet.
+rear room sets match and the object6330 difference is explained above. Do not
+enable AI/automap commits yet; exterior and mirror policy still need qualification.
 
 Durable capture-only legacy observation comparator now out/observation-baseline.exe:
 records view begin/end, main/rear, rooms/objects and supports the rear-window
