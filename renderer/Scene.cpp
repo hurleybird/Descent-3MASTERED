@@ -19,6 +19,45 @@
 #include <thread>
 
 namespace d3scene {
+struct ReportStoragePool {
+    struct Buffers { std::vector<int32_t> rooms; std::vector<uint32_t> objects; };
+    std::array<Buffers,16> spare;
+    size_t count = 0;
+    const std::thread::id publisher = std::this_thread::get_id();
+};
+VisibilityReport::VisibilityReport() {
+    static thread_local auto pool = std::make_shared<ReportStoragePool>();
+    storage_pool_ = pool;
+    if (pool->count) {
+        auto& buffers = pool->spare[--pool->count];
+        rooms.swap(buffers.rooms); objects.swap(buffers.objects);
+    }
+}
+VisibilityReport::~VisibilityReport() {
+    const auto& pool = storage_pool_;
+    if (!pool || pool->publisher != std::this_thread::get_id() || pool->count == pool->spare.size()) return;
+    auto& buffers = pool->spare[pool->count++];
+    rooms.clear(); objects.clear(); rooms.swap(buffers.rooms); objects.swap(buffers.objects);
+}
+VisibilityReport::VisibilityReport(const VisibilityReport& other) : VisibilityReport() { *this = other; }
+VisibilityReport& VisibilityReport::operator=(const VisibilityReport& other) {
+    if (this != &other) {
+        frame_sequence = other.frame_sequence; scene_lifetime = other.scene_lifetime;
+        view_history_key = other.view_history_key; feedback = other.feedback; terrain = other.terrain;
+        rooms = other.rooms; objects = other.objects;
+    }
+    return *this;
+}
+VisibilityReport& VisibilityReport::operator=(VisibilityReport&& other) noexcept {
+    // A renderer's empty report is often replaced by game eligibility. Swap
+    // its spare capacity into the retiring temporary instead of freeing it.
+    if (this != &other) {
+        std::swap(frame_sequence,other.frame_sequence); std::swap(scene_lifetime,other.scene_lifetime);
+        std::swap(view_history_key,other.view_history_key); std::swap(feedback,other.feedback); std::swap(terrain,other.terrain);
+        rooms.swap(other.rooms); objects.swap(other.objects); storage_pool_.swap(other.storage_pool_);
+    }
+    return *this;
+}
 // Foreground layers are frame-owned, but their released view-list capacity is
 // reusable. Local HUD/cockpit/effect builders must not allocate those same
 // short lists every frame. Held copies remain independent; foreign-thread

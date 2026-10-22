@@ -838,12 +838,21 @@ ImageMip readViewImage(const Presentation&,uint64_t image);
 
 // A result of visibility, not a side effect of drawing a depth/color pass.
 // Commit policy remains game-owned; replay does not mutate the simulation.
+struct ReportStoragePool;
 struct VisibilityReport {
+    VisibilityReport();
+    ~VisibilityReport();
+    VisibilityReport(const VisibilityReport&);
+    VisibilityReport& operator=(const VisibilityReport&);
+    VisibilityReport(VisibilityReport&&) noexcept = default;
+    VisibilityReport& operator=(VisibilityReport&&) noexcept;
     uint64_t frame_sequence = 0, scene_lifetime = 0, view_history_key = 0;
     uint8_t feedback = NoFeedback;
     std::vector<int32_t> rooms;
     std::vector<uint32_t> objects;
     bool terrain = false;
+private:
+    std::shared_ptr<ReportStoragePool> storage_pool_;
 };
 
 // Renderer-owned scene publication; separate from context-dependent GL assets.

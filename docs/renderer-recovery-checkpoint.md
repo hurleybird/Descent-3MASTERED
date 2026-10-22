@@ -1,5 +1,37 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## October 22 continuation — flat owned feedback aggregation
+
+SceneFeedbackTransaction now owns its publication and deduplicates through dense
+frame ordinals, not a node per room/object. View replay IDs use SceneLookup;
+exact replay payloads live in flat packed arrays, not per-view copied vectors.
+Domain separation, first object order, stale identity rejection and whole-report
+validation before acceptance remain unchanged. All capacity growth precedes
+acceptance; geometric growth avoids linear reallocation on cold multi-view runs.
+Transaction storage returns to a publisher-thread pool only after destruction.
+
+VisibilityReport recycles released ID-list capacity. Copy is independent; move
+assignment swaps retiring capacity into the temporary instead of freeing the
+renderer's empty report buffer when eligibility replaces it. No asset/source
+pointers are cached. Foreign-thread releases free normally and never touch the
+publisher's pool. Tests cover copy/move capacity reuse, foreign release, owned
+publication lifetime, retired handle/index reuse and all prior replay/domain
+checks. All3 contract suites pass. AI/automap commits remain disabled.
+
+feedback-flat-abba002-{new1,old1,old2,new2}: CPU1.260/1.485/1.215/1.363ms,
+GPU.694/.690/.695/.690. Control out/feedback-flat-control.exe is the verified
+pre-change binary from prepared-images-perf006 (SHA256
+6BB8BFF972DBCF9713F547CE0BA0F0A76FD63B48D31CA18C6819A53149840154).
+The timing spread does not support a claimed speedup. Images old1/new1 EXACT.
+feedback-flat-outdoor moving1080pSSAA2MSAA4AO/bloom/main+rear image EXACT against
+rain-camera-moving-hq, with no logged GL errors and rain pending=0.
+Latest build/runtime current. Candidate/Previous/desktop unchanged; unrelated
+untracked lib/gitinfo.h preserved. Usage17%, credits unchanged62044.8730600000.
+Remaining: actual frame feedback commit/order qualification (not just pure
+reports), observer/guided/cinematic/module call-site audit, other effect families
+including snow, final visual/performance acceptance and legacy code removal.
+No shadows until renderer qualification is complete.
+
 ## October 22 continuation — actual prepared image producers
 
 prepareViewImages validates/orders the complete dependency set, then owns each

@@ -3,6 +3,7 @@
 #include "../../renderer/SceneTerrain.h"
 #include "../../renderer/SceneGeometry.h"
 #include <stdexcept>
+#include <thread>
 int runFeedbackTests() {
     using namespace d3scene;
     int checks = 0;
@@ -51,6 +52,35 @@ int runFeedbackTests() {
     rejects([&] { transaction.seal(); });
     SceneFeedbackTransaction next(*frame);
     check(next.seal().objects.empty()); // no cross-frame carryover
+    {
+        VisibilityReport held_report; held_report.frame_sequence = 1; held_report.rooms = {7}; held_report.objects = {200};
+        auto independent = held_report; independent.rooms[0] = 9;
+        check(held_report.rooms[0] == 7);
+        VisibilityReport receiver; receiver.rooms.reserve(71);
+        const auto spare_capacity = receiver.rooms.capacity();
+        {
+            VisibilityReport incoming; incoming.rooms = {9}; incoming.frame_sequence = 99;
+            receiver = std::move(incoming);
+        }
+        VisibilityReport recycled;
+        check(recycled.rooms.empty() && recycled.rooms.capacity() == spare_capacity);
+        check(receiver.rooms == std::vector<int32_t>{9} && receiver.frame_sequence == 99);
+        std::thread foreign_report([report = held_report] {}); foreign_report.join();
+        check(held_report.objects == std::vector<uint32_t>{200});
+        auto owned_frame = Presentation::freeze(data);
+        auto owned = std::make_unique<SceneFeedbackTransaction>(*owned_frame); owned_frame.reset();
+        owned->add(a);
+        check(owned->seal().objects == std::vector<uint32_t>({200,100}));
+        std::thread foreign_transaction([value = std::move(owned)] {}); foreign_transaction.join();
+        auto replacement_data = data; replacement_data.sequence++;
+        replacement_data.objects[0].handle = 201;
+        const auto replacement_frame = Presentation::freeze(replacement_data);
+        { SceneFeedbackTransaction retired(*frame); retired.add(a); check(retired.seal().objects.size() == 2); }
+        SceneFeedbackTransaction replacement(*replacement_frame);
+        auto replacement_report = a; replacement_report.frame_sequence++;
+        replacement_report.objects = {201}; replacement.add(replacement_report);
+        check(replacement.seal().objects == std::vector<uint32_t>{201});
+    }
     View view; view.history_key = 1; view.room = 7;
     view.viewport = view.projection_anchor = {0,0,800,600};
     check(InspectSceneObservations(*frame,view).report.objects.empty());
