@@ -206,6 +206,23 @@ void PrepareGameCockpitGauges(d3scene::FrameData& frame,const ModelTransforms& t
         }
         if (mask == STAT_PRIMARYLOAD || mask == STAT_SECONDARYLOAD) {
             const bool primary = mask == STAT_PRIMARYLOAD;
+            if (!moving) {
+                double left=Game_window_w,top=Game_window_h,right=0,bottom=0;
+                bool projected=true;
+                for (const auto& point : points) {
+                    const auto clip=d3scene::project(camera,point);
+                    if (clip.w <= 0) { projected=false; break; }
+                    const double x=(clip.x/clip.w+1)*.5*Game_window_w;
+                    const double y=(1-clip.y/clip.w)*.5*Game_window_h;
+                    left=(std::min)(left,x); right=(std::max)(right,x);
+                    top=(std::min)(top,y); bottom=(std::max)(bottom,y);
+                }
+                if (projected) {
+                    const int x=int(std::floor(left)),y=int(std::floor(top));
+                    frame.view_regions.push_back({primary ? SceneCockpitPrimaryView : SceneCockpitSecondaryView,
+                        {Game_window_x+x,Game_window_y+y,int(std::ceil(right))+2-x,int(std::ceil(bottom))+2-y}});
+                }
+            }
             if ((primary && Disable_primary_monitor) || (!primary && Disable_secondary_monitor)) continue;
             if (Cockpit_alt_mode) {
                 d3scene::Vec3 center;
@@ -1276,44 +1293,4 @@ int GetFirstVert(bsp_info* sm)
 		first_vert = 0;		// If no alpha info, just set to first vertex
 
 	return first_vert;
-}
-
-//Returns the coordinates of the specified cockpit monitor
-//Parameter:	window - 0 means primary monitor, 1 means secondary
-//					x0,y0,x1,y1 - these are filled in with the coordinates of the montiro
-//Returns: true if got coords, false if the monitor was animating
-bool GetCockpitWindowCoords(int window, int* left, int* top, int* right, int* bot)
-{
-	if (Render_gauge_moving)
-		return 0;
-
-	tGauge* gauge;
-
-	gauge = &Gauge_list[GAUGE_INDEX(window ? STAT_SECONDARYLOAD : STAT_PRIMARYLOAD)];
-
-	if (gauge->monitor) 
-	{
-#define HUD_RENDER_ZOOM	0.56f
-
-		StartFrame(false);
-		g3_StartFrame(&Viewer_object->pos, &Viewer_object->orient, HUD_RENDER_ZOOM);
-
-		for (int i = 0; i < 2; i++)
-		{
-			gauge->pts[i * 2].p3_flags &= (~PF_PROJECTED);
-			g3_ProjectPoint(&gauge->pts[i * 2]);
-		}
-
-		*left = gauge->pts[0].p3_sx;
-		*top = gauge->pts[0].p3_sy;
-		*right = gauge->pts[2].p3_sx + 2;
-		*bot = gauge->pts[2].p3_sy + 2;
-
-		g3_EndFrame();
-		EndFrame();
-
-		return 1;
-	}
-
-	return 0;
 }

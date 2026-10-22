@@ -50,10 +50,4 @@ void FlagGaugesFunctional(tStatMask mask);
 //	sets gauges as gauges nonfunctional
 void FlagGaugesNonfunctional(tStatMask mask);
 
-//Returns the coordinates of the specified cockpit monitor
-//Parameter:	window - 0 means primary monitor, 1 means secondary
-//					x0,y0,x1,y1 - these are filled in with the coordinates of the montiro
-//Returns: true if got coords, false if the monitor was animating
-bool GetCockpitWindowCoords(int window,int *left,int *top,int *right,int *bot);
-
 #endif

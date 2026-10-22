@@ -64,6 +64,16 @@ int runFeedbackTests() {
         item.observation_bounds = {item.current.position,item.current.position};
     }
     auto observed_frame = Presentation::freeze(data);
+    {
+        auto region_data = data;
+        region_data.view_regions.push_back({42,{12,34,56,78}});
+        const auto region_frame = Presentation::freeze(region_data);
+        region_data.view_regions[0].rectangle.width = 0;
+        check(region_frame->data().view_regions[0].rectangle.width == 56);
+        rejects([&] { Presentation::freeze(region_data); });
+        region_data.view_regions = {{42,{0,0,10,10}},{42,{0,0,20,20}}};
+        rejects([&] { Presentation::freeze(region_data); });
+    }
     auto effect_view = view;
     effect_view.feedback = NoFeedback;
     auto effects = CollectSceneEffectEligibility(prepareView(*observed_frame,effect_view));

@@ -1030,7 +1030,8 @@ d3scene::VisibilityReport RenderGameSceneView(const d3scene::Presentation& frame
         // Inspection of AI/automap remains read-only. Do not replace the
         // separately qualified effect-admission report with diagnostic domains.
         if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0) {
-            AutomatedCaptureLog("scene observation candidate rooms=%u objects=%u exterior_pending=%d mirrors_pending=%d",
+            AutomatedCaptureLog("scene observation candidate frame=%d view=%llu kind=%d rooms=%u objects=%u exterior_pending=%d mirrors_pending=%d",
+                AutomatedCaptureFrameIndex(),(unsigned long long)view.history_key,int(view.kind),
                 (unsigned)candidate.report.rooms.size(),(unsigned)candidate.report.objects.size(),
                 candidate.exterior_pending,candidate.mirrors_pending);
             for (auto room : candidate.report.rooms)

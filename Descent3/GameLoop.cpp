@@ -701,6 +701,8 @@ static void BeginAutomatedCaptureFrame()
 		Players[Player_num].flags |= PLAYER_FLAGS_HEADLIGHT;
 		AutomatedCaptureLog("capture headlight enabled");
 	}
+	if (Automated_capture.gameplay_frame == 0 && FindArg("-capture-rear-smallview") && Player_object)
+		CreateSmallView(SVW_LEFT,Player_object->handle,SVF_REARVIEW,0.0f,D3_DEFAULT_ZOOM,-1,nullptr);
 	PlaceAutomatedCaptureScorch();
 	if (Automated_capture.gameplay_frame == 10 && FindArg("-capture-fire-flare") &&
 		Player_object && Player_num >= 0 && Player_num < MAX_PLAYERS)

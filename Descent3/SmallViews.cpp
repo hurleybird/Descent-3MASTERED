@@ -379,14 +379,13 @@ void DrawSmallViews(const d3scene::Presentation& presentation, SceneFeedbackTran
 		{
 			cockpit_embedded = true;
 			//draw on the cockpit
-			if (!GetCockpitWindowCoords((v == SVW_LEFT) ? 0 : 1, &left, &top, &right, &bot))
-				continue;
-
-			//Move relative to the current window
-			left += Game_window_x;
-			right += Game_window_x;
-			top += Game_window_y;
-			bot += Game_window_y;
+			const auto identity = v == SVW_LEFT ? SceneCockpitPrimaryView : SceneCockpitSecondaryView;
+			const d3scene::Rect* region = nullptr;
+			for (const auto& candidate : presentation.data().view_regions)
+				if (candidate.identity == identity) { region = &candidate.rectangle; break; }
+			if (!region) continue;
+			left = region->x; top = region->y;
+			right = left+region->width; bot = top+region->height;
 
 			outline_color = -1;
 		}

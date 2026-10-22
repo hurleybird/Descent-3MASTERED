@@ -764,6 +764,8 @@ enum class ViewProjection { Perspective, Orthographic };
 enum class FogPathOrigin { Camera, ClipPlane };
 enum class ReflectionPolicy { Images, SurfaceFilm };
 struct Rect { int32_t x = 0, y = 0, width = 0, height = 0; };
+// Logical screen regions published with the geometry that determines their pose.
+struct ViewRegion { uint64_t identity = 0; Rect rectangle; };
 enum Feedback : uint8_t { NoFeedback = 0, Automap = 1, ObjectVisibility = 2, EffectEligibility = 4 };
 struct ViewImageInput { uint64_t slot = 0, image = 0; };
 inline bool operator==(const ViewImageInput& a,const ViewImageInput& b) { return a.slot == b.slot && a.image == b.image; }
@@ -990,6 +992,7 @@ struct FrameData {
     TerrainState terrain;
     std::vector<PreparedMesh> meshes;
     std::vector<PreparedForeground> foregrounds;
+    std::vector<ViewRegion> view_regions;
     bool sky_enabled = false;
     Vec3 sky_color;
     FogAssetRef fog;

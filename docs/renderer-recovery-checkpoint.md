@@ -1,5 +1,32 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## October 22 continuation — real cockpit auxiliary view crash fixed
+
+Real rear-window fixture exposed a crash: SmallViews queried legacy gauge->pts,
+which migrated cockpit rendering never populates. Invalid monitor viewport then
+failed validateView. Replaced that upstream dependency with immutable ViewRegion
+metadata, published from the same transformed monitor quad and camera as gauges.
+SmallViews consumes those regions. Removed GetCockpitWindowCoords and its legacy
+g3 render-state dependency entirely. Region storage is recycled with frame data;
+freeze checks positive extents and unique identities. No cockpit geometry changed.
+Capture-only -capture-rear-smallview opens the real left rear monitor. Observation
+headers now include frame/view/kind even when the report has no room/object lines.
+
+All3 contract targets pass (including held region ownership/invalid metadata).
+observe-rear-fixed002/007 complete at720p; actual rear monitor inspected in007.
+observe-rear-hq007 also completes with heading,1080pSSAA2MSAA4AO/bloom and GL audit;
+image inspected, no logged GL errors. region-default007 image is EXACT against
+observe-heading007-new without a rear window. Candidate/Previous untouched.
+002 main+rear room sets and ordered objects match legacy.007 main matches;
+rear room sets match but legacy includes object6330 and new does not (4vs5),
+still an unqualified boundary case. Do not enable AI/automap commits yet.
+
+Durable capture-only legacy observation comparator now out/observation-baseline.exe:
+records view begin/end, main/rear, rooms/objects and supports the rear-window
+fixture. Source instrumentation reverted; baseline worktree clean. It is NOT the
+timing comparator. Evidence observe-rear{002,007}-old and fixed equivalents.
+Next: resolve remaining auxiliary boundary difference, then exterior/mirror policy.
+
 ## October 22 continuation — prepared observation apertures
 
 Active continuation is already the requested Sol6.1/high fork. Do not fork again.

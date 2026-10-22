@@ -718,6 +718,7 @@ Presentation::~Presentation() {
     reclaim(data_.camera_perturbations,clean.camera_perturbations);
     reclaim(data_.meshes,clean.meshes);
     reclaim(data_.foregrounds,clean.foregrounds);
+    reclaim(data_.view_regions,clean.view_regions);
     reclaim(data_.terrain.materials,clean.terrain.materials);
     reclaim(data_.terrain.patches,clean.terrain.patches);
     // Drop frame-owned pose/asset references now; retain only allocation
@@ -904,6 +905,11 @@ PresentationRef Presentation::complete(FrameData data) {
     storage->room_indices_.assign(data.rooms,[](const RoomState& room) { return room.number; });
     const auto& rooms = storage->room_indices_.lookup();
     data.has_planar_surfaces = false;
+    for (size_t i=0;i<data.view_regions.size();++i) {
+        const auto& region=data.view_regions[i];
+        require(region.identity && region.rectangle.width > 0 && region.rectangle.height > 0,"Invalid view region");
+        for (size_t j=0;j<i;++j) require(data.view_regions[j].identity != region.identity,"Duplicate view region identity");
+    }
     for (const auto& room : data.rooms) {
         data.has_planar_surfaces = data.has_planar_surfaces || !room.mirrors.empty();
         require(room.number >= 0,"Invalid scene room identity");
