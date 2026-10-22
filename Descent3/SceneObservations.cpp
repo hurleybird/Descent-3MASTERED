@@ -5,6 +5,29 @@
 #include <algorithm>
 #include <cmath>
 
+d3scene::VisibilityReport CollectSceneEffectEligibility(const d3scene::PreparedView& prepared) {
+    using namespace d3scene;
+    const auto& frame = prepared.frame();
+    const auto& view = prepared.view();
+    VisibilityReport report;
+    report.frame_sequence = frame.data().sequence;
+    report.scene_lifetime = frame.data().scene_lifetime;
+    report.view_history_key = view.history_key;
+    // Preview, automap, clipped diagnostic, and foreground views cannot extend
+    // simulation effect lifetime. Reflected-view admission is qualified separately.
+    if ((view.kind != ViewKind::Main && view.kind != ViewKind::Auxiliary) ||
+        view.collection != 0 || view.has_clip_plane || !view.excluded_surfaces.empty() ||
+        view.target != ViewTarget::Scene || view.ordering != ViewOrdering::Depth ||
+        view.projection != ViewProjection::Perspective || !view.portal_visibility)
+        return report;
+    report.feedback = EffectEligibility;
+    const auto& visible = prepared.visibility();
+    report.rooms.reserve(visible.room_indices.size());
+    for (auto index : visible.room_indices) report.rooms.push_back(frame.data().rooms[index].number);
+    report.terrain = visible.exterior_visible;
+    return report;
+}
+
 SceneObservationInspection InspectSceneObservations(const d3scene::Presentation& frame,d3scene::View request) {
     using namespace d3scene;
     const auto view = resolveView(frame,request);

@@ -1,5 +1,34 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## Current recovery continuation — 2026-10-21 (supersedes hypotheses below)
+
+Restored effect eligibility for normal main/auxiliary views from their already
+prepared portal-room lists. GameLoop commits room/terrain timestamps after views;
+AI and automap remain uncommitted. Mirrors/diagnostic views remain excluded.
+Removed feedback's per-frame duplicate whole-level identity hash tables; validation
+uses Presentation's existing room/object indices. All three contract tests pass.
+Frame1000 save007 now retains steam (368 world meshes versus former328).
+
+Barrel diagnosis: matching frame90 captures with `-capture-no-fog` in BOTH renderers
+still differ with headlight ON. With headlight OFF the barrels visually match.
+Old object-volume headlight uses original radius/linear falloff; modern canonical
+light uses room-headlight radius*.67, falloff1.5, strength1.5. This is a candidate
+explanation, not yet a complete proof excluding influence-culling differences.
+Do not restore object-specific brightness or blame fog without further evidence.
+Baseline diagnostic source change was reverted after building the no-fog binary.
+
+Evidence C:/tmp/D3RendererVerification/recover007-*:
+old/new-clear90; old/new-clear-unlit; new-fog90; steam1000.
+Corrected sustained720p/3000frames/CPU2 means500..2499:
+perf-old CPU1.485728 GPU.567498; shared-index CPU.93 GPU.78 (rounded).
+Before identity-index fix perf-new CPU1.717993 GPU.782932.
+direct-fog CPU.94 GPU1.57: keep field fog, direct integration is slower here.
+Earlier particle-starved sustained wins are NOT qualified comparisons.
+The runtime currently holds the corrected modern build. Candidate/PreviousCandidate
+untouched. Builds recreated in out/build/{renderer,scene-tests,baseline-diagnostic}.
+Preserved out/empty-view-candidate.exe is the pre-fix comparator, not latest.
+Credits unchanged62451.4387600000; included usage last77% consumed.
+
 ## Active 2026-10-21 flare regression investigation
 
 ## Compact recovery — latest state, 2026-10-21

@@ -997,15 +997,17 @@ d3scene::VisibilityReport RenderGameSceneView(const d3scene::Presentation& frame
     }
     d3scene::renderViewImages(frame,planar.images);
     auto observations = d3scene::renderView(planar.consumer);
+    observations = CollectSceneEffectEligibility(planar.consumer);
     if (FindArg("-scene-observation-probe") &&
         (view.kind == d3scene::ViewKind::Main || view.kind == d3scene::ViewKind::Auxiliary)) {
         auto inspection = view;
         inspection.feedback = d3scene::Automap | d3scene::ObjectVisibility | d3scene::EffectEligibility;
         const auto candidate = InspectSceneObservations(frame,inspection);
-        observations = candidate.report; // collected for inspection only; never committed
+        // Inspection of AI/automap remains read-only. Do not replace the
+        // separately qualified effect-admission report with diagnostic domains.
         if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
             AutomatedCaptureLog("scene observation candidate rooms=%u objects=%u exterior_pending=%d mirrors_pending=%d",
-                (unsigned)observations.rooms.size(),(unsigned)observations.objects.size(),
+                (unsigned)candidate.report.rooms.size(),(unsigned)candidate.report.objects.size(),
                 candidate.exterior_pending,candidate.mirrors_pending);
     }
     if (view.kind == d3scene::ViewKind::Main && FindArg("-scene-model-collection-probe")) {

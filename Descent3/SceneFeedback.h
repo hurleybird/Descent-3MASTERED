@@ -1,6 +1,7 @@
 // Descent 3MASTERED - GPL-3.0-or-later
 #pragma once
 #include "../renderer/Scene.h"
+#include "../renderer/SceneView.h"
 #include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
@@ -12,6 +13,11 @@ struct SceneObservationInspection {
 // Candidate compatibility query, not a permission to commit gameplay state.
 // Full exterior qualification and reflected observations remain coverage gaps.
 SceneObservationInspection InspectSceneObservations(const d3scene::Presentation&,d3scene::View);
+
+// Effect admission is conservative room visibility, not an AI observation or
+// proof that a surface produced pixels. Reuse the immutable portal query that
+// prepared the view; never walk the scene a second time to keep emitters alive.
+d3scene::VisibilityReport CollectSceneEffectEligibility(const d3scene::PreparedView&);
 
 // Game-owned observation transaction. It deliberately does not interpret GPU
 // draw items as observations, or write Rooms/Objects while collecting views.
@@ -27,11 +33,10 @@ struct SceneFrameFeedback {
 class SceneFeedbackTransaction {
     const d3scene::Presentation& frame_;
     SceneFrameFeedback result_;
-    std::unordered_set<int32_t> valid_rooms_, automap_, effects_;
-    std::unordered_set<uint32_t> valid_objects_, objects_;
+    std::unordered_set<int32_t> automap_, effects_;
+    std::unordered_set<uint32_t> objects_;
     std::unordered_map<uint64_t,d3scene::VisibilityReport> views_;
     bool sealed_ = false;
-    bool catalogued_ = false;
 public:
     SceneFeedbackTransaction(const SceneFeedbackTransaction&) = delete;
     SceneFeedbackTransaction& operator=(const SceneFeedbackTransaction&) = delete;
@@ -50,14 +55,11 @@ public:
         require(report.rooms.empty() || (report.feedback & (d3scene::Automap | d3scene::EffectEligibility)));
         require(report.objects.empty() || (report.feedback & d3scene::ObjectVisibility));
         require(!report.terrain || (report.feedback & d3scene::EffectEligibility));
-        if (!catalogued_ && (!report.rooms.empty() || !report.objects.empty())) {
-            for (const auto& room : frame_.data().rooms) valid_rooms_.insert(room.number);
-            for (const auto& object : frame_.data().objects) valid_objects_.insert(object.handle);
-            catalogued_ = true;
-        }
         // Validate the entire report before accepting any of its domains.
-        for (const auto room : report.rooms) require(valid_rooms_.count(room) != 0);
-        for (const auto object : report.objects) require(valid_objects_.count(object) != 0);
+        // The immutable presentation already owns these identity indices. Do
+        // not rebuild node-allocated catalogues of the whole level per frame.
+        for (const auto room : report.rooms) require(frame_.roomIndices().find(room) != frame_.roomIndices().end());
+        for (const auto object : report.objects) require(frame_.objectIndices().find(object) != frame_.objectIndices().end());
         const auto previous = views_.find(report.view_history_key);
         if (previous != views_.end()) {
             const auto& old = previous->second;

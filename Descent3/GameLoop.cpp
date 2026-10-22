@@ -687,6 +687,11 @@ static void BeginAutomatedCaptureFrame()
 		return;
 
 	Automated_capture.gameplay_frame_active = true;
+	if (Automated_capture.gameplay_frame == 0 && FindArg("-capture-no-fog"))
+	{
+		Detail_settings.Fog_enabled = false;
+		AutomatedCaptureLog("capture fog disabled");
+	}
 	if (Automated_capture.gameplay_frame == 0 && FindArg("-capture-headlight") &&
 		Player_num >= 0 && Player_num < MAX_PLAYERS)
 	{
@@ -3114,9 +3119,12 @@ void GameRenderFrame(void)
 			DrawSmallViews(*presentation,feedback);
 		}
 		// One observation boundary after world views, before foreground canvases.
-		// Inspection reports remain NoFeedback; the commit barrier stays in place
-		// until the simulation-bounds/portal observation query is qualified.
+		// Only effect admission is qualified here. Automap exploration and AI
+		// observation still require their independent simulation-volume policy.
 		const auto& observations = feedback.seal();
+		for (const auto room : observations.effect_rooms)
+			Rooms[room].last_render_time = Gametime;
+		if (observations.terrain) Last_terrain_render_time = Gametime;
 		if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
 			AutomatedCaptureLog("scene observations sealed automap=%u effects=%u objects=%u terrain=%d",
 				(unsigned)observations.automap_rooms.size(),(unsigned)observations.effect_rooms.size(),

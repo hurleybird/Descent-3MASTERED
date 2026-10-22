@@ -64,6 +64,19 @@ int runFeedbackTests() {
         item.observation_bounds = {item.current.position,item.current.position};
     }
     auto observed_frame = Presentation::freeze(data);
+    auto effect_view = view;
+    effect_view.feedback = NoFeedback;
+    auto effects = CollectSceneEffectEligibility(prepareView(*observed_frame,effect_view));
+    check(effects.feedback == EffectEligibility);
+    check(effects.rooms == std::vector<int32_t>{7});
+    check(effects.objects.empty() && !effects.terrain);
+    check(effects.frame_sequence == data.sequence && effects.scene_lifetime == data.scene_lifetime);
+    effect_view.kind = ViewKind::Auxiliary;
+    check(CollectSceneEffectEligibility(prepareView(*observed_frame,effect_view)).rooms == effects.rooms);
+    effect_view.kind = ViewKind::Preview;
+    check(CollectSceneEffectEligibility(prepareView(*observed_frame,effect_view)).feedback == NoFeedback);
+    effect_view.kind = ViewKind::Main; effect_view.portal_visibility = false;
+    check(CollectSceneEffectEligibility(prepareView(*observed_frame,effect_view)).feedback == NoFeedback);
     auto candidate = InspectSceneObservations(*observed_frame,view);
     check(candidate.report.rooms == std::vector<int32_t>{7}); // disconnected room not explored
     check(candidate.report.objects == std::vector<uint32_t>({200,100})); // includes before near plane
