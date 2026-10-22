@@ -2,6 +2,56 @@
 
 ## Active 2026-10-21 flare regression investigation
 
+## Compact recovery — latest state, 2026-10-21
+
+User requests push latest work and recover this SAME task after Bad Request.
+No handoff, no deletion (especially no PowerShell deletion). Continue renderer
+work after recovery, not shadows or cancelled cockpit geometry. Stop before
+credits: last checked65% used, credits62451.4387600000 unchanged.
+
+Active worktree: C:/Users/Jeff/.codex/worktrees/renderer-rearchitecture/DESCENT-3MASTERED
+Branch codex/renderer-rearchitecture, latest implementation ab6eb0f.
+Only unrelated untracked lib/gitinfo.h; do not stage. No game/build running.
+Main/Candidate/PreviousCandidate/desktop/delivered preview untouched.
+Completed: aee6973 no-medium fog exit;34773af mirror aperture; eef3393 packed
+fog nodes/capture-only field timestamps;ab6eb0f sparse image-scratch reset.
+Build/tests/image evidence and measurements are summarized immediately below.
+
+IMPORTANT binary identities: out/empty-view-candidate.exe is ab6eb0f semantics,
+SHA5047D04BB83303B32AD25737A2918219F9DC815518BB6458A9EDB088291B829B.
+Owned runtime C:/tmp/D3RendererVerification/scene-view-test currently has it.
+out/build/renderer executable is REJECTED16-lane fog experiment; source restored
+to8, so rebuild before deploying that build.16-lane007 GPU .563949 vs8 .558496,
+no win; source fully reverted. Sparse fog-bin experiment also rejected.
+Old baseline out/build/renderer-ipo is rebuilt bfb59647 (NOT modern IPO build),
+SHA A6286E9315A60F3C93B3A764C93A808B8FA385924ADDFACE1B573433374F3DA4.
+
+Scaling runs under C:/tmp/D3RendererVerification/scale{002,006,007}-{new,old}:
+1080p output SSAA2/MSAA4/AO/bloom,1000frames means400..899,CPU2,-limitframe0.
+GPU new/old:0025.943174/6.280078;0064.476182/5.834370;0075.709490/6.451678.
+007repeat new/old5.648724/6.405546. CPU007 drifts/inconclusive, not universal win.
+Effects differ, so NOT strict visual/work equivalence. Earlier sustained720p
+eight-save CPU wins remain separately qualified; don't mix timing regimes.
+
+CURRENT INVESTIGATION (read this instead of old transcript): save007 old/new
+headlight-on images differ substantially: broad pale highlight on left wall in
+old, absent in new. Still present difference with AO/bloom off (scale007-plain-*).
+With NO HEADLIGHT atframe90, old/new BOTH show that pale contribution:
+wall007-{old,new}-unlit/saveg003.png. Thus investigate headlight interaction with
+static specular/reflections; not established cause. Fog-debug wall007-fog shows
+only weak fog on that wall. Do NOT call this an intentional fog improvement.
+No code changes made for this issue yet. Last inspected gl_scene.cpp fragment
+static+dynamic specular (~414..458), vertex reflection packing (~195..220),
+reflection GPU table (~775..850), and SceneLights.cpp headlight setup.
+Potential next narrow test: headlight-on frame90 at720p matching the unlit pair,
+then isolate shader reflection contribution/NaNs or packed influence addresses.
+Do not infer failure from unmatched frame/resolution captures alone.
+
+Keep recovery small: one investigation, bounded tool output, no new agents,
+no sprawling historical search. Existing profile/image scripts are ignored out/
+helpers; use one owned runtime and one comparator, no runtime clones.
+
+
 LATEST after eef3393: image scratch resets only touched binding/pixel slots,
 not both full registries (~144K ints/frame). Zero sentinel/index+1 preserves
 source aliases; touched list retains capacity, never assets or cross-frame IDs.
