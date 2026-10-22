@@ -4,6 +4,17 @@
 
 ## Compact recovery — latest state, 2026-10-21
 
+RECOVERY CLEANUP COMPLETED: removed3,341,364,761 bytes across2653 generated files
+using Node with exact-root/realpath/link/tracked-file validation, NOT PowerShell.
+Deleted out/build, out/perf-checkpoints, superseded root out/*.exe/*.obj/*.log.
+Preserved source, all benchmark outputs outside worktree, scripts, small evidence,
+out/empty-view-candidate.exe (current8-lane ab6eb0f semantics),
+out/baseline-pre-rewrite.exe (A6286E... verified copy before build deletion),
+and out/sample-render-thread.exe. Build caches/PDBs are gone; reconfigure before
+building. Superseded binaries/logs are not recoverable directly; source revisions
+remain in git. All source pushed through2d9d163 before cleanup. No active game.
+Use THIS paragraph over older build paths/retained-executable claims below.
+
 User requests push latest work and recover this SAME task after Bad Request.
 No handoff, no deletion (especially no PowerShell deletion). Continue renderer
 work after recovery, not shadows or cancelled cockpit geometry. Stop before
