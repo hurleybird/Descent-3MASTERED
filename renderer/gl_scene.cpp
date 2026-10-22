@@ -217,6 +217,24 @@ void main() {
     surface_payload[2] = vec4(vertex_dynamic.z,vertex_color);
 }
 )GLSL";
+// Shared classification keeps the layer composite and full-resolution repair
+// complementary: an edge receives exactly one of them, never both.
+const char* ParticleEdgeShader = R"GLSL(
+uniform vec4 volume_mapping;
+uniform int volume_edge_only;
+bool particleDepthEdge(vec2 pixel) {
+    vec2 base = floor((pixel-volume_mapping.zw)/volume_mapping.xy-0.5);
+    ivec2 extent = textureSize(opaque_depth,0);
+    float lo = texelFetch(opaque_depth,clamp(ivec2(pixel)-depth_snapshot_origin,ivec2(0),extent-1),0).r;
+    float hi = lo;
+    for (int y=0;y<2;++y) for(int x=0;x<2;++x) {
+        vec2 center = (base+vec2(x,y)+0.5)*volume_mapping.xy+volume_mapping.zw;
+        float z = texelFetch(opaque_depth,clamp(ivec2(center)-depth_snapshot_origin,ivec2(0),extent-1),0).r;
+        lo=min(lo,z); hi=max(hi,z);
+    }
+    return hi-lo > max(1.e-7,(1.0-hi)*0.01);
+}
+)GLSL";
 const std::string SceneFragmentShader = std::string(SceneLightingShader) + R"GLSL(
 uniform sampler2D colortexture, lightmaptexture;
 uniform sampler2D planar_texture;
@@ -381,6 +399,7 @@ vec3 applySceneFog(vec3 radiance,out float transmission) {
 void main() {
     vec2 material_uv=texcoord*texture_scale+texture_offset;
     vec2 scene_pixel = gl_FragCoord.xy*fragment_mapping.xy+fragment_mapping.zw;
+    if (volume_edge_only != 0 && !particleDepthEdge(scene_pixel)) discard;
     vec4 base=use_texture != 0 ? texture(colortexture,material_uv) : vec4(base_color,1);
     base.a=(use_texture_alpha != 0 ? base.a : 1.0)*vertex_alpha*material_alpha;
     if (raster_stripe.x > 0.0) {
@@ -1339,6 +1358,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
                 reinterpret_cast<const char*>(glGetString(GL_RENDERER)),varying,vertex,fragment);
         }
         auto fragment = SceneFragmentShader;
+        fragment.insert(fragment.find("void main()"),ParticleEdgeShader);
         fragment.insert(fragment.find('\n')+1,"#define SCENE_FOG_MODE "+std::to_string(fog_mode)+"\n");
         scene_shader.AttachSource(SceneVertexShader.c_str(), fragment.c_str());
         // Resolve the shader interface at link time, never by string in a view.
@@ -1365,6 +1385,8 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         scene_uniforms.opaque_depth = scene_shader.FindUniform("opaque_depth");
         scene_uniforms.depth_snapshot_origin = scene_shader.FindUniform("depth_snapshot_origin");
         scene_uniforms.fragment_mapping = scene_shader.FindUniform("fragment_mapping");
+        scene_uniforms.volume_mapping = scene_shader.FindUniform("volume_mapping");
+        scene_uniforms.volume_edge_only = scene_shader.FindUniform("volume_edge_only");
         scene_uniforms.planar_projection = scene_shader.FindUniform("planar_projection");
         glUniformBlockBinding(scene_shader.Handle(),glGetUniformBlockIndex(scene_shader.Handle(),"SceneDrawBlock"),7);
         glUniformBlockBinding(scene_shader.Handle(),glGetUniformBlockIndex(scene_shader.Handle(),"SceneViewBlock"),8);
@@ -1460,6 +1482,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     const auto& projection = visibility.camera.projection;
     glUniform1i(scene_uniforms.surface_prepass,0);
     glUniform4f(scene_uniforms.fragment_mapping,1,1,0,0);
+    glUniform1i(scene_uniforms.volume_edge_only,0);
     glUniform1i(scene_uniforms.scene_occlusion_enabled,0);
     const auto& fog_volumes = d3scene::fogVolumes(presentation.data());
     const auto fog_id = presentation.data().fog ? presentation.data().fog->id() : d3scene::AssetId{};
@@ -2022,6 +2045,31 @@ void main() {
       // Image consumers do not write clip distances; never leak this state.
       depth_prepass = pass.kind == d3scene::ViewPassKind::DepthSurface;
       const bool volume_layer = pass.kind == d3scene::ViewPassKind::SoftVolumes;
+      d3scene::Rect volume_coverage = raster;
+      if (volume_layer) {
+          double left=1,right=-1,bottom=1,top=-1;
+          bool crosses_near = false;
+          for (uint32_t i=pass.begin;i<pass.end && !crosses_near;++i) {
+              const auto& item = visibility.surfaces[i];
+              const auto& mesh = presentation.data().meshes[item.mesh_index];
+              const auto& vertices = mesh.vertices.empty() ? mesh.asset->geometry().vertices : mesh.vertices;
+              for (const auto& vertex : vertices) {
+                  const auto p = d3scene::project(visibility.camera,d3scene::transformPoint(visibility.world(item),vertex));
+                  if (p.w <= visibility.camera.projection.near_distance) { crosses_near=true; break; }
+                  left=(std::min)(left,p.x/p.w); right=(std::max)(right,p.x/p.w);
+                  bottom=(std::min)(bottom,p.y/p.w); top=(std::max)(top,p.y/p.w);
+              }
+          }
+          if (!crosses_near) {
+              const int padding = 2*SupersamplingFactor(); // include bilinear reconstruction footprint
+              const auto edge = [&](double ndc,int extent,int margin) {
+                  const double clipped=(std::max)(-1.0,(std::min)(1.0,ndc));
+                  return (std::max)(0,(std::min)(extent,int(std::floor((clipped+1)*.5*extent))+margin));
+              };
+              const int x=edge(left,raster.width,-padding), y=edge(bottom,raster.height,-padding);
+              volume_coverage={raster.x+x,raster.y+y,edge(right,raster.width,padding+1)-x,edge(top,raster.height,padding+1)-y};
+          }
+      }
       bind_outputs();
       if (target.coverage.width) {
           glEnable(GL_SCISSOR_TEST);
@@ -2059,6 +2107,15 @@ void main() {
           const GLfloat clear[4]{}; glClearBufferfv(GL_COLOR,0,clear);
           glViewport(0,0,width,height); glDisable(GL_MULTISAMPLE);
           glUniform4f(scene_uniforms.fragment_mapping,float(raster.width)/width,float(raster.height)/height,float(raster.x),float(raster.y));
+      }
+      const bool repair_edges = volume_layer && !FindArg("-scene-particle-bilinear-reference");
+      for (int particle_phase = 0; particle_phase < (repair_edges ? 2 : 1); ++particle_phase) {
+      if (particle_phase) {
+          bind_outputs();
+          glViewport(raster.x,raster.y,raster.width,raster.height);
+          if (output.Samples() >= 2) glEnable(GL_MULTISAMPLE);
+          glUniform4f(scene_uniforms.volume_mapping,float(raster.width)/scene_volume_width,float(raster.height)/scene_volume_height,float(raster.x),float(raster.y));
+          glUniform1i(scene_uniforms.volume_edge_only,1);
       }
       if (view.has_clip_plane) glEnable(GL_CLIP_DISTANCE0);
       else glDisable(GL_CLIP_DISTANCE0);
@@ -2160,7 +2217,7 @@ void main() {
         glColorMaski(1,motion_write,motion_write,motion_write,motion_write);
         glColorMaski(4,motion_write,motion_write,motion_write,motion_write);
         glDepthMask(policy.writesDepth() ? GL_TRUE : GL_FALSE);
-        if (policy.testsDepth() && !volume_layer) glEnable(GL_DEPTH_TEST); else glDisable(GL_DEPTH_TEST);
+        if (policy.testsDepth() && (!volume_layer || particle_phase)) glEnable(GL_DEPTH_TEST); else glDisable(GL_DEPTH_TEST);
         if (cull) {
             glEnable(GL_CULL_FACE);
             glFrontFace(clockwise ? GL_CW : GL_CCW);
@@ -2195,31 +2252,53 @@ void main() {
       // texture policies. Scene samplers must not override those policies.
       glBindSampler(0,0); glBindSampler(1,0); glBindSampler(8,0);
       glDisable(GL_CLIP_DISTANCE0);
-      if (volume_layer) {
+      if (volume_layer && !particle_phase) {
           if (!scene_volume_composite.Handle()) {
               extern const char* blitVertexSrc;
-              scene_volume_composite.AttachSource(blitVertexSrc,R"GLSL(#version 330 core
+              const std::string composite = std::string(R"GLSL(#version 330 core
 uniform sampler2D particles;
+uniform sampler2D opaque_depth;
+uniform ivec2 depth_snapshot_origin;
 uniform vec4 rectangle;
 out vec4 color;
-void main() { color = texture(particles,(gl_FragCoord.xy-rectangle.xy)/rectangle.zw); }
-)GLSL");
+)GLSL") + ParticleEdgeShader + R"GLSL(
+void main() {
+    if (volume_edge_only != 0 && particleDepthEdge(gl_FragCoord.xy)) discard;
+    color = texture(particles,(gl_FragCoord.xy-rectangle.xy)/rectangle.zw);
+}
+)GLSL";
+              scene_volume_composite.AttachSource(blitVertexSrc,composite.c_str());
               scene_volume_composite.Use();
               glUniform1i(scene_volume_composite.FindUniform("particles"),14);
+              glUniform1i(scene_volume_composite.FindUniform("opaque_depth"),7);
               scene_volume_rectangle = scene_volume_composite.FindUniform("rectangle");
+              scene_volume_mapping = scene_volume_composite.FindUniform("volume_mapping");
+              scene_volume_edge = scene_volume_composite.FindUniform("volume_edge_only");
+              scene_volume_depth_origin = scene_volume_composite.FindUniform("depth_snapshot_origin");
           }
           glBindFramebuffer(GL_DRAW_FRAMEBUFFER,output.Handle()); glDrawBuffer(GL_COLOR_ATTACHMENT0);
           glViewport(raster.x,raster.y,raster.width,raster.height);
+          glEnable(GL_SCISSOR_TEST);
+          glScissor(volume_coverage.x,volume_coverage.y,volume_coverage.width,volume_coverage.height);
           if (output.Samples() >= 2) glEnable(GL_MULTISAMPLE);
           glDisable(GL_DEPTH_TEST); glDepthMask(GL_FALSE); glDisable(GL_CULL_FACE);
           glEnablei(GL_BLEND,0);
           glBlendFuncSeparatei(0,GL_ONE,GL_ONE_MINUS_SRC_ALPHA,GL_ONE,GL_ONE_MINUS_SRC_ALPHA);
           scene_volume_composite.Use();
           glUniform4f(scene_volume_rectangle,float(raster.x),float(raster.y),float(raster.width),float(raster.height));
+          glUniform4f(scene_volume_mapping,float(raster.width)/scene_volume_width,float(raster.height)/scene_volume_height,float(raster.x),float(raster.y));
+          glUniform1i(scene_volume_edge,repair_edges);
+          glUniform2i(scene_volume_depth_origin,depth_for_sampling == depth.texture ? raster.x : 0,depth_for_sampling == depth.texture ? raster.y : 0);
           glActiveTexture(GL_TEXTURE14); glBindTexture(GL_TEXTURE_2D,scene_volume_texture); glBindSampler(14,0);
           glBindVertexArray(GL_GetFramebufferVAO()); glDrawArrays(GL_TRIANGLES,0,3);
           rend_RecordDrawCall(RENDERER_DRAW_CALL_POSTPROCESS);
           scene_shader.Use(); glUniform4f(scene_uniforms.fragment_mapping,1,1,0,0);
+      }
+      }
+      glUniform1i(scene_uniforms.volume_edge_only,0);
+      if (volume_layer) {
+          glDisable(GL_SCISSOR_TEST);
+          glScissor(inherited_scissor_box[0],inherited_scissor_box[1],inherited_scissor_box[2],inherited_scissor_box[3]);
       }
     }
     if (measure_passes) {

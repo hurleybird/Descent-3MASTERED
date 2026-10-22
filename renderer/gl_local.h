@@ -168,6 +168,7 @@ class GL4Renderer : public IRenderer
 		GLint opaque_depth = -1;
 		GLint depth_snapshot_origin = -1;
 		GLint fragment_mapping = -1;
+		GLint volume_mapping = -1, volume_edge_only = -1;
 		GLint planar_projection = -1;
 	};
 	struct SceneProgram { ShaderProgram shader; SceneUniformLocations uniforms; };
@@ -218,6 +219,7 @@ class GL4Renderer : public IRenderer
 	int scene_volume_width = 0, scene_volume_height = 0;
 	ShaderProgram scene_volume_composite;
 	GLint scene_volume_rectangle = -1;
+	GLint scene_volume_mapping = -1, scene_volume_edge = -1, scene_volume_depth_origin = -1;
 	std::weak_ptr<const d3scene::Presentation> scene_frame_owner;
 	std::vector<ElementRange> scene_mesh_position_ranges;
 	void PrepareSceneViewTables(const d3scene::PreparedView&);

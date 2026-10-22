@@ -12,6 +12,20 @@ onto the SSAA/MSAA target. Default schedule retains its original fast path.
 Tests cover default behavior, mixed alpha/additive grouping, glass boundaries,
 and late depth barriers. All 3 test suites pass.
 
+FOLLOW-UP: depth-discontinuity repair is now the opt-in path's default. A shared
+shader predicate excludes edge pixels from the layer composite and renders the
+same ordered particle run at full resolution there. No double blending. Composite
+is scissored to projected particle bounds plus filter padding; near-plane crossings
+conservatively use the full raster. Scope restores scissor state. Diagnostic
+-scene-particle-bilinear-reference bypasses repair for comparison.
+particles002-bounded GPU7.070ms (full7.06), max error2/255 (was27 with bilinear).
+particles007-bounded GPU8.135ms (full8.83); max3/255. Bounded and unbounded repair
+images match exactly. Moving002/007 frames996/999 max3/255, inspected002 platform.
+Single-sample SSAA2 plus auxiliary-offset/offscreen-image fixtures max3/255;
+no logged GL errors (particles007-single-{full,bounded}). Cached R8 edge-mask
+experiment was pixel-identical but slower8.18 vs8.01ms in007 and was REMOVED.
+Do not report the original1.8ms saving as the quality-preserving result.
+
 Evidence particles007-{full,display}{,-repeat}, 1080p SSAA2 MSAA4 AO/bloom,
 1000 frames / mean400..899: repeat CPU1.58 vs1.59ms; GPU8.83 vs7.01ms;
 whole frame9.46 vs7.63ms. Static frame1000 max channel difference3/255.
