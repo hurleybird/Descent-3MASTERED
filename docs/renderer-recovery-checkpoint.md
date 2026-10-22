@@ -2,6 +2,35 @@
 
 ## Current recovery continuation — 2026-10-21 (supersedes hypotheses below)
 
+Opaque-depth MSAA snapshot now borrows the framebuffer's separate resolved
+texture for the duration of LateWorld, avoiding the second full-resolution copy.
+Single-sample targets still copy (sampling attached draw depth would be feedback).
+Qualified exact images at1080pSSAA2MSAA4AO/bloom in002/007; offset auxiliary view
+plus offscreen view-image producer at1280SSAA2MSAA4; and single-sample fallback.
+Flags -scene-depth-copy-reference and -scene-offset-view-probe are capture-only
+qualification aids. Evidence depthcopy{002,007}-{control,new}, depth-offset-*,
+depth-single-check. GPU0027.3645->7.0039;0079.1359->8.8382.002new had GL audit
+enabled: do NOT attribute its CPU change to the optimization. Snapshot stage
+002.9308->.57364ms. Latest runtime/build contain this optimization.
+
+REFRESHED PRE-REWRITE720p3000frame corpus (mean500..2499), steam restored:
+save oldCPU newCPU oldGPU newGPU
+0001.9551 .9812 .7160 .5010
+0012.2551 .76341.08081.0767
+0023.12381.40821.6075 .6890
+0032.17941.12371.0201 .3868
+004 .7159 .2897 .4248 .1626
+005 .8432 .6668 .3312 .1351
+006 .8074 .3562 .4380 .4555
+0071.0482 .8990 .5184 .7500
+All CPU baselines win14..66%; GPU is NOT universally faster. Capture folders
+restored-{000..007}-{old,new}; exact pixel equivalence with legacy not claimed
+(headlight/fog semantics and gameplay feedback differ). No build during timing.
+007 highquality LateWorld costs2.3152ms: soft-particle full-SSAA/MSAA fill is a
+remaining target. Offscreen low-frequency particle rendering is only being
+considered, not implemented. Reference NVIDIA GPU Gems3 chapter23 highlights
+occlusion halos/undersampling and mixed-resolution edge recovery requirements.
+
 Fog traversal now packs view-local bounds and threaded skips into two vec4s,
 removing shader source-node indirection. Uses a second RGBA32F texture view of
 the existing influence buffer (unit13), not another allocation/upload. Source

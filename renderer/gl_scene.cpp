@@ -1237,6 +1237,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         Error("Scene target was selected before establishing its scene lifetime");
     auto& output = target.framebuffer;
     auto& depth = target.depth;
+    GLuint depth_for_sampling = depth.texture;
     const auto raster = target.raster;
     const bool owns_world_products = target.role == SceneOutputRole::MainWorld;
     const bool writes_protection = post_protection_mask.mask_texture != 0 &&
@@ -1858,7 +1859,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         if (!estimate.ao_texture) Error("Scheduled occlusion estimate is missing");
         BindSceneTables();
         glActiveTexture(GL_TEXTURE6); glBindTexture(GL_TEXTURE_BUFFER,scene_fog_texture);
-        glActiveTexture(GL_TEXTURE7); glBindTexture(GL_TEXTURE_2D,depth.texture);
+        glActiveTexture(GL_TEXTURE7); glBindTexture(GL_TEXTURE_2D,depth_for_sampling);
         GL_BindFramebufferTexture(estimate.ao_texture,11,GL_LINEAR);
         scene_shader.Use();
         glUniform1i(scene_uniforms.scene_occlusion_enabled,1);
@@ -1949,7 +1950,7 @@ void main() {
         // explicitly, including buffer textures used by both shader stages.
         BindSceneTables();
         glActiveTexture(GL_TEXTURE6); glBindTexture(GL_TEXTURE_BUFFER,scene_fog_texture);
-        glActiveTexture(GL_TEXTURE7); glBindTexture(GL_TEXTURE_2D,depth.texture);
+        glActiveTexture(GL_TEXTURE7); glBindTexture(GL_TEXTURE_2D,depth_for_sampling);
         scene_shader.Use();
         glDepthFunc(GL_LEQUAL);
         continue;
@@ -1961,6 +1962,15 @@ void main() {
         glGetIntegerv(GL_VIEWPORT,viewport);
         glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING,&previous_read);
         glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING,&previous_draw);
+        const bool force_copy = AutomatedCaptureFrameIndex() >= 0 && FindArg("-scene-depth-copy-reference");
+        const bool resolved_storage = output.Samples() >= 2 && !force_copy;
+        if (resolved_storage) {
+            // The resolve texture is distinct from the multisampled draw depth.
+            // LateWorld only writes the latter; no resolve occurs inside that
+            // pass. Borrow this immutable opaque snapshot until the view ends,
+            // rather than copying the full supersampled depth a second time.
+            depth_for_sampling = output.DepthTextureForRead();
+        } else {
         if (!depth.texture) glGenTextures(1,&depth.texture);
         if (!depth.framebuffer) glGenFramebuffers(1,&depth.framebuffer);
         glActiveTexture(GL_TEXTURE7); glBindTexture(GL_TEXTURE_2D,depth.texture);
@@ -1986,11 +1996,15 @@ void main() {
         glDisable(GL_SCISSOR_TEST);
         glBlitFramebuffer(viewport[0],viewport[1],viewport[0]+viewport[2],viewport[1]+viewport[3],0,0,viewport[2],viewport[3],GL_DEPTH_BUFFER_BIT,GL_NEAREST);
         if (scissor) glEnable(GL_SCISSOR_TEST);
+        depth_for_sampling = depth.texture;
+        }
         glBindFramebuffer(GL_READ_FRAMEBUFFER,previous_read); glBindFramebuffer(GL_DRAW_FRAMEBUFFER,previous_draw);
         const auto snapshot_error = glGetError();
         if (snapshot_error != GL_NO_ERROR) Error("Scene opaque-depth snapshot failed: GL 0x%x source=%d viewport=%d,%d,%d,%d",
             snapshot_error,previous_draw,viewport[0],viewport[1],viewport[2],viewport[3]);
-        glUniform2i(scene_uniforms.depth_snapshot_origin,viewport[0],viewport[1]);
+        glActiveTexture(GL_TEXTURE7); glBindTexture(GL_TEXTURE_2D,depth_for_sampling);
+        scene_shader.Use();
+        glUniform2i(scene_uniforms.depth_snapshot_origin,resolved_storage ? 0 : viewport[0],resolved_storage ? 0 : viewport[1]);
         continue;
       }
       // Image consumers do not write clip distances; never leak this state.

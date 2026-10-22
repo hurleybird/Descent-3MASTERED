@@ -1014,6 +1014,14 @@ d3scene::VisibilityReport RenderGameSceneView(const d3scene::Presentation& frame
     }
     d3scene::renderViewImages(frame,planar.images);
     auto observations = d3scene::renderView(planar.consumer);
+    if (AutomatedCaptureFrameIndex() >= 0 && FindArg("-scene-offset-view-probe") && view.kind == d3scene::ViewKind::Main) {
+        auto inset = view;
+        inset.kind = d3scene::ViewKind::Auxiliary; inset.feedback = d3scene::NoFeedback;
+        inset.history_key = 0x4f4646534554ull;
+        inset.viewport = inset.projection_anchor = {83,61,320,180};
+        inset.clear_depth = true;
+        d3scene::renderView(frame,inset);
+    }
     observations = CollectSceneEffectEligibility(planar.consumer);
     if (FindArg("-scene-observation-probe") &&
         (view.kind == d3scene::ViewKind::Main || view.kind == d3scene::ViewKind::Auxiliary)) {
