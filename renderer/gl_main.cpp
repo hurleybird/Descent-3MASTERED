@@ -2519,6 +2519,13 @@ void GL4Renderer::RenderForeground(const d3scene::Presentation& frame,
 	d3scene::validateForeground(layer);
 	if (!framebuffer_ok || modal_ui_frame_active || cockpit_scene_frame_active)
 		Error("Foreground composition unavailable in this frame phase");
+	if (layer.composition == d3scene::ForegroundComposition::InScene) {
+		if (post_present_pending_swap) Error("In-scene canvas requested after world presentation completed");
+		FlushFontBatch();
+		for (const auto& view : layer.scene_views) RenderSceneView(d3scene::prepareView(frame,view));
+		UseDrawVAO();
+		return;
+	}
 	if (!BeginPostPresentFrame()) Error("Foreground requires a completed world image");
 	FlushFontBatch();
 	if (!layer.scene_views.empty()) {

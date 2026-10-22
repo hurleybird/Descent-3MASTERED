@@ -2,6 +2,8 @@
 #include "../../Descent3/SceneCanvas.h"
 #include "grtext.h"
 #include "../../renderer/SceneGeometry.h"
+#include "../../renderer/SceneCompositing.h"
+#include "../../Descent3/gameevent.h"
 #include <stdexcept>
 #include <string>
 
@@ -161,5 +163,31 @@ int runCanvasTests() {
     check(scheduled->data().foregrounds[0].identity == 8 && scheduled->data().foregrounds[1].identity == 7 &&
         scheduled->data().foregrounds[2].identity == 9,"Foreground execution order depends on publication call order");
     check(data.foregrounds[0].identity == 7,"Foreground compilation mutated the caller's plan");
+    {
+        d3scene::FrameData overlay; overlay.sequence = 1; overlay.scene_lifetime = d3scene::assets().lifetime();
+        std::vector<FrameScreenBlend> events{{1,0,0,.25f},{0,0,1,.5f}};
+        PrepareFrameBlendCanvas(overlay,41,{20,30,800,600},events,true);
+        check(overlay.meshes.size() == 2 && overlay.meshes[0].asset == overlay.meshes[1].asset &&
+            overlay.meshes[0].vertices.empty() && overlay.meshes[0].texture_uvs.empty(),
+            "Screen blend allocated per-event quad geometry");
+        check(overlay.foregrounds.size() == 1 && overlay.foregrounds[0].phase == d3scene::ForegroundPhase::AfterMainWorld &&
+            overlay.foregrounds[0].layer.composition == d3scene::ForegroundComposition::InScene,
+            "Screen blend completed world presentation or entered cockpit isolation");
+        const auto retained = d3scene::Presentation::freeze(overlay);
+        events[0].alpha = 1; overlay.meshes.clear();
+        check(retained->data().meshes[0].surface.alpha == .25f,
+            "Screen overlay retained mutable callback data");
+        const auto point = d3scene::transformPoint(retained->data().meshes[0].world,{-1,1,0});
+        check(point.x == 0 && point.y == 0,"Screen blend placement lost its local canvas origin");
+        auto invalid_layer = retained->data().foregrounds[0].layer;
+        invalid_layer.display_views.push_back(canvas);
+        bool failed = false;
+        try { d3scene::validateForeground(invalid_layer); } catch (const std::invalid_argument&) { failed = true; }
+        check(failed,"In-scene canvas accepted a display-phase consumer");
+        invalid_layer.display_views.clear(); invalid_layer.scene_views[0].clear_depth = true;
+        failed = false;
+        try { d3scene::validateForeground(invalid_layer); } catch (const std::invalid_argument&) { failed = true; }
+        check(failed,"In-scene canvas accepted a world depth clear");
+    }
     return checks;
 }

@@ -110,6 +110,8 @@
 #endif
 
 extern bool Display_renderer_stats;
+void DoDamageEffect(int,void*);
+void DoEDrainEffect(int,void*);
 
 //Current zoom factor (this is the tan of 29.25, which is half our FOV of 58.5)
 float Render_FOV = Render_FOV_desired;
@@ -2915,10 +2917,11 @@ void GameDrawMainView(const d3scene::Presentation& presentation, SceneFeedbackTr
 	}
 	rend_PerfGpuSceneMark(RENDERER_GPU_SCENE_AFTER_MATCENS);
 
-	// Draw any render events
+	// Render only immutable screen-blend data. Queue callbacks already advanced
+	// once in the game phase, before publication; this stage cannot replay them.
 	{
-		PERF_MARKER_SCOPE("ProcessRenderEvents");
-		if (!SceneGeometryInspection()) ProcessRenderEvents();
+		PERF_MARKER_SCOPE("Scene.FrameOverlays");
+		RenderGameForegrounds(presentation,d3scene::ForegroundPhase::AfterMainWorld);
 	}
 	rend_PerfGpuSceneMark(RENDERER_GPU_SCENE_AFTER_RENDER_EVENTS);
 
@@ -3091,9 +3094,25 @@ void GameRenderFrame(void)
 
 		// Publish once. Every world view below sees this same owned scene, not
 		// a second traversal of mutable simulation state.
+		if (AutomatedCaptureFrameIndex() == 20 && FindArg("-scene-overlay-events-probe")) {
+			// Exercise the real queue and damage/energy/fusion producers in a
+			// private fixed-input capture, not a fabricated GPU-only quad.
+			Players[Player_num].damage_magnitude = MAX_DAMAGE_MAG*.5f;
+			Players[Player_num].edrain_magnitude = MAX_EDRAIN_MAG*.5f;
+			if (FindEventID(DAMAGE_EFFECT) < 0)
+				CreateNewEvent(RENDER_EVENT,DAMAGE_EFFECT,0,nullptr,0,DoDamageEffect);
+			if (FindEventID(EDRAIN_EFFECT) < 0)
+				CreateNewEvent(RENDER_EVENT,EDRAIN_EFFECT,0,nullptr,0,DoEDrainEffect);
+			float rgba[4] = {1,1,1,.1f};
+			CreateNewEvent(RENDER_EVENT,FUSION_EFFECT,0,rgba,sizeof(rgba),DrawAlphaEvent);
+		}
+		const auto& screen_overlays = AdvanceFrameOverlayEvents(d3scene::assets().lifetime(),uint64_t(FrameCount));
+		if (!screen_overlays.empty() && AutomatedCapturePending())
+			AutomatedCaptureLog("scene frame overlays logical_frame=%d count=%u queued=%d",FrameCount,
+				(unsigned)screen_overlays.size(),Num_events);
 		const auto main_view = CaptureGameMainView();
 		const auto presentation = SceneGeometryInspection() && FindArg("-scene-automap-probe") ?
-			PrepareAutomapInspection() : PrepareGamePresentation(true,&main_view);
+			PrepareAutomapInspection() : PrepareGamePresentation(true,&main_view,&screen_overlays);
 		const ModuleSceneScope module_scene(presentation);
 		SceneFeedbackTransaction feedback(*presentation);
 

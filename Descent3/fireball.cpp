@@ -2099,7 +2099,7 @@ void DrawAlphaEvent(int eventnum, void* data)
 {
 	float* vals = (float*)data;
 
-	DrawAlphaBlendedScreen(vals[0], vals[1], vals[2], vals[3]);
+	EmitFrameScreenBlend(vals[0], vals[1], vals[2], vals[3]);
 }
 //Returns a random explosion based on the explosion size
 int GetRandomExplosion(float size)

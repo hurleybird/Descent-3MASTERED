@@ -864,6 +864,7 @@ VisibilityReport renderView(const Presentation& frame, const View& view);
 // image/depth buffer, then resolve once over the completed world. Display views
 // follow that resolve (e.g. an authored late canopy or native-resolution UI).
 struct ForegroundStoragePool;
+enum class ForegroundComposition { Isolated, InScene };
 struct ForegroundLayer {
     ForegroundLayer();
     ForegroundLayer(std::initializer_list<View> scene,std::initializer_list<View> display);
@@ -874,6 +875,9 @@ struct ForegroundLayer {
     ForegroundLayer& operator=(ForegroundLayer&&) noexcept = default;
     std::vector<View> scene_views;
     std::vector<View> display_views;
+    // InScene is depth-independent compositing onto the still-live world
+    // image, before final resolve/postprocessing. It needs no extra target.
+    ForegroundComposition composition = ForegroundComposition::Isolated;
 private:
     std::shared_ptr<ForegroundStoragePool> storage_pool_;
 };
@@ -881,7 +885,7 @@ void renderForeground(const Presentation& frame, const ForegroundLayer& layer);
 
 // Game layout publishes camera, placement and ordering alongside geometry.
 // Execution selects a named layer; it never consults live window/HUD state.
-enum class ForegroundPhase { WorldOverlay, FinalOverlay };
+enum class ForegroundPhase { AfterMainWorld, WorldOverlay, FinalOverlay };
 struct PreparedForeground {
     uint64_t identity = 0;
     ForegroundLayer layer;

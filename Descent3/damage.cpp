@@ -138,7 +138,7 @@ void DoDamageEffect (int eventnum,void *data)
 	if (damage_norm>1.0)
 		damage_norm=1.0;
 
-	DrawAlphaBlendedScreen (1.0,0,0,.4*damage_norm);
+	EmitFrameScreenBlend(1.f,0,0,.4f*damage_norm);
 
 	// If we're all done, just stop.  Else, make another event!
 	if (Players[Player_num].damage_magnitude<.0001f)
@@ -180,7 +180,7 @@ void DoEDrainEffect (int eventnum,void *data)
 	if (edrain_norm>1.0)
 		edrain_norm=1.0;
 
-	DrawAlphaBlendedScreen (0,0,1.0,.6*edrain_norm);
+	EmitFrameScreenBlend(0,0,1.f,.6f*edrain_norm);
 
 	// If we're all done, just stop.  Else, make another event!
 	if (Players[Player_num].edrain_magnitude<.0001f)

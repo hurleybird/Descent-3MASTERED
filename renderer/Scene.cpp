@@ -854,7 +854,8 @@ PresentationRef Presentation::complete(FrameData data) {
     for (const auto& foreground : data.foregrounds) {
         require(foreground.identity,"Invalid or duplicate foreground identity");
         foreground_ids.push_back(foreground.identity);
-        require(foreground.phase == ForegroundPhase::WorldOverlay || foreground.phase == ForegroundPhase::FinalOverlay,
+        require(foreground.phase == ForegroundPhase::AfterMainWorld ||
+            foreground.phase == ForegroundPhase::WorldOverlay || foreground.phase == ForegroundPhase::FinalOverlay,
             "Unknown foreground phase");
         foreground_order.emplace_back(foreground.phase,foreground.order);
         validateForeground(foreground.layer);

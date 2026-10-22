@@ -1,5 +1,6 @@
 // Descent 3MASTERED - GPL-3.0-or-later
 #include "SceneCanvas.h"
+#include "gameevent.h"
 #include "../renderer/SceneGeometry.h"
 #include "grtext.h"
 #include <algorithm>
@@ -64,6 +65,36 @@ void PrepareSceneQuad(d3scene::FrameData& frame,uint64_t collection,int32_t& nex
     surface.blend = style.additive ? d3scene::BlendMode::Additive : d3scene::BlendMode::Alpha;
     surface.alpha = style.alpha; surface.color_modulation = style.color;
     frame.meshes.push_back(std::move(quad));
+}
+
+void PrepareFrameBlendCanvas(d3scene::FrameData& frame,uint64_t collection,d3scene::Rect viewport,
+    const std::vector<FrameScreenBlend>& blends,bool inspection) {
+    if (blends.empty()) return;
+    const auto asset = d3scene::assets().quadMesh();
+    int32_t order = 0;
+    for (const auto& blend : blends) {
+        if (!(blend.alpha > 0)) continue;
+        d3scene::PreparedMesh quad;
+        quad.asset = asset; quad.collection = collection;
+        // Shared canonical geometry plus a placement. No per-event vertex/UV
+        // vectors are allocated each frame just to draw the same rectangle.
+        quad.world.position = {viewport.width*.5f,viewport.height*.5f,.5f};
+        quad.world.right = {viewport.width*.5f,0,0};
+        quad.world.up = {0,-viewport.height*.5f,0};
+        quad.surface.composition_order = order++;
+        quad.surface.unlit = quad.surface.two_sided = true;
+        quad.surface.depth = d3scene::DepthMode::Disabled;
+        quad.surface.blend = d3scene::BlendMode::Alpha;
+        quad.surface.alpha = blend.alpha;
+        quad.surface.color_modulation = {blend.red,blend.green,blend.blue};
+        frame.meshes.push_back(std::move(quad));
+    }
+    if (!order) return;
+    d3scene::PreparedForeground foreground;
+    foreground.identity = collection; foreground.phase = d3scene::ForegroundPhase::AfterMainWorld;
+    foreground.layer.composition = d3scene::ForegroundComposition::InScene;
+    foreground.layer.scene_views.push_back(MakeSceneCanvasView(collection,viewport,d3scene::ViewTarget::Scene,inspection));
+    frame.foregrounds.push_back(std::move(foreground));
 }
 
 namespace {

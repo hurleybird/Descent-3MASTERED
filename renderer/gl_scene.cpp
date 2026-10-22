@@ -1313,6 +1313,9 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     const bool writes_protection = post_protection_mask.mask_texture != 0 &&
         (owns_world_products || target.role == SceneOutputRole::SceneLayer);
     const auto& visibility = prepared.visibility();
+    // Compositing admission rejects depth-tested materials. Color-only canvas
+    // work must not invalidate a still-current world depth resolve.
+    const bool writes_target_depth = view.clear_depth || visibility.ordering != d3scene::ViewOrdering::Compositing;
     if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
         AutomatedCaptureLog("scene view collection=%llu target=%u projection=%u surfaces=%u",
             static_cast<unsigned long long>(view.collection),static_cast<unsigned>(view.target),
@@ -1483,7 +1486,8 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         glDisablei(GL_BLEND,1); glDisablei(GL_BLEND,4);
     };
     bind_outputs();
-    output.MarkAllDirty();
+    output.MarkColorDirty();
+    if (writes_target_depth) output.MarkDepthDirty();
     glViewport(raster.x,raster.y,raster.width,raster.height);
     if (output.Samples() >= 2) glEnable(GL_MULTISAMPLE); else glDisable(GL_MULTISAMPLE);
     if (view.clear_depth) {
@@ -2437,7 +2441,8 @@ void main() {
         glDisable(GL_SCISSOR_TEST);
     }
     if (inherited_scissor) glEnable(GL_SCISSOR_TEST);
-    output.MarkAllDirty();
+    output.MarkColorDirty();
+    if (writes_target_depth) output.MarkDepthDirty();
     if (writes_protection) {
         post_protection_mask_dirty = true;
         post_protection_mask.resolve_valid = false;
@@ -2448,7 +2453,7 @@ void main() {
     ClearBoundTextures();
     glActiveTexture(GL_TEXTURE0); Last_texel_unit_set = 0;
     rendTEMP_UnbindVertexBuffer();
-    if (target.role != SceneOutputRole::Image) rend_NotifyDepthBufferWrite();
+    if (writes_target_depth && target.role != SceneOutputRole::Image) rend_NotifyDepthBufferWrite();
     target.history.commit(history);
     // Broad-phase geometry inspection is NOT gameplay visibility. Do not mark
     // every submitted room explored merely because it was depth-tested.

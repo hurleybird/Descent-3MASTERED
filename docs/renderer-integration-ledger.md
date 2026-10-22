@@ -77,3 +77,24 @@ These prove wiring and execution, not final AI/gameplay or rain visual acceptanc
 Evidence: integration-observers-{saveg003,saveg006,outdoor-user20261022}-20261022.
 All release/pending-domain gates remain. Next: once-only visual event scheduling
 and Matcen/cinematic/emitter mutation-vs-description separation.
+
+## Screen overlay event integration
+
+The three real RENDER_EVENT families (damage, energy drain and fusion flash)
+now advance in the game-owned pre-publication phase and emit RGBA descriptions.
+No event callback runs during renderer execution. A generation-tagged due-list
+prevents reallocated slots and zero-delay rescheduling from advancing twice in
+one logical frame. Replay is idempotent; unknown callbacks are rejected before
+any queue changes. The allocator/scheduler is linked into the CPU contract suite.
+
+Descriptions become owned, shared-topology canvas meshes after the main world
+and before auxiliary views/cockpit/HUD. The explicit InScene composition mode
+does not complete presentation or clear world depth. Depth-independent canvases
+also no longer invalidate the world depth resolve. All three suites and the
+engine build pass.
+
+Private control/event captures at1280x720,SSAA2,MSAA4,AO+bloom exercised the real
+damage/energy/fusion callbacks on frames20–22 with a rear-view monitor. Visual
+inspection confirms world tinting while cockpit/HUD/monitor remain unaffected;
+no GL errors. Evidence: integration-frame-events-{control,events}-20261022.
+This closes the event producer/caller gap, not the other pending effect families.

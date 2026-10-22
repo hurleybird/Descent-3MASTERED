@@ -20,6 +20,8 @@
 
 #include "game.h"
 #include "object.h"
+#include <cstdint>
+#include <vector>
 
 #define MAX_EVENTS 500
 
@@ -57,7 +59,11 @@ int CreateNewEvent(int type, int id, float length, void* data, int size, void(*s
 
 // Processes all pending events, removing the ones that are expired
 void ProcessNormalEvents();
-void ProcessRenderEvents();
+struct FrameScreenBlend { float red, green, blue, alpha; };
+// Game-owned advancement. Due events are snapshotted before any callback runs;
+// zero-delay rescheduling cannot execute again during this logical frame.
+const std::vector<FrameScreenBlend>& AdvanceFrameOverlayEvents(uint64_t scene_lifetime,uint64_t logical_frame);
+void EmitFrameScreenBlend(float red,float green,float blue,float alpha);
 
 // Does a specific action according to an event
 void HandleEvent(game_event*);

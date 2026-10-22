@@ -46,6 +46,9 @@ struct SceneQuadStyle {
 };
 void PrepareSceneQuad(d3scene::FrameData&,uint64_t collection,int32_t& next_order,
     d3scene::Rect rectangle,const SceneQuadStyle&);
+struct FrameScreenBlend;
+void PrepareFrameBlendCanvas(d3scene::FrameData&,uint64_t collection,d3scene::Rect viewport,
+    const std::vector<FrameScreenBlend>&,bool inspection);
 d3scene::View MakeSceneCanvasView(uint64_t collection,d3scene::Rect viewport,
     d3scene::ViewTarget target,bool inspection);
 // Plain legacy-byte text in logical top-left canvas coordinates. Atlas lookup

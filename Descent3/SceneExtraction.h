@@ -7,6 +7,7 @@ struct object;
 struct ModelTransforms;
 struct HUDCanvasLayout;
 class SceneFeedbackTransaction;
+struct FrameScreenBlend;
 // Capture the physical main camera and its logical crop once, before scene
 // publication. World and camera-bound foregrounds consume the same value.
 struct GameMainView {
@@ -54,6 +55,7 @@ constexpr uint64_t SceneHUDAuxiliary = 0x4855444155580001ull;
 constexpr uint64_t SceneViewImageProbe = 0x56494557494d4701ull;
 constexpr uint64_t SceneInspectionBanner = 0x5445535442414e01ull;
 constexpr uint64_t SceneCloseScreenEffects = 0x5745415448455201ull;
+constexpr uint64_t SceneFrameScreenBlend = 0x53435245454e0001ull;
 constexpr float SceneCockpitZoom = .56f;
 void PrepareGameCockpitGauges(d3scene::FrameData&,const ModelTransforms&,const d3scene::Transform&,bool moving);
 void PrepareGameCockpit(d3scene::FrameData&, bool advance,const d3scene::FrameData* previous = nullptr,bool retain_materials = false);
@@ -64,7 +66,8 @@ void RenderGameForegrounds(const d3scene::Presentation&,d3scene::ForegroundPhase
 void PrepareCockpitComposition(d3scene::FrameData&,d3scene::Rect viewport,float zoom);
 // Independent captures publish their own scene without advancing cockpit/HUD
 // animation or replacing the gameplay presentation's motion-history source.
-d3scene::PresentationRef PrepareGamePresentation(bool advance = true,const GameMainView* = nullptr);
+d3scene::PresentationRef PrepareGamePresentation(bool advance = true,const GameMainView* = nullptr,
+    const std::vector<FrameScreenBlend>* overlays = nullptr);
 void RenderGameSceneView(const d3scene::Presentation&, d3scene::View,
     SceneFeedbackTransaction* game_observations = nullptr);
 bool SceneGeometryInspection();

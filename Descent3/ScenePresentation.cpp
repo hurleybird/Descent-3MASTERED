@@ -562,7 +562,8 @@ void PrepareGameInspectionBanner(d3scene::FrameData& data) {
     data.foregrounds.push_back(std::move(foreground));
 }
 
-d3scene::PresentationRef PrepareGamePresentation(bool advance,const GameMainView* main_view) {
+d3scene::PresentationRef PrepareGamePresentation(bool advance,const GameMainView* main_view,
+    const std::vector<FrameScreenBlend>* overlays) {
     PERF_MARKER_SCOPE("Scene.PreparePresentation");
     static d3scene::PresentationRef previous_models;
     const bool retain_rooms = [&] { PERF_MARKER_SCOPE("Scene.MaterialInputs"); return roomMaterialInputsUnchanged(); }();
@@ -680,6 +681,8 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance,const GameMainView
     { PERF_MARKER_SCOPE("Scene.PrepareModels"); PrepareGameModelInstances(data, previous_models.get(),retain_rooms); }
     { PERF_MARKER_SCOPE("Scene.PrepareObjectEffects"); PrepareGameObjectEffects(data); }
     { PERF_MARKER_SCOPE("Scene.PrepareScorches"); PrepareGameScorches(data); }
+    if (overlays && main_view)
+        PrepareFrameBlendCanvas(data,SceneFrameScreenBlend,main_view->world.viewport,*overlays,SceneGeometryInspection());
     if (SceneGeometryInspection() && FindArg("-scene-cockpit-probe")) {
         PERF_MARKER_SCOPE("Scene.PrepareCockpit");
         PrepareGameCockpit(data,advance,previous_models ? &previous_models->data() : nullptr,retain_rooms);
