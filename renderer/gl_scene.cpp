@@ -232,6 +232,7 @@ in vec4 current_clip, previous_clip;
 layout(location=1) out vec4 surface_motion; // XY displacement, Z history validity, W surface class
 layout(location=4) out uint surface_identity;
 uniform samplerBuffer scene_fog;
+uniform samplerBuffer scene_fog_nodes;
 uniform sampler3D scene_fog_field;
 uniform float fog_field_range;
 uniform vec4 fog_field_color; // W selects scalar optical depth; RGB is shared fog color.
@@ -348,13 +349,12 @@ vec3 applySceneFog(vec3 radiance,out float transmission) {
         float path = winding > 0 ? interval : 0.0;
         int node = 0;
         while (node < view_count) {
-            int source_node = texelFetch(scene_influences,view_nodes+node*2).r;
-            int record = int(low.w)+source_node*2;
-            vec4 node_low = texelFetch(scene_fog,record), node_high = texelFetch(scene_fog,record+1);
-            if (!fogBounds(node_low.xyz,node_high.xyz,inverse_direction,parallel,distance)) {
-                node = texelFetch(scene_influences,view_nodes+node*2+1).r; continue;
-            }
+            int record = view_nodes+node*2;
+            vec4 node_low = texelFetch(scene_fog_nodes,record), node_high = texelFetch(scene_fog_nodes,record+1);
             int count = int(node_high.w);
+            if (!fogBounds(node_low.xyz,node_high.xyz,inverse_direction,parallel,distance)) {
+                node = count > 0 ? node+1 : int(node_low.w); continue;
+            }
             for (int triangle = 0; triangle < count; ++triangle) {
                 int offset = int(high.w)+(int(node_low.w)+triangle)*4;
                 float crossing;
@@ -594,6 +594,8 @@ void GL4Renderer::DestroySceneResources() {
     if (scene_fog_buffer) glDeleteBuffers(1,&scene_fog_buffer);
     if (scene_fog_texture) glDeleteTextures(1,&scene_fog_texture);
     scene_fog_buffer = scene_fog_texture = 0;
+    if (scene_fog_nodes_texture) glDeleteTextures(1,&scene_fog_nodes_texture);
+    scene_fog_nodes_texture = 0;
     if (scene_fog_field_texture) glDeleteTextures(1,&scene_fog_field_texture);
     scene_fog_field_texture = 0;
     scene_fog_field_width = scene_fog_field_height = 0;
@@ -1002,7 +1004,13 @@ void GL4Renderer::PrepareSceneViewTables(const d3scene::PreparedView& prepared) 
         scene_view_fog_volumes.clear();
         static thread_local std::vector<d3scene::FogViewNode> fog_nodes;
         static thread_local std::vector<int32_t> fog_entries;
+        static thread_local std::vector<float> fog_records;
         fog_entries.clear();
+        fog_records.clear();
+        // The same buffer has scalar-integer and vec4-float texture views.
+        // Align the float records without introducing another upload/allocation.
+        while (indices.size()%4) indices.push_back(0);
+        const size_t fog_record_start = indices.size();
         size_t source_fog_nodes = 0,view_fog_nodes = 0;
         if (prepared.view().collection == 0) {
             const auto& volumes = d3scene::fogVolumes(frame.data());
@@ -1011,11 +1019,21 @@ void GL4Renderer::PrepareSceneViewTables(const d3scene::PreparedView& prepared) 
                 d3scene::prepareFogViewNodes(volumes[i],demand.camera,optical_frustum,fog_nodes);
                 // Source geometry is immutable. Camera containment belongs to
                 // this view's packed traversal entry, alongside its node range.
-                fog_entries.insert(fog_entries.end(),{int32_t(i),int32_t(indices.size()),int32_t(fog_nodes.size()),
+                fog_entries.insert(fog_entries.end(),{int32_t(i),int32_t((fog_record_start+fog_records.size())/4),int32_t(fog_nodes.size()),
                     d3scene::fogWinding(volumes[i],demand.camera.transform.position)});
-                for (const auto& node : fog_nodes) { indices.push_back(int32_t(node.source)); indices.push_back(int32_t(node.escape)); }
+                d3scene::appendFogViewRecords(volumes[i],fog_nodes,fog_records);
                 scene_view_fog_volumes.push_back(uint32_t(i));
                 source_fog_nodes += volumes[i].nodes.size(); view_fog_nodes += fog_nodes.size();
+            }
+        }
+        if (!fog_records.empty()) {
+            static_assert(sizeof(float) == sizeof(int32_t),"Fog stream scalar width");
+            indices.resize(fog_record_start+fog_records.size());
+            std::memcpy(indices.data()+fog_record_start,fog_records.data(),fog_records.size()*sizeof(float));
+            if (!scene_fog_nodes_texture) {
+                glGenTextures(1,&scene_fog_nodes_texture);
+                glActiveTexture(GL_TEXTURE13); glBindTexture(GL_TEXTURE_BUFFER,scene_fog_nodes_texture);
+                glTexBuffer(GL_TEXTURE_BUFFER,GL_RGBA32F,scene_influence_buffer);
             }
         }
         scene_view_fog = ElementRange(uint32_t(indices.size()),uint32_t(scene_view_fog_volumes.size()));
@@ -1049,6 +1067,7 @@ void GL4Renderer::BindSceneTables() {
     glActiveTexture(GL_TEXTURE5); glBindTexture(GL_TEXTURE_BUFFER,scene_position_texture);
     glActiveTexture(GL_TEXTURE9); glBindTexture(GL_TEXTURE_BUFFER,scene_reflection_texture);
     glActiveTexture(GL_TEXTURE12); glBindTexture(GL_TEXTURE_3D,scene_fog_field_texture);
+    glActiveTexture(GL_TEXTURE13); glBindTexture(GL_TEXTURE_BUFFER,scene_fog_nodes_texture);
     glActiveTexture(GL_TEXTURE0); Last_texel_unit_set = 0;
 }
 
@@ -1349,6 +1368,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         glUniform1i(scene_uniforms.specular_texture,8);
         glUniform1i(scene_uniforms.scene_fog,6);
         glUniform1i(scene_shader.FindUniform("scene_fog_field"),12);
+        glUniform1i(scene_shader.FindUniform("scene_fog_nodes"),13);
         glUniform1i(scene_uniforms.scene_occlusion,11);
         glUniform1i(scene_uniforms.opaque_depth,7);
     }
@@ -1440,14 +1460,8 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         const auto& volume = fog_volumes[index];
         const auto& low = volume.bounds.minimum; const auto& high = volume.bounds.maximum;
         const float record[12] = {volume.color.x,volume.color.y,volume.color.z,volume.depth,
-            low.x,low.y,low.z,float(fog.size()/4),high.x,high.y,high.z,float(fog.size()/4+volume.nodes.size()*2)};
+            low.x,low.y,low.z,0,high.x,high.y,high.z,float(fog.size()/4)};
         std::copy(record,record+12,fog.begin()+index*12);
-        for (const auto& node : volume.nodes) {
-            const auto& a = node.bounds.minimum; const auto& b = node.bounds.maximum;
-            // Escape links belong to the view traversal, not this asset record.
-            // Bounds and leaf range fit exactly in two vec4 fetches.
-            fog.insert(fog.end(),{a.x,a.y,a.z,float(node.first),b.x,b.y,b.z,float(node.count)});
-        }
         for (const auto& triangle : volume.boundary) {
             const auto& a=triangle.a; const auto& b=triangle.b; const auto& c=triangle.c;
             const d3scene::Vec3 ab{b.x-a.x,b.y-a.y,b.z-a.z},ac{c.x-a.x,c.y-a.y,c.z-a.z};
@@ -1578,6 +1592,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
             std::string source = SceneLightingShader;
             source.replace(0,source.find('\n'),"#version 430 core");
             source += "\nuniform samplerBuffer scene_fog;\n";
+            source += "\nuniform samplerBuffer scene_fog_nodes;\n";
             source += SceneFogIntersectionShader;
             source += "\n#define SCENE_FOG_SLICES "+std::to_string(SceneFogFieldSlices)+"\n";
             source += "\n#define SCENE_FOG_LANES "+std::to_string(SceneFogFieldLanes)+"\n";
@@ -1589,6 +1604,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
             glUniformBlockBinding(scene_fog_field_shader.Handle(),glGetUniformBlockIndex(scene_fog_field_shader.Handle(),"SceneViewBlock"),8);
             scene_fog_field_shader.Use();
             glUniform1i(scene_fog_field_shader.FindUniform("scene_fog"),6);
+            glUniform1i(scene_fog_field_shader.FindUniform("scene_fog_nodes"),13);
             glUniform1i(scene_fog_field_shader.FindUniform("scene_influences"),3);
             scene_fog_field_range = scene_fog_field_shader.FindUniform("fog_field_range");
         }

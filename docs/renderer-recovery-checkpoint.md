@@ -2,6 +2,22 @@
 
 ## Current recovery continuation — 2026-10-21 (supersedes hypotheses below)
 
+Fog traversal now packs view-local bounds and threaded skips into two vec4s,
+removing shader source-node indirection. Uses a second RGBA32F texture view of
+the existing influence buffer (unit13), not another allocation/upload. Source
+asset retains triangles; no sampling/geometry/math change. Tests3/3 pass.
+Image equality:007,002; roofprobe with continuous183<-184 fog and movingheading
+frames90..93 are byte-identical decoded PNGs against feedback-control.exe.
+6000frame ABBA save002 (means1000..4999): new GPU.689143/.693006 vs control
+.730067/.728199; CPU1.444354/1.395941 vs1.408484/1.392489; cycles6.697M/6.472M
+vs6.534M/6.465M. Modest GPU win with small CPU variation, NOT a universal speedup.
+HQ1080pSSAA2MSAA4AObloom save002: GPU7.303062 vs7.315384, CPU1.981688 vs2.039972.
+Steam-restored HQ cost remains high. Runtime currently feedback-control after
+comparison; build out/build/renderer is newest compact-node implementation.
+out/feedback-control.exe is003899e semantics, includes restored steam and shared
+identity validation; older empty-view-candidate lacks that fix. No live game.
+Included usage last80% consumed; credits unchanged.
+
 Lossless cleanup reclaimed19,750,504,080 bytes by recompressing2843 generated
 capture PNGs under C:/tmp/D3RendererVerification. Every replacement was decoded
 and byte-compared with original decompressed PNG data. No screenshot/frame lost;

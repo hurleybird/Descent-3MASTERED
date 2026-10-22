@@ -145,6 +145,18 @@ int runFogTests() {
             request.camera.position.z = eye_z; camera = prepareCamera(request);
             prepareFogViewNodes(many,camera,true,nodes);
             check(!nodes.empty() && nodes.size() < many.nodes.size(),"Optical cone did not prune off-view fog branches");
+            std::vector<float> packed;
+            appendFogViewRecords(many,nodes,packed);
+            check(packed.size() == nodes.size()*8,"Packed fog node stride");
+            for (size_t i=0;i<nodes.size();++i) {
+                const auto& source = many.nodes[nodes[i].source];
+                check(packed[i*8] == source.bounds.minimum.x && packed[i*8+1] == source.bounds.minimum.y &&
+                    packed[i*8+2] == source.bounds.minimum.z && packed[i*8+4] == source.bounds.maximum.x &&
+                    packed[i*8+5] == source.bounds.maximum.y && packed[i*8+6] == source.bounds.maximum.z,
+                    "Packed fog bounds changed");
+                check(packed[i*8+3] == float(source.count ? source.first : nodes[i].escape) &&
+                    packed[i*8+7] == float(source.count),"Packed fog payload changed");
+            }
             auto narrowed = many; narrowed.nodes.clear();
             for (size_t i = 0; i < nodes.size(); ++i) {
                 check(nodes[i].escape > i && nodes[i].escape <= nodes.size(),"Pruned fog escape is not forward/bounded");

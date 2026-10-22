@@ -58,6 +58,17 @@ void prepareFogViewNodes(const FogVolume& volume,const Camera& camera,bool optic
             [](const FogViewNode& value,uint32_t source) { return value.source < source; })-output.begin());
     }
 }
+void appendFogViewRecords(const FogVolume& volume,const std::vector<FogViewNode>& nodes,std::vector<float>& output) {
+    for (size_t i=0;i<nodes.size();++i) {
+        const auto& view = nodes[i];
+        const auto& node = volume.nodes.at(view.source);
+        if (view.escape <= i || view.escape > nodes.size() || (node.count && view.escape != i+1))
+            throw std::logic_error("Invalid threaded fog traversal");
+        const auto& a = node.bounds.minimum; const auto& b = node.bounds.maximum;
+        output.insert(output.end(),{a.x,a.y,a.z,float(node.count ? node.first : view.escape),
+            b.x,b.y,b.z,float(node.count)});
+    }
+}
 namespace {
 Vec3 sub(Vec3 a,Vec3 b) { return {a.x-b.x,a.y-b.y,a.z-b.z}; }
 Vec3 cross(Vec3 a,Vec3 b) { return {a.y*b.z-a.z*b.y,a.z*b.x-a.x*b.z,a.x*b.y-a.y*b.x}; }

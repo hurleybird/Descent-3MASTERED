@@ -15,6 +15,9 @@ struct FogViewNode { uint32_t source,escape; };
 // View-local threaded traversal of the immutable boundary tree. Omitted
 // branches cannot intersect any camera-to-surface ray in this optical cone.
 void prepareFogViewNodes(const FogVolume&,const Camera&,bool optical_cone,std::vector<FogViewNode>&);
+// Two vec4s per view-local node: bounds plus leaf first/count or internal escape.
+// Leaves always advance by one, so traversal needs no separate indirection table.
+void appendFogViewRecords(const FogVolume&,const std::vector<FogViewNode>&,std::vector<float>&);
 // Connected authored space, compiled before any camera query. Interior portal
 // faces disappear from the boundary; all other faces close the volume.
 struct FogPortalSource { int32_t polygon, destination_room, destination_portal; bool open; };

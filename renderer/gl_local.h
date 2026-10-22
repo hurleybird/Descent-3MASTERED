@@ -200,6 +200,7 @@ class GL4Renderer : public IRenderer
 	std::unordered_map<uint64_t, SceneReflectionRanges> scene_reflection_assets;
 	d3scene::RetainedDependencies<uint64_t> scene_reflection_dependencies;
 	GLuint scene_fog_buffer = 0, scene_fog_texture = 0;
+	GLuint scene_fog_nodes_texture = 0; // float view of the shared per-view influence stream
 	struct FogFieldProgram { ShaderProgram shader; GLint range = -1; };
 	std::array<FogFieldProgram,4> scene_fog_field_programs;
 	GLuint scene_fog_field_texture = 0;
