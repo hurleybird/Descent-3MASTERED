@@ -202,10 +202,16 @@ d3scene::ModelAssetRef PrepareGameModelAsset(int number,bool audit_geometry) {
         !MatchesSceneModelAsset(asset->geometry(),*model))
         throw std::logic_error("Model geometry changed without producer invalidation");
     if (!asset || (published_epochs[number] != epoch && !MatchesSceneModelAsset(asset->geometry(),*model))) {
-        size_t repaired = 0;
-        auto geometry = CompileSceneModelAsset(*model,&repaired);
+        size_t repaired = 0, repaired_uvs = 0;
+        auto geometry = CompileSceneModelAsset(*model,&repaired,&repaired_uvs);
         if (repaired && !asset) AutomatedCaptureLog("scene model=%s repaired shading normals=%u",model->name,static_cast<unsigned>(repaired));
-        asset = d3scene::assets().publishModel(number,std::move(geometry));
+        if (repaired_uvs) AutomatedCaptureLog("scene model=%s repaired UV components=%u",model->name,static_cast<unsigned>(repaired_uvs));
+        try {
+            asset = d3scene::assets().publishModel(number,std::move(geometry));
+        } catch (const std::exception& error) {
+            AutomatedCaptureLog("scene model publication failed model=%s reason=%s",model->name,error.what());
+            throw;
+        }
     }
     published_epochs[number] = epoch;
     return asset;

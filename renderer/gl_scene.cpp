@@ -1487,8 +1487,8 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     const auto fog_clip = view.fog_path_origin == d3scene::FogPathOrigin::ClipPlane ? clip : d3scene::Plane{};
     const auto& projection = visibility.camera.projection;
     glUniform1i(scene_uniforms.surface_prepass,0);
-    glUniform4f(scene_uniforms.fragment_mapping,1,1,0,0);
-    glUniform1i(scene_uniforms.volume_edge_only,0);
+    if (scene_uniforms.fragment_mapping >= 0) glUniform4f(scene_uniforms.fragment_mapping,1,1,0,0);
+    if (scene_uniforms.volume_edge_only >= 0) glUniform1i(scene_uniforms.volume_edge_only,0);
     glUniform1i(scene_uniforms.scene_occlusion_enabled,0);
     const auto& fog_volumes = d3scene::fogVolumes(presentation.data());
     const auto fog_id = presentation.data().fog ? presentation.data().fog->id() : d3scene::AssetId{};
@@ -2301,7 +2301,7 @@ void main() {
           scene_shader.Use(); glUniform4f(scene_uniforms.fragment_mapping,1,1,0,0);
       }
       }
-      glUniform1i(scene_uniforms.volume_edge_only,0);
+      if (scene_uniforms.volume_edge_only >= 0) glUniform1i(scene_uniforms.volume_edge_only,0);
       if (volume_layer) {
           glDisable(GL_SCISSOR_TEST);
           glScissor(inherited_scissor_box[0],inherited_scissor_box[1],inherited_scissor_box[2],inherited_scissor_box[3]);

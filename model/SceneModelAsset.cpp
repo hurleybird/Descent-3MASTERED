@@ -6,6 +6,7 @@
 namespace {
 uint64_t SourceEpoch = 1;
 d3scene::Vec3 value(const vector& v) { return {v.x,v.y,v.z}; }
+float finiteUV(float value) { return std::isfinite(value) ? value : 0.f; }
 }
 uint64_t SceneModelSourceEpoch() { return SourceEpoch; }
 void InvalidateSceneModelSources() {
@@ -50,8 +51,9 @@ SceneModelRoles ResolveSceneModelRoles(const d3scene::ModelAsset& asset,uint32_t
             ResolveSceneModelPartRole(parts[i].authored_flags,mask,i,has_custom_texture);
     return result;
 }
-d3scene::ModelGeometry CompileSceneModelAsset(const poly_model& model, size_t* repaired_normals) {
+d3scene::ModelGeometry CompileSceneModelAsset(const poly_model& model, size_t* repaired_normals,size_t* repaired_uv_components) {
     if (repaired_normals) *repaired_normals = 0;
+    if (repaired_uv_components) *repaired_uv_components = 0;
     if (model.n_models < 0 || model.n_models > MAX_SUBOBJECTS || model.n_textures < 0 ||
         model.n_textures > MAX_MODEL_TEXTURES || (model.n_models && !model.submodel))
         throw std::invalid_argument("Invalid authored model counts");
@@ -79,7 +81,13 @@ d3scene::ModelGeometry CompileSceneModelAsset(const poly_model& model, size_t* r
                 if (vertex < 0 || vertex >= source.nverts) throw std::invalid_argument("Invalid authored model vertex");
                 const float alpha = source.alpha ? source.alpha[vertex] : 1.f;
                 if (!std::isfinite(alpha)) throw std::invalid_argument("Invalid authored model alpha");
-                polygon.corners.push_back({static_cast<uint32_t>(vertex), face.u[k], face.v[k], 0, 0,
+                // Shipped OOF files can contain NaN texture coordinates (for
+                // example MUDSickleFull). Preserve topology and every finite
+                // component; undefined coordinates have a deterministic origin.
+                // The immutable scene boundary still rejects non-finite data.
+                if (repaired_uv_components) *repaired_uv_components +=
+                    size_t(!std::isfinite(face.u[k]))+size_t(!std::isfinite(face.v[k]));
+                polygon.corners.push_back({static_cast<uint32_t>(vertex), finiteUV(face.u[k]), finiteUV(face.v[k]), 0, 0,
                     static_cast<uint8_t>(std::max(0.f, std::min(alpha, 1.f)) * 255.f)});
             }
             part.geometry.polygons.push_back(std::move(polygon));
@@ -176,7 +184,7 @@ bool MatchesSceneModelAsset(const d3scene::ModelGeometry& geometry,const poly_mo
                 const int vertex = face.vertnums[c]; const auto& corner = polygon.corners[c];
                 if (vertex < 0 || vertex >= source.nverts) return false;
                 const float alpha = source.alpha ? source.alpha[vertex] : 1.f;
-                if (!std::isfinite(alpha) || corner.vertex != uint32_t(vertex) || corner.u != face.u[c] || corner.v != face.v[c] ||
+                if (!std::isfinite(alpha) || corner.vertex != uint32_t(vertex) || corner.u != finiteUV(face.u[c]) || corner.v != finiteUV(face.v[c]) ||
                     corner.alpha != uint8_t(std::max(0.f,std::min(alpha,1.f))*255.f)) return false;
             }
         }

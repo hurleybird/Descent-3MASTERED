@@ -192,6 +192,25 @@ int runModelSceneTests() {
     check(repaired == 2 && compiled.parts[0].geometry.vertex_normals[1].z == -1, "Invalid authored normals not repaired at asset boundary");
     check(std::isnan(normals[1].y), "Asset compiler rewrote source shading data");
     check(MatchesSceneModelAsset(compiled,source_model), "Resident model did not recognize repaired source normals");
+    u[0] = std::numeric_limits<float>::quiet_NaN();
+    v[1] = std::numeric_limits<float>::infinity();
+    face.texnum = 0; source_model.n_textures = 1; source_model.textures[0] = 0;
+    size_t repaired_uvs = 0;
+    const auto repaired_uv_model = CompileSceneModelAsset(source_model,nullptr,&repaired_uvs);
+    check(repaired_uvs == 2 && repaired_uv_model.parts[0].geometry.polygons[0].corners[0].u == 0 &&
+        repaired_uv_model.parts[0].geometry.polygons[0].corners[1].v == 0 &&
+        repaired_uv_model.parts[0].geometry.polygons[0].corners[2].u == 1,
+        "Invalid imported UVs were not repaired component-wise");
+    check(std::isnan(u[0]) && std::isinf(v[1]),"UV repair mutated authored source");
+    check(MatchesSceneModelAsset(repaired_uv_model,source_model),"Repaired UVs continually invalidate model assets");
+    {
+        SceneAssets repair_assets;
+        check(bool(repair_assets.publishModel(0,repaired_uv_model)),"Repaired imported model failed scene validation");
+        auto invalid_uv_model = repaired_uv_model;
+        invalid_uv_model.parts[0].geometry.polygons[0].corners[0].u = std::numeric_limits<float>::quiet_NaN();
+        rejects([&] { repair_assets.publishModel(1,invalid_uv_model); });
+    }
+    u[0] = 0; v[1] = 1; face.texnum = -1; source_model.n_textures = 0;
     u[1] = .25f;
     check(!MatchesSceneModelAsset(compiled,source_model), "Resident model missed changed UV");
     u[1] = 0; alpha[1] = 1;

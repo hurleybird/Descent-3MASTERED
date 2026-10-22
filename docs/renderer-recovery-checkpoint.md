@@ -1,5 +1,44 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## October 22 continuation — real outdoor fixture and imported UV repair
+
+User replaced first live save slot. Original benchmark saveg000 remains intact in
+seeds. New immutable copy seeds/savegame/outdoor-user20261022 SHA256
+F2B3C6BE67C02467BC5D915A438B7A1D2F9753A8FE0865F7AAFE0142BABDDB9C.
+True exterior camera, terrain/building/sky, actual rear monitor verified visually.
+observe-user-outdoor-{old,new}: room membership8 and ordered objects11 match.
+observe-user-outdoor-heading-{old,new}: at90frames main0rooms/0objects and
+rear4rooms/5ordered objects match. HQ1080p SSAA2 MSAA4 AO/bloom capture passes
+and inspected, no logged GL errors. This does NOT enable gameplay commits.
+Initial comparison falsely reported9extra objects because its regex excluded
+negative room IDs; corrected signed parsing proves exact object agreement.
+
+Historical search found no true outdoor save: two unique archived copies were
+indoor. Old D-Day benchmark starts in a sky-open mine. Reproduced anyway:
+observe-dday-outdoor-{old,new} room membership10/ordered objects4 match.
+Archive user-crash-save-20260820/saveg000 uncovered a real migration crash:
+MUDSickleFull.OOF imports4nonfinite UV components. Model compiler now normalizes
+only nonfinite UV components to0, preserves topology/finite coordinates/source,
+logs repairs and applies the same canonicalization in revision matching. Scene
+validation remains strict. Intended invalid coordinates cannot be recovered.
+Asset from runtime d3.hog SHA256374be39eaaffc487bcbc5a068df88dfe6e0e49e3698c91c76aa20ab8c39e2362.
+observe-archive-crash-fixed completes and inspected; legacy comparison matches
+18room membership and37objects in order. Tests cover NaN/infinity, source
+immutability, repaired publication, invalid direct publication, revision reuse.
+All3 contract targets pass. Temporary per-face probes removed.
+
+Optional particle uniforms now skip location=-1 on ordinary scene execution.
+uniform-abba002 comparisons pixel-exact; HQ opt-in uniform-guard-particles007
+also pixel-exact to particles007-bounded. Timings drifted too much (new1CPU1.34,
+old1=1.51,old2=1.09,new2=1.04ms) to claim a performance gain/regression.
+Default007 heading has1pixel max3delta; no blanket exact-image claim for that run.
+
+New exterior fixture exposes missing rain streaks: FADING_LINE is explicitly
+pending in PrepareGameEffects; no world rain line publication yet. Next focused
+work can migrate generic stroke primitives then rain, rather than restore legacy
+draw-state fallback. No shadows, Candidate/Previous/desktop changes. Unrelated
+untracked lib/gitinfo.h preserved. Credits unchanged62044.8730600000; usage12%.
+
 ## October 22 continuation — mirror inspection contract
 
 Read-only prepared-view observation inspection now accepts terminal mirror

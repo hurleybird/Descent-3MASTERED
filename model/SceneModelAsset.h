@@ -11,7 +11,8 @@ SceneModelRoles ResolveSceneModelRoles(const d3scene::ModelGeometry&,uint32_t ma
 SceneModelRoles ResolveSceneModelRoles(const d3scene::ModelAsset&,uint32_t mask,bool has_custom_texture);
 
 // Asset compiler: owned topology and validated shading data, no game globals.
-d3scene::ModelGeometry CompileSceneModelAsset(const poly_model&, size_t* repaired_normals = nullptr);
+d3scene::ModelGeometry CompileSceneModelAsset(const poly_model&, size_t* repaired_normals = nullptr,
+    size_t* repaired_uv_components = nullptr);
 // Compare source semantics without rebuilding/allocating a candidate model.
 bool MatchesSceneModelAsset(const d3scene::ModelGeometry&,const poly_model&);
 uint64_t SceneModelSourceEpoch();
