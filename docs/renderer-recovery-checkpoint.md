@@ -25,6 +25,10 @@ Single-sample SSAA2 plus auxiliary-offset/offscreen-image fixtures max3/255;
 no logged GL errors (particles007-single-{full,bounded}). Cached R8 edge-mask
 experiment was pixel-identical but slower8.18 vs8.01ms in007 and was REMOVED.
 Do not report the original1.8ms saving as the quality-preserving result.
+Default-path particle shader code is now compiled out unless the opt-in flag is
+present. particles007-off-{control,final,specialized} images match exactly; small
+GPU timing differences .75..78ms are not a demonstrated optimization. Latest
+lossless cleanup saved another336,399,510 bytes across97 captures, pixels checked.
 
 Evidence particles007-{full,display}{,-repeat}, 1080p SSAA2 MSAA4 AO/bloom,
 1000 frames / mean400..899: repeat CPU1.58 vs1.59ms; GPU8.83 vs7.01ms;

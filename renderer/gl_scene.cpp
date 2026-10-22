@@ -398,8 +398,12 @@ vec3 applySceneFog(vec3 radiance,out float transmission) {
 }
 void main() {
     vec2 material_uv=texcoord*texture_scale+texture_offset;
+#if SCENE_PARTICLE_LAYER
     vec2 scene_pixel = gl_FragCoord.xy*fragment_mapping.xy+fragment_mapping.zw;
     if (volume_edge_only != 0 && !particleDepthEdge(scene_pixel)) discard;
+#else
+    vec2 scene_pixel = gl_FragCoord.xy;
+#endif
     vec4 base=use_texture != 0 ? texture(colortexture,material_uv) : vec4(base_color,1);
     base.a=(use_texture_alpha != 0 ? base.a : 1.0)*vertex_alpha*material_alpha;
     if (raster_stripe.x > 0.0) {
@@ -1358,7 +1362,9 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
                 reinterpret_cast<const char*>(glGetString(GL_RENDERER)),varying,vertex,fragment);
         }
         auto fragment = SceneFragmentShader;
-        fragment.insert(fragment.find("void main()"),ParticleEdgeShader);
+        const bool particle_shader = FindArg("-scene-display-particles") != 0;
+        if (particle_shader) fragment.insert(fragment.find("void main()"),ParticleEdgeShader);
+        fragment.insert(fragment.find('\n')+1,std::string("#define SCENE_PARTICLE_LAYER ")+(particle_shader ? "1\n" : "0\n"));
         fragment.insert(fragment.find('\n')+1,"#define SCENE_FOG_MODE "+std::to_string(fog_mode)+"\n");
         scene_shader.AttachSource(SceneVertexShader.c_str(), fragment.c_str());
         // Resolve the shader interface at link time, never by string in a view.
