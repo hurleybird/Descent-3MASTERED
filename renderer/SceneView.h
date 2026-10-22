@@ -56,6 +56,9 @@ struct PlanarViewPlan;
 PlanarViewPlan planPlanarViews(const Presentation&,const View&,uint32_t samples = 0);
 Transform resolveMeshTransform(const PreparedMesh&,const Camera&,const Transform* attachment = nullptr);
 ClipPosition project(const Camera& camera, Vec3 world);
+// Unit transverse direction in logical pixel space. Clips the centerline at
+// the near plane before division; degenerate/behind-eye segments collapse.
+Vec2 rasterStrokeSide(const Camera&,const Transform&,Rect viewport);
 Vec3 unproject(const Camera& camera, float ndc_x, float ndc_y, float depth);
 bool sphereIntersects(const Camera& camera, Vec3 center, float radius);
 struct PortalWindow;

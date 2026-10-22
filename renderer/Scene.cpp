@@ -295,6 +295,7 @@ void SceneAssets::reset() {
     terrain_occlusion_.reset();
     meshes_.clear();
     quad_meshes_.fill({});
+    fading_stroke_mesh_.reset();
     fog_.reset();
     lifetime_ = lifetime;
     revision_ = 0;
@@ -481,6 +482,10 @@ MeshAssetRef SceneAssets::quadMesh(uint32_t count) {
     auto& asset = quad_meshes_[count-1];
     if (!asset) asset = publishMesh(count == 1 ? 2 : 256+count,unitQuadBatch(count));
     return asset;
+}
+MeshAssetRef SceneAssets::fadingStrokeMesh() {
+    if (!fading_stroke_mesh_) fading_stroke_mesh_ = publishMesh(9,unitFadingStroke());
+    return fading_stroke_mesh_;
 }
 MeshAsset::MeshAsset(AssetId id,MeshGeometry geometry) : id_(id), geometry_(std::move(geometry)) {
     for (const auto& polygon : geometry_.polygons)
@@ -873,7 +878,16 @@ PresentationRef Presentation::complete(FrameData data) {
         require(mesh.texture_uvs.empty() || mesh.texture_uvs.size() == mesh.asset->geometry().vertices.size(),
             "Incomplete prepared mesh texture coordinates");
         for (const auto uv : mesh.texture_uvs) require(std::isfinite(uv.x) && std::isfinite(uv.y),"Invalid prepared texture coordinate");
-        require(mesh.asset->geometry().raster_offsets.empty() || mesh.surface.layer == RenderLayer::Background,
+        require(std::isfinite(mesh.raster_stroke_width) && mesh.raster_stroke_width >= 0,"Invalid stroke width");
+        if (mesh.raster_stroke_width > 0) {
+            const auto policy = materialPolicy(mesh.surface,mesh.asset->hasVertexAlpha());
+            require(!mesh.asset->geometry().raster_offsets.empty() && mesh.alignment == MeshAlignment::World &&
+                !mesh.model_instance && mesh.raster_domain == RasterDomain::Surface &&
+                mesh.eye_distance == 0 && mesh.size_fade_range.y == 0 &&
+                mesh.surface.unlit && policy.blended() && !policy.writesDepth(),
+                "Raster strokes require unlit non-depth-writing world endpoints");
+        }
+        require(mesh.asset->geometry().raster_offsets.empty() || mesh.surface.layer == RenderLayer::Background || mesh.raster_stroke_width > 0,
             "Raster markers require a background layer");
         require(finite(mesh.world) && finite(mesh.camera_translation),"Invalid generic mesh transform");
         require(std::isfinite(mesh.eye_distance) && mesh.eye_distance >= 0,"Invalid view-relative mesh distance");

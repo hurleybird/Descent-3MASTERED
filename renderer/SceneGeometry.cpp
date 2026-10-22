@@ -92,6 +92,15 @@ MeshGeometry unitBillboardQuad() {
     mesh.polygons.push_back(std::move(face));
     return mesh;
 }
+MeshGeometry unitFadingStroke() {
+    MeshGeometry mesh;
+    mesh.vertices = {{0,1,0},{0,1,0},{0,-1,0},{0,-1,0}};
+    mesh.raster_offsets = {{-.5f,0},{.5f,0},{.5f,0},{-.5f,0}};
+    MeshPolygon face; face.normal = {0,0,-1};
+    face.corners = {{0,0,0,0,0,255},{1,1,0,0,0,255},{2,1,1,0,0,0},{3,0,1,0,0,0}};
+    mesh.polygons.push_back(std::move(face));
+    return mesh;
+}
 MeshGeometry unitQuadBatch(uint32_t count) {
     if (!count || count > 128) throw std::invalid_argument("Invalid canonical quad batch size");
     MeshGeometry result;

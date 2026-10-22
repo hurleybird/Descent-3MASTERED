@@ -1128,6 +1128,45 @@ int runSceneViewTests() {
     check(near(rod_end.right.x,0) && near(rod_end.right.y,0) && near(rod_end.right.z,0),"End-on rod produced nonfinite geometry");
     rod.world = d3scene::axisBillboardPlacement({0,0,10},{0,0,10},1);
     check(near(d3scene::resolveMeshTransform(rod,d3scene::prepareCamera(view())).right.x,0),"Zero-length rod did not collapse");
+    {
+        const auto stroke_camera = d3scene::prepareCamera(view());
+        const auto placement = d3scene::axisBillboardPlacement({0,2,10},{0,-2,10},0);
+        const auto stroke_side = d3scene::rasterStrokeSide(stroke_camera,placement,{0,0,800,600});
+        check(near(stroke_side.x,1) && near(stroke_side.y,0),"Raster stroke lost screen-perpendicular width");
+        auto crossing = d3scene::axisBillboardPlacement({-2,0,-1},{2,0,10},0);
+        const auto clipped_side = d3scene::rasterStrokeSide(stroke_camera,crossing,{0,0,800,600});
+        check(near(clipped_side.x,0) && near(clipped_side.y,1),"Near-crossing stroke divided behind the eye");
+        const auto degenerate = d3scene::axisBillboardPlacement({0,0,2},{0,0,20},0);
+        const auto end_on = d3scene::rasterStrokeSide(stroke_camera,degenerate,{0,0,800,600});
+        check(end_on.x == 0 && end_on.y == 0,"End-on raster stroke produced arbitrary geometry");
+        const auto hidden = d3scene::axisBillboardPlacement({1,0,-1},{0,0,-2},0);
+        check(d3scene::rasterStrokeSide(stroke_camera,hidden,{0,0,800,600}).x == 0,"Behind-eye stroke did not collapse");
+        auto oblique = d3scene::axisBillboardPlacement({-2,2,10},{2,-2,20},0);
+        const auto square = d3scene::rasterStrokeSide(stroke_camera,oblique,{0,0,800,800});
+        const auto wide = d3scene::rasterStrokeSide(stroke_camera,oblique,{0,0,1600,800});
+        check(near(square.x*square.x+square.y*square.y,1) && near(wide.x*wide.x+wide.y*wide.y,1) &&
+            !near(square.x,wide.x),"Stroke width/orientation ignored logical viewport aspect");
+        auto reverse = view(); reverse.camera.forward = {0,0,-1}; reverse.camera.right = {-1,0,0};
+        check(d3scene::rasterStrokeSide(d3scene::prepareCamera(reverse),placement,{0,0,800,600}).x == 0 &&
+            near(d3scene::rasterStrokeSide(stroke_camera,placement,{0,0,800,600}).x,1),"Stroke facing leaked across views");
+        d3scene::FrameData strokes; strokes.sequence = 1; strokes.scene_lifetime = assets.lifetime();
+        d3scene::PreparedMesh stroke; stroke.asset = assets.fadingStrokeMesh();
+        check(stroke.asset == assets.fadingStrokeMesh(),"Stroke topology allocated per instance");
+        check(stroke.asset->geometry().polygons[0].corners[0].alpha == 255 &&
+            stroke.asset->geometry().polygons[0].corners[2].alpha == 0,"Stroke endpoint opacity lost");
+        stroke.world = placement; stroke.raster_stroke_width = 1; stroke.surface.unlit = true;
+        stroke.surface.blend = d3scene::BlendMode::Additive; strokes.meshes.push_back(stroke);
+        const auto held = d3scene::Presentation::freeze(strokes);
+        check(d3scene::queryView(*held,view()).surfaces.size() == 1,"World raster stroke was dropped before expansion");
+        strokes.meshes[0].raster_stroke_width = -1;
+        bool rejected_stroke = false;
+        try { d3scene::Presentation::freeze(strokes); } catch (const std::invalid_argument&) { rejected_stroke = true; }
+        check(rejected_stroke && held->data().meshes[0].raster_stroke_width == 1,"Stroke width was invalid or not owned");
+        strokes.meshes[0].raster_stroke_width = 1; strokes.meshes[0].surface.depth = d3scene::DepthMode::ReadWrite;
+        rejected_stroke = false;
+        try { d3scene::Presentation::freeze(strokes); } catch (const std::invalid_argument&) { rejected_stroke = true; }
+        check(rejected_stroke,"Raster stroke entered unsupported depth/history path");
+    }
     check(ring.vertices.size() == 64 && ring.polygons.size() == 32 && ring.polygons.back().corners[1].vertex == 0,
         "Billboard ring has missing closure or incorrect topology");
     check(ring.polygons[0].corners[0].alpha == 0 && ring.polygons[0].corners[2].alpha == 102,

@@ -1,5 +1,34 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## October 22 continuation — generic pixel-width strokes restore rain
+
+PreparedMesh now publishes a world centerline plus logical-pixel stroke width.
+Canonical immutable fading-stroke topology is shared for the scene lifetime;
+no per-line topology/vertex allocation. View-local transverse direction clips at
+the near plane before perspective division; behind-eye/end-on lines collapse.
+Existing vertex raster offsets and spare draw-record components implement the
+extrusion: no added attributes, varyings, UBO bytes or render-state fallback.
+Publication requires unlit, translucent, non-depth-writing Surface-domain strokes.
+Tests cover aspect, independent cameras, near crossing, degeneracy, ownership,
+canonical asset reuse, endpoint opacity and unsupported depth writes. All3 suites
+pass. Rain and weapon FADING_LINE inputs now publish these ordinary world meshes.
+Other pending weather remains untouched: windshield droplets, puddles and snow.
+Unlit pixel markers no longer disable world emitter-frustum culling; they never
+consume that lighting. No new per-frame renderer allocation was introduced.
+
+rain-strokes-user-native and rain-strokes-user-hq inspected: actual rain streaks
+present, main/rear cameras, HQ1080p SSAA2MSAA4 AO/bloom, GL audit without errors.
+rain-strokes-default002-field image EXACT to uniform-abba002-new2, GPU0.700ms;
+no demonstrated ordinary-scene speed gain. rain-strokes-default002 (without-field)
+used different fog arguments and is NOT a valid comparative performance run.
+
+New real outdoor benchmark, ABBA3000frames, CPU2,720pSSAA1MSAA0/noAO/noBloom,
+means500..2499: new1 CPU1.243/GPU.340ms; old1=1.941/.805;
+old2=1.932/.785; new2=1.386/.334. Old frozen pre-rewrite comparator.
+These are NOT full visual/feature equivalence claims: remaining weather and
+known migrated effect differences still apply. Source is cleaner/measurement
+improved, not permission to clear gameplay gates. Candidate/Previous untouched.
+
 ## October 22 continuation — real outdoor fixture and imported UV repair
 
 User replaced first live save slot. Original benchmark saveg000 remains intact in

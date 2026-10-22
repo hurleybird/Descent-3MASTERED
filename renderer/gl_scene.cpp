@@ -95,6 +95,8 @@ layout(std140) uniform SceneDrawBlock { vec4 draw_params[21]; uvec4 draw_identit
 #define reflection_count (int(draw_params[19].z))
 #define planar_material (int(draw_params[19].w))
 #define planar_image (int(draw_params[20].x))
+#define raster_stroke_side (draw_params[20].yz)
+#define raster_stroke_width (draw_params[20].w)
 #define motion_identity (draw_identity.x)
 #define motion_valid (int(draw_identity.y))
 #define polygon_light_table (int(draw_identity.z))
@@ -181,7 +183,11 @@ void main() {
     if (orthographic_depth_scale > 0.0)
         gl_Position = vec4(dot(relative,camera_right)*projection.x+projection.z,
             dot(relative,camera_up)*projection.y+projection.w,(z-near_distance)*orthographic_depth_scale-1.0,1.0);
-    gl_Position.xy += raster_offset*raster_pixel_scale*gl_Position.w;
+    vec2 pixel_offset = raster_offset;
+    if (raster_stroke_width > 0.0)
+        pixel_offset = (raster_stroke_side*raster_offset.x+
+            vec2(-raster_stroke_side.y,raster_stroke_side.x)*raster_offset.y)*raster_stroke_width;
+    gl_Position.xy += pixel_offset*raster_pixel_scale*gl_Position.w;
     if (effect_depth_offset != 0.0)
         gl_Position.z = orthographic_depth_scale > 0.0 ? (z+effect_depth_offset-near_distance)*orthographic_depth_scale-1.0 :
             (1.0-2.0*near_distance/max(near_distance,z+effect_depth_offset))*gl_Position.w;
@@ -780,9 +786,11 @@ void GL4Renderer::PrepareSceneViewTables(const d3scene::PreparedView& prepared) 
         bool optical_frustum = prepared.view().projection == d3scene::ViewProjection::Perspective;
         for (const auto& item : demand.surfaces) if (!item.model && !item.mesh && !item.terrain)
             surfaces[frame.data().rooms[item.room_index].surface_base+item.polygon_index] = 1;
-        // Pixel-expanded geometry can shade an off-frustum world point.
+        // Lit pixel-expanded geometry can shade an off-frustum world point.
+        // Unlit stars/strokes must not disable emitter culling for the world.
         for (auto mesh : visible_meshes)
-            if (!frame.data().meshes[mesh].asset->geometry().raster_offsets.empty()) optical_frustum = false;
+            if (!frame.data().meshes[mesh].surface.unlit &&
+                !frame.data().meshes[mesh].asset->geometry().raster_offsets.empty()) optical_frustum = false;
         const auto wantsPart = [&](const d3scene::PreparedModelPart& part) {
             return parts[part.compiled_index] != 0;
         };
@@ -1800,6 +1808,11 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
             (item.mesh ? exteriorRoom(presentation.data().meshes[item.mesh_index].room) : presentation.data().rooms[item.room_index].exterior));
         record[72] = float(view.collection == 0 && exterior && exterior_fog.enabled);
         const auto& world = visibility.world(item);
+        if (item.mesh && presentation.data().meshes[item.mesh_index].raster_stroke_width > 0) {
+            const auto side = d3scene::rasterStrokeSide(visibility.camera,world,view.viewport);
+            record[81] = side.x; record[82] = side.y;
+            record[83] = presentation.data().meshes[item.mesh_index].raster_stroke_width;
+        }
         { const auto value = world.position; record[0] = value.x; record[1] = value.y; record[2] = value.z; } { const auto value = world.right; record[4] = value.x; record[5] = value.y; record[6] = value.z; }
         { const auto value = world.up; record[8] = value.x; record[9] = value.y; record[10] = value.z; } { const auto value = world.forward; record[12] = value.x; record[13] = value.y; record[14] = value.z; }
         d3scene::SurfaceMotion motion;

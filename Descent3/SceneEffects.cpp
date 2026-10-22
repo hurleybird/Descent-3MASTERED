@@ -29,6 +29,30 @@ bool special(int id) {
 d3scene::Vec3 value(const vector& v) { return {v.x,v.y,v.z}; }
 d3scene::Transform basis(const matrix& m) { return {{},value(m.rvec),value(m.uvec),value(m.fvec)}; }
 float alphaByte(float alpha) { return static_cast<int>((std::max)(0.f,(std::min)(255.f,alpha*255.f)))/255.f; }
+bool prepareFadingLine(d3scene::FrameData& frame,const vis_effect& effect) {
+    vector end = effect.end_pos;
+    const bool rain = (effect.flags & VF_WINDSHIELD_EFFECT) != 0;
+    if (!rain) {
+        auto direction = -effect.velocity;
+        if (!(vm_NormalizeVectorFast(&direction) > 0)) return false;
+        end = effect.pos+direction*effect.size;
+    }
+    if (effect.pos.x == end.x && effect.pos.y == end.y && effect.pos.z == end.z) return false;
+    const float age = std::max(0.f,float(frame.simulation_time)-effect.creation_time);
+    const float life = effect.lifetime > 0 ? std::min(.99999f,age/effect.lifetime) : 1.f;
+    d3scene::PreparedMesh stroke;
+    stroke.asset = d3scene::assets().fadingStrokeMesh();
+    stroke.world = d3scene::axisBillboardPlacement(value(effect.pos),value(end),0);
+    stroke.raster_stroke_width = 1;
+    stroke.room = effect.roomnum;
+    stroke.surface.unlit = true; stroke.surface.two_sided = true;
+    stroke.surface.blend = d3scene::BlendMode::Additive;
+    stroke.surface.alpha = alphaByte(rain ? .3f : 1-life);
+    const auto color = GR_16_TO_COLOR(effect.lighting_color);
+    stroke.surface.base_color = {GR_COLOR_RED(color)/255.f,GR_COLOR_GREEN(color)/255.f,GR_COLOR_BLUE(color)/255.f};
+    frame.meshes.push_back(std::move(stroke));
+    return true;
+}
 d3scene::PreparedMesh prepareRing(float radius,float phase,float alpha,int bitmap,int room) {
     // One immutable topology/material-coordinate layout, with frame-owned
     // procedural positions. No new asset revision for every expanding ring.
@@ -308,6 +332,10 @@ void PrepareGameEffects(d3scene::FrameData& frame) {
     for (int slot = 0; slot <= Highest_vis_effect_index; ++slot) {
         const auto& effect = VisEffects[slot];
         if (effect.type == VIS_NONE || (effect.flags & VF_DEAD)) continue;
+        if (effect.type == VIS_FIREBALL && effect.id == FADING_LINE_INDEX) {
+            if (prepareFadingLine(frame,effect)) ++prepared;
+            continue;
+        }
         if (effect.type == VIS_FIREBALL && effect.id == BLAST_RING_INDEX &&
             !(effect.flags & (VF_WINDSHIELD_EFFECT | VF_CLOSE_SCREEN_EFFECT))) {
             if (prepareVisRing(frame,effect)) ++prepared;

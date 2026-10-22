@@ -363,6 +363,24 @@ ClipPosition project(const Camera& camera, Vec3 world) {
     return {x*projection.x_scale+z*projection.x_offset, y*projection.y_scale+z*projection.y_offset,
         z-2*projection.near_distance,z};
 }
+Vec2 rasterStrokeSide(const Camera& camera,const Transform& world,Rect viewport) {
+    if (viewport.width <= 0 || viewport.height <= 0) throw std::invalid_argument("Invalid stroke viewport");
+    auto a = project(camera,combine(world.position,1,world.up,1));
+    auto b = project(camera,combine(world.position,1,world.up,-1));
+    const double da = a.z+a.w, db = b.z+b.w;
+    if (da < 0 && db < 0) return {};
+    const auto interpolate = [](ClipPosition a,ClipPosition b,double t) {
+        return ClipPosition{a.x+(b.x-a.x)*t,a.y+(b.y-a.y)*t,a.z+(b.z-a.z)*t,a.w+(b.w-a.w)*t};
+    };
+    if (da < 0) a = interpolate(a,b,da/(da-db));
+    else if (db < 0) b = interpolate(b,a,db/(db-da));
+    if (!(a.w > 0 && b.w > 0)) return {};
+    const double dx = (b.x/b.w-a.x/a.w)*viewport.width;
+    const double dy = (b.y/b.w-a.y/a.w)*viewport.height;
+    const double length = std::hypot(dx,dy);
+    if (!(length > 1.e-8) || !std::isfinite(length)) return {};
+    return {float(-dy/length),float(dx/length)};
+}
 bool sphereIntersects(const Camera& camera, Vec3 center, float radius) {
     if (!std::isfinite(radius) || radius < 0) throw std::invalid_argument("Invalid sphere radius");
     for (const auto& plane : camera.planes)

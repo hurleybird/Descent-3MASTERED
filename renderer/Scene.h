@@ -233,8 +233,9 @@ public:
     TerrainOcclusionRef publishTerrainOcclusion(const TerrainOcclusionData&);
     MeshAssetRef publishMesh(uint32_t,MeshGeometry);
     // Canonical topology belongs to the scene lifetime, not to each sprite or
-    // text run. Slots 2 and 258..384 are reserved for these primitives.
+    // text run. Slots 2, 9 and 258..384 are reserved for these primitives.
     MeshAssetRef quadMesh(uint32_t count = 1);
+    MeshAssetRef fadingStrokeMesh();
     FogAssetRef publishFog(const std::vector<RoomState>&);
     uint64_t lifetime() const { return lifetime_; }
 private:
@@ -251,6 +252,7 @@ private:
     TerrainOcclusionRef terrain_occlusion_;
     std::vector<MeshAssetRef> meshes_;
     std::array<MeshAssetRef,128> quad_meshes_{};
+    MeshAssetRef fading_stroke_mesh_;
     FogAssetRef fog_;
 };
 
@@ -356,6 +358,10 @@ enum class RasterDomain : uint8_t { Surface, SoftVolume };
 struct PreparedMesh {
     MeshAssetRef asset;
     RasterDomain raster_domain = RasterDomain::Surface;
+    // Pixel-width extrusion around the segment world.position +/- world.up.
+    // Geometry supplies signed transverse/longitudinal raster offsets. Facing
+    // is compiled independently for each view; endpoints remain world-space.
+    float raster_stroke_width = 0;
     bool light_influences_prepared = false;
     LightCandidateRange light_candidates;
     uint64_t collection = 0; // zero is the world; other collections are isolated view content

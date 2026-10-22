@@ -27,6 +27,7 @@ template<class Consumer> void forEachTriangleCorner(size_t corners, Consumer con
 std::vector<Vec3> deformMesh(const MeshGeometry&,float range,double time,uint32_t owner,uint32_t part);
 void deformMeshInto(const MeshGeometry&,float range,double time,uint32_t owner,uint32_t part,std::vector<Vec3>&);
 MeshGeometry unitBillboardQuad();
+MeshGeometry unitFadingStroke();
 MeshGeometry unitQuadBatch(uint32_t count);
 void appendPreparedTextureCoordinates(const PreparedMesh&,std::vector<Vec2>&);
 MeshGeometry billboardRing(float inner_ratio,uint8_t inner_alpha,uint8_t outer_alpha,uint32_t segments = 32);
