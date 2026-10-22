@@ -9,7 +9,7 @@
 #include <cmath>
 #include <stdexcept>
 #include <limits>
-#include <set>
+#include <functional>
 #include <thread>
 
 namespace d3scene {
@@ -53,6 +53,32 @@ PreparedView prepareView(const Presentation& frame,const View& request) {
     auto view = resolveView(frame,request);
     auto visibility = queryResolvedView(frame,view);
     return PreparedView(frame.shared_from_this(),std::move(view),std::move(visibility));
+}
+struct ImagePlanStoragePool {
+    std::array<std::vector<PreparedViewImage>,8> spare;
+    size_t count = 0;
+    const std::thread::id publisher = std::this_thread::get_id();
+};
+PreparedImagePlan::PreparedImagePlan() {
+    static thread_local auto pool = std::make_shared<ImagePlanStoragePool>();
+    storage_pool_ = pool;
+    if (pool->count) images_.swap(pool->spare[--pool->count]);
+}
+PreparedImagePlan::~PreparedImagePlan() {
+    const auto& pool = storage_pool_;
+    if (!pool || pool->publisher != std::this_thread::get_id() || pool->count == pool->spare.size()) return;
+    images_.clear(); images_.swap(pool->spare[pool->count++]);
+}
+PreparedImagePlan prepareViewImages(const Presentation& frame,const std::vector<ViewImageRequest>& requests) {
+    static thread_local std::vector<size_t> order;
+    orderViewImages(requests,order);
+    PreparedImagePlan result;
+    result.images_.reserve(requests.size());
+    for (const auto index : order) {
+        const auto& request = requests[index];
+        result.images_.push_back(PreparedViewImage(prepareView(frame,request.view),request.image,request.scale,request.samples));
+    }
+    return result;
 }
 Rect rasterViewport(Rect logical, int32_t raster_height, int32_t scale, int32_t offset_x, int32_t offset_y) {
     if (raster_height <= 0 || scale <= 0 || logical.width <= 0 || logical.height <= 0)
@@ -456,33 +482,48 @@ uint64_t viewImageSource(const View& view,uint64_t slot) {
     throw std::invalid_argument("View has no source for its surface image slot");
 }
 std::vector<size_t> orderViewImages(const std::vector<ViewImageRequest>& images) {
-    std::unordered_map<uint64_t,size_t> producers;
+    std::vector<size_t> order;
+    orderViewImages(images,order);
+    return order;
+}
+void orderViewImages(const std::vector<ViewImageRequest>& images,std::vector<size_t>& order) {
+    // Flat retained scratch replaces per-node maps, sets and nested vectors.
+    // The dependency compiler remains O((V+E)log(V+E)), with source-order ties.
+    static thread_local std::vector<std::pair<uint64_t,size_t>> producers;
+    static thread_local std::vector<std::pair<size_t,size_t>> edges;
+    static thread_local std::vector<size_t> remaining,ready;
+    producers.clear(); edges.clear(); ready.clear(); order.clear();
+    producers.reserve(images.size()); remaining.assign(images.size(),0);
     for (size_t i = 0; i < images.size(); ++i) {
         validateViewImage(images[i]);
-        if (!producers.emplace(images[i].image,i).second)
+        producers.emplace_back(images[i].image,i);
+    }
+    std::sort(producers.begin(),producers.end());
+    for (size_t i = 1; i < producers.size(); ++i)
+        if (producers[i-1].first == producers[i].first)
             throw std::invalid_argument("View image graph has duplicate producers");
-    }
-    std::vector<std::vector<size_t>> consumers(images.size());
-    std::vector<size_t> remaining(images.size());
-    std::set<size_t> ready;
     for (size_t i = 0; i < images.size(); ++i) {
-        std::unordered_set<size_t> dependencies;
         for (const auto& input : images[i].view.image_inputs) {
-            const auto source = producers.find(input.image);
-            if (source == producers.end()) throw std::invalid_argument("View image graph has a missing producer");
-            dependencies.insert(source->second);
+            const auto source = std::lower_bound(producers.begin(),producers.end(),std::pair<uint64_t,size_t>{input.image,0});
+            if (source == producers.end() || source->first != input.image)
+                throw std::invalid_argument("View image graph has a missing producer");
+            edges.emplace_back(source->second,i);
         }
-        remaining[i] = dependencies.size();
-        for (const auto source : dependencies) consumers[source].push_back(i);
-        if (dependencies.empty()) ready.insert(i);
     }
-    std::vector<size_t> order;
+    std::sort(edges.begin(),edges.end()); edges.erase(std::unique(edges.begin(),edges.end()),edges.end());
+    for (const auto& edge : edges) ++remaining[edge.second];
+    for (size_t i = 0; i < images.size(); ++i) if (!remaining[i]) ready.push_back(i);
+    std::make_heap(ready.begin(),ready.end(),std::greater<size_t>{});
+    order.reserve(images.size());
     while (!ready.empty()) {
-        const auto source = *ready.begin(); ready.erase(ready.begin()); order.push_back(source);
-        for (const auto consumer : consumers[source]) if (!--remaining[consumer]) ready.insert(consumer);
+        std::pop_heap(ready.begin(),ready.end(),std::greater<size_t>{});
+        const auto source = ready.back(); ready.pop_back(); order.push_back(source);
+        auto edge = std::lower_bound(edges.begin(),edges.end(),std::pair<size_t,size_t>{source,0});
+        for (; edge != edges.end() && edge->first == source; ++edge) if (!--remaining[edge->second]) {
+            ready.push_back(edge->second); std::push_heap(ready.begin(),ready.end(),std::greater<size_t>{});
+        }
     }
     if (order.size() != images.size()) throw std::invalid_argument("View image graph contains a dependency cycle");
-    return order;
 }
 uint32_t selectModelVariant(const ModelInstance& object,const Camera& camera) {
     const auto depth = dot(camera.transform.forward,subtract(object.current.position,camera.transform.position));

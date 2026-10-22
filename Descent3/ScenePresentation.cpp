@@ -1012,18 +1012,19 @@ d3scene::VisibilityReport RenderGameSceneView(const d3scene::Presentation& frame
         // owns the dependency from this canvas image to the scene image.
         planar.images.push_back(std::move(copy)); planar.images.push_back(std::move(image));
     }
-    d3scene::renderViewImages(frame,planar.images);
+    const auto producers = d3scene::prepareViewImages(frame,planar.images);
+    d3scene::renderViewImages(producers);
     if (FindArg("-scene-observation-probe") && (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)) {
-        for (const auto& image : planar.images) if (image.view.kind == d3scene::ViewKind::Mirror) {
-            const auto producer = d3scene::prepareView(frame,image.view);
+        for (const auto& image : producers.images()) if (image.producer().view().kind == d3scene::ViewKind::Mirror) {
+            const auto& producer = image.producer();
             const auto candidate = InspectSceneObservations(producer,d3scene::ObjectVisibility | d3scene::EffectEligibility);
             AutomatedCaptureLog("scene mirror observation frame=%d view=%llu rooms=%u objects=%u exterior_pending=%d",
-                AutomatedCaptureFrameIndex(),(unsigned long long)image.view.history_key,
+                AutomatedCaptureFrameIndex(),(unsigned long long)producer.view().history_key,
                 (unsigned)candidate.report.rooms.size(),(unsigned)candidate.report.objects.size(),candidate.exterior_pending);
             for (auto room : candidate.report.rooms)
-                AutomatedCaptureLog("scene mirror observation frame=%d view=%llu room=%d",AutomatedCaptureFrameIndex(),(unsigned long long)image.view.history_key,room);
+                AutomatedCaptureLog("scene mirror observation frame=%d view=%llu room=%d",AutomatedCaptureFrameIndex(),(unsigned long long)producer.view().history_key,room);
             for (auto object : candidate.report.objects)
-                AutomatedCaptureLog("scene mirror observation frame=%d view=%llu object=%u",AutomatedCaptureFrameIndex(),(unsigned long long)image.view.history_key,object);
+                AutomatedCaptureLog("scene mirror observation frame=%d view=%llu object=%u",AutomatedCaptureFrameIndex(),(unsigned long long)producer.view().history_key,object);
         }
     }
     auto observations = d3scene::renderView(planar.consumer);

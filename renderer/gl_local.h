@@ -762,7 +762,7 @@ public:
 	GL4Renderer();
 	d3scene::VisibilityReport RenderSceneView(const d3scene::PreparedView&) override;
 	void RenderForeground(const d3scene::Presentation&, const d3scene::ForegroundLayer&) override;
-	void RenderViewImage(const d3scene::Presentation&, const d3scene::ViewImageRequest&) override;
+	void RenderViewImage(const d3scene::PreparedViewImage&) override;
 	d3scene::ImageMip ReadViewImage(const d3scene::Presentation&, uint64_t image) override;
 
 	//INITIALIZATION

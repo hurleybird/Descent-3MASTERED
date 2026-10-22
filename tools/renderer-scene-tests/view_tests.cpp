@@ -482,6 +482,37 @@ int runSceneViewTests() {
         check(orderViewImages({dependent,image,independent}) == std::vector<size_t>({1,0,2}),
             "View image graph lost dependency order or duplicated a producer");
         check(orderViewImages({}).empty(),"Empty view image graph produced work");
+        {
+            FrameData image_data; image_data.sequence = 8; image_data.scene_lifetime = assets.lifetime();
+            appendRoom(assets,image_data,triangle(0,3));
+            auto image_frame = Presentation::freeze(image_data);
+            std::vector<ViewImageRequest> requests{dependent,image,independent};
+            for (auto& request : requests) { request.view.coverage = {}; request.view.history_key = request.image; }
+            const auto compiled = prepareViewImages(*image_frame,requests);
+            check(compiled.images().size() == 3 && compiled.images()[0].image() == 17 &&
+                compiled.images()[1].image() == 19 && compiled.images()[2].image() == 20,
+                "Prepared image producers lost dependency order");
+            check(compiled.images()[0].samples() == 4 && compiled.images()[0].scale() == 1 &&
+                compiled.images()[0].producer().visibility().surfaces.size() == 1,
+                "Image preparation did not own its actual visibility/sample contract");
+            requests[1].view.camera.position.x = 100;
+            image_data.sequence = 9;
+            const auto later_frame = Presentation::freeze(image_data);
+            const auto later = prepareViewImages(*later_frame,requests);
+            image_frame.reset();
+            check(compiled.images()[0].producer().frame().data().sequence == 8 &&
+                compiled.images()[0].producer().view().camera.position.x == 0 &&
+                later.images()[0].producer().view().camera.position.x == 100,
+                "Prepared producer borrowed later camera/frame state");
+            const auto copied = compiled;
+            check(copied.images()[0].producer().visibility().surfaces.size() == 1,
+                "Copied image plan lost independently owned query results");
+            auto invalid_requests = requests; invalid_requests[0].view.image_inputs[0].image = 999;
+            bool invalid_plan = false;
+            try { prepareViewImages(*later_frame,invalid_requests); } catch (const std::invalid_argument&) { invalid_plan = true; }
+            check(invalid_plan,"Prepared image plan accepted an absent dependency");
+            check(prepareViewImages(*later_frame,{}).images().empty(),"Empty prepared image plan retained old producers");
+        }
         for (int invalid = 0; invalid < 4; ++invalid) {
             auto a = image, b = dependent;
             if (invalid == 0) b.image = a.image;

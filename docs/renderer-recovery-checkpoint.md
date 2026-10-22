@@ -1,5 +1,36 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## October 22 continuation — actual prepared image producers
+
+prepareViewImages validates/orders the complete dependency set, then owns each
+producer's PreparedView plus image ID/scale/MSAA. GPU image execution accepts
+only PreparedViewImage and never queries the camera/visibility again. The normal
+request-list convenience entry compiles this same plan. Mirror inspection now
+consumes the actual executed producer; the second diagnostic preparation is gone.
+No production AI/automap commits enabled. Prepared plans retain their exact
+publication and camera across source mutation/later frames, including copies.
+
+Image-plan vector capacity is recycled through a publisher-thread pool; released
+entries drop their frame references. Existing image dependency ordering now uses
+retained flat sorted producers/edges and a min-heap instead of per-node unordered
+maps/sets/nested vectors. Duplicate dependencies are deduplicated; source-order
+ties preserved, absent/duplicate/cyclic producers still reject. Existing graph
+tests and new prepared ownership/copy/empty/invalid-plan tests pass (all3 suites).
+
+prepared-images-mirror006 and prepared-images-heading006 images EXACT to their
+observe-mirror equivalents; mirror still reports rooms54/56 and objects2048/2088
+in static capture. Actual image inspected. prepared-images-chain002 verifies
+reversed source/copy declarations and visible picture-in-picture, GL audit clean.
+Its capture-save-output creates only owned imageplan-saveprobe20261022 seed;
+prepared-images-reload002 successfully loads it. Native mirror3000frames CPU.401,
+GPU.459ms; no measured speedup claimed from the dependency-storage change.
+
+Remaining upstream feedback work: transaction storage/report copies still use
+per-frame node/vector allocations; fix the owned aggregation path before enabling
+AI/automap. Save-thumbnail planner still re-prepares its consumer as an image;
+rare independent capture path, not a new production mirror double-query. Whole
+renderer validation/gates remain incomplete; shadows and Candidates untouched.
+
 ## October 22 continuation — captured main camera and owned rain foreground
 
 CaptureGameMainView now selects the physical camera/rear role/overscan/logical

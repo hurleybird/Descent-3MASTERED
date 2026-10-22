@@ -42,9 +42,13 @@ d3scene::VisibilityReport d3scene::renderView(const PreparedView& prepared)
 static oeApplication* Renderer_app;
 void d3scene::renderViewImages(const Presentation& frame,const std::vector<ViewImageRequest>& images)
 {
-	const auto order = orderViewImages(images);
-	for (const auto& image : images) if (!image.view.geometry_inspection) frame.requireExecutable();
-	for (const auto index : order) renderer_inst->RenderViewImage(frame,images[index]);
+	renderViewImages(prepareViewImages(frame,images));
+}
+void d3scene::renderViewImages(const PreparedImagePlan& plan)
+{
+	for (const auto& image : plan.images())
+		if (!image.producer().view().geometry_inspection) image.producer().frame().requireExecutable();
+	for (const auto& image : plan.images()) renderer_inst->RenderViewImage(image);
 }
 void d3scene::renderForeground(const Presentation& frame, const ForegroundLayer& layer)
 {

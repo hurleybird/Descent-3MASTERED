@@ -829,6 +829,8 @@ void validateViewImage(const ViewImageRequest&);
 // All declared dependencies are checked and scheduled before executing any
 // producer. Inputs cannot silently reuse a previous presentation's image.
 void renderViewImages(const Presentation&,const std::vector<ViewImageRequest>&);
+class PreparedImagePlan;
+void renderViewImages(const PreparedImagePlan&);
 // Explicit blocking readback for thumbnails/export, never part of frame
 // rendering. RGBA8 pixels are packed bottom row first, as in renderer images.
 // Rejects products from another presentation or scene lifetime.

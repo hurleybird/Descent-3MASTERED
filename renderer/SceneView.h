@@ -52,6 +52,7 @@ bool excludesObject(const View&,uint32_t handle);
 bool excludesSurface(const View&,RoomSurfaceId);
 uint64_t viewImageSource(const View&,uint64_t slot);
 std::vector<size_t> orderViewImages(const std::vector<ViewImageRequest>&);
+void orderViewImages(const std::vector<ViewImageRequest>&,std::vector<size_t>& order);
 struct PlanarViewPlan;
 // Single-bounce image schedule from the consumer's visible planar groups.
 // Child cameras include the camera rig, exclude their own film and render other
@@ -135,6 +136,37 @@ public:
     const ViewVisibility& visibility() const { return visibility_; }
 };
 PreparedView prepareView(const Presentation&,const View&);
+class PreparedImagePlan;
+class PreparedViewImage {
+    PreparedView producer_;
+    uint64_t image_;
+    uint32_t scale_, samples_;
+    PreparedViewImage(PreparedView producer,uint64_t image,uint32_t scale,uint32_t samples) :
+        producer_(std::move(producer)),image_(image),scale_(scale),samples_(samples) {}
+    friend PreparedImagePlan prepareViewImages(const Presentation&,const std::vector<ViewImageRequest>&);
+public:
+    const PreparedView& producer() const { return producer_; }
+    uint64_t image() const { return image_; }
+    uint32_t scale() const { return scale_; }
+    uint32_t samples() const { return samples_; }
+};
+struct ImagePlanStoragePool;
+class PreparedImagePlan {
+    std::vector<PreparedViewImage> images_;
+    std::shared_ptr<ImagePlanStoragePool> storage_pool_;
+    PreparedImagePlan();
+    friend PreparedImagePlan prepareViewImages(const Presentation&,const std::vector<ViewImageRequest>&);
+public:
+    ~PreparedImagePlan();
+    PreparedImagePlan(const PreparedImagePlan&) = default;
+    PreparedImagePlan& operator=(const PreparedImagePlan&) = default;
+    PreparedImagePlan(PreparedImagePlan&&) noexcept = default;
+    PreparedImagePlan& operator=(PreparedImagePlan&&) noexcept = default;
+    const std::vector<PreparedViewImage>& images() const { return images_; }
+};
+// Validate/order the complete dependency set before preparing any producer.
+// Rendering and game inspection subsequently consume these exact owned views.
+PreparedImagePlan prepareViewImages(const Presentation&,const std::vector<ViewImageRequest>&);
 VisibilityReport renderView(const PreparedView&);
 struct PlanarViewPlan { PreparedView consumer; std::vector<ViewImageRequest> images; };
 enum class ViewPassKind { Background, OpaqueWorld, SnapshotOpaqueDepth, ExportOpaqueScene, LateWorld, EvaluateWorldOcclusion, CompositeSurfaces, DepthSurface, SoftVolumes };

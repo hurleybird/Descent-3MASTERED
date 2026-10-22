@@ -1177,8 +1177,10 @@ void GL4Renderer::UploadSceneMesh(SceneMeshGpu& gpu, d3scene::AssetId id, const 
     gpu.id = id;
 }
 
-void GL4Renderer::RenderViewImage(const d3scene::Presentation& presentation,const d3scene::ViewImageRequest& request) {
-    d3scene::validateViewImage(request);
+void GL4Renderer::RenderViewImage(const d3scene::PreparedViewImage& product) {
+    const auto& prepared = product.producer();
+    const auto& presentation = prepared.frame();
+    const auto& view = prepared.view();
     if (!framebuffer_ok) Error("Independent view image requires an initialized scene context");
     FlushFontBatch(); // drain the caller's canvas before any target allocation
     EnsureSceneLifetime(presentation);
@@ -1188,7 +1190,7 @@ void GL4Renderer::RenderViewImage(const d3scene::Presentation& presentation,cons
             it->second.buffer.Destroy(); it->second.depth.Destroy(); it = scene_view_images.erase(it);
         } else ++it;
     }
-    auto& image = scene_view_images[request.image];
+    auto& image = scene_view_images[product.image()];
     if (image.sequence == sequence) throw std::logic_error("View image has more than one producer in a presentation");
     image.sequence = 0; // failed/in-flight products are never readable
     GLint draw, read, viewport[4];
@@ -1199,22 +1201,21 @@ void GL4Renderer::RenderViewImage(const d3scene::Presentation& presentation,cons
         glViewport(viewport[0],viewport[1],viewport[2],viewport[3]);
     };
     try {
-        if (image.buffer.Width() != uint32_t(request.view.viewport.width)*request.scale ||
-            image.buffer.Height() != uint32_t(request.view.viewport.height)*request.scale ||
-            image.buffer.RequestedSamples() != request.samples) image.history.clear();
-        image.buffer.Update(request.view.viewport.width*request.scale,request.view.viewport.height*request.scale,request.samples);
+        if (image.buffer.Width() != uint32_t(view.viewport.width)*product.scale() ||
+            image.buffer.Height() != uint32_t(view.viewport.height)*product.scale() ||
+            image.buffer.RequestedSamples() != product.samples()) image.history.clear();
+        image.buffer.Update(view.viewport.width*product.scale(),view.viewport.height*product.scale(),product.samples());
         image.buffer.ClearAll();
-        const auto raster = d3scene::rasterViewport(request.view.viewport,image.buffer.Height(),request.scale);
-        const auto coverage = request.view.coverage.width ?
-            d3scene::rasterViewport(request.view.coverage,image.buffer.Height(),request.scale) : d3scene::Rect{};
-        const auto prepared = d3scene::prepareView(presentation,request.view);
+        const auto raster = d3scene::rasterViewport(view.viewport,image.buffer.Height(),product.scale());
+        const auto coverage = view.coverage.width ?
+            d3scene::rasterViewport(view.coverage,image.buffer.Height(),product.scale()) : d3scene::Rect{};
         ExecuteSceneView(prepared,{image.buffer,raster,SceneOutputRole::Image,image.depth,image.history,coverage});
         image.matrices = d3scene::viewMatrices(prepared.visibility().camera);
         image.sequence = sequence;
         if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
             AutomatedCaptureLog("scene view image key=%llu size=%ux%u samples=%u sequence=%llu coverage=%d,%d,%d,%d",
-                static_cast<unsigned long long>(request.image),image.buffer.Width(),image.buffer.Height(),image.buffer.Samples(),
-                static_cast<unsigned long long>(sequence),request.view.coverage.x,request.view.coverage.y,request.view.coverage.width,request.view.coverage.height);
+                static_cast<unsigned long long>(product.image()),image.buffer.Width(),image.buffer.Height(),image.buffer.Samples(),
+                static_cast<unsigned long long>(sequence),view.coverage.x,view.coverage.y,view.coverage.width,view.coverage.height);
     } catch (...) { restore(); throw; }
     restore();
 }
