@@ -44,6 +44,9 @@ View resolveView(const Presentation&, View);
 // Independent reflected camera, with the parent's physical half-space retained.
 // Does not reflect/mutate scene vertices, poses, lights or simulation identity.
 View reflectedView(const Presentation&,View parent,Plane mirror,uint64_t history_key,int32_t room);
+// Isolated display-resolution camera foreground sharing a main view's optics
+// and captured attachment, cropped without an independent camera reconstruction.
+View cameraOverlayView(View main,uint64_t collection,Rect display_viewport);
 bool reversesWinding(const Transform& camera);
 bool excludesObject(const View&,uint32_t handle);
 bool excludesSurface(const View&,RoomSurfaceId);

@@ -19,6 +19,34 @@
 #include <thread>
 
 namespace d3scene {
+// Foreground layers are frame-owned, but their released view-list capacity is
+// reusable. Local HUD/cockpit/effect builders must not allocate those same
+// short lists every frame. Held copies remain independent; foreign-thread
+// destruction never writes the publisher's pool.
+struct ForegroundStoragePool {
+    struct Buffers { std::vector<View> scene, display; };
+    std::array<Buffers,32> spare;
+    size_t count = 0;
+    const std::thread::id publisher = std::this_thread::get_id();
+};
+ForegroundLayer::ForegroundLayer() {
+    static thread_local auto pool = std::make_shared<ForegroundStoragePool>();
+    storage_pool_ = pool;
+    if (pool->count) {
+        auto& buffers = pool->spare[--pool->count];
+        scene_views.swap(buffers.scene); display_views.swap(buffers.display);
+    }
+}
+ForegroundLayer::ForegroundLayer(std::initializer_list<View> scene,std::initializer_list<View> display) : ForegroundLayer() {
+    scene_views.assign(scene); display_views.assign(display);
+}
+ForegroundLayer::~ForegroundLayer() {
+    const auto& pool = storage_pool_;
+    if (!pool || pool->publisher != std::this_thread::get_id() || pool->count == pool->spare.size()) return;
+    auto& buffers = pool->spare[pool->count++];
+    scene_views.clear(); display_views.clear();
+    scene_views.swap(buffers.scene); display_views.swap(buffers.display);
+}
 // Compilation storage follows the snapshot lifetime, just like its input
 // arrays. Recycle only after the last reader releases the presentation.
 struct FrameCompilationStorage {

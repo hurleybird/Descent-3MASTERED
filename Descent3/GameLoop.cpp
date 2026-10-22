@@ -703,6 +703,8 @@ static void BeginAutomatedCaptureFrame()
 	}
 	if (Automated_capture.gameplay_frame == 0 && FindArg("-capture-rear-smallview") && Player_object)
 		CreateSmallView(SVW_LEFT,Player_object->handle,SVF_REARVIEW,0.0f,D3_DEFAULT_ZOOM,-1,nullptr);
+	if (Automated_capture.gameplay_frame == 0 && FindArg("-capture-main-rear") && Player_object)
+		Players[Player_num].flags |= PLAYER_FLAGS_REARVIEW;
 	PlaceAutomatedCaptureScorch();
 	if (Automated_capture.gameplay_frame == 10 && FindArg("-capture-fire-flare") &&
 		Player_object && Player_num >= 0 && Player_num < MAX_PLAYERS)
@@ -2860,53 +2862,44 @@ static void GetMainViewOverscanFrame(int* x1, int* y1, int* x2, int* y2, int* an
 	*anchor_y = top;
 }
 
+static GameMainView CaptureGameMainView()
+{
+	extern bool Guided_missile_smallview;
+	int x1,y1,x2,y2,anchor_x,anchor_y;
+	GetMainViewOverscanFrame(&x1,&y1,&x2,&y2,&anchor_x,&anchor_y);
+	const bool guided = !Cinematic_inuse && Players[Player_num].guided_obj && !Guided_missile_smallview;
+	const auto* viewer = guided ? Players[Player_num].guided_obj : Viewer_object;
+	const bool rear = !guided && viewer == Player_object && (Players[Player_num].flags & PLAYER_FLAGS_REARVIEW);
+	GameMainView result;
+	result.world = MakeGameSceneView(d3scene::ViewKind::Main,1,viewer,viewer->pos,viewer->roomnum,
+		viewer->orient,Render_zoom,rear,{x1,y1,x2-x1,y2-y1},{anchor_x,anchor_y,Game_window_w,Game_window_h});
+	result.display_viewport = {Game_window_x,Game_window_y,Game_window_w,Game_window_h};
+	result.player_first_person = viewer == Player_object && !rear;
+	return result;
+}
+
 //Render into the big window
-void GameDrawMainView(const d3scene::Presentation& presentation, SceneFeedbackTransaction& feedback)
+void GameDrawMainView(const d3scene::Presentation& presentation, SceneFeedbackTransaction& feedback,const GameMainView& main_view)
 {
 	PERF_MARKER_SCOPE("GameDrawMainView");
-	extern bool Guided_missile_smallview;					// smallviews.cpp
-
-	bool rear_view = 0;
-	object* save_view;
 
 	DebugBlockPrint("SR");
 
 	//Start rendering
-	int main_view_x1, main_view_y1, main_view_x2, main_view_y2;
-	int main_view_anchor_x, main_view_anchor_y;
-	GetMainViewOverscanFrame(&main_view_x1, &main_view_y1, &main_view_x2, &main_view_y2,
-		&main_view_anchor_x, &main_view_anchor_y);
-	VisEffectBeginCloseScreenFrame();
+	const auto& viewport = main_view.world.viewport;
 	{
 		PERF_MARKER_SCOPE("StartFrame.MainView");
-		StartFrame(main_view_x1, main_view_y1, main_view_x2, main_view_y2, true);
+		StartFrame(viewport.x,viewport.y,viewport.x+viewport.width,viewport.y+viewport.height,true);
 	}
-
-	// Set guided view
-	if (!Cinematic_inuse && Players[Player_num].guided_obj != NULL && !Guided_missile_smallview)
-	{
-		save_view = Viewer_object;
-		Viewer_object = Players[Player_num].guided_obj;
-	}
-	else if ((Viewer_object == Player_object) && (Players[Player_num].flags & PLAYER_FLAGS_REARVIEW))
-		rear_view = 1;
 
 	//Draw the world
 	Rendering_main_view = true;
 	{
 		PERF_MARKER_SCOPE("GameRenderWorld.MainView");
-		const auto view = MakeGameSceneView(d3scene::ViewKind::Main, 1, Viewer_object,
-			Viewer_object->pos, Viewer_object->roomnum, Viewer_object->orient, Render_zoom, rear_view,
-			{main_view_x1, main_view_y1, main_view_x2 - main_view_x1, main_view_y2 - main_view_y1},
-			{main_view_anchor_x, main_view_anchor_y, Game_window_w, Game_window_h});
-		feedback.add(RenderGameSceneView(presentation, view));
+		feedback.add(RenderGameSceneView(presentation,main_view.world));
 	}
 	rend_PerfGpuSceneMark(RENDERER_GPU_SCENE_AFTER_MAIN_WORLD);
 	Rendering_main_view = false;
-
-	// Restore viewer object if guided
-	if (!Cinematic_inuse && Players[Player_num].guided_obj != NULL && !Guided_missile_smallview)
-		Viewer_object = save_view;
 
 	// Room changes
 	{
@@ -2928,7 +2921,6 @@ void GameDrawMainView(const d3scene::Presentation& presentation, SceneFeedbackTr
 		if (!SceneGeometryInspection()) ProcessRenderEvents();
 	}
 	rend_PerfGpuSceneMark(RENDERER_GPU_SCENE_AFTER_RENDER_EVENTS);
-	VisEffectEndCloseScreenCollection();
 
 	rend_PerfGpuSceneMark(RENDERER_GPU_SCENE_AFTER_CAPTURE_BLOOM);
 
@@ -2985,25 +2977,18 @@ void GameDrawHud()
 
 static void GameDrawPostPresentFrame(bool force_backbuffer_frame)
 {
-	const bool draw_cockpit = !HUD_disabled && CockpitHasPostPostElements();
 	const bool draw_message_consoles = !HUD_disabled &&
 		!IsCleanGameplayScreenshotActive() && AreHUDMessageConsolesOpen();
-	VisEffectRenderCloseScreenEffectsPostAO();
-	if (!force_backbuffer_frame && !draw_cockpit && !draw_message_consoles)
+	// Cockpit and close-screen effects are owned foregrounds now. This adapter
+	// remains only for the not-yet-migrated console UI; never replay old camera
+	// snapshots or late-effect queues into the completed scene.
+	if (!force_backbuffer_frame && !draw_message_consoles)
 		return;
 
 	PERF_MARKER_SCOPE("GameDrawPostPresentFrame");
 	rend_StartPostPresentFrame(0, 0, Max_window_w, Max_window_h, RF_CLEAR_ZBUFFER);
-	if (draw_cockpit)
-	{
-		g3_StartFrame(&Viewer_object->pos, &Viewer_object->orient, HUD_RENDER_ZOOM);
-		RenderCockpitPostPost();
-		g3_EndFrame();
-	}
 	if (draw_message_consoles)
 	{
-		if (draw_cockpit)
-			rend_StartPostPresentFrame(0, 0, Max_window_w, Max_window_h, RF_CLEAR_ZBUFFER);
 		RenderHUDMessageConsoles();
 	}
 	rend_EndFrame();
@@ -3106,15 +3091,16 @@ void GameRenderFrame(void)
 
 		// Publish once. Every world view below sees this same owned scene, not
 		// a second traversal of mutable simulation state.
+		const auto main_view = CaptureGameMainView();
 		const auto presentation = SceneGeometryInspection() && FindArg("-scene-automap-probe") ?
-			PrepareAutomapInspection() : PrepareGamePresentation();
+			PrepareAutomapInspection() : PrepareGamePresentation(true,&main_view);
 		const ModuleSceneScope module_scene(presentation);
 		SceneFeedbackTransaction feedback(*presentation);
 
 		// Draw the big 3d view
 		{
 			PERF_MARKER_SCOPE("GameDrawMainView.Total");
-			GameDrawMainView(*presentation,feedback);
+			GameDrawMainView(*presentation,feedback,main_view);
 		}
 		rend_PerfGpuSceneMark(RENDERER_GPU_SCENE_AFTER_MAIN_VIEW);
 

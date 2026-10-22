@@ -562,7 +562,7 @@ void PrepareGameInspectionBanner(d3scene::FrameData& data) {
     data.foregrounds.push_back(std::move(foreground));
 }
 
-d3scene::PresentationRef PrepareGamePresentation(bool advance) {
+d3scene::PresentationRef PrepareGamePresentation(bool advance,const GameMainView* main_view) {
     PERF_MARKER_SCOPE("Scene.PreparePresentation");
     static d3scene::PresentationRef previous_models;
     const bool retain_rooms = [&] { PERF_MARKER_SCOPE("Scene.MaterialInputs"); return roomMaterialInputsUnchanged(); }();
@@ -676,7 +676,7 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance) {
     }
     { PERF_MARKER_SCOPE("Scene.PrepareTerrain"); PrepareGameTerrain(data); }
     { PERF_MARKER_SCOPE("Scene.PrepareSky"); PrepareGameSky(data); }
-    { PERF_MARKER_SCOPE("Scene.PrepareEffects"); PrepareGameEffects(data); }
+    { PERF_MARKER_SCOPE("Scene.PrepareEffects"); PrepareGameEffects(data,main_view); }
     { PERF_MARKER_SCOPE("Scene.PrepareModels"); PrepareGameModelInstances(data, previous_models.get(),retain_rooms); }
     { PERF_MARKER_SCOPE("Scene.PrepareObjectEffects"); PrepareGameObjectEffects(data); }
     { PERF_MARKER_SCOPE("Scene.PrepareScorches"); PrepareGameScorches(data); }

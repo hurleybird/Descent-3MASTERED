@@ -226,6 +226,29 @@ Camera prepareCamera(const View& view) {
     if (view.has_clip_plane) camera.planes[5] = view.clip_plane;
     return camera;
 }
+View cameraOverlayView(View main,uint64_t collection,Rect display) {
+    validateView(main);
+    if (main.kind != ViewKind::Main || main.target != ViewTarget::Scene || main.collection ||
+        main.projection != ViewProjection::Perspective || main.has_clip_plane || !collection || collection == main.history_key)
+        throw std::invalid_argument("Camera foreground requires a main perspective source");
+    const auto crop = [](int32_t anchor,int32_t source,int32_t destination) {
+        const int64_t value = int64_t(anchor)+source-destination;
+        if (value < std::numeric_limits<int32_t>::min() || value > std::numeric_limits<int32_t>::max())
+            throw std::invalid_argument("Camera foreground crop overflow");
+        return int32_t(value);
+    };
+    main.projection_anchor.x = crop(main.projection_anchor.x,main.viewport.x,display.x);
+    main.projection_anchor.y = crop(main.projection_anchor.y,main.viewport.y,display.y);
+    main.viewport = display;
+    main.coverage = {};
+    main.kind = ViewKind::Preview; main.target = ViewTarget::Display;
+    main.collection = main.history_key = collection; main.feedback = NoFeedback;
+    main.portal_visibility = false; main.dynamic_lighting = false; main.clear_depth = true;
+    main.room = -1; main.exterior_origin = false;
+    main.exclude_camera_rig = false; main.excluded_objects.clear(); main.excluded_surfaces.clear(); main.image_inputs.clear();
+    validateView(main);
+    return main;
+}
 bool reversesWinding(const Transform& camera) {
     const Vec3 cross{camera.right.y*camera.up.z-camera.right.z*camera.up.y,
         camera.right.z*camera.up.x-camera.right.x*camera.up.z,

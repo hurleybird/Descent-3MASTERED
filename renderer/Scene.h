@@ -12,6 +12,7 @@
 #include <array>
 #include <unordered_map>
 #include <stdexcept>
+#include <initializer_list>
 
 struct ModelAnimation;
 namespace d3scene {
@@ -851,9 +852,19 @@ VisibilityReport renderView(const Presentation& frame, const View& view);
 // Ordered independent foreground views share a freshly cleared scene-resolution
 // image/depth buffer, then resolve once over the completed world. Display views
 // follow that resolve (e.g. an authored late canopy or native-resolution UI).
+struct ForegroundStoragePool;
 struct ForegroundLayer {
+    ForegroundLayer();
+    ForegroundLayer(std::initializer_list<View> scene,std::initializer_list<View> display);
+    ~ForegroundLayer();
+    ForegroundLayer(const ForegroundLayer&) = default;
+    ForegroundLayer& operator=(const ForegroundLayer&) = default;
+    ForegroundLayer(ForegroundLayer&&) noexcept = default;
+    ForegroundLayer& operator=(ForegroundLayer&&) noexcept = default;
     std::vector<View> scene_views;
     std::vector<View> display_views;
+private:
+    std::shared_ptr<ForegroundStoragePool> storage_pool_;
 };
 void renderForeground(const Presentation& frame, const ForegroundLayer& layer);
 

@@ -1,6 +1,7 @@
 // Descent 3MASTERED - GPL-3.0-or-later
 #include "SceneExtraction.h"
 #include "../renderer/SceneGeometry.h"
+#include "../renderer/SceneView.h"
 #include "../renderer/SceneAnimation.h"
 #include "viseffect.h"
 #include "fireball.h"
@@ -29,6 +30,43 @@ bool special(int id) {
 d3scene::Vec3 value(const vector& v) { return {v.x,v.y,v.z}; }
 d3scene::Transform basis(const matrix& m) { return {{},value(m.rvec),value(m.uvec),value(m.fvec)}; }
 float alphaByte(float alpha) { return static_cast<int>((std::max)(0.f,(std::min)(255.f,alpha*255.f)))/255.f; }
+bool prepareRainDrop(d3scene::FrameData& frame,const vis_effect& effect,const d3scene::MeshAssetRef& quad,
+    const GameMainView* main_view) {
+    const bool windshield = effect.id == RAINDROP_INDEX;
+    if (windshield && (!main_view || !main_view->player_first_person)) return false;
+    if (!(effect.lifetime > 0) || !(effect.size > 0)) return false;
+    const int bitmap = Fireballs[effect.id].bm_handle;
+    if (bitmap <= BAD_BITMAP_HANDLE || bitmap >= MAX_BITMAPS || !GameBitmaps[bitmap].used) return false;
+    const int width = bm_w(bitmap,0), height = bm_h(bitmap,0);
+    if (width <= 0 || height <= 0) return false;
+    const float age = std::max(0.f,float(frame.simulation_time)-effect.creation_time);
+    const float life = std::min(.99999f,age/effect.lifetime);
+    const float size = effect.size*(1-life*.5f);
+    const float opacity = life < .1f ? life/.1f : life > .5f ? 2*(1-life) : 1;
+    d3scene::PreparedMesh drop;
+    drop.asset = quad; drop.room = effect.roomnum;
+    if (windshield) {
+        drop.collection = SceneCloseScreenEffects;
+        drop.alignment = d3scene::MeshAlignment::Camera;
+        drop.world.position = d3scene::transformPoint(main_view->world.camera,value(effect.pos));
+    } else {
+        auto normal = effect.end_pos;
+        if (!(vm_GetMagnitudeFast(&normal) > .0001f)) return false;
+        matrix plane; vm_VectorToMatrix(&plane,&normal,nullptr,nullptr);
+        drop.world = basis(plane); drop.world.position = value(effect.pos);
+    }
+    drop.world.right.x *= size; drop.world.right.y *= size; drop.world.right.z *= size;
+    const float vertical = size*height/width;
+    drop.world.up.x *= vertical; drop.world.up.y *= vertical; drop.world.up.z *= vertical;
+    auto& surface = drop.surface;
+    surface.bitmap = bitmap; surface.unlit = true; surface.two_sided = true;
+    surface.texture_alpha = true; surface.texture_wrap = false;
+    surface.blend = d3scene::BlendMode::Additive;
+    surface.depth = windshield ? d3scene::DepthMode::Disabled : d3scene::DepthMode::ReadOnly;
+    surface.alpha = alphaByte(opacity*(windshield ? .4f : .2f));
+    frame.meshes.push_back(std::move(drop));
+    return true;
+}
 bool prepareFadingLine(d3scene::FrameData& frame,const vis_effect& effect) {
     vector end = effect.end_pos;
     const bool rain = (effect.flags & VF_WINDSHIELD_EFFECT) != 0;
@@ -325,13 +363,20 @@ void PrepareGameObjectEffects(d3scene::FrameData& frame) {
         frame.meshes.push_back(std::move(sprite));
     }
 }
-void PrepareGameEffects(d3scene::FrameData& frame) {
+void PrepareGameEffects(d3scene::FrameData& frame,const GameMainView* main_view) {
     if (!VisEffects) return;
     const auto quad = d3scene::assets().quadMesh();
-    unsigned prepared = 0, pending = 0;
+    unsigned prepared = 0, pending = 0, windshield = 0;
     for (int slot = 0; slot <= Highest_vis_effect_index; ++slot) {
         const auto& effect = VisEffects[slot];
         if (effect.type == VIS_NONE || (effect.flags & VF_DEAD)) continue;
+        if (effect.type == VIS_FIREBALL && (effect.id == RAINDROP_INDEX || effect.id == PUDDLEDROP_INDEX)) {
+            if (prepareRainDrop(frame,effect,quad,main_view)) {
+                ++prepared;
+                if (effect.id == RAINDROP_INDEX) ++windshield;
+            }
+            continue;
+        }
         if (effect.type == VIS_FIREBALL && effect.id == FADING_LINE_INDEX) {
             if (prepareFadingLine(frame,effect)) ++prepared;
             continue;
@@ -546,6 +591,14 @@ void PrepareGameEffects(d3scene::FrameData& frame) {
         if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
             AutomatedCaptureLog("scene ring fixture facing=1 planar_reverse=1 object=1 gravity=1 prepared_positions=224");
     }
+    if (windshield) {
+        d3scene::PreparedForeground foreground;
+        foreground.identity = SceneCloseScreenEffects; foreground.order = 35;
+        auto view = d3scene::cameraOverlayView(main_view->world,SceneCloseScreenEffects,main_view->display_viewport);
+        view.geometry_inspection = SceneGeometryInspection();
+        foreground.layer.display_views.push_back(std::move(view));
+        frame.foregrounds.push_back(std::move(foreground));
+    }
     if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
-        AutomatedCaptureLog("scene effects sprites=%u pending=%u",prepared,pending);
+        AutomatedCaptureLog("scene effects sprites=%u pending=%u windshield=%u",prepared,pending,windshield);
 }

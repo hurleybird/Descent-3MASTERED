@@ -48,6 +48,61 @@ void appendRoom(d3scene::SceneAssets& assets,d3scene::FrameData& data,d3scene::M
 int runSceneViewTests() {
     {
         using namespace d3scene;
+        auto main_source = view();
+        main_source.viewport = {-20,-15,840,630}; main_source.projection_anchor = {20,15,800,600};
+        main_source.attached_camera = true; main_source.camera_owner = 42;
+        main_source.camera.position = {2,3,4}; main_source.exclude_camera_rig = true;
+        main_source.feedback = Automap | ObjectVisibility;
+        const auto overlay = cameraOverlayView(main_source,99,{0,0,800,600});
+        check(overlay.kind == ViewKind::Preview && overlay.target == ViewTarget::Display && overlay.collection == 99 &&
+            overlay.feedback == NoFeedback && !overlay.portal_visibility && !overlay.dynamic_lighting && overlay.clear_depth,
+            "Camera foreground inherited world admission or feedback");
+        check(overlay.attached_camera && overlay.camera_owner == 42 && !overlay.exclude_camera_rig &&
+            overlay.projection_anchor.x == 0 && overlay.projection_anchor.y == 0,"Camera foreground lost captured source/crop");
+        const Vec3 point{5,4,20};
+        const auto a = project(prepareCamera(main_source),point), b = project(prepareCamera(overlay),point);
+        check(near(main_source.viewport.x+(a.x/a.w+1)*main_source.viewport.width/2,
+                   overlay.viewport.x+(b.x/b.w+1)*overlay.viewport.width/2) &&
+              near(main_source.viewport.y+(1-a.y/a.w)*main_source.viewport.height/2,
+                   overlay.viewport.y+(1-b.y/b.w)*overlay.viewport.height/2),"Camera foreground shifted optical sample positions");
+        SceneAssets overlay_assets; FrameData overlay_data;
+        overlay_data.sequence = 1; overlay_data.scene_lifetime = overlay_assets.lifetime();
+        ObjectState camera_owner; camera_owner.handle = 42; overlay_data.objects.push_back(camera_owner);
+        Transform rotation; rotation.right = {0,0,-1}; rotation.forward = {1,0,0};
+        overlay_data.camera_perturbations.push_back({42,rotation});
+        const auto overlay_frame = Presentation::freeze(overlay_data);
+        const auto resolved_source = resolveView(*overlay_frame,main_source), resolved_overlay = resolveView(*overlay_frame,overlay);
+        check(near(resolved_source.camera.forward.x,resolved_overlay.camera.forward.x) &&
+            near(resolveView(*overlay_frame,resolved_overlay).camera.forward.x,resolved_overlay.camera.forward.x),
+            "Camera foreground missed or double-applied source perturbation");
+        const auto rejects_overlay = [&](View source,uint64_t identity) {
+            bool rejected = false;
+            try { cameraOverlayView(source,identity,{0,0,800,600}); } catch (const std::invalid_argument&) { rejected = true; }
+            check(rejected,"Unsupported camera foreground source accepted");
+        };
+        rejects_overlay(main_source,main_source.history_key);
+        main_source.kind = ViewKind::Mirror; rejects_overlay(main_source,100);
+        main_source.kind = ViewKind::Auxiliary; rejects_overlay(main_source,100);
+        ForegroundLayer retained_layer;
+        retained_layer.display_views.push_back(overlay);
+        auto copied_layer = retained_layer;
+        copied_layer.display_views[0].camera.position.x = 99;
+        check(retained_layer.display_views[0].camera.position.x == 2,"Foreground storage shared live view values");
+        size_t retained_capacity = 0;
+        {
+            ForegroundLayer scratch_layer; scratch_layer.display_views.reserve(31);
+            retained_capacity = scratch_layer.display_views.capacity();
+        }
+        ForegroundLayer reused_layer;
+        check(reused_layer.display_views.empty() && reused_layer.display_views.capacity() == retained_capacity,
+            "Released foreground view-list storage was not recycled");
+        auto foreign_layer = retained_layer;
+        std::thread foreign_release([layer = std::move(foreign_layer)] {});
+        foreign_release.join();
+        check(retained_layer.display_views[0].camera.position.x == 2,"Foreign foreground release corrupted held source");
+    }
+    {
+        using namespace d3scene;
         SceneAssets assets; FrameData data; data.sequence = 1; data.scene_lifetime = assets.lifetime();
         appendRoom(assets,data,triangle(-2,3));
         appendRoom(assets,data,triangle(2,3));

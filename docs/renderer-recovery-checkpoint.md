@@ -1,5 +1,47 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## October 22 continuation — captured main camera and owned rain foreground
+
+CaptureGameMainView now selects the physical camera/rear role/overscan/logical
+crop once before publication. Main world execution and camera-bound effects
+consume that value. Guided selection no longer temporarily swaps Viewer_object.
+Independent thumbnails omit first-person effects rather than borrow live main
+camera state. Real guided gameplay still needs qualification; camera-editing
+diagnostic probes are not proof of physical first-person overlay behavior.
+
+cameraOverlayView derives an isolated display-resolution collection from the
+same captured optics/attachment, preserving sample coordinates through overscan
+cropping. No portal/AI/automap/light ownership, mirror or auxiliary source allowed.
+Tests cover crop/sample coordinates, perturbation exactly once, independent held
+copies and invalid source/identity. Rain droplets publish into this collection
+between HUD and cockpit; world puddles publish ordinary depth-tested planar
+quads. Existing source sizes/fades/textures retained. No legacy effect draw call.
+Real rear-view capture flag -capture-main-rear verifies windshield=0, versus7
+in the forward save. Native and moving1080pSSAA2MSAA4AO/bloom captures inspected;
+the supplied rain scene now reports pending=0. Snow/other missing families in
+other scenes remain unfinished. Actual rear monitor still works.
+
+ForegroundLayer now recycles released scene/display view-list capacity through
+a bounded publisher-thread pool. Held copies do not share live values; foreign
+thread destruction cannot mutate the pool. Existing HUD/cockpit builders also
+reuse this storage. Tests verify capacity reuse/copy isolation/foreign release.
+All3 contract suites pass. Removed old cockpit-snapshot and close-screen queue
+replay from GameDrawPostPresentFrame; that adapter now only owns unmigrated
+console UI. No g3 camera reconstruction for obsolete cockpit replay remains in
+that call path. Unchanged images after pooling/replay removal: rain-foreground-
+final vs rain-camera-native EXACT; camera-foreground-final007 vs camera-source-
+rear007 EXACT; camera-foreground-final002 vs rain-strokes-default002-field EXACT.
+007 vs earlier observe-rear-hq007 has2pixel max3delta, not blanket legacy parity.
+
+With all rain families restored, repeated720p outdoor runs CPU1.304/1.362ms,
+GPU.331/.326ms (outdoor-rain-complete-new{1,2}); earlier legacy1.941/1.932CPU,
+.805/.785GPU. Noninterleaved follow-up, remaining whole-renderer differences
+still limit equivalence claims. No gameplay gates cleared, no shadows, no
+Candidate/Previous/desktop changes. Usage14%, credits unchanged62044.8730600000.
+Next upstream feedback boundary: actual image producers should own PreparedView
+results for game inspection; mirror diagnostics currently prepare a second query.
+Do not enable production AI/automap commits by copying that diagnostic pattern.
+
 ## October 22 continuation — generic pixel-width strokes restore rain
 
 PreparedMesh now publishes a world centerline plus logical-pixel stroke width.
