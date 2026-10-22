@@ -2,6 +2,23 @@
 
 ## Active 2026-10-21 flare regression investigation
 
+LATEST after34773af: packed immutable fog BVH nodes into two vec4s (bounds,
+first/count); removed unused asset escape and third mostly-empty fetch. Both
+field builder and analytic fragment refinement updated. Added capture-frame-only
+GPU timestamp pair for field build (results read after view submission).
+Field costs ~.36ms before, ~.335-.340ms packed in002/007 capture diagnostics.
+Sustained007 ABBA new/control/control/new GPU .568490/.576816/.575273/.556072;
+CPU .914597/.790870/.831632/.773197 (drift, no attributed CPU benefit).
+002 pair GPU .673430/.695699. Images exact007/002, roof flare, heavy002
+SSAA2/MSAA4/AO/bloom/multiview; field occupancy audit passes; all3 tests pass.
+Evidence packed* under verification root. Sparse per-ray bin initialization
+was rejected: same images but007 GPU .591662/.579663/.576691/.588530 ABBA;
+source fully removed. Fog workgroup remains8 (32 previously rejected).
+Comparator out/empty-view-candidate.exe currently34773af semantics, hash
+A8028CC470E059798417DB4A462210686D954A0331FAAB29F99EC95FD3BB8547.
+Runtime/build now packed-fog; Candidate/Previous/delivered preview untouched.
+Latest usage65% consumed, credits unchanged. Continue, do not yield.
+
 LATEST after aee6973: consumer-owned view coverage now constrains mirror
 producer portal visibility and rasterization without changing projection,
 allocation, resolution or sampling. Near-plane crossing conservatively keeps

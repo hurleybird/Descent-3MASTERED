@@ -349,12 +349,12 @@ vec3 applySceneFog(vec3 radiance,out float transmission) {
         int node = 0;
         while (node < view_count) {
             int source_node = texelFetch(scene_influences,view_nodes+node*2).r;
-            int record = int(low.w)+source_node*3;
+            int record = int(low.w)+source_node*2;
             vec4 node_low = texelFetch(scene_fog,record), node_high = texelFetch(scene_fog,record+1);
             if (!fogBounds(node_low.xyz,node_high.xyz,inverse_direction,parallel,distance)) {
                 node = texelFetch(scene_influences,view_nodes+node*2+1).r; continue;
             }
-            int count = int(texelFetch(scene_fog,record+2).x);
+            int count = int(node_high.w);
             for (int triangle = 0; triangle < count; ++triangle) {
                 int offset = int(high.w)+(int(node_low.w)+triangle)*4;
                 float crossing;
@@ -1440,11 +1440,13 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         const auto& volume = fog_volumes[index];
         const auto& low = volume.bounds.minimum; const auto& high = volume.bounds.maximum;
         const float record[12] = {volume.color.x,volume.color.y,volume.color.z,volume.depth,
-            low.x,low.y,low.z,float(fog.size()/4),high.x,high.y,high.z,float(fog.size()/4+volume.nodes.size()*3)};
+            low.x,low.y,low.z,float(fog.size()/4),high.x,high.y,high.z,float(fog.size()/4+volume.nodes.size()*2)};
         std::copy(record,record+12,fog.begin()+index*12);
         for (const auto& node : volume.nodes) {
             const auto& a = node.bounds.minimum; const auto& b = node.bounds.maximum;
-            fog.insert(fog.end(),{a.x,a.y,a.z,float(node.first),b.x,b.y,b.z,float(node.escape),float(node.count),0,0,0});
+            // Escape links belong to the view traversal, not this asset record.
+            // Bounds and leaf range fit exactly in two vec4 fetches.
+            fog.insert(fog.end(),{a.x,a.y,a.z,float(node.first),b.x,b.y,b.z,float(node.count)});
         }
         for (const auto& triangle : volume.boundary) {
             const auto& a=triangle.a; const auto& b=triangle.b; const auto& c=triangle.c;
@@ -1543,6 +1545,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     float field_range = 0;
     d3scene::Vec3 field_color{};
     bool scalar_field = false;
+    GLuint field_queries[2]{}; // capture frame only; read after all view work
     if (field_fog) {
         PERF_MARKER_SCOPE("Scene.FogField");
         field_range = 1;
@@ -1615,8 +1618,13 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         scene_fog_field_shader.Use();
         glUniform1f(scene_fog_field_range,field_range);
         glBindImageTexture(0,scene_fog_field_texture,0,GL_TRUE,0,GL_READ_WRITE,field_format);
+        if (AutomatedCapturePending()) {
+            glGenQueries(2,field_queries);
+            glQueryCounter(field_queries[0],GL_TIMESTAMP);
+        }
         glDispatchCompute((width+SceneFogFieldLanes-1)/SceneFogFieldLanes,height,1);
         glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT);
+        if (field_queries[0]) glQueryCounter(field_queries[1],GL_TIMESTAMP);
         glBindImageTexture(0,0,0,GL_FALSE,0,GL_WRITE_ONLY,GL_RGBA32F);
         glActiveTexture(GL_TEXTURE12); glBindTexture(GL_TEXTURE_3D,scene_fog_field_texture);
         if (AutomatedCapturePending() && FindArg("-scene-fog-field-audit"))
@@ -2123,6 +2131,13 @@ void main() {
     }
     if (measure_passes) {
         glQueryCounter(pass_queries.back(),GL_TIMESTAMP);
+        if (field_queries[0]) {
+            GLuint64 begin = 0,end = 0;
+            glGetQueryObjectui64v(field_queries[0],GL_QUERY_RESULT,&begin);
+            glGetQueryObjectui64v(field_queries[1],GL_QUERY_RESULT,&end);
+            AutomatedCaptureLog("scene fog field GPU ms=%.6f",double(end-begin)*1.e-6);
+            glDeleteQueries(2,field_queries);
+        }
         uint64_t geometry_bytes = 0;
         for (uint32_t page = 0; page < scene_geometry_allocator.pageCount(); ++page)
             geometry_bytes += uint64_t(scene_geometry_allocator.capacity(page))*sizeof(SceneVertex);

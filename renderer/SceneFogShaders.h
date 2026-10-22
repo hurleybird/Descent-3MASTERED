@@ -96,12 +96,12 @@ void main() {
         int node=0;
         while (node<view_count) {
             int source_node=texelFetch(scene_influences,view_nodes+node*2).r;
-            int record=int(low.w)+source_node*3;
+            int record=int(low.w)+source_node*2;
             vec4 node_low=texelFetch(scene_fog,record),node_high=texelFetch(scene_fog,record+1);
             if (!fogBounds(node_low.xyz,node_high.xyz,inverse_direction,parallel,length)) {
                 node=texelFetch(scene_influences,view_nodes+node*2+1).r; continue;
             }
-            int count=int(texelFetch(scene_fog,record+2).x);
+            int count=int(node_high.w);
             for (int triangle=0;triangle<count;++triangle) {
                 int offset=int(high.w)+(int(node_low.w)+triangle)*4;
                 float crossing;
