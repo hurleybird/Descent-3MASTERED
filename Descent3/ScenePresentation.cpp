@@ -1030,10 +1030,15 @@ d3scene::VisibilityReport RenderGameSceneView(const d3scene::Presentation& frame
         const auto candidate = InspectSceneObservations(frame,inspection);
         // Inspection of AI/automap remains read-only. Do not replace the
         // separately qualified effect-admission report with diagnostic domains.
-        if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
+        if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0) {
             AutomatedCaptureLog("scene observation candidate rooms=%u objects=%u exterior_pending=%d mirrors_pending=%d",
                 (unsigned)candidate.report.rooms.size(),(unsigned)candidate.report.objects.size(),
                 candidate.exterior_pending,candidate.mirrors_pending);
+            for (auto room : candidate.report.rooms)
+                AutomatedCaptureLog("scene observation frame=%d view=%llu room=%d",AutomatedCaptureFrameIndex(),(unsigned long long)view.history_key,room);
+            for (auto object : candidate.report.objects)
+                AutomatedCaptureLog("scene observation frame=%d view=%llu object=%u",AutomatedCaptureFrameIndex(),(unsigned long long)view.history_key,object);
+        }
     }
     if (view.kind == d3scene::ViewKind::Main && FindArg("-scene-model-collection-probe")) {
         // Exercise a second content collection in the same frozen frame. No

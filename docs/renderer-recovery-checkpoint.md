@@ -1,5 +1,27 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## October 22 checkpoint — observation comparison
+
+User reset usage, but has a smaller allowance. Requested continuation only to
+the next natural checkpoint, then a fork set to gpt-6.1-sol / high.
+Completed the previously launched four-save observation comparison. Evidence:
+C:/tmp/D3RendererVerification/observations{002,003,006,007}-{old,new}.
+Two capture frames, fixed delta0.000001 to minimize simulation divergence.
+Compared last legacy frame's non-mirror reports against new main view1 report.
+Room sets match:002=4,003=3,006=2,007=3. Object lists, including order, match
+exactly:002=16,003=8,006=0,007=4.002 room order differs, not room membership.
+This is STATIC MAIN-VIEW evidence only; it does not qualify AI behavior,
+moving/auxiliary views, exterior cases, or mirror observations. No automap/AI
+commit was enabled. The new diagnostic now logs room/object identities under
+the existing -scene-observation-probe flag, only on capture frames.
+Baseline source instrumentation was reverted after building; baseline worktree
+is clean. Its out/build/baseline-diagnostic executable is observation-instrumented,
+not the frozen timing comparator. Unrelated lib/gitinfo.h remains untracked.
+Next: qualify observation policy more broadly before enabling gameplay feedback;
+reuse prepared visibility upstream rather than introducing a second production
+portal walk. Keep particle optimization opt-in. Latest runtime is current renderer
+with observation logging; Candidate/Previous/delivered previews untouched.
+
 ## Current recovery continuation — 2026-10-21 (supersedes hypotheses below)
 
 Opt-in display-resolution smoke prototype: -scene-display-particles. NOT default
