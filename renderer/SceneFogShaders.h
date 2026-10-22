@@ -42,15 +42,52 @@ bool fogBounds(vec3 low,vec3 high,vec3 inverse_direction,bvec3 parallel,float le
 }
 )GLSL";
 
+// Each tile stores a compact bitset over the view-owned boundary candidates.
+// No variable-capacity lists, atomics, CPU tile construction, or GPU readback.
+static const char* SceneFogTileComputeShader = R"GLSL(
+layout(local_size_x=64) in;
+layout(std430,binding=0) writeonly buffer FogTiles {uint fog_tiles[];};
+void main() {
+    int entry=fog_volume_offset+int(gl_GlobalInvocationID.z)*4;
+    int base=texelFetch(scene_influences,entry+1).r*4-SCENE_FOG_HEADER_WORDS;
+    int first=texelFetch(scene_influences,base).r;
+    int count=texelFetch(scene_influences,base+1).r;
+    int destination=texelFetch(scene_influences,base+2).r;
+    int stride=texelFetch(scene_influences,base+3).r;
+    int tile=int(gl_GlobalInvocationID.x),word=int(gl_GlobalInvocationID.y);
+    if (word>=stride || tile>=SCENE_FOG_TILE_SIDE*SCENE_FOG_TILE_SIDE) return;
+    vec2 low=vec2(tile%SCENE_FOG_TILE_SIDE,tile/SCENE_FOG_TILE_SIDE)*(2.0/float(SCENE_FOG_TILE_SIDE))-1.0;
+    vec2 high=low+2.0/float(SCENE_FOG_TILE_SIDE);
+    uint mask=0u;
+    for (int bit=0;bit<32 && word*32+bit<count;++bit) {
+        int record=(base+first)/4+(word*32+bit)*(SCENE_FOG_TRIANGLE_WORDS/4);
+        vec4 bounds=texelFetch(scene_fog_nodes,record);
+        bool overlaps=all(lessThanEqual(bounds.xy,high)) && all(greaterThanEqual(bounds.zw,low));
+        if (overlaps) for (int edge=1;edge<=3;++edge) {
+            vec4 plane=texelFetch(scene_fog_nodes,record+edge);
+            vec2 corner=vec2(plane.x>=0.0 ? high.x : low.x,plane.y>=0.0 ? high.y : low.y);
+            if (dot(plane.xy,corner)+plane.z < -plane.w) overlaps=false;
+        }
+        if (overlaps) mask|=1u<<bit;
+    }
+    fog_tiles[destination+tile*stride+word]=mask;
+}
+)GLSL";
+
 // Compile centered optical columns in one pass. Boundary crossings are binned
 // once per ray, analytically integrated per cell, then accumulated in depth.
 static const char* SceneFogFieldComputeShader = R"GLSL(
 layout(local_size_x=SCENE_FOG_LANES,local_size_y=1) in;
 layout(SCENE_FOG_FIELD_FORMAT,binding=0) coherent uniform image3D fog_field_output;
 uniform float fog_field_range;
+layout(std430,binding=0) readonly buffer FogTiles {uint fog_tiles[];};
 const int FOG_SLICES = SCENE_FOG_SLICES;
 shared float slope_events[FOG_SLICES*SCENE_FOG_LANES];
 shared float depth_events[FOG_SLICES*SCENE_FOG_LANES];
+bool fieldEdge(vec4 plane,vec2 sample_position,int flags,int edge) {
+    float side=dot(plane.xy,sample_position)+plane.z;
+    return side>0.0 || (side==0.0 && (flags&(1<<edge))!=0);
+}
 void crossingEvent(float z,float sign,float start) {
     int slice = max(0,int(floor(sqrt(max(0.0,z/fog_field_range))*float(FOG_SLICES))));
     if (slice>=FOG_SLICES) return;
@@ -82,7 +119,6 @@ void main() {
         int entry=fog_volume_offset+candidate*4;
         int volume=texelFetch(scene_influences,entry).r;
         int view_nodes=texelFetch(scene_influences,entry+1).r;
-        int view_count=texelFetch(scene_influences,entry+2).r;
         vec4 appearance=texelFetch(scene_fog,volume*3);
         vec4 low=texelFetch(scene_fog,volume*3+1), high=texelFetch(scene_fog,volume*3+2);
         if (!fogBounds(low.xyz,high.xyz,inverse_direction,parallel,length)) continue;
@@ -93,24 +129,30 @@ void main() {
         for (int i=0;i<FOG_SLICES;++i) {
             slope_events[i*SCENE_FOG_LANES+lane]=0.0; depth_events[i*SCENE_FOG_LANES+lane]=0.0;
         }
-        int node=0;
-        while (node<view_count) {
-            int record=view_nodes+node*2;
-            vec4 node_low=texelFetch(scene_fog_nodes,record),node_high=texelFetch(scene_fog_nodes,record+1);
-            int count=int(node_high.w);
-            if (!fogBounds(node_low.xyz,node_high.xyz,inverse_direction,parallel,length)) {
-                node=count>0 ? node+1 : int(node_low.w); continue;
-            }
-            for (int triangle=0;triangle<count;++triangle) {
-                int offset=int(high.w)+(int(node_low.w)+triangle)*4;
-                float crossing;
-                if (fogHit(texelFetch(scene_fog,offset),texelFetch(scene_fog,offset+1),
-                    texelFetch(scene_fog,offset+2),direction,crossing) && crossing>1.e-5 && crossing<length) {
-                    float sign=dot(texelFetch(scene_fog,offset+3).xyz,direction)>0.0 ? 1.0 : -1.0;
+        int field_base=view_nodes*4-SCENE_FOG_HEADER_WORDS;
+        int first=field_base+texelFetch(scene_influences,field_base).r;
+        int mask_base=texelFetch(scene_influences,field_base+2).r;
+        int stride=texelFetch(scene_influences,field_base+3).r;
+        ivec2 tile=min(ivec2(SCENE_FOG_TILE_SIDE-1),ivec2((vec2(pixel)+.5)/vec2(size.xy)*float(SCENE_FOG_TILE_SIDE)));
+        for (int word=0;word<stride;++word) {
+            uint mask=fog_tiles[mask_base+(tile.y*SCENE_FOG_TILE_SIDE+tile.x)*stride+word];
+            while (mask!=0u) {
+                int triangle=word*32+findLSB(mask);
+                mask&=mask-1u;
+                int record=(first+triangle*SCENE_FOG_TRIANGLE_WORDS)/4;
+                vec4 plane=texelFetch(scene_fog_nodes,record+4);
+                float denominator=dot(plane.xyz,direction);
+                float crossing=plane.w/denominator;
+                vec4 inward=texelFetch(scene_fog_nodes,record+5);
+                int flags=int(inward.w);
+                if (abs(denominator)>=1.e-12 && crossing>1.e-5 && crossing<length &&
+                    fieldEdge(texelFetch(scene_fog_nodes,record+1),ndc,flags,0) &&
+                    fieldEdge(texelFetch(scene_fog_nodes,record+2),ndc,flags,1) &&
+                    fieldEdge(texelFetch(scene_fog_nodes,record+3),ndc,flags,2)) {
+                    float sign=dot(inward.xyz,direction)>0.0 ? 1.0 : -1.0;
                     crossingEvent(crossing*forward_scale,sign,start*forward_scale);
                 }
             }
-            ++node;
         }
         float winding=float(texelFetch(scene_influences,entry+3).r);
         float integrated_length=0.0;

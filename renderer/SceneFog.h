@@ -18,6 +18,14 @@ void prepareFogViewNodes(const FogVolume&,const Camera&,bool optical_cone,std::v
 // Two vec4s per view-local node: bounds plus leaf first/count or internal escape.
 // Leaves always advance by one, so traversal needs no separate indirection table.
 void appendFogViewRecords(const FogVolume&,const std::vector<FogViewNode>&,std::vector<float>&);
+constexpr uint32_t FogFieldTileSide=32,FogFieldHeaderWords=8,FogFieldTriangleWords=24;
+// View-owned projected boundary candidates plus the reference traversal. Eight
+// integer header words precede the nodes. Each candidate holds a rectangle,
+// three half-open homogeneous edges, a triangle plane and its authored inward
+// normal. The GPU builds tile bitsets without CPU per-tile lists. Returns mask
+// words per tile; mask_base is measured in uint32 words. Node address: start+2
+// vec4s. Integer and float GPU views share this storage. No near/mirror clipping.
+uint32_t appendFogFieldRecords(const FogVolume&,const Camera&,const std::vector<FogViewNode>&,uint32_t mask_base,std::vector<float>&);
 // Connected authored space, compiled before any camera query. Interior portal
 // faces disappear from the boundary; all other faces close the volume.
 struct FogPortalSource { int32_t polygon, destination_room, destination_portal; bool open; };

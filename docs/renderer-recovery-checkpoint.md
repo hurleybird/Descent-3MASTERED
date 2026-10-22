@@ -1,5 +1,64 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## October 22 — focused slot007 GPU regression repaired and verified
+
+User requests fixing only the ~45% native GPU regression, keeping the modern
+architecture; no other regression work, no shadows. All current changes are
+limited to optical fog preparation/execution and tests. Baseline committed source
+was73d2cc2; unrelated lib/gitinfo.h remains untracked. Frozen before-fix binary:
+out/slot007-gpu-control.exe (B50792A4F9506E6DA43D7A436CD8C1041A3A1B21DB72E5AE48BD12613D8DA036).
+Current qualified-candidate binary: out/slot007-gpu-fixed.exe
+(4C4382BE54BFD505146CEECCE1325D3D2705D67B51095B5F90C5FBBD9CFF4315);
+build and owned scene-view-test runtime match it. No Candidate/Previous/desktop
+changes. This is the focused repair checkpoint, not whole-renderer acceptance.
+
+Cause isolated: original field build .312ms; diagnostic no-traversal .083ms.
+Rejected and removed:32-ray workgroups, parallel-depth workers, angular node
+bounds and CPU per-tile lists (the latter hurt CPU despite a GPU win). Kept:
+view-owned homogeneous boundary equations, GPU-built conservative tile bitsets,
+stable source crossing order, unchanged64 depth slices/resolution/density, and
+scalar optical-depth sampling with common color reconstructed once. GPU mask
+buffer is retained scratch, no readback/atomics/fixed-capacity lists. Portable
+GL4.3 compute/SSBO only. Before/after native3000-frame screenshot EXACT so far.
+All3 contract suites pass, including6000 random prepared-equation comparisons,
+shared diagonals, reflected/cropped/eye-plane views, no geometry/mirror-plane
+clipping of optical prefixes, retained world-node payload, GPU tile rejection,
+held output independence, empty fields and projection/address validation.
+
+Latest native repeats,3000frames,mean500..2499,720p SSAA1/MSAA0/noAO/noBloom,
+CPU2,uncapped. Order fixed1/control1/legacy1/legacy2/control2/fixed2:
+whole-frame1.177615/1.326463/1.625893/1.678123/1.358419/1.248145ms;
+GPU .509415/.746373/.533122/.543811/.745205/.509788ms.
+Raw slot007-final-native-{labels}-20261022 under C:/tmp/D3RendererVerification.
+Field build before .312ms -> .129ms; scalar sampling then saves another~.045ms.
+Legacy is reconstructed frozen pre-rewrite A6286E...; whole-renderer strict
+pixel equivalence with it remains unclaimed. Do not add CPU and GPU timings.
+
+Final binary's additional native3000frame run:GPU.5122785, whole1.267462ms
+(slot007-final-state-native20261022). GPU regression is gone in the tested scene;
+new .509-.512 versus repeated legacy .533-.544. No universal GPU win claimed.
+
+Matched4K output SSAA2/MSAA4 AO+bloom,300frames means100..249:
+before-fix whole59.082193/59.789393ms; fixed56.306920/55.838100ms.
+Raw slot007-final-4k-{fixed1,control1,control2,fixed2}-20261022. GPU similarly
+58.569/59.108 ->55.723/55.369ms. Earlier pre-rewrite4K runs90.98/90.18ms versus
+before-fix55.60/53.66ms (compare4kcombined-*); do not mix different timing rounds.
+NativeCPU remains variable, with no added per-tile CPU construction overhead.
+
+Qualification: eight90frame saves slot007-qa-{control,fixed}-{000..007}-20261022:
+seven pixel-exact,002 max1/255 on8pixels. 4K300frame comparison max1/255 on4pixels.
+Moving1080pSSAA2/MSAA4/AO/bloom steam frames90..94 and continuous roof150..153
+are exact or max1/255 on at most9pixels. Vector-field and offset/offscreen-image
+producer fixtures exact. All independent512sample optical/occupancy audit error
+reports match the before-fix binary exactly, including all roof/moving frames and
+three multiview producers. GL audits have no logged errors. Roof and moving steam
+screenshots visually inspected headlight-on. No quality settings were reduced.
+No remaining benchmark processes. Final scope: only this fog/GPU regression;
+other migration/gameplay gates and unrelated regressions remain untouched.
+Literal4x SSAA + saved107% AO overscan fails framebuffer creation in BOTH
+renderers; out-of-scope and left untouched. Do not call2x/4x the literal max.
+Included usage last23% consumed, credits unchanged62044.8730600000.
+
 ## October 22 continuation — flat owned feedback aggregation
 
 SceneFeedbackTransaction now owns its publication and deduplicates through dense

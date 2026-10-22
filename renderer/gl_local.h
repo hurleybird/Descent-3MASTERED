@@ -206,6 +206,10 @@ class GL4Renderer : public IRenderer
 	struct FogFieldProgram { ShaderProgram shader; GLint range = -1; };
 	std::array<FogFieldProgram,4> scene_fog_field_programs;
 	GLuint scene_fog_field_texture = 0;
+	ShaderProgram scene_fog_tile_program;
+	GLuint scene_fog_tile_buffer = 0;
+	size_t scene_fog_tile_capacity = 0;
+	uint32_t scene_fog_tile_words = 0, scene_fog_tile_max_stride = 0;
 	GLenum scene_fog_field_format = GL_RGBA32F;
 	int scene_fog_field_width = 0, scene_fog_field_height = 0;
 	d3scene::AssetId scene_fog_id;

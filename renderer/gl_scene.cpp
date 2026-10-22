@@ -20,6 +20,12 @@
 extern int Last_texel_unit_set;
 
 namespace {
+const std::string& FogFieldDefinitions() {
+    static const std::string text="\n#define SCENE_FOG_TILE_SIDE "+std::to_string(d3scene::FogFieldTileSide)+
+        "\n#define SCENE_FOG_HEADER_WORDS "+std::to_string(d3scene::FogFieldHeaderWords)+
+        "\n#define SCENE_FOG_TRIANGLE_WORDS "+std::to_string(d3scene::FogFieldTriangleWords)+"\n";
+    return text;
+}
 static_assert(static_cast<int>(d3scene::OcclusionClass::Default) == RENDERER_AO_CLASS_DEFAULT &&
     static_cast<int>(d3scene::OcclusionClass::Terrain) == RENDERER_AO_CLASS_TERRAIN &&
     static_cast<int>(d3scene::OcclusionClass::Model) == RENDERER_AO_CLASS_POLYOBJECT &&
@@ -345,12 +351,27 @@ vec3 applySceneFog(vec3 radiance,out float transmission) {
         vec2 base = floor(location), blend = fract(location);
         float layer = (sample_index+fraction+0.5)/(slices+1.0);
         vec4 integrated = vec4(0), minimum = vec4(1.e30), maximum = vec4(-1.e30);
+        if (fog_field_color.w != 0.0) {
+            float depth=0.0,low=1.e30,high=-1.e30;
+            for (int y=0;y<2;++y) for (int x=0;x<2;++x) {
+                float column=texture(scene_fog_field,vec3((base+vec2(x,y)+0.5)/dimensions,layer)).r;
+                depth+=column*(x==0 ? 1.0-blend.x : blend.x)*(y==0 ? 1.0-blend.y : blend.y);
+                float visible=column/max(1.0,column);
+                low=min(low,visible); high=max(high,visible);
+            }
+            // A common color is factored out by the field producer. Preserve
+            // that scalar contract through sampling; reconstruct color once.
+            // Signed/HDR colors retain their component-wise contrast bounds.
+            vec4 color=vec4(fog_field_color.rgb,1.0);
+            integrated=color*depth;
+            minimum=min(color*low,color*high); maximum=max(color*low,color*high);
+        } else {
         for (int y = 0; y < 2; ++y) for (int x = 0; x < 2; ++x) {
             vec4 column = texture(scene_fog_field,vec3((base+vec2(x,y)+0.5)/dimensions,layer));
-            if (fog_field_color.w != 0.0) column = vec4(fog_field_color.rgb,1.0)*column.r;
             integrated += column*(x == 0 ? 1.0-blend.x : blend.x)*(y == 0 ? 1.0-blend.y : blend.y);
             vec4 visible = column/max(1.0,column.a);
             minimum = min(minimum,visible); maximum = max(maximum,visible);
+        }
         }
         // Refine strong relative transitions, not ordinary smooth gradients.
         // This is a contrast heuristic, not a bound on unsampled thin features.
@@ -631,6 +652,10 @@ void GL4Renderer::DestroySceneResources() {
     scene_fog_field_texture = 0;
     scene_fog_field_width = scene_fog_field_height = 0;
     for (auto& program : scene_fog_field_programs) program.shader.Destroy();
+    scene_fog_tile_program.Destroy();
+    if (scene_fog_tile_buffer) glDeleteBuffers(1,&scene_fog_tile_buffer);
+    scene_fog_tile_buffer=0; scene_fog_tile_capacity=0;
+    scene_fog_tile_words=scene_fog_tile_max_stride=0;
     scene_fog_id = {};
     scene_view_fog = {}; scene_view_fog_volumes.clear();
     for (auto& depth : scene_depth_snapshots) depth.second.Destroy();
@@ -1041,6 +1066,7 @@ void GL4Renderer::PrepareSceneViewTables(const d3scene::PreparedView& prepared) 
             glBufferData(GL_TEXTURE_BUFFER,positions.size()*sizeof(d3scene::PositionPair),positions.data(),GL_STREAM_DRAW);
         }
         scene_view_fog_volumes.clear();
+        scene_fog_tile_words=scene_fog_tile_max_stride=0;
         static thread_local std::vector<d3scene::FogViewNode> fog_nodes;
         static thread_local std::vector<int32_t> fog_entries;
         static thread_local std::vector<float> fog_records;
@@ -1058,9 +1084,15 @@ void GL4Renderer::PrepareSceneViewTables(const d3scene::PreparedView& prepared) 
                 d3scene::prepareFogViewNodes(volumes[i],demand.camera,optical_frustum,fog_nodes);
                 // Source geometry is immutable. Camera containment belongs to
                 // this view's packed traversal entry, alongside its node range.
-                fog_entries.insert(fog_entries.end(),{int32_t(i),int32_t((fog_record_start+fog_records.size())/4),int32_t(fog_nodes.size()),
+                const bool field=FindArg("-scene-fog-field") && demand.camera.projection.orthographic_depth_scale==0;
+                fog_entries.insert(fog_entries.end(),{int32_t(i),int32_t((fog_record_start+fog_records.size())/4)+(field ? int(d3scene::FogFieldHeaderWords/4) : 0),int32_t(fog_nodes.size()),
                     d3scene::fogWinding(volumes[i],demand.camera.transform.position)});
-                d3scene::appendFogViewRecords(volumes[i],fog_nodes,fog_records);
+                if (field) {
+                    const uint32_t stride=d3scene::appendFogFieldRecords(volumes[i],demand.camera,fog_nodes,scene_fog_tile_words,fog_records);
+                    scene_fog_tile_words+=stride*d3scene::FogFieldTileSide*d3scene::FogFieldTileSide;
+                    scene_fog_tile_max_stride=(std::max)(scene_fog_tile_max_stride,stride);
+                }
+                else d3scene::appendFogViewRecords(volumes[i],fog_nodes,fog_records);
                 scene_view_fog_volumes.push_back(uint32_t(i));
                 source_fog_nodes += volumes[i].nodes.size(); view_fog_nodes += fog_nodes.size();
             }
@@ -1610,7 +1642,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     float field_range = 0;
     d3scene::Vec3 field_color{};
     bool scalar_field = false;
-    GLuint field_queries[2]{}; // capture frame only; read after all view work
+    GLuint field_queries[3]{}; // capture frame only; read after all view work
     if (field_fog) {
         PERF_MARKER_SCOPE("Scene.FogField");
         field_range = 1;
@@ -1644,6 +1676,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
             source.replace(0,source.find('\n'),"#version 430 core");
             source += "\nuniform samplerBuffer scene_fog;\n";
             source += "\nuniform samplerBuffer scene_fog_nodes;\n";
+            source += FogFieldDefinitions();
             source += SceneFogIntersectionShader;
             source += "\n#define SCENE_FOG_SLICES "+std::to_string(SceneFogFieldSlices)+"\n";
             source += "\n#define SCENE_FOG_LANES "+std::to_string(SceneFogFieldLanes)+"\n";
@@ -1681,17 +1714,49 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
             scene_fog_field_format = field_format;
         }
         // Wait for the preceding view's sampler reads before reusing scratch.
-        glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
+        glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT|GL_SHADER_STORAGE_BARRIER_BIT);
         scene_fog_field_shader.Use();
         glUniform1f(scene_fog_field_range,field_range);
         glBindImageTexture(0,scene_fog_field_texture,0,GL_TRUE,0,GL_READ_WRITE,field_format);
         if (AutomatedCapturePending()) {
-            glGenQueries(2,field_queries);
+            glGenQueries(3,field_queries);
             glQueryCounter(field_queries[0],GL_TIMESTAMP);
         }
+        if (!scene_fog_tile_program.Handle()) {
+            std::string source=SceneLightingShader;
+            source.replace(0,source.find('\n'),"#version 430 core");
+            source+="\nuniform samplerBuffer scene_fog_nodes;\n";
+            source+=FogFieldDefinitions();
+            source+=SceneFogTileComputeShader;
+            scene_fog_tile_program.AttachComputeSource(source.c_str());
+            glUniformBlockBinding(scene_fog_tile_program.Handle(),glGetUniformBlockIndex(scene_fog_tile_program.Handle(),"SceneViewBlock"),8);
+            scene_fog_tile_program.Use();
+            glUniform1i(scene_fog_tile_program.FindUniform("scene_influences"),3);
+            glUniform1i(scene_fog_tile_program.FindUniform("scene_fog_nodes"),13);
+        }
+        if (!scene_fog_tile_buffer) glGenBuffers(1,&scene_fog_tile_buffer);
+        GLint previous_tile_binding=0,previous_storage_binding=0;
+        glGetIntegeri_v(GL_SHADER_STORAGE_BUFFER_BINDING,0,&previous_tile_binding);
+        glGetIntegerv(GL_SHADER_STORAGE_BUFFER_BINDING,&previous_storage_binding);
+        glBindBuffer(GL_SHADER_STORAGE_BUFFER,scene_fog_tile_buffer);
+        const size_t tile_bytes=size_t(scene_fog_tile_words)*sizeof(uint32_t);
+        if (!scene_fog_tile_capacity || tile_bytes>scene_fog_tile_capacity) {
+            scene_fog_tile_capacity=(std::max)(size_t(4096),(tile_bytes+4095)&~size_t(4095));
+            glBufferData(GL_SHADER_STORAGE_BUFFER,scene_fog_tile_capacity,nullptr,GL_STREAM_DRAW);
+        }
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER,0,scene_fog_tile_buffer);
+        if (scene_fog_tile_max_stride) {
+            scene_fog_tile_program.Use();
+            glDispatchCompute((d3scene::FogFieldTileSide*d3scene::FogFieldTileSide+63)/64,scene_fog_tile_max_stride,scene_view_fog.count);
+            glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+        }
+        scene_fog_field_shader.Use();
+        if (field_queries[0]) glQueryCounter(field_queries[1],GL_TIMESTAMP);
         glDispatchCompute((width+SceneFogFieldLanes-1)/SceneFogFieldLanes,height,1);
         glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT);
-        if (field_queries[0]) glQueryCounter(field_queries[1],GL_TIMESTAMP);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER,0,GLuint(previous_tile_binding));
+        glBindBuffer(GL_SHADER_STORAGE_BUFFER,GLuint(previous_storage_binding));
+        if (field_queries[0]) glQueryCounter(field_queries[2],GL_TIMESTAMP);
         glBindImageTexture(0,0,0,GL_FALSE,0,GL_WRITE_ONLY,GL_RGBA32F);
         glActiveTexture(GL_TEXTURE12); glBindTexture(GL_TEXTURE_3D,scene_fog_field_texture);
         if (AutomatedCapturePending() && FindArg("-scene-fog-field-audit"))
@@ -2324,11 +2389,13 @@ void main() {
     if (measure_passes) {
         glQueryCounter(pass_queries.back(),GL_TIMESTAMP);
         if (field_queries[0]) {
-            GLuint64 begin = 0,end = 0;
+            GLuint64 begin = 0,tiles = 0,end = 0;
             glGetQueryObjectui64v(field_queries[0],GL_QUERY_RESULT,&begin);
-            glGetQueryObjectui64v(field_queries[1],GL_QUERY_RESULT,&end);
+            glGetQueryObjectui64v(field_queries[1],GL_QUERY_RESULT,&tiles);
+            glGetQueryObjectui64v(field_queries[2],GL_QUERY_RESULT,&end);
             AutomatedCaptureLog("scene fog field GPU ms=%.6f",double(end-begin)*1.e-6);
-            glDeleteQueries(2,field_queries);
+            AutomatedCaptureLog("scene fog tiles GPU ms=%.6f integration=%.6f",double(tiles-begin)*1.e-6,double(end-tiles)*1.e-6);
+            glDeleteQueries(3,field_queries);
         }
         uint64_t geometry_bytes = 0;
         for (uint32_t page = 0; page < scene_geometry_allocator.pageCount(); ++page)

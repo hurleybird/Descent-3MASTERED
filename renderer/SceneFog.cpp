@@ -3,6 +3,7 @@
 #include "SceneView.h"
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <unordered_map>
 #include <functional>
 #include <limits>
@@ -68,6 +69,88 @@ void appendFogViewRecords(const FogVolume& volume,const std::vector<FogViewNode>
         output.insert(output.end(),{a.x,a.y,a.z,float(node.count ? node.first : view.escape),
             b.x,b.y,b.z,float(node.count)});
     }
+}
+uint32_t appendFogFieldRecords(const FogVolume& volume,const Camera& camera,const std::vector<FogViewNode>& nodes,uint32_t mask_base,std::vector<float>& output) {
+    constexpr int tiles=FogFieldTileSide;
+    if (output.size()%4) throw std::invalid_argument("Fog GPU records require vec4 alignment");
+    if (camera.projection.orthographic_depth_scale!=0 || !std::isfinite(camera.projection.x_scale) ||
+        !std::isfinite(camera.projection.y_scale) || camera.projection.x_scale==0 || camera.projection.y_scale==0)
+        throw std::invalid_argument("Fog field requires a finite perspective projection");
+    const size_t start=output.size();
+    output.resize(start+FogFieldHeaderWords);
+    appendFogViewRecords(volume,nodes,output);
+    const size_t records=output.size();
+    const auto& transform=camera.transform;
+    const auto project=[&](Vec3 point,Vec3 axis) {
+        return (double(point.x)-transform.position.x)*axis.x+
+            (double(point.y)-transform.position.y)*axis.y+(double(point.z)-transform.position.z)*axis.z;
+    };
+    for (const auto& view : nodes) {
+        const auto& node=volume.nodes.at(view.source);
+        for (uint32_t triangle=node.first;triangle<node.first+node.count;++triangle) {
+            const auto& t=volume.boundary.at(triangle);
+            double low[2]={1.e30,1.e30},high[2]={-1.e30,-1.e30};
+            double low_z=1.e30,high_z=-1.e30;
+            for (const auto point : {t.a,t.b,t.c}) {
+                const double z=project(point,transform.forward);
+                low_z=std::min(low_z,z); high_z=std::max(high_z,z);
+                if (z<=1.e-5) continue;
+                const double xy[2]={project(point,transform.right)/z*camera.projection.x_scale+camera.projection.x_offset,
+                    project(point,transform.up)/z*camera.projection.y_scale+camera.projection.y_offset};
+                for (int axis=0;axis<2;++axis) {low[axis]=std::min(low[axis],xy[axis]); high[axis]=std::max(high[axis],xy[axis]);}
+            }
+            if (high_z<=0) continue;
+            // Eye-plane crossings cannot safely divide by forward depth. Keep
+            // them in every tile instead of clipping away optical prefixes.
+            if (low_z<=1.e-5) {low[0]=low[1]=-1; high[0]=high[1]=1;}
+            for (int axis=0;axis<2;++axis) {
+                const double margin=1.e-4*(1+std::max(std::abs(low[axis]),std::abs(high[axis])));
+                low[axis]-=margin; high[axis]+=margin;
+            }
+            if (low[0]>1 || high[0]<-1 || low[1]>1 || high[1]<-1) continue;
+            output.insert(output.end(),{float(low[0]),float(low[1]),float(high[0]),float(high[1])});
+            const Vec3 ab{t.b.x-t.a.x,t.b.y-t.a.y,t.b.z-t.a.z},ac{t.c.x-t.a.x,t.c.y-t.a.y,t.c.z-t.a.z};
+            const Vec3 normal{ab.y*ac.z-ab.z*ac.y,ab.z*ac.x-ab.x*ac.z,ab.x*ac.y-ab.y*ac.x};
+            const double vertices[3][3]={{double(t.a.x)-transform.position.x,double(t.a.y)-transform.position.y,double(t.a.z)-transform.position.z},
+                {double(t.b.x)-transform.position.x,double(t.b.y)-transform.position.y,double(t.b.z)-transform.position.z},
+                {double(t.c.x)-transform.position.x,double(t.c.y)-transform.position.y,double(t.c.z)-transform.position.z}};
+            const double plane_distance=normal.x*vertices[0][0]+normal.y*vertices[0][1]+normal.z*vertices[0][2];
+            const double orientation=plane_distance<0 ? -1 : 1;
+            const int drop=std::abs(normal.x)>=std::abs(normal.y) && std::abs(normal.x)>=std::abs(normal.z) ? 0 :
+                (std::abs(normal.y)>=std::abs(normal.z) ? 1 : 2);
+            const double normal_components[3]={normal.x,normal.y,normal.z};
+            const double projected_orientation=normal_components[drop]<0 ? -1 : 1;
+            int flags=0;
+            // An edge through the eye is homogeneous: substituting the view's
+            // ray equation gives one affine half-plane in NDC. It also works
+            // for triangles crossing the eye plane, without a clipped polygon.
+            // Keep the old dominant-axis half-open rule on shared boundaries.
+            for (int edge=0;edge<3;++edge) {
+                const auto& p=vertices[edge]; const auto& q=vertices[(edge+1)%3];
+                const double n[3]={p[1]*q[2]-p[2]*q[1],p[2]*q[0]-p[0]*q[2],p[0]*q[1]-p[1]*q[0]};
+                const auto axisDot=[&](Vec3 axis) {return (n[0]*axis.x+n[1]*axis.y+n[2]*axis.z)*orientation;};
+                const double a=axisDot(transform.right)/camera.projection.x_scale,b=axisDot(transform.up)/camera.projection.y_scale;
+                const double c=axisDot(transform.forward)-a*camera.projection.x_offset-b*camera.projection.y_offset;
+                const double margin=1.e-4*(1+std::abs(a)+std::abs(b)+std::abs(c));
+                output.insert(output.end(),{float(a),float(b),float(c),float(margin)});
+                const double dx=(q[(drop+1)%3]-p[(drop+1)%3])*projected_orientation;
+                const double dy=(q[(drop+2)%3]-p[(drop+2)%3])*projected_orientation;
+                if (dy>0 || (dy==0 && dx<0)) flags|=1<<edge;
+            }
+            // Authored inward normals can differ from geometric normals on
+            // nonplanar faces. Preserve them for oriented crossing signs.
+            output.insert(output.end(),{normal.x,normal.y,normal.z,float(plane_distance),t.inward.x,t.inward.y,t.inward.z,float(flags)});
+        }
+    }
+    const size_t candidate_count=(output.size()-records)/FogFieldTriangleWords;
+    if (output.size()-start>size_t(INT32_MAX) || candidate_count>size_t(INT32_MAX)-31)
+        throw std::length_error("Fog field records exceed GPU addressing");
+    const uint32_t count=uint32_t(candidate_count),words=(count+31)/32;
+    if (uint64_t(mask_base)+uint64_t(words)*tiles*tiles>INT32_MAX)
+        throw std::length_error("Fog field masks exceed GPU addressing");
+    const uint32_t header[8]={uint32_t(records-start),count,mask_base,words,tiles,tiles,0,0};
+    std::memcpy(output.data()+start,header,sizeof(header));
+    return words;
 }
 namespace {
 Vec3 sub(Vec3 a,Vec3 b) { return {a.x-b.x,a.y-b.y,a.z-b.z}; }

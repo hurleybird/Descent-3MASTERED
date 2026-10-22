@@ -4,10 +4,57 @@
 #include <cmath>
 #include <stdexcept>
 #include <limits>
+#include <cstring>
 namespace {
 int Checks = 0;
 void check(bool value,const char* message) { ++Checks; if (!value) throw std::runtime_error(message); }
 bool near(float a,float b) { return std::abs(a-b) < .0001f; }
+uint32_t fieldWord(const std::vector<float>& values,size_t offset) {
+    uint32_t value; std::memcpy(&value,&values.at(offset),sizeof(value)); return value;
+}
+double preparedFogPath(const std::vector<float>& values,size_t base,const d3scene::Camera& camera,
+    d3scene::Vec3 end,bool inside,double start) {
+    const auto eye=camera.transform.position;
+    const double delta[3]={double(end.x)-eye.x,double(end.y)-eye.y,double(end.z)-eye.z};
+    const double length=std::sqrt(delta[0]*delta[0]+delta[1]*delta[1]+delta[2]*delta[2]);
+    const double direction[3]={delta[0]/length,delta[1]/length,delta[2]/length};
+    const auto axisDot=[&](d3scene::Vec3 axis) {return direction[0]*axis.x+direction[1]*axis.y+direction[2]*axis.z;};
+    const double forward=axisDot(camera.transform.forward);
+    const double uv[2]={axisDot(camera.transform.right)/forward*camera.projection.x_scale+camera.projection.x_offset,
+        axisDot(camera.transform.up)/forward*camera.projection.y_scale+camera.projection.y_offset};
+    const int side=int(d3scene::FogFieldTileSide);
+    const int tile[2]={std::max(0,std::min(side-1,int((uv[0]*.5+.5)*side))),
+        std::max(0,std::min(side-1,int((uv[1]*.5+.5)*side)))};
+    double path=inside ? std::max(0.0,length-start) : 0;
+    for (uint32_t i=0;i<fieldWord(values,base+1);++i) {
+        const size_t record=base+fieldWord(values,base)+i*d3scene::FogFieldTriangleWords;
+        const double denominator=values[record+16]*direction[0]+values[record+17]*direction[1]+values[record+18]*direction[2];
+        if (std::abs(denominator)<1.e-12) continue;
+        const double crossing=values[record+19]/denominator;
+        if (crossing<=1.e-5 || crossing>=length) continue;
+        bool hit=true;
+        const int flags=int(values[record+23]);
+        for (int edge=0;edge<3;++edge) {
+            const size_t p=record+4+edge*4;
+            const double value=values[p]*uv[0]+values[p+1]*uv[1]+values[p+2];
+            if (value<0 || (value==0 && !(flags&(1<<edge)))) hit=false;
+        }
+        if (!hit) continue;
+        const double low[2]={double(tile[0])*2/side-1,double(tile[1])*2/side-1};
+        const double high[2]={low[0]+2.0/side,low[1]+2.0/side};
+        check(values[record]<=high[0] && values[record+1]<=high[1] && values[record+2]>=low[0] && values[record+3]>=low[1],
+            "Projected rectangle lost an optical crossing");
+        for (int edge=0;edge<3;++edge) {
+            const size_t p=record+4+edge*4;
+            const double maximum=values[p]*(values[p]>=0 ? high[0] : low[0])+
+                values[p+1]*(values[p+1]>=0 ? high[1] : low[1])+values[p+2];
+            check(maximum>=-values[p+3],"GPU tile edge rejection lost an optical crossing");
+        }
+        const double inward=values[record+20]*direction[0]+values[record+21]*direction[1]+values[record+22]*direction[2];
+        path+=(inward>0 ? 1 : -1)*(length-std::max(start,crossing));
+    }
+    return std::max(0.0,std::min(std::max(0.0,length-start),path));
+}
 d3scene::RoomState box(d3scene::SceneAssets& assets,int id,float z) {
     d3scene::MeshGeometry mesh;
     mesh.vertices = {{-1,-1,z},{1,-1,z},{1,1,z},{-1,1,z},{-1,-1,z+2},{1,-1,z+2},{1,1,z+2},{-1,1,z+2}};
@@ -111,6 +158,49 @@ int runFogTests() {
     const auto original_asset = frame.fog;
     {
         using namespace d3scene;
+        View request; request.history_key=1;
+        request.viewport=request.projection_anchor={0,0,800,600};
+        uint32_t random=7341;
+        const auto sample=[&] {random=random*1664525u+1013904223u; return float(random>>8)/16777216.f;};
+        for (int scenario=0;scenario<4;++scenario) {
+            auto view=request;
+            view.has_clip_plane=true; view.clip_plane={{0,0,1},-100};
+            if (scenario==1) view.camera.position.z=3; // eye-plane crossings
+            if (scenario==2) {view.camera.right={-1,0,0}; view.viewport={80,60,500,350};}
+            if (scenario==3) {view.camera.position.z=8; view.camera.right={-1,0,0}; view.camera.forward={0,0,-1};}
+            const auto camera=prepareCamera(view);
+            std::vector<FogViewNode> nodes;
+            prepareFogViewNodes(volume,camera,true,nodes);
+            std::vector<float> packed;
+            appendFogFieldRecords(volume,camera,nodes,0,packed);
+            const auto held=packed;
+            const bool inside=fogContains(volume,view.camera.position);
+            for (int i=0;i<500;++i) {
+                const auto end=unproject(camera,sample()*1.4f-.7f,sample()*1.4f-.7f,.5f+sample()*.4f);
+                const float start=sample();
+                check(std::abs(preparedFogPath(packed,0,camera,end,inside,start)-
+                    fogSegmentLength(volume,view.camera.position,end,inside,start))<.002,
+                    "Reflected/cropped/eye-plane field changed optical prefixes");
+            }
+            std::vector<float> other;
+            appendFogFieldRecords(volume,camera,nodes,79,other);
+            check(packed==held,"Preparing another field mutated a held field");
+            auto invalid=camera; invalid.projection.orthographic_depth_scale=.1f;
+            bool rejected=false;
+            try {appendFogFieldRecords(volume,invalid,nodes,0,other);} catch (const std::invalid_argument&) {rejected=true;}
+            check(rejected,"Orthographic projection entered the perspective field contract");
+            rejected=false;
+            try {appendFogFieldRecords(volume,camera,nodes,INT32_MAX,other);} catch (const std::length_error&) {rejected=true;}
+            check(rejected,"Field bitset addressing overflow was accepted");
+        }
+        FogVolume empty;
+        std::vector<FogViewNode> nodes;
+        std::vector<float> packed;
+        check(appendFogFieldRecords(empty,prepareCamera(request),nodes,0,packed)==0 &&
+            packed.size()==FogFieldHeaderWords && fieldWord(packed,1)==0,"Empty field kept stale candidates");
+    }
+    {
+        using namespace d3scene;
         FogVolume many = volume;
         for (int x = -4; x <= 4; ++x) for (int z = -4; z <= 4; ++z) {
             if (!x && !z) continue;
@@ -163,6 +253,15 @@ int runFogTests() {
                 auto node = many.nodes[nodes[i].source]; node.escape = nodes[i].escape; narrowed.nodes.push_back(node);
             }
             const bool inside = fogContains(many,request.camera.position);
+            std::vector<float> field(4,17);
+            const uint32_t stride=appendFogFieldRecords(many,camera,nodes,123,field);
+            check(field.front()==17 && field[3]==17,"Field preparation overwrote a preceding view");
+            check(fieldWord(field,6)==123 && fieldWord(field,7)==stride &&
+                stride==(fieldWord(field,5)+31)/32,"Field tile-mask addressing changed");
+            check(fieldWord(field,8)==FogFieldTileSide && fieldWord(field,9)==FogFieldTileSide,
+                "Field tile dimensions differ from the shader contract");
+            for (size_t i=0;i<packed.size();++i)
+                check(field[4+FogFieldHeaderWords+i]==packed[i],"Field packing changed reference traversal");
             for (int i = 0; i < 2000; ++i) {
                 const auto end = unproject(camera,sample()*2-1,sample()*2-1,.5f+sample()*.499f);
                 const float start = sample()*5;
@@ -172,6 +271,15 @@ int runFogTests() {
                 check(fogSegmentLength(many,request.camera.position,end,inside,start) ==
                     fogSegmentLength(narrowed,request.camera.position,end,inside,start),
                     "Pruned fog traversal changed exact optical integration");
+                check(std::abs(preparedFogPath(field,4,camera,end,inside,start)-
+                    fogSegmentLength(many,request.camera.position,end,inside,start))<.002,
+                    "Prepared homogeneous boundary equations changed optical integration");
+            }
+            for (float x : {-.5f,0.f,.5f}) for (float y : {-.5f,0.f,.5f}) {
+                const auto end=unproject(camera,x,y,.99f);
+                check(std::abs(preparedFogPath(field,4,camera,end,inside,0)-
+                    fogSegmentLength(many,request.camera.position,end,inside))<.002,
+                    "Prepared field doubled or lost a shared triangle edge");
             }
         }
         FogVolume empty; prepareFogViewNodes(empty,camera,true,nodes);
