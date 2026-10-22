@@ -183,8 +183,13 @@ void prepareImages(d3scene::FrameData& data,MaterialResolution& resolution) {
     // scratch, not thousands of per-frame hash nodes/reference-counted entries.
     static thread_local std::array<int,MAX_BITMAPS+MAX_LIGHTMAPS> pixels;
     static thread_local std::array<int,MAX_BITMAPS+MAX_LIGHTMAPS+MAX_TEXTURES+1> bindings;
+    static thread_local std::vector<std::pair<uint32_t,uint32_t>> used_slots;
     static thread_local size_t previous_binding_count = 0;
-    pixels.fill(-1); bindings.fill(-1);
+    // Zero means absent; stored indices are biased by one. Registry capacity
+    // is not frame workload: reset only slots written by the last transaction.
+    // This scratch owns no assets and retains capacity, never image identity.
+    for (const auto& slot : used_slots) { bindings[slot.first] = 0; pixels[slot.second] = 0; }
+    used_slots.clear();
     data.images.reserve(previous_binding_count);
     const bool audit_images = FindArg("-scene-image-revision-audit") != 0;
     size_t image_misses = 0, image_requests = 0;
@@ -238,12 +243,13 @@ void prepareImages(d3scene::FrameData& data,MaterialResolution& resolution) {
     const auto sample = [&](int handle,bool baked,int texture = -1) -> ImageBindingView {
         const uint32_t key = texture >= 0 ? uint32_t(MAX_BITMAPS+MAX_LIGHTMAPS+texture+1) : uint32_t(handle+(baked ? MAX_BITMAPS : 0)+1);
         if (key >= bindings.size()) Error("Image resource outside source registry");
-        if (bindings[key] >= 0) return {key,data.images[bindings[key]].asset.get()};
+        if (bindings[key]) return {key,data.images[bindings[key]-1].asset.get()};
         const int bitmap = texture >= 0 ? resolution.bitmap(texture) : handle;
         const int pixel_slot = bitmap+(baked ? MAX_BITMAPS : 0);
         if (bitmap < 0 || pixel_slot >= int(pixels.size())) Error("Image pixels outside source registry");
-        auto asset = pixels[pixel_slot] >= 0 ? data.images[pixels[pixel_slot]].asset : image(bitmap,baked);
-        bindings[key] = pixels[pixel_slot] = int(data.images.size()); data.images.push_back({key,std::move(asset)});
+        auto asset = pixels[pixel_slot] ? data.images[pixels[pixel_slot]-1].asset : image(bitmap,baked);
+        used_slots.emplace_back(key,uint32_t(pixel_slot));
+        bindings[key] = pixels[pixel_slot] = int(data.images.size()+1); data.images.push_back({key,std::move(asset)});
         return {key,data.images.back().asset.get()};
     };
     const auto prepare = [&](d3scene::SurfaceBinding& surface) {

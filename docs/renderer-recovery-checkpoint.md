@@ -2,6 +2,19 @@
 
 ## Active 2026-10-21 flare regression investigation
 
+LATEST after eef3393: image scratch resets only touched binding/pixel slots,
+not both full registries (~144K ints/frame). Zero sentinel/index+1 preserves
+source aliases; touched list retains capacity, never assets or cross-frame IDs.
+005 sustained ABBA new/control/control/new CPU .616462/.638409/.645107/.612961;
+GPU .133941/.133134/.134374/.133456. 002 pair CPU1.171495/1.215888,
+GPU .680062/.677071. Images exact005/heavy002 with resource/geometry/image
+revision audits and late-view probes. Evidence slots* under verification root.
+Comparator now packed-fog eef3393 semantics, SHA
+8A825179FC149B5CF060ADB2C5EFB3CED3ACAFE0F6C1E3DC81AC77A46BA0E238.
+Build has sparse slot reset; runtime currently comparator after last timing.
+Looking at residual preparation/attachment representation. Do not confuse
+inspecting this path with authorizing cancelled cockpit geometry changes.
+
 LATEST after34773af: packed immutable fog BVH nodes into two vec4s (bounds,
 first/count); removed unused asset escape and third mostly-empty fetch. Both
 field builder and analytic fragment refinement updated. Added capture-frame-only
