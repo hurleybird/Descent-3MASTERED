@@ -48,6 +48,32 @@ void appendRoom(d3scene::SceneAssets& assets,d3scene::FrameData& data,d3scene::M
 int runSceneViewTests() {
     {
         using namespace d3scene;
+        SceneAssets assets; FrameData data; data.sequence = 1; data.scene_lifetime = assets.lifetime();
+        appendRoom(assets,data,triangle(-2,3));
+        appendRoom(assets,data,triangle(2,3));
+        const auto frame = Presentation::freeze(data);
+        auto request = view(); request.kind = ViewKind::Auxiliary;
+        check(queryView(*frame,request).surfaces.size() == 2,"Coverage fixture lost a full-view surface");
+        const auto full_projection = viewMatrices(prepareCamera(request)).projection;
+        request.coverage = {0,0,400,600};
+        for (bool portals : {false,true}) {
+            request.portal_visibility = portals;
+            const auto selected = queryView(*frame,request);
+            check(selected.surfaces.size() == 1 && selected.surfaces[0].room_index == 0,
+                "View aperture did not reject the unconsumed half of the image");
+            check(viewMatrices(selected.camera).projection == full_projection,
+                "View aperture changed pixel projection");
+        }
+        const auto scaled = rasterViewport(request.coverage,1200,2);
+        check(scaled.x == 0 && scaled.y == 0 && scaled.width == 800 && scaled.height == 1200,
+            "View aperture lost raster scale");
+        request.kind = ViewKind::Main;
+        bool rejected = false;
+        try { validateView(request); } catch (const std::invalid_argument&) { rejected = true; }
+        check(rejected,"Image coverage silently narrowed the main gameplay view");
+    }
+    {
+        using namespace d3scene;
         static_assert(sizeof(VisibleSurface) <= 48,"Per-polygon visibility record grew placement data");
         ViewVisibility first;
         first.placements.push_back({{7,8,9}});
@@ -279,6 +305,9 @@ int runSceneViewTests() {
         check(plan.images.size() == 1 && plan.consumer.view().image_inputs.size() == 1,
             "Visible mirror group did not schedule one image");
         const auto& child = plan.images[0];
+        check(child.view.coverage.width > 0 && child.view.coverage.width < child.view.viewport.width &&
+            child.view.coverage.height > 0 && child.view.coverage.height < child.view.viewport.height,
+            "Small mirror did not constrain producer raster coverage");
         check(child.view.reflections == ReflectionPolicy::SurfaceFilm && child.view.feedback == NoFeedback &&
             child.view.excluded_surfaces.size() == 1 && queryView(*frame,child.view).surfaces.empty(),
             "Reflected producer retained its own film or recursive policy");
@@ -287,6 +316,10 @@ int runSceneViewTests() {
         check(planPlanarViews(*frame,child.view).images.empty(),"Terminal reflection scheduled recursion");
         auto moved = parent; moved.camera.position.x = .25f;
         check(planPlanarViews(*frame,moved).images[0].image == child.image,"Mirror image identity changed with camera motion");
+        auto near_film = parent; near_film.camera.position.z = 2;
+        const auto near_plan = planPlanarViews(*frame,near_film);
+        check(near_plan.images.size() == 1 && near_plan.images[0].view.coverage.width == 0,
+            "Mirror touching the near plane lost conservative full-image coverage");
         for (Vec3 point : {Vec3{0,0,3},Vec3{.5f,.2f,3}}) {
             const auto original = project(prepareCamera(parent),point);
             const auto reflected = project(prepareCamera(child.view),point);
@@ -348,7 +381,8 @@ int runSceneViewTests() {
         ViewImageRequest image; image.image = 17; image.view = view();
         image.view.kind = ViewKind::Preview; image.samples = 4;
         validateViewImage(image);
-        for (int invalid = 0; invalid < 8; ++invalid) {
+        image.view.coverage = {20,30,100,200}; validateViewImage(image);
+        for (int invalid = 0; invalid < 11; ++invalid) {
             auto bad = image;
             if (invalid == 0) bad.image = 0;
             if (invalid == 1) bad.view.kind = ViewKind::Main;
@@ -358,6 +392,9 @@ int runSceneViewTests() {
             if (invalid == 5) bad.scale = 3;
             if (invalid == 6) bad.samples = 1;
             if (invalid == 7) { bad.scale = 4; bad.view.viewport.width = (std::numeric_limits<int32_t>::max)(); }
+            if (invalid == 8) bad.view.coverage.x = -1;
+            if (invalid == 9) bad.view.coverage.width = bad.view.viewport.width;
+            if (invalid == 10) bad.view.coverage.height = 0;
             bool rejected = false;
             try { validateViewImage(bad); } catch (const std::invalid_argument&) { rejected = true; }
             check(rejected,"Invalid independent view image request accepted");

@@ -477,7 +477,31 @@ PlanarViewPlan planPlanarViews(const Presentation& frame,const View& parent,uint
         auto child = reflectedView(frame,source,group.plane,identity,room.number);
         for (auto polygon : group.polygons) child.excluded_surfaces.push_back({room.asset->id(),polygon});
         child.viewport.x = child.viewport.y = 0;
+        child.coverage = {}; // producer footprint is derived below, not inherited
         ViewImageRequest image; image.image = identity; image.view = std::move(child); image.samples = samples;
+        // The consumer determines which producer pixels can contribute. Keep
+        // the full projection/allocation (no resampling or resize churn), but
+        // rasterize only the mirror aperture plus a filtering/sample guard.
+        const auto camera = prepareCamera(image.view);
+        const auto width = image.view.viewport.width,height = image.view.viewport.height;
+        double left = width,top = height,right = 0,bottom = 0;
+        bool bounded = true;
+        for (const auto polygon : group.polygons) for (const auto& corner : room.asset->geometry().polygons[polygon].corners) {
+            const auto p = project(camera,room.asset->geometry().vertices[corner.vertex]);
+            // A near-plane crossing needs homogeneous clipping; retaining the
+            // full image here is conservative, including the eye on the film.
+            if (p.w <= camera.projection.near_distance) { bounded = false; break; }
+            const double x = (p.x/p.w*.5+.5)*width,y = (.5-p.y/p.w*.5)*height;
+            left = std::min(left,x); right = std::max(right,x);
+            top = std::min(top,y); bottom = std::max(bottom,y);
+        }
+        if (bounded) {
+            const int x = int(std::max(0.0,std::min(double(width-1),std::floor(left)-2)));
+            const int y = int(std::max(0.0,std::min(double(height-1),std::floor(top)-2)));
+            const int end_x = int(std::max(double(x+1),std::min(double(width),std::ceil(right)+2)));
+            const int end_y = int(std::max(double(y+1),std::min(double(height),std::ceil(bottom)+2)));
+            if (end_x-x < width || end_y-y < height) image.view.coverage = {x,y,end_x-x,end_y-y};
+        }
         validateViewImage(image);
         plan.images.push_back(std::move(image));
         plan.consumer.view_.image_inputs.push_back({slot,identity});
@@ -506,15 +530,16 @@ static ViewVisibility queryResolvedView(const Presentation& frame,const View& vi
     const auto& windows = spatial.rooms;
     const auto& room_indices = frame.roomIndices();
     const auto& exterior_window = spatial.exterior;
+    const auto coverage = viewCoverage(view);
     result.exterior_visible = exterior_window.visible;
     const auto spatialWindow = [&](int32_t room) {
-        if (!world_content) return PortalWindow{-1,-1,1,1,true};
+        if (!world_content) return coverage;
         const auto found = room_indices.find(room);
         if (found != room_indices.end()) return windows[found->second];
         // Nonnegative values identify rooms; -1 is unbound content. Other
         // negative memberships identify exterior cells, not unbound geometry.
         if (room < -1) return exterior_window;
-        return PortalWindow{-1,-1,1,1,true};
+        return coverage;
     };
     static thread_local ProjectionScratch projection_scratch;
     auto consider = [&](MeshView geometry,ProjectedMesh& projected,const Transform& world,const SurfaceBinding& surface,VisibleSurface item,float alpha = 1) {
@@ -684,7 +709,7 @@ static ViewVisibility queryResolvedView(const Presentation& frame,const View& vi
         const auto& geometry = instance.asset->geometry();
         if (!instance.surface.draw_surface || geometry.polygons.empty() ||
             (instance.surface.material.layer == RenderLayer::Background && !result.exterior_visible)) continue;
-        PortalWindow window{-1,-1,1,1,true};
+        PortalWindow window = coverage;
         if (instance.surface.material.layer == RenderLayer::World && view.portal_visibility) {
             window = spatialWindow(instance.room);
             if (!window.visible) continue;

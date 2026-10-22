@@ -1278,6 +1278,12 @@ void validateView(const View& view) {
     }
     require(view.viewport.width > 0 && view.viewport.height > 0 &&
         view.projection_anchor.width > 0 && view.projection_anchor.height > 0, "Invalid view extent");
+    const auto& coverage = view.coverage;
+    require((coverage.x == 0 && coverage.y == 0 && coverage.width == 0 && coverage.height == 0) ||
+        (view.feedback == NoFeedback && view.kind != ViewKind::Main &&
+         coverage.x >= 0 && coverage.y >= 0 && coverage.width > 0 && coverage.height > 0 &&
+         int64_t(coverage.x)+coverage.width <= view.viewport.width && int64_t(coverage.y)+coverage.height <= view.viewport.height),
+        "Invalid view coverage extent or feedback ownership");
     require((view.feedback & ~(Automap | ObjectVisibility | EffectEligibility)) == 0, "Invalid feedback policy");
     require(view.collection == 0 || (view.kind != ViewKind::Main && view.feedback == NoFeedback),
         "Non-world collections cannot own main-world products or gameplay feedback");

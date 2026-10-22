@@ -2,6 +2,25 @@
 
 ## Active 2026-10-21 flare regression investigation
 
+LATEST after aee6973: consumer-owned view coverage now constrains mirror
+producer portal visibility and rasterization without changing projection,
+allocation, resolution or sampling. Near-plane crossing conservatively keeps
+the full image. Coverage cannot narrow main/gameplay-feedback views. All three
+contract targets pass, including aperture selection/projection/scale/near-plane.
+Pixel-exact: 006 720p/4K, 006 1080p SSAA2/MSAA4/AO/bloom, heavy002 multi-view,
+and ceiling/flare roof reproduction. Evidence aperture* under verification root.
+720p sustained ABBA new/control/control/new (3000 frames,500..2499):
+CPU .391691/.387266/.391094/.392676; GPU .446367/.473308/.474834/.445740.
+Mirror surfaces 73 -> 66. 4K ABBA (1000frames,400..899):
+CPU .425156/.401622/.402040/.446080; GPU 1.799880/1.839620/1.834632/1.798590.
+GPU gain modest; no CPU win claim, especially 4K. Comparator remains aee6973
+semantics AF7862... at out/empty-view-candidate.exe. Owned runtime has aperture.
+Surface-output shader specialization was rejected (no measurable benefit),
+all source removed; evidence out/rejected-surface-output.txt. Do not repeat.
+Next: remaining save007 fog GPU cost. User says STOP STOPPING: keep working,
+no final/yield at checkpoints. Usage last64%, credits unchanged62451.4387600000.
+No deletion, Candidate/PreviousCandidate/delivered preview unchanged.
+
 LATEST afterf786976: sustained eight-save corpus is CPU-faster than reconstructed
 old in EVERY save (roughly34-69% first sweep;005 repeated advantage23-36%).
 out/sustained-baseline-results.txt holds exact numbers and evidence paths.

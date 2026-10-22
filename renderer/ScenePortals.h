@@ -10,6 +10,7 @@ struct PortalVisibility {
     std::vector<PortalWindow> rooms;
     PortalWindow exterior;
 };
+PortalWindow viewCoverage(const View&);
 // One spatial result for geometry and observations. Room windows and exterior
 // admission are conservative NDC unions; neither is a mutable room/face mark.
 PortalVisibility queryPortalVisibility(const Presentation&,const View&,const Camera&);

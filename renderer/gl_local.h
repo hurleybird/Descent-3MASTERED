@@ -243,6 +243,7 @@ class GL4Renderer : public IRenderer
 		SceneOutputRole role;
 		SceneDepthSnapshot& depth;
 		d3scene::ViewHistory& history;
+		d3scene::Rect coverage; // optional raster-space scissor, independent of projection
 	};
 	d3scene::VisibilityReport ExecuteSceneView(const d3scene::PreparedView&,const SceneRasterTarget&);
 	//MAIN

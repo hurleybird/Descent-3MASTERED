@@ -1147,14 +1147,16 @@ void GL4Renderer::RenderViewImage(const d3scene::Presentation& presentation,cons
         image.buffer.Update(request.view.viewport.width*request.scale,request.view.viewport.height*request.scale,request.samples);
         image.buffer.ClearAll();
         const auto raster = d3scene::rasterViewport(request.view.viewport,image.buffer.Height(),request.scale);
+        const auto coverage = request.view.coverage.width ?
+            d3scene::rasterViewport(request.view.coverage,image.buffer.Height(),request.scale) : d3scene::Rect{};
         const auto prepared = d3scene::prepareView(presentation,request.view);
-        ExecuteSceneView(prepared,{image.buffer,raster,SceneOutputRole::Image,image.depth,image.history});
+        ExecuteSceneView(prepared,{image.buffer,raster,SceneOutputRole::Image,image.depth,image.history,coverage});
         image.matrices = d3scene::viewMatrices(prepared.visibility().camera);
         image.sequence = sequence;
         if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
-            AutomatedCaptureLog("scene view image key=%llu size=%ux%u samples=%u sequence=%llu",
+            AutomatedCaptureLog("scene view image key=%llu size=%ux%u samples=%u sequence=%llu coverage=%d,%d,%d,%d",
                 static_cast<unsigned long long>(request.image),image.buffer.Width(),image.buffer.Height(),image.buffer.Samples(),
-                static_cast<unsigned long long>(sequence));
+                static_cast<unsigned long long>(sequence),request.view.coverage.x,request.view.coverage.y,request.view.coverage.width,request.view.coverage.height);
     } catch (...) { restore(); throw; }
     restore();
 }
@@ -1274,6 +1276,8 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     check_scene_error("entry");
     FlushFontBatch();
     const GLboolean inherited_scissor = glIsEnabled(GL_SCISSOR_TEST);
+    GLint inherited_scissor_box[4]{};
+    if (target.coverage.width) glGetIntegerv(GL_SCISSOR_BOX,inherited_scissor_box);
     GLint inherited_viewport[4]; glGetIntegerv(GL_VIEWPORT,inherited_viewport);
     glDisable(GL_SCISSOR_TEST);
     check_scene_error("font flush");
@@ -1968,6 +1972,10 @@ void main() {
       // Image consumers do not write clip distances; never leak this state.
       depth_prepass = pass.kind == d3scene::ViewPassKind::DepthSurface;
       bind_outputs();
+      if (target.coverage.width) {
+          glEnable(GL_SCISSOR_TEST);
+          glScissor(target.coverage.x,target.coverage.y,target.coverage.width,target.coverage.height);
+      }
       if (depth_prepass) {
           glViewport(raster.x/SupersamplingFactor(),raster.y/SupersamplingFactor(),
               raster.width/SupersamplingFactor(),raster.height/SupersamplingFactor());
@@ -2136,6 +2144,10 @@ void main() {
     // A view owns its raster rectangle only during execution. The surrounding
     // canvas may continue drawing without another legacy StartFrame call.
     glViewport(inherited_viewport[0],inherited_viewport[1],inherited_viewport[2],inherited_viewport[3]);
+    if (target.coverage.width) {
+        glScissor(inherited_scissor_box[0],inherited_scissor_box[1],inherited_scissor_box[2],inherited_scissor_box[3]);
+        glDisable(GL_SCISSOR_TEST);
+    }
     if (inherited_scissor) glEnable(GL_SCISSOR_TEST);
     output.MarkAllDirty();
     if (writes_protection) {

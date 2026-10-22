@@ -794,6 +794,9 @@ struct View {
     std::vector<RoomSurfaceId> excluded_surfaces;
     std::vector<ViewImageInput> image_inputs;
     Rect viewport, projection_anchor;
+    // Optional view-local pixel footprint; zero means full view. Consumers
+    // cannot read outside it. Projection and sample positions stay unchanged.
+    Rect coverage;
     float zoom = 1;
     bool dynamic_lighting = true;
     bool portal_visibility = true;

@@ -68,15 +68,22 @@ PortalWindow intersect(PortalWindow a,PortalWindow b) {
     return result;
 }
 }
+PortalWindow viewCoverage(const View& view) {
+    if (!view.coverage.width) return {-1,-1,1,1,true};
+    const auto& c = view.coverage;
+    return {2.0*c.x/view.viewport.width-1,1-2.0*(c.y+c.height)/view.viewport.height,
+        2.0*(c.x+c.width)/view.viewport.width-1,1-2.0*c.y/view.viewport.height,true};
+}
 PortalVisibility queryPortalVisibility(const Presentation& frame,const View& view,const Camera& camera) {
     const auto& rooms = frame.data().rooms;
     PortalVisibility result; result.rooms.resize(rooms.size());
     auto& windows = result.rooms;
     const auto& indices = frame.roomIndices();
     const auto root = indices.find(view.room);
+    const auto coverage = viewCoverage(view);
     if (!view.portal_visibility || (root == indices.end() && !view.exterior_origin)) {
-        for (auto& window : windows) window.visible = true;
-        result.exterior = {-1,-1,1,1,true};
+        for (auto& window : windows) window = coverage;
+        result.exterior = coverage;
         return result;
     }
     // Scratch is query-local in meaning and never escapes into the result.
@@ -110,8 +117,8 @@ PortalVisibility queryPortalVisibility(const Presentation& frame,const View& vie
         // Seed available exterior shells, then enter interiors only through
         // their apertures. Terrain occlusion may refine these seeds later.
         for (size_t i = 0; i < rooms.size(); ++i)
-            if (rooms[i].exterior) widen(i,{-1,-1,1,1,true});
-    } else widen(root->second,{-1,-1,1,1,true});
+            if (rooms[i].exterior) widen(i,coverage);
+    } else widen(root->second,coverage);
     while (queue_count) {
         const size_t index = queue[queue_head];
         queue_head = (queue_head+1)%queue.size(); --queue_count; queued[index] = false;
@@ -131,7 +138,7 @@ PortalVisibility queryPortalVisibility(const Presentation& frame,const View& vie
             widen(destination->second,intersect(window,aperture));
         }
     }
-    if (view.exterior_origin) result.exterior = {-1,-1,1,1,true};
+    if (view.exterior_origin) result.exterior = coverage;
     else for (size_t i = 0; i < rooms.size(); ++i) if (rooms[i].exterior && windows[i].visible) {
         const auto& window = windows[i];
         if (!result.exterior.visible) result.exterior = window;
