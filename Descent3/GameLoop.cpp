@@ -2896,7 +2896,7 @@ void GameDrawMainView(const d3scene::Presentation& presentation, SceneFeedbackTr
 	Rendering_main_view = true;
 	{
 		PERF_MARKER_SCOPE("GameRenderWorld.MainView");
-		feedback.add(RenderGameSceneView(presentation,main_view.world));
+		RenderGameSceneView(presentation,main_view.world,&feedback);
 	}
 	rend_PerfGpuSceneMark(RENDERER_GPU_SCENE_AFTER_MAIN_WORLD);
 	Rendering_main_view = false;
@@ -3110,16 +3110,16 @@ void GameRenderFrame(void)
 			DrawSmallViews(*presentation,feedback);
 		}
 		// One observation boundary after world views, before foreground canvases.
-		// Only effect admission is qualified here. Automap exploration and AI
-		// observation still require their independent simulation-volume policy.
+		// Observation commit is game-owned. Draw replay cannot update AI, map,
+		// weather or effect clocks; those results use source simulation volumes.
 		const auto& observations = feedback.seal();
-		for (const auto room : observations.effect_rooms)
-			Rooms[room].last_render_time = Gametime;
-		if (observations.terrain) Last_terrain_render_time = Gametime;
+		CommitGameVisibility(*presentation,observations,uint64_t(FrameCount));
 		if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
-			AutomatedCaptureLog("scene observations sealed automap=%u effects=%u objects=%u terrain=%d",
+			AutomatedCaptureLog("scene observations committed logical_frame=%d sequence=%llu automap=%u effects=%u objects=%u ai=%d terrain=%d main_present=%d main_exterior=%d main_owner=%u",
+				FrameCount,(unsigned long long)observations.frame_sequence,
 				(unsigned)observations.automap_rooms.size(),(unsigned)observations.effect_rooms.size(),
-				(unsigned)observations.objects.size(),observations.terrain);
+				(unsigned)observations.objects.size(),AI_NumRendered,observations.terrain,
+				observations.main_view_present,observations.main_exterior_visible,observations.main_camera_owner);
 		rend_PerfGpuSceneMark(RENDERER_GPU_SCENE_AFTER_SMALL_VIEWS);
 		if (SceneGeometryInspection() && FindArg("-scene-layer-probe"))
 		{

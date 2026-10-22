@@ -791,7 +791,8 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance,const GameMainView
     return prepared;
 }
 
-d3scene::VisibilityReport RenderGameSceneView(const d3scene::Presentation& frame, d3scene::View view) {
+void RenderGameSceneView(const d3scene::Presentation& frame, d3scene::View view,
+    SceneFeedbackTransaction* game_observations) {
     if (!SceneGeometryInspection())
         Error("Renderer migration is incomplete. This test build requires -scene-inspection; use the preserved Candidate for gameplay.");
     view.geometry_inspection = true;
@@ -1013,6 +1014,15 @@ d3scene::VisibilityReport RenderGameSceneView(const d3scene::Presentation& frame
         planar.images.push_back(std::move(copy)); planar.images.push_back(std::move(image));
     }
     const auto producers = d3scene::prepareViewImages(frame,planar.images);
+    // Game-side planning consumes the exact prepared camera/apertures. GPU
+    // execution below is observation-free and may be replayed independently.
+    // Mirror-first logical order is independent of GPU completion order.
+    if (game_observations) {
+        for (const auto& image : producers.images())
+            if (image.producer().view().kind == d3scene::ViewKind::Mirror)
+                game_observations->observe(image.producer());
+        game_observations->observe(planar.consumer);
+    }
     d3scene::renderViewImages(producers);
     if (FindArg("-scene-observation-probe") && (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)) {
         for (const auto& image : producers.images()) if (image.producer().view().kind == d3scene::ViewKind::Mirror) {
@@ -1027,7 +1037,7 @@ d3scene::VisibilityReport RenderGameSceneView(const d3scene::Presentation& frame
                 AutomatedCaptureLog("scene mirror observation frame=%d view=%llu object=%u",AutomatedCaptureFrameIndex(),(unsigned long long)producer.view().history_key,object);
         }
     }
-    auto observations = d3scene::renderView(planar.consumer);
+    d3scene::renderView(planar.consumer);
     if (AutomatedCaptureFrameIndex() >= 0 && FindArg("-scene-offset-view-probe") && view.kind == d3scene::ViewKind::Main) {
         auto inset = view;
         inset.kind = d3scene::ViewKind::Auxiliary; inset.feedback = d3scene::NoFeedback;
@@ -1036,7 +1046,6 @@ d3scene::VisibilityReport RenderGameSceneView(const d3scene::Presentation& frame
         inset.clear_depth = true;
         d3scene::renderView(frame,inset);
     }
-    observations = CollectSceneEffectEligibility(planar.consumer);
     if (FindArg("-scene-observation-probe") &&
         (view.kind == d3scene::ViewKind::Main || view.kind == d3scene::ViewKind::Auxiliary)) {
         const auto candidate = InspectSceneObservations(planar.consumer,
@@ -1074,7 +1083,6 @@ d3scene::VisibilityReport RenderGameSceneView(const d3scene::Presentation& frame
         if (FindArg("-scene-display-view-probe") && (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0))
             AutomatedCaptureLog("scene display view fixture target=display viewport=bottom_right");
     }
-    return observations;
 }
 
 void RenderGameForegrounds(const d3scene::Presentation& frame,d3scene::ForegroundPhase phase) {

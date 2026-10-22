@@ -6,6 +6,7 @@
 struct object;
 struct ModelTransforms;
 struct HUDCanvasLayout;
+class SceneFeedbackTransaction;
 // Capture the physical main camera and its logical crop once, before scene
 // publication. World and camera-bound foregrounds consume the same value.
 struct GameMainView {
@@ -64,7 +65,8 @@ void PrepareCockpitComposition(d3scene::FrameData&,d3scene::Rect viewport,float 
 // Independent captures publish their own scene without advancing cockpit/HUD
 // animation or replacing the gameplay presentation's motion-history source.
 d3scene::PresentationRef PrepareGamePresentation(bool advance = true,const GameMainView* = nullptr);
-d3scene::VisibilityReport RenderGameSceneView(const d3scene::Presentation&, d3scene::View);
+void RenderGameSceneView(const d3scene::Presentation&, d3scene::View,
+    SceneFeedbackTransaction* game_observations = nullptr);
 bool SceneGeometryInspection();
 void RenderModuleSceneView(object*, vector*, int, matrix*, float, bool,
     int anchor_x = 0, int anchor_y = 0, int anchor_w = 0, int anchor_h = 0);
@@ -72,7 +74,3 @@ void RenderModuleSceneView(object*, vector*, int, matrix*, float, bool,
 d3scene::View MakeGameSceneView(d3scene::ViewKind kind, uint64_t history_key,
     const object* viewer, const vector& eye, int room, const matrix& orientation,
     float zoom, bool rear, d3scene::Rect viewport, d3scene::Rect projection_anchor);
-
-// Migration barrier: preserve observed AI/automap/effect timing when implementing
-// this commit step. GPU execution must not write those game structures itself.
-void CommitGameVisibility(const d3scene::Presentation&, const d3scene::VisibilityReport&) = delete;

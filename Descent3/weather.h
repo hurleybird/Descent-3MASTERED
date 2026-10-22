@@ -19,6 +19,7 @@
 #define WEATHER_H
 
 #include "vecmat.h"
+#include <cstdint>
 
 #define WEATHER_FLAGS_RAIN			1
 #define WEATHER_FLAGS_LIGHTNING		2
@@ -69,6 +70,9 @@ struct enhanced_snow_particle
 
 // resets the weather so there is nothing happening
 void ResetWeather ();
+// Prior main-camera observation, committed by the game frame owner. Mirrors
+// and auxiliary exterior visibility never enable the main weather emitter.
+void SetWeatherMainViewObservation(bool exterior_visible,uint32_t camera_owner);
 
 // Makes droplets appear on the windshield, plus makes rain fall in the distance
 void DoRainEffect ();

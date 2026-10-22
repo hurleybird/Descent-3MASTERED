@@ -127,6 +127,22 @@ int runFeedbackTests() {
     check(InspectSceneObservations(prepared_observation,NoFeedback).report.objects.empty());
     rejects([&] { InspectSceneObservations(prepared_observation,128); });
     {
+        SceneFeedbackTransaction live(*observed_frame);
+        check(live.observe(prepared_observation));
+        check(live.observe(prepared_observation)); // exact replay is observation-only
+        auto auxiliary = view; auxiliary.kind = ViewKind::Auxiliary; auxiliary.history_key = 2;
+        auxiliary.exterior_origin = true; auxiliary.room = -2;
+        check(live.observe(prepareView(*observed_frame,auxiliary)));
+        auto preview = view; preview.kind = ViewKind::Preview; preview.history_key = 3;
+        check(!live.observe(prepareView(*observed_frame,preview)));
+        auto independent = view; independent.kind = ViewKind::SaveThumbnail; independent.history_key = 4;
+        check(!live.observe(prepareView(*observed_frame,independent)));
+        const auto& accepted = live.seal();
+        check(accepted.main_view_present && !accepted.main_exterior_visible && accepted.terrain);
+        check(accepted.automap_rooms == std::vector<int32_t>{7});
+        check(accepted.objects == std::vector<uint32_t>({200,100}));
+    }
+    {
         auto zoom_data = data;
         auto& edge_object = zoom_data.objects[0];
         edge_object.current.position = {0,-48.8f,72.3f}; edge_object.observation_radius = 7;
@@ -157,6 +173,12 @@ int runFeedbackTests() {
         check(reflected_report.report.objects == std::vector<uint32_t>{100});
         check(reflected_report.report.rooms == std::vector<int32_t>{7});
         rejects([&] { InspectSceneObservations(reflected,Automap); });
+        SceneFeedbackTransaction reflected_game(*mirror_frame);
+        check(reflected_game.observe(reflected));
+        const auto& reflected_game_result = reflected_game.seal();
+        check(reflected_game_result.automap_rooms.empty() && !reflected_game_result.main_view_present);
+        check(reflected_game_result.effect_rooms == std::vector<int32_t>{7} &&
+            reflected_game_result.objects == std::vector<uint32_t>{100});
         mirror_view.coverage = {600,0,200,600};
         check(InspectSceneObservations(prepareView(*mirror_frame,mirror_view),ObjectVisibility).report.objects.empty());
         auto equal_depth = data;

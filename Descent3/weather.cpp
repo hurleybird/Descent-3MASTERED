@@ -42,6 +42,21 @@
 #include "psrand.h"
 
 weather Weather = { 0 };
+static bool Main_weather_exterior = false;
+static uint32_t Main_weather_owner = uint32_t(OBJECT_HANDLE_NONE);
+void SetWeatherMainViewObservation(bool visible,uint32_t owner) {
+	Main_weather_exterior = visible; Main_weather_owner = owner;
+}
+static object* WeatherObserver() {
+	if ((Main_weather_owner & HANDLE_COUNT_MASK) && (Main_weather_owner & HANDLE_OBJNUM_MASK) < MAX_OBJECTS)
+		if (auto* owner = ObjGet(static_cast<int>(Main_weather_owner))) return owner;
+	return Viewer_object;
+}
+static bool MainWeatherSeesExterior() {
+	// The observation describes one physical camera, not a union of all views.
+	const auto* viewer = WeatherObserver();
+	return Main_weather_exterior && viewer && Main_weather_owner == uint32_t(viewer->handle);
+}
 static std::vector<enhanced_snow_particle> Enhanced_snow_particles;
 static const float ENHANCED_WEATHER_BLACKSHARK_PULL = 1024.0f;
 
@@ -59,6 +74,7 @@ static bool ResolveRainExteriorRoom(const vector& pos, int* exterior_room);
 void ResetWeather()
 {
 	Weather.flags = 0;
+	Main_weather_exterior = false; Main_weather_owner = uint32_t(OBJECT_HANDLE_NONE);
 	Weather.last_lightning_evaluation_time = 0;
 	Enhanced_snow_particles.clear();
 }
@@ -68,26 +84,27 @@ void ResetWeather()
 // creating rain in the mine itself.
 static bool ResolveRainExteriorRoom(const vector& pos, int* exterior_room)
 {
-	if (!Viewer_object || !exterior_room)
+	auto* const viewer = WeatherObserver();
+	if (!viewer || !exterior_room)
 		return false;
 
-	if (OBJECT_OUTSIDE(Viewer_object))
+	if (OBJECT_OUTSIDE(viewer))
 	{
-		*exterior_room = EnhancedWeatherRoomForPos(pos, Viewer_object->roomnum);
+		*exterior_room = EnhancedWeatherRoomForPos(pos, viewer->roomnum);
 		return true;
 	}
-	if (!RenderLastMainViewSawTerrain())
+	if (!MainWeatherSeesExterior())
 		return false;
 
-	vector start = Viewer_object->pos;
+	vector start = viewer->pos;
 	vector end = pos;
 	fvi_query fq = {};
 	fvi_info hit_info = {};
 	fq.p0 = &start;
 	fq.p1 = &end;
-	fq.startroom = Viewer_object->roomnum;
+	fq.startroom = viewer->roomnum;
 	fq.rad = 0.0f;
-	fq.thisobjnum = OBJNUM(Viewer_object);
+	fq.thisobjnum = OBJNUM(viewer);
 	fq.ignore_obj_list = NULL;
 	// Transparent render portals must not make exterior weather disappear.
 	fq.flags = FQ_TRANSPOINT | FQ_IGNORE_POWERUPS | FQ_IGNORE_WEAPONS;
@@ -103,10 +120,12 @@ static bool ResolveRainExteriorRoom(const vector& pos, int* exterior_room)
 // Makes droplets appear on the windshield, plus makes rain fall in the distance
 void DoRainEffect()
 {
+	auto* const viewer = WeatherObserver();
+	if (!viewer) return;
 	float droplet_ages[8] = {};
-	const int viewer_index = OBJNUM(Viewer_object);
+	const int viewer_index = OBJNUM(viewer);
 	const int droplet_events = Get60HzVisualEventAges(viewer_index,
-		Viewer_object->handle, VIS60_WEATHER_DROPLETS, droplet_ages, 8);
+		viewer->handle, VIS60_WEATHER_DROPLETS, droplet_ages, 8);
 
 	// See how many droplets to create on the windshield
 	// This is dependant on how fast the player is moving forward
@@ -115,11 +134,11 @@ void DoRainEffect()
 	if (randval < 20)
 		randval = 20;
 
-	vector vel = Viewer_object->mtype.phys_info.velocity;
+	vector vel = viewer->mtype.phys_info.velocity;
 	float mag = vm_GetMagnitudeFast(&vel);
 	vel /= mag;
 
-	float scalar = vm_DotProduct(&vel, &Viewer_object->orient.fvec);
+	float scalar = vm_DotProduct(&vel, &viewer->orient.fvec);
 
 	vector upvec = { 0,1.0,0 };
 
@@ -132,7 +151,7 @@ void DoRainEffect()
 	else if (randval > 80)
 		randval = 80;
 
-	if ((upvec * Viewer_object->orient.uvec) < 0)
+	if ((upvec * viewer->orient.uvec) < 0)
 		randval = 8000; // Make sure rain does fall upwards
 
 	const bool suppress_windshield_splatter =
@@ -140,8 +159,8 @@ void DoRainEffect()
 
 	for (int event = 0; event < droplet_events; ++event)
 	{
-		if (suppress_windshield_splatter || Viewer_object->type != OBJ_PLAYER ||
-			!OBJECT_OUTSIDE(Viewer_object) ||
+		if (suppress_windshield_splatter || viewer->type != OBJ_PLAYER ||
+			!OBJECT_OUTSIDE(viewer) ||
 			(ps_rand() % randval) != 0)
 			continue;
 
@@ -152,7 +171,7 @@ void DoRainEffect()
 		pos.y = ((ps_rand() % 1000) - 500) / 350.0;
 		pos.z = 3.0;
 
-		int visnum = VisEffectCreate(VIS_FIREBALL, RAINDROP_INDEX, Viewer_object->roomnum, &pos);
+		int visnum = VisEffectCreate(VIS_FIREBALL, RAINDROP_INDEX, viewer->roomnum, &pos);
 		if (visnum >= 0)
 		{
 			vis_effect* vis = &VisEffects[visnum];
@@ -174,24 +193,24 @@ void DoRainEffect()
 
 	// Create some rain in the distance
 
-	const bool viewer_outside = OBJECT_OUTSIDE(Viewer_object);
+	const bool viewer_outside = OBJECT_OUTSIDE(viewer);
 	if (!viewer_outside &&
-		(!Render_enhanced_weather || !RenderLastMainViewSawTerrain()))
+		(!Render_enhanced_weather || !MainWeatherSeesExterior()))
 		return;
 	{
 		PSRand rain_rand;
-		rain_rand.seed(Get60HzVisualNoise((uint32_t)Viewer_object->handle, 4));
+		rain_rand.seed(Get60HzVisualNoise((uint32_t)viewer->handle, 4));
 		int num = 20 + (rain_rand() % 15);
 		angvec angs;
 		int i;
 
-		vm_ExtractAnglesFromMatrix(&angs, &Viewer_object->orient);
+		vm_ExtractAnglesFromMatrix(&angs, &viewer->orient);
 		matrix mat;
 		vm_AnglesToMatrix(&mat, 0, angs.h, 0);
 
 		for (i = 0; i < num; i++)
 		{
-			vector pos = Viewer_object->pos;
+			vector pos = viewer->pos;
 
 			float z = ((rain_rand() % 1000) / 1000.0) * 700;
 			float x = (((rain_rand() % 1000) - 500) / 500.0) * 300;
@@ -222,7 +241,7 @@ void DoRainEffect()
 					streak = { 0.0f, -1.0f, 0.0f };
 				vis->end_pos -= streak * 20.0f;
 				vis->flags |= VF_WINDSHIELD_EFFECT;
-				vis->pos -= (Viewer_object->mtype.phys_info.velocity / 2);
+				vis->pos -= (viewer->mtype.phys_info.velocity / 2);
 			}
 		}
 
@@ -231,13 +250,13 @@ void DoRainEffect()
 
 		float puddle_ages[8] = {};
 		const int puddle_events = Get60HzVisualEventAges(viewer_index,
-			Viewer_object->handle, VIS60_WEATHER_PUDDLES, puddle_ages, 8);
+			viewer->handle, VIS60_WEATHER_PUDDLES, puddle_ages, 8);
 		for (int event = 0; event < puddle_events; ++event)
 		{
 			const int puddle_count = num / 2;
 			for (i = 0; i < puddle_count; i++)
 			{
-				vector pos = Viewer_object->pos;
+				vector pos = viewer->pos;
 
 				float z = ((ps_rand() % 1000) / 1000.0) * 700;
 				float x = (((ps_rand() % 1000) - 500) / 500.0) * 300;
@@ -257,13 +276,13 @@ void DoRainEffect()
 				vector norm;
 				float ypos = GetTerrainGroundPoint(&pos, &norm);
 				vector hit_pos, hit_norm;
-				int hit_room = Viewer_object->roomnum;
+				int hit_room = viewer->roomnum;
 				vector fall_start = pos;
 				fall_start.y += 96.0f;
 				vector fall_end = pos;
 				fall_end.y = ypos - 4.0f;
 				const bool hit_weather_surface = FindEnhancedWeatherSurfaceHit(&fall_start,
-					&fall_end, Viewer_object->roomnum,
+					&fall_end, viewer->roomnum,
 					&hit_pos, &hit_norm, &hit_room);
 				if (hit_weather_surface)
 				{
@@ -273,7 +292,7 @@ void DoRainEffect()
 				else
 				pos.y = ypos;
 				int visnum = VisEffectCreate(VIS_FIREBALL, PUDDLEDROP_INDEX,
-					hit_weather_surface ? hit_room : Viewer_object->roomnum, &pos);
+					hit_weather_surface ? hit_room : viewer->roomnum, &pos);
 				if (visnum >= 0)
 				{
 					vis_effect* vis = &VisEffects[visnum];
@@ -339,10 +358,11 @@ static void ApplyEnhancedWeatherGravity(vector* pos, vector* velocity, float str
 
 static bool EnhancedWeatherHasOverheadOccluder()
 {
-	if (!Render_enhanced_weather || !Viewer_object)
+	auto* const viewer = WeatherObserver();
+	if (!Render_enhanced_weather || !viewer)
 		return false;
 
-	vector start = Viewer_object->pos;
+	vector start = viewer->pos;
 	vector end = start;
 	end.y += MAX_TERRAIN_HEIGHT * 2.0f;
 
@@ -350,9 +370,9 @@ static bool EnhancedWeatherHasOverheadOccluder()
 	fvi_info hit_info = {};
 	fq.p0 = &start;
 	fq.p1 = &end;
-	fq.startroom = Viewer_object->roomnum;
+	fq.startroom = viewer->roomnum;
 	fq.rad = 0.0f;
-	fq.thisobjnum = OBJNUM(Viewer_object);
+	fq.thisobjnum = OBJNUM(viewer);
 	fq.ignore_obj_list = NULL;
 	fq.flags = FQ_CHECK_OBJS | FQ_IGNORE_POWERUPS | FQ_IGNORE_WEAPONS |
 		FQ_IGNORE_RENDER_THROUGH_PORTALS | FQ_NO_RELINK;
@@ -373,7 +393,8 @@ static int EnhancedWeatherRoomForPos(const vector& pos, int fallback_room)
 static bool FindEnhancedWeatherSurfaceHit(const vector* start, const vector* end, int start_room,
 	vector* hit_pos, vector* hit_normal, int* hit_room)
 {
-	if (!Render_enhanced_weather || !Viewer_object || !start || !end)
+	auto* const viewer = WeatherObserver();
+	if (!Render_enhanced_weather || !viewer || !start || !end)
 		return false;
 
 	vector query_start = *start;
@@ -450,6 +471,7 @@ static void EnhancedSnowImpactFade(enhanced_snow_particle& particle, const vecto
 
 static void MoveEnhancedSnowParticle(enhanced_snow_particle& particle)
 {
+	auto* const viewer = WeatherObserver();
 	particle.lifeleft -= Frametime;
 	if (particle.lifeleft <= 0.0f)
 	{
@@ -502,11 +524,11 @@ static void MoveEnhancedSnowParticle(enhanced_snow_particle& particle)
 		}
 	}
 
-	if (Viewer_object)
+	if (viewer)
 	{
-		const vector delta = particle.pos - Viewer_object->pos;
+		const vector delta = particle.pos - viewer->pos;
 		const float horizontal_distance_squared = delta.x * delta.x + delta.z * delta.z;
-		vector view_forward = Viewer_object->orient.fvec;
+		vector view_forward = viewer->orient.fvec;
 		view_forward.y = 0.0f;
 		vm_NormalizeVector(&view_forward);
 		const float forward_distance = delta.x * view_forward.x + delta.z * view_forward.z;
@@ -537,6 +559,8 @@ static void MoveEnhancedSnowParticles()
 
 static int CreateEnhancedSnow(float age, PSRand& random, int available_slots)
 {
+	auto* const viewer = WeatherObserver();
+	if (!viewer) return 0;
 	const float intensity = SnowClampIntensity(Weather.snow_intensity_scalar);
 	int num = 14 + (random() % 10);
 	if (num > available_slots)
@@ -547,8 +571,8 @@ static int CreateEnhancedSnow(float age, PSRand& random, int available_slots)
 	// Place new flakes in a world-aligned volume rather than a box attached to
 	// the current view. A modest velocity lead keeps a fast ship from outrunning
 	// the storm while every existing flake remains fixed in world space.
-	vector center = Viewer_object->pos;
-	vector viewer_velocity = Viewer_object->mtype.phys_info.velocity;
+	vector center = viewer->pos;
+	vector viewer_velocity = viewer->mtype.phys_info.velocity;
 	float viewer_speed = vm_GetMagnitudeFast(&viewer_velocity);
 	if (viewer_speed > 0.01f)
 	{
@@ -565,7 +589,7 @@ static int CreateEnhancedSnow(float age, PSRand& random, int available_slots)
 		sinf(wind_angle * 0.83f) * (3.0f + intensity * 3.0f)
 	};
 	angvec view_angles;
-	vm_ExtractAnglesFromMatrix(&view_angles, &Viewer_object->orient);
+	vm_ExtractAnglesFromMatrix(&view_angles, &viewer->orient);
 	matrix spawn_orient;
 	vm_AnglesToMatrix(&spawn_orient, 0, view_angles.h, 0);
 
@@ -596,7 +620,7 @@ static int CreateEnhancedSnow(float age, PSRand& random, int available_slots)
 		enhanced_snow_particle particle = {};
 		particle.pos = pos;
 		particle.last_surface_probe_pos = pos;
-		particle.roomnum = EnhancedWeatherRoomForPos(pos, Viewer_object->roomnum);
+		particle.roomnum = EnhancedWeatherRoomForPos(pos, viewer->roomnum);
 		const float size_roll = SnowRandomUnit(random);
 		if (size_roll < 0.82f)
 			particle.size = 0.25f + SnowRandomUnit(random) * 0.40f;
@@ -635,11 +659,13 @@ static int CreateEnhancedSnow(float age, PSRand& random, int available_slots)
 
 static void DoLegacySnowEffect()
 {
-	if (OBJECT_OUTSIDE(Viewer_object))
+	auto* const viewer = WeatherObserver();
+	if (!viewer) return;
+	if (OBJECT_OUTSIDE(viewer))
 	{
 		float snow_ages[8] = {};
-		const int snow_events = Get60HzVisualEventAges(OBJNUM(Viewer_object),
-			Viewer_object->handle, VIS60_WEATHER_SNOW, snow_ages, 8);
+		const int snow_events = Get60HzVisualEventAges(OBJNUM(viewer),
+			viewer->handle, VIS60_WEATHER_SNOW, snow_ages, 8);
 		for (int event = 0; event < snow_events; ++event)
 		{
 			int num = 20 + (ps_rand() % 15);
@@ -655,11 +681,11 @@ static void DoLegacySnowEffect()
 				}
 			}
 
-			matrix mat = Viewer_object->orient;
+			matrix mat = viewer->orient;
 
 			for (int i = 0; i < num; i++)
 			{
-				vector pos = Viewer_object->pos;
+				vector pos = viewer->pos;
 
 				float z = ((ps_rand() % 1000) / 1000.0) * 300;
 				float x = (((ps_rand() % 1000) - 500) / 500.0) * 200;
@@ -675,7 +701,7 @@ static void DoLegacySnowEffect()
 					continue;
 
 				vector down_vec = { 0,-30,0 };
-				int visnum = VisEffectCreate(VIS_FIREBALL, SNOWFLAKE_INDEX, Viewer_object->roomnum, &pos);
+				int visnum = VisEffectCreate(VIS_FIREBALL, SNOWFLAKE_INDEX, viewer->roomnum, &pos);
 				if (visnum >= 0)
 				{
 					vis_effect* vis = &VisEffects[visnum];
@@ -702,6 +728,8 @@ static void DoLegacySnowEffect()
 // Creates snow for this frame
 void DoSnowEffect()
 {
+	auto* const viewer = WeatherObserver();
+	if (!viewer) return;
 	if (!Render_enhanced_weather)
 	{
 		Enhanced_snow_particles.clear();
@@ -709,7 +737,7 @@ void DoSnowEffect()
 		return;
 	}
 
-	if (OBJECT_OUTSIDE(Viewer_object))
+	if (OBJECT_OUTSIDE(viewer))
 	{
 		MoveEnhancedSnowParticles();
 		const float intensity = SnowClampIntensity(Weather.snow_intensity_scalar);
@@ -719,13 +747,13 @@ void DoSnowEffect()
 			missing_flakes = 0;
 
 		float snow_ages[8] = {};
-		const int snow_events = Get60HzVisualEventAges(OBJNUM(Viewer_object),
-			Viewer_object->handle, VIS60_WEATHER_SNOW, snow_ages, 8);
+		const int snow_events = Get60HzVisualEventAges(OBJNUM(viewer),
+			viewer->handle, VIS60_WEATHER_SNOW, snow_ages, 8);
 		for (int event = 0; event < snow_events; ++event)
 		{
 			if (missing_flakes <= 0)
 				break;
-			PSRand snow_random(Get60HzVisualNoise((uint32_t)Viewer_object->handle,
+			PSRand snow_random(Get60HzVisualNoise((uint32_t)viewer->handle,
 				0x50u + (uint32_t)event));
 			const int created = CreateEnhancedSnow(snow_ages[event], snow_random, missing_flakes);
 			missing_flakes -= created;

@@ -32,6 +32,9 @@ struct SceneFrameFeedback {
     std::vector<int32_t> automap_rooms, effect_rooms;
     std::vector<uint32_t> objects;
     bool terrain = false;
+    bool main_view_present = false, main_exterior_visible = false;
+    uint64_t main_view_key = 0, main_camera_variant = 0;
+    uint32_t main_camera_owner = 0;
 };
 
 class SceneFeedbackTransaction {
@@ -49,6 +52,8 @@ class SceneFeedbackTransaction {
         std::vector<uint32_t> replay_objects;
         void clear() {
             result.frame_sequence = result.scene_lifetime = 0; result.terrain = false;
+            result.main_view_present = result.main_exterior_visible = false;
+            result.main_view_key = result.main_camera_variant = result.main_camera_owner = 0;
             result.automap_rooms.clear(); result.effect_rooms.clear(); result.objects.clear();
             room_domains.clear(); object_seen.clear(); view_indices.clear(); views.clear();
             replay_rooms.clear(); replay_objects.clear();
@@ -66,6 +71,9 @@ class SceneFeedbackTransaction {
 public:
     SceneFeedbackTransaction(const SceneFeedbackTransaction&) = delete;
     SceneFeedbackTransaction& operator=(const SceneFeedbackTransaction&) = delete;
+    // Game policy over the exact executable view. No renderer callback or GPU
+    // result is involved, and unsupported/independent view roles do nothing.
+    bool observe(const d3scene::PreparedView&);
     explicit SceneFeedbackTransaction(const d3scene::Presentation& frame) : frame_(frame.shared_from_this()) {
         static thread_local auto pool = std::make_shared<Pool>();
         pool_ = pool;
@@ -147,3 +155,44 @@ public:
         return storage_.result;
     }
 };
+
+// Once-only game commit, independent of GPU replay and publication numbering.
+// Validate every live source before any mutation; the sink's apply operation
+// must be allocation-free and nonthrowing. A rejected attempt consumes nothing.
+class SceneFeedbackCommit {
+    uint64_t lifetime_ = 0, sequence_ = 0, game_frame_ = 0;
+public:
+    template<class Sink>
+    bool commit(const d3scene::Presentation& frame,const SceneFrameFeedback& result,
+        uint64_t game_frame,Sink& sink) {
+        static_assert(noexcept(sink.apply(result,game_frame)),"Game observation writes must not throw");
+        if (result.frame_sequence != frame.data().sequence || result.scene_lifetime != frame.data().scene_lifetime)
+            throw std::invalid_argument("Observation commit does not belong to its publication");
+        if (result.objects.size() > frame.data().objects.size())
+            throw std::invalid_argument("Observation commit exceeds its source object inventory");
+        if (lifetime_ == result.scene_lifetime && sequence_) {
+            if (game_frame_ == game_frame && sequence_ == result.frame_sequence) return false;
+            if (game_frame <= game_frame_ || result.frame_sequence <= sequence_)
+                throw std::logic_error("Game observation frame was replayed or reordered");
+        }
+        const auto room = [&](int32_t id) {
+            if (frame.roomIndices().find(id) == frame.roomIndices().end())
+                throw std::invalid_argument("Observation room is absent from its publication");
+            sink.validateRoom(id);
+        };
+        for (auto id : result.automap_rooms) room(id);
+        for (auto id : result.effect_rooms) room(id);
+        for (auto object : result.objects) {
+            if (frame.objectIndices().find(object) == frame.objectIndices().end())
+                throw std::invalid_argument("Observation object is absent from its publication");
+            sink.validateObject(object);
+        }
+        sink.apply(result,game_frame);
+        lifetime_ = result.scene_lifetime; sequence_ = result.frame_sequence; game_frame_ = game_frame;
+        return true;
+    }
+};
+
+// The only simulation writer for an accepted world-view transaction. Called
+// by the game frame owner, never by rendering or independent image requests.
+bool CommitGameVisibility(const d3scene::Presentation&,const SceneFrameFeedback&,uint64_t game_frame);

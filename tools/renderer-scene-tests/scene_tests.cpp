@@ -614,6 +614,7 @@ int runProceduralTests();
 int runTerrainTests();
 int runFogTests();
 int runFeedbackTests();
+int runGameFrameTests();
 int runCanvasTests();
 int runModuleContextTests();
 int runAutomapTests();
@@ -659,6 +660,7 @@ int main() {
         Checks += runTerrainTests();
         Checks += runFogTests();
         Checks += runFeedbackTests();
+        Checks += runGameFrameTests();
         Checks += runCanvasTests();
         Checks += runModuleContextTests();
         Checks += runAutomapTests();

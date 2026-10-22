@@ -142,3 +142,31 @@ SceneObservationInspection InspectSceneObservations(const d3scene::PreparedView&
     return inspectObservations(prepared.frame(),prepared.view(),prepared.visibility().camera,
         prepared.visibility().spatial,feedback);
 }
+
+bool SceneFeedbackTransaction::observe(const d3scene::PreparedView& prepared) {
+    using namespace d3scene;
+    const auto& view = prepared.view();
+    const bool main = view.kind == ViewKind::Main;
+    const bool mirror = view.kind == ViewKind::Mirror && view.has_clip_plane &&
+        view.reflections == ReflectionPolicy::SurfaceFilm && view.fog_path_origin == FogPathOrigin::ClipPlane;
+    if ((!main && view.kind != ViewKind::Auxiliary && !mirror) || view.collection != 0 ||
+        (view.has_clip_plane && !mirror) || (!mirror && !view.excluded_surfaces.empty()) ||
+        view.target != ViewTarget::Scene || view.ordering != ViewOrdering::Depth ||
+        view.projection != ViewProjection::Perspective || !view.portal_visibility) return false;
+    if (!view.exterior_origin && prepared.frame().roomIndices().find(view.room) == prepared.frame().roomIndices().end())
+        return false; // isolated model/diagnostic collections have no gameplay spatial root
+    auto& result = storage_.result;
+    if (main && result.main_view_present &&
+        (result.main_view_key != view.history_key || result.main_camera_owner != view.camera_owner ||
+         result.main_camera_variant != view.camera_variant ||
+         result.main_exterior_visible != prepared.visibility().exterior_visible))
+        throw std::invalid_argument("One game frame cannot have conflicting main weather observers");
+    const uint8_t domains = ObjectVisibility | EffectEligibility | (mirror ? 0 : Automap);
+    add(InspectSceneObservations(prepared,domains).report);
+    if (main) {
+        result.main_view_present = true; result.main_view_key = view.history_key;
+        result.main_camera_owner = view.camera_owner; result.main_camera_variant = view.camera_variant;
+        result.main_exterior_visible = prepared.visibility().exterior_visible;
+    }
+    return true;
+}
