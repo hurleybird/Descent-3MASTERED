@@ -980,6 +980,23 @@ d3scene::VisibilityReport RenderGameSceneView(const d3scene::Presentation& frame
     auto planar = [&] { PERF_MARKER_SCOPE("Scene.PrepareView");
         return d3scene::planPlanarViews(frame,view,Render_preferred_state.msaa_samples); }();
     view = planar.consumer.view();
+    if (AutomatedCapturePending() && FindArg("-scene-model-light-audit") && view.kind == d3scene::ViewKind::Main) {
+        const auto& visible = planar.consumer.visibility();
+        for (const auto& instance : frame.data().model_instances) {
+            if (std::find(visible.object_indices.begin(),visible.object_indices.end(),instance.compiled_owner) == visible.object_indices.end()) continue;
+            const auto clip = d3scene::project(visible.camera,instance.current.position);
+            if (clip.w <= 0) continue;
+            for (const auto& light : frame.data().lights) if (light.headlight) {
+                auto legacy = light;
+                legacy.radius /= .67f; legacy.falloff = 1;
+                const auto ambient = d3scene::resolveModelAmbient(frame.data().ambientFor(instance),instance.current.position,{1,1,1});
+                AutomatedCaptureLog("model headlight owner=%u room=%d ndc=%.6g,%.6g depth=%.6g ambient=%.6g,%.6g,%.6g canonical=%.6g legacy_object=%.6g",
+                    instance.owner,instance.room,clip.x/clip.w,clip.y/clip.w,clip.w,ambient.x,ambient.y,ambient.z,
+                    d3scene::lightAttenuation(light,instance.current.position)*light.color.x,
+                    d3scene::lightAttenuation(legacy,instance.current.position)*light.color.x/1.5f);
+            }
+        }
+    }
     if (FindArg("-scene-view-image-probe") && view.kind == d3scene::ViewKind::Main) {
         d3scene::ViewImageRequest image;
         image.image = SceneViewImageProbe; image.view = view;

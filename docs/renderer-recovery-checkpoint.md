@@ -2,6 +2,15 @@
 
 ## Current recovery continuation — 2026-10-21 (supersedes hypotheses below)
 
+Lossless cleanup reclaimed19,750,504,080 bytes by recompressing2843 generated
+capture PNGs under C:/tmp/D3RendererVerification. Every replacement was decoded
+and byte-compared with original decompressed PNG data. No screenshot/frame lost;
+preview/runtime/seed directories excluded. Helper out/recompress-captures.cjs.
+Headlight audit confirms barrel owners4324/4325 are outside canonical radius:
+canonical center attenuation0; original-radius object formula .265122/.219930.
+Evidence recover007-light-audit/capture.log and -scene-model-light-audit flag.
+This confirms light-response split rather than fog. Keep unified response for now.
+
 Restored effect eligibility for normal main/auxiliary views from their already
 prepared portal-room lists. GameLoop commits room/terrain timestamps after views;
 AI and automap remain uncommitted. Mirrors/diagnostic views remain excluded.
