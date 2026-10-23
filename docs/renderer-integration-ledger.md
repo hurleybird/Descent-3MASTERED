@@ -216,3 +216,35 @@ Neither policy change caused the initial comparison discrepancy. Real fog-roof
 captures before/after the policy change are byte-identical and were inspected:
 integration-canvas-transport-roof-{before,after}-20261022. These checks do not
 claim a new fog appearance fix or complete lifecycle/export/module qualification.
+
+## Source-captured module world-preview ABI
+
+The world-view export now has the exact six-argument type used by shipped DMFC.
+It records an independent image request and an ordered opaque canvas quad,
+retaining the existing published world. No GPU call or recursive extraction
+occurs in that adapter. Source capture owns a bounded frame stack, callback
+preview namespace and requested samples. Full absolute rectangles become image
+extents and viewport-relative canvas placement. Outside a source canvas the
+world export explicitly rejects the request; no implicit last world is used.
+
+The module StartFrame/EndFrame/GetFrameParameters/ResetFacings/depth-state exports
+translate inside this source context and retain the UI path outside it. The
+game schedules recorded preview images, including planar dependencies, before
+their display-canvas consumers. Preview admission remains observation-free.
+The other module graphics exports and real custom/HUD-interval callbacks are
+NOT restored yet; do not enable them before their translator is complete.
+
+CPU suites pass: exact ABI type, two offset cameras, copied values/ownership,
+separate histories, requested MSAA, frame balancing/nesting limits, bounded
+preview count, out-of-scope rejection and no output growth on budget failure.
+The engine build passes. The capture-only fixture calls actual GetGameAPI table
+slots247–252, matching dmfcdllinit.h, with six-argument function pointers. Its
+forward/rear previews at(120,120)/(440,150) were visually inspected. Stable
+240x135/MSAA4 storage is reused; the resize fixture changes both images to
+280x160/MSAA2 on frame10, reallocates once, then reuses on frame11. No GL errors.
+Evidence: integration-module-api-20261022 and integration-module-api-resize-20261022.
+This is actual exported-table coverage, NOT loaded-DMFC callback qualification
+or two-player/menu/observer acceptance. I21/I22 remain open until those callers,
+the 2D translator and their ordering/lifecycle are qualified together.
+The ordinary inspection path without module probes remains byte-identical to
+the prior normal capture: integration-module-normal-20261022 (SHA0C5AFFFD…A79FBB44).

@@ -3206,8 +3206,16 @@ void GameRenderFrame(void)
 				(unsigned)observations.objects.size(),AI_NumRendered,observations.terrain,
 				observations.main_view_present,observations.main_exterior_visible,observations.main_camera_owner);
 		rend_PerfGpuSceneMark(RENDERER_GPU_SCENE_AFTER_SMALL_VIEWS);
+		static std::vector<d3scene::ViewImageRequest> module_images;
+		module_images.clear();
 		const auto overlay_presentation = FindArg("-scene-automap-probe") ? d3scene::PresentationRef{} :
-			PrepareGameOverlayPresentation(*presentation,hud_layout,true);
+			PrepareGameOverlayPresentation(*presentation,hud_layout,true,module_images);
+		for (auto& image : module_images) {
+			auto plan = d3scene::planPlanarViews(*presentation,image.view,Render_preferred_state.msaa_samples);
+			image.view = plan.consumer.view();
+			plan.images.push_back(image);
+			d3scene::renderViewImages(*presentation,plan.images);
+		}
 		if (SceneGeometryInspection() && FindArg("-scene-layer-probe"))
 		{
 			// Exercise the canvas composition boundary without invoking any

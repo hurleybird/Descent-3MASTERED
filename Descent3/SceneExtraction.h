@@ -75,12 +75,11 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance = true,const GameM
 // A game-owned post-observation publication. It owns HUD/module descriptions,
 // never extracts another world or advances the world's temporal predecessor.
 d3scene::PresentationRef PrepareGameOverlayPresentation(const d3scene::Presentation& world,
-    const HUDCanvasLayout&,bool advance);
+    const HUDCanvasLayout&,bool advance,std::vector<d3scene::ViewImageRequest>& world_images);
 void RenderGameSceneView(const d3scene::Presentation&, d3scene::View,
     SceneFeedbackTransaction* game_observations = nullptr);
 bool SceneGeometryInspection();
-void RenderModuleSceneView(object*, vector*, int, matrix*, float, bool,
-    int anchor_x = 0, int anchor_y = 0, int anchor_w = 0, int anchor_h = 0);
+void RenderModuleSceneView(object*, vector*, int, matrix*, float, bool);
 
 d3scene::View MakeGameSceneView(d3scene::ViewKind kind, uint64_t history_key,
     const object* viewer, const vector& eye, int room, const matrix& orientation,

@@ -18,6 +18,9 @@
 
 #include "pstypes.h"
 #include "SceneExtraction.h"
+#include "SceneModuleContext.h"
+#include <limits>
+#include <stdexcept>
 #include "pserror.h"
 #include "game.h"
 #include "game2dll.h"
@@ -128,6 +131,40 @@ static void DUMMYrend_DrawScaledBitmap(int x1, int y1, int x2, int y2, int bm, f
 {
 	ASSERT(zval >= 0.0f && zval <= 1.0f);
 	rend_DrawScaledBitmap(x1, y1, x2, y2, bm, u0, v0, u1, v1, color, alphas);
+}
+
+static void ModuleStartFrame(int x,int y,int right,int bottom,bool clear) {
+    if (auto* capture = ModuleCanvasCapture()) {
+        const int64_t width = int64_t(right)-x,height = int64_t(bottom)-y;
+        if (width <= 0 || height <= 0 || width > (std::numeric_limits<int32_t>::max)() || height > (std::numeric_limits<int32_t>::max)())
+            throw std::invalid_argument("Invalid module preview frame rectangle");
+        capture->startFrame({x,y,int32_t(width),int32_t(height)});
+    } else dStartFrame(x,y,right,bottom,clear);
+}
+static void ModuleEndFrame() {
+    if (auto* capture = ModuleCanvasCapture()) capture->endFrame(); else EndFrame();
+}
+static bool ModuleFrameParameters(int* x,int* y,int* right,int* bottom) {
+    if (auto* capture = ModuleCanvasCapture()) {
+        if (!x || !y || !right || !bottom) throw std::invalid_argument("Missing module frame rectangle output");
+        const auto rectangle = capture->frame();
+        *x = rectangle.x; *y = rectangle.y;
+        *right = rectangle.x+rectangle.width; *bottom = rectangle.y+rectangle.height;
+        return true;
+    }
+    return GetFrameParameters(x,y,right,bottom);
+}
+static void ModuleResetFacings() {
+    // Preview requests query immutable world geometry; they cannot reset the
+    // game's legacy traversal marks while the source callback is recording.
+    if (!ModuleCanvasCapture()) ResetFacings();
+}
+static void ModuleDepthState(int state) {
+    // Canvas geometry is depth-independent; recorded world images own depth.
+    // This compatibility setter cannot change GPU state during source capture.
+    if (ModuleCanvasCapture()) {
+        if (state != 0 && state != 1) throw std::invalid_argument("Invalid module depth state");
+    } else rend_SetZBufferState(state);
 }
 
 void GetGameAPI(game_api* api)
@@ -394,12 +431,12 @@ void GetGameAPI(game_api* api)
 	NEXTFP = (int*)vm_GetCentroidFast;
 	NEXTFP = (int*)RenderHUDGetTextLineWidth;
 	NEXTFP = (int*)RenderHUDGetTextHeight;
-	NEXTFP = (int*)dStartFrame;
-	NEXTFP = (int*)EndFrame;
-	NEXTFP = (int*)ResetFacings;
+	NEXTFP = (int*)ModuleStartFrame;
+	NEXTFP = (int*)ModuleEndFrame;
+	NEXTFP = (int*)ModuleResetFacings;
 	NEXTFP = (int*)RenderModuleSceneView;
-	NEXTFP = (int*)GetFrameParameters;
-	NEXTFP = (int*)rend_SetZBufferState;
+	NEXTFP = (int*)ModuleFrameParameters;
+	NEXTFP = (int*)ModuleDepthState;
 	NEXTFP = (int*)rend_SetLighting;
 	NEXTFP = (int*)rend_SetColorModel;
 	NEXTFP = (int*)rend_SetTextureType;
@@ -557,6 +594,35 @@ void GetGameAPI(game_api* api)
 	Multi_d3m_osiris_funcs.module_is_static = false;
 	Multi_d3m_osiris_funcs.game_checksum = Osiris_game_checksum;
 	Multi_d3m_osiris_funcs.script_identifier = Netgame.scriptname;
+}
+
+// Capture-only use of the actual exported table, with the slot indices and
+// six-argument signature consumed by dmfcdllinit.h/gamedll_header.h. This does
+// not claim to exercise an actually loaded multiplayer module's callbacks.
+void ExerciseModuleSceneViewAPI(object* viewer,bool resized) {
+    if (!viewer || !ModuleCanvasCapture()) throw std::logic_error("Module API fixture requires a source canvas and viewer");
+    game_api api{}; GetGameAPI(&api);
+    if (api.fp[247] != (int*)ModuleStartFrame || api.fp[250] != (int*)RenderModuleSceneView ||
+        api.fp[251] != (int*)ModuleFrameParameters)
+        throw std::logic_error("Module scene export slot layout changed");
+    auto start = reinterpret_cast<void (*)(int,int,int,int,bool)>(api.fp[247]);
+    auto end = reinterpret_cast<void (*)()>(api.fp[248]);
+    auto reset = reinterpret_cast<void (*)()>(api.fp[249]);
+    auto world = reinterpret_cast<void (*)(object*,vector*,int,matrix*,float,bool)>(api.fp[250]);
+    auto parameters = reinterpret_cast<bool (*)(int*,int*,int*,int*)>(api.fp[251]);
+    auto depth = reinterpret_cast<void (*)(int)>(api.fp[252]);
+    for (int i = 0; i < 2; ++i) {
+        const int x = 120+i*320,y = 120+i*30;
+        const int width = resized ? 280 : 240,height = resized ? 160 : 135;
+        start(x,y,x+width,y+height,true);
+        int left,top,right,bottom;
+        if (!parameters(&left,&top,&right,&bottom) || left != x || top != y || right != x+width || bottom != y+height)
+            throw std::logic_error("Module API lost its full active frame rectangle");
+        reset(); depth(1);
+        vector eye = viewer->pos; matrix orientation = viewer->orient;
+        world(viewer,&eye,viewer->roomnum,&orientation,Render_zoom,i != 0);
+        end();
+    }
 }
 
 //Closes and deletes any tempfiles for the game module

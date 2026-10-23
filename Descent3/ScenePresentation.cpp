@@ -795,7 +795,7 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance,const GameMainView
 }
 
 d3scene::PresentationRef PrepareGameOverlayPresentation(const d3scene::Presentation& world,
-    const HUDCanvasLayout& layout,bool advance) {
+    const HUDCanvasLayout& layout,bool advance,std::vector<d3scene::ViewImageRequest>& world_images) {
     PERF_MARKER_SCOPE("Scene.PrepareGameOverlays");
     auto data = d3scene::acquireFrameData();
     data.sequence = AllocateGamePresentationSequence();
@@ -807,6 +807,26 @@ d3scene::PresentationRef PrepareGameOverlayPresentation(const d3scene::Presentat
     PrepareGameHUD(data,layout,advance);
     PrepareCinematicCanvas(data);
     PrepareGameInspectionBanner(data);
+    if (FindArg("-scene-module-view-probe")) {
+        constexpr uint64_t collection = 0x4d4f44554c455052ull;
+        int32_t order = 0;
+        std::vector<d3scene::ViewImageInput> inputs;
+        const bool resized = FindArg("-scene-module-view-resize-probe") && AutomatedCaptureFrameIndex() >= 10;
+        {
+            ModuleCanvasScope capture(data,collection,order,layout.display,collection+1,world_images,inputs,
+                SceneGeometryInspection(),resized ? 2 : Render_preferred_state.msaa_samples);
+            ExerciseModuleSceneViewAPI(Player_object,resized);
+            capture.complete();
+        }
+        d3scene::PreparedForeground foreground; foreground.identity = collection; foreground.order = 40;
+        foreground.phase = d3scene::ForegroundPhase::FinalOverlay;
+        auto canvas = MakeSceneCanvasView(collection,layout.display,d3scene::ViewTarget::Display,true);
+        canvas.image_inputs = std::move(inputs);
+        foreground.layer.display_views.push_back(std::move(canvas));
+        data.foregrounds.push_back(std::move(foreground));
+        if (AutomatedCapturePending()) AutomatedCaptureLog("scene module API previews=%u world=%llu canvas=%llu",
+            unsigned(world_images.size()),(unsigned long long)world.data().sequence,(unsigned long long)data.sequence);
+    }
     if (FindArg("-scene-cross-publication-image-probe")) {
         if (!FindArg("-scene-view-image-probe")) Error("Cross-publication image fixture requires its world image producer");
         const auto collection = SceneViewImageProbe+2;
@@ -1199,16 +1219,4 @@ void PrepareCockpitComposition(d3scene::FrameData& frame,d3scene::Rect viewport,
     frame.foregrounds.push_back({SceneCockpitBase,std::move(layer),40});
     if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
         AutomatedCaptureLog("scene cockpit composed base=%d late=%d gauges=%d text=%d",base,late,gauges,text);
-}
-
-void RenderModuleSceneView(object* viewer, vector* eye, int room, matrix* orientation,
-    float zoom, bool rear, int x, int y, int w, int h) {
-    if (!eye || !orientation) Error("Module scene view has no camera");
-    int width, height;
-    rend_GetProjectionParameters(&width, &height);
-    if (w <= 0 || h <= 0) { x = y = 0; w = width; h = height; }
-    const auto frame = ModuleScenePresentation();
-    const auto view = MakeGameSceneView(d3scene::ViewKind::Preview, 0x100000000ull,
-        viewer, *eye, room, *orientation, zoom, rear, {0, 0, width, height}, {x, y, w, h});
-    RenderGameSceneView(*frame, view);
 }
