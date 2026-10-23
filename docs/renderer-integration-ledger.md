@@ -474,3 +474,37 @@ qualify actual demo recording/playback files or the omitted diagnostics/player
 labels. A separate visual concern in this scene is bright floor bands appearing
 through the monitor areas; investigate I18 opacity/depth/composition before
 promotion, without assuming this is new or altering cancelled cockpit geometry.
+
+## Game-owned object emitters (I13 implementation; broader qualification pending)
+
+Powerup sparkles and damaged/virus lightning now advance after object movement,
+once per logical game frame. Their old renderobject callbacks and draw-owned
+sparkle clock are removed. Eligibility is the previous accepted world observation
+union, stamped with full object handle, scene lifetime and 64-bit logical frame;
+neither independent publications nor a wrapped 16-bit renderframe can enable it.
+Admission gaps explicitly reset local clocks. Each bounded 30/60Hz event owns a
+local RNG stream, so allocation failure, replay or additional cameras cannot
+consume gameplay randomness or multiply an object's emissions. Newly attached
+arcs resolve initial endpoints from one lazy object-pose sample, not a zero-length
+placeholder awaiting another update. No per-frame heap storage was added.
+
+The real producer is linked into CPU tests with only allocation/light/pose game
+boundaries substituted; the existing throwing ps_rand fixture catches accidental
+shared RNG use. Tests cover paused/repeated/reordered updates, 16-bit frame wrap,
+stale/foreign-scene/recycled-handle observations, bounded cadence, explicit
+admission breaks, scene resets, allocation failure, and initial attachments.
+Engine and all three CPU suites pass.
+
+Native ObjCreate fixtures (not direct effect injection) produce damage and virus
+arcs plus powerup sparkles. Actual rear-monitor capture at frame180 records
+4620 sparkles,16 damage bolts,21 virus bolts; both arc colors are visible in the
+inspected output. Evidence: integration-object-emissions-{main,rear}-20261023.
+The same frame180 run without the rear monitor produces2473 sparkles but the
+same16 damage/21 virus bolts: additional observed powerups are admitted, not
+duplicate emission from the already observed front objects.
+The ordinary003 save now naturally includes the previously omitted sparkles;
+its image is intentionally not byte-identical (0.3335% changed pixels, confined
+to world effects at x378..964/y178..410). Evidence: integration-object-emissions-
+normal-20261023. These short GL-audited runs are not performance or full natural
+combat/destruction qualification, and do not close the remaining I13/viewer-wide
+deformation and other release gates.

@@ -71,7 +71,4 @@ int IsPointVisible (vector *,float,float *pointz=NULL);
 // Draws the 'typing message' icon indicator above an object
 void DrawPlayerTypingIndicator (object *obj);
 
-#define POWERUP_SPARKLE_INTERVAL 1.0f/30.0f
-extern float Last_powerup_sparkle_time;
-
 #endif

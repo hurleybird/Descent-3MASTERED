@@ -33,6 +33,7 @@
 #include "TelCom.h"
 #include "SceneModuleContext.h"
 #include "SceneFeedback.h"
+#include "GameVisualEffects.h"
 #include "../renderer/SceneLighting.h"
 #include "../renderer/SceneAnimation.h"
 #include "game.h"
@@ -48,6 +49,7 @@
 #include "damage.h"
 #include "ship.h"
 #include "objinit.h"
+#include "objinfo.h"
 #include "gameevent.h"
 #include "gametexture.h"
 #include "AIMain.h"
@@ -3041,9 +3043,6 @@ void GameRenderFrame(void)
 	Mine_depth = 0;
 #endif
 
-	// increase our timing for the powerup sparkles, used globally by all
-	Last_powerup_sparkle_time += Frametime;
-
 	{
 		PERF_MARKER_SCOPE("PreUpdateAllLightGlows");
 		PreUpdateAllLightGlows();
@@ -3091,6 +3090,29 @@ void GameRenderFrame(void)
 
 		// Publish once. Every world view below sees this same owned scene, not
 		// a second traversal of mutable simulation state.
+		if (AutomatedCaptureFrameIndex() == 0 && FindArg("-scene-object-emissions-probe") && Player_object) {
+			int powerup = -1,robot = GENOBJ_GUIDEBOT;
+			for (int i = 0; i <= Highest_object_index; ++i) {
+				if (Objects[i].type == OBJ_POWERUP && powerup < 0) powerup = Objects[i].id;
+				if (Objects[i].type == OBJ_ROBOT) robot = Objects[i].id;
+			}
+			if (powerup < 0) Error("Object emission fixture needs an authored powerup");
+			Render_powerup_sparkles = true;
+			for (int variant = 0; variant < 3; ++variant) {
+				auto position = Player_object->pos+Player_object->orient.fvec*16+
+					Player_object->orient.rvec*((variant-1.f)*5);
+				const int index = ObjCreate(variant ? OBJ_ROBOT : OBJ_POWERUP,variant ? robot : powerup,
+					Player_object->roomnum,&position,&Player_object->orient);
+				if (index < 0) Error("Object emission fixture initialization failed");
+				auto& source = Objects[index]; source.control_type = CT_NONE; source.movement_type = MT_NONE;
+				source.shields = variant == 1 ? .01f : 100000;
+				if (variant == 2) {
+					if (!source.effect_info) Error("Authored robot has no effect state for virus fixture");
+					source.effect_info->type_flags |= EF_VIRUS_INFECTED;
+				}
+				AutomatedCaptureLog("scene real object-init emitter fixture variant=%d owner=%u definition=%d",variant,source.handle,source.id);
+			}
+		}
 		if (AutomatedCaptureFrameIndex() == 1 && FindArg("-scene-mass-snow-probe") && Player_object) {
 			// Legacy flakes are deliberately retired by the simulation while the
 			// enhanced-weather option is active. Exercise their actual setting.
@@ -3461,12 +3483,6 @@ void GameRenderFrame(void)
 	{
 		PERF_MARKER_SCOPE("PostUpdateAllLightGlows");
 		PostUpdateAllLightGlows();
-	}
-
-	// Reset our powerup sparkle time if it has overflowed
-	while (Last_powerup_sparkle_time >= POWERUP_SPARKLE_INTERVAL)
-	{
-		Last_powerup_sparkle_time -= POWERUP_SPARKLE_INTERVAL;
 	}
 
 }
@@ -3912,6 +3928,20 @@ void GameFrame(void)
 		//Move objects for this frame
 		RTP_tSTARTTIME(objframe_time, curr_time);
 		ObjDoFrameAll();
+		const auto visual_emissions = AdvanceGameVisualEffects(d3scene::assets().lifetime(),uint64_t(FrameCount),false);
+		if (FindArg("-scene-emitter-replay-probe") &&
+			AdvanceGameVisualEffects(d3scene::assets().lifetime(),uint64_t(FrameCount),false).advanced)
+			Error("Game-owned emitter advanced twice in one logical frame");
+		if (FindArg("-scene-object-emissions-probe") && AutomatedCaptureFrameIndex() >= 0) {
+			static GameVisualEmissionStats totals;
+			if (AutomatedCaptureFrameIndex() == 0) totals = {};
+			totals.sparkles += visual_emissions.sparkles; totals.damage += visual_emissions.damage; totals.virus += visual_emissions.virus;
+			if (AutomatedCapturePending()) AutomatedCaptureLog("game visual fixture totals sparkles=%u damage=%u virus=%u",
+				totals.sparkles,totals.damage,totals.virus);
+		}
+		if (AutomatedCapturePending() && (visual_emissions.sparkles || visual_emissions.damage || visual_emissions.virus))
+			AutomatedCaptureLog("game visual emissions frame=%d objects=%u sparkles=%u damage=%u virus=%u",FrameCount,
+				visual_emissions.objects,visual_emissions.sparkles,visual_emissions.damage,visual_emissions.virus);
 		RTP_tENDTIME(objframe_time, curr_time);
 
 		RTP_tSTARTTIME(matcenframe_time, curr_time);

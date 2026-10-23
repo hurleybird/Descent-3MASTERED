@@ -109,9 +109,6 @@ static unsigned int RenderObject_transparent_extra_random_state = 0;
 
 bool GetLinearPosition(vector* points, float* times, int num_points, float t, vector* pos);
 
-float Last_powerup_sparkle_time = 0.0f;
-bool Render_powerup_sparkles = false;
-
 static bool RenderObject_IsLegacyMotionBlurEligible(const object* obj)
 {
 	if (!obj || obj->render_type != RT_POLYOBJ || obj->size <= 0.001f)
@@ -420,8 +417,6 @@ private:
 	double start_time;
 };
 
-//Do powerup sparkles and stuff
-void DrawPowerupSparkles(object* obj);
 // Draws the glowing disk around a powerup
 void DrawPowerupGlowDisk(object* obj);
 // Draws a damage disk around a powerup
@@ -432,10 +427,6 @@ void DrawPlayerSightVector(object* obj);
 void DrawPlayerNameOnHud(object* obj);
 // Draws a rotating ball around the player
 void DrawPlayerRotatingBall(object* obj);
-// Creates lightning sparks on a damaged object
-void DrawSparkyDamageLightning(object* obj);
-// Creates Virus infected lightning on an object
-void DrawVirusLightning(object* obj);
 
 #ifdef EDITOR
 //Draws the little corner brackets around the selected object
@@ -1507,7 +1498,6 @@ static bool RenderObjectInternal(object* obj)
 		if (obj->type == OBJ_POWERUP && RenderObject_pass != RENDER_OBJECT_OPAQUE)
 		{
 			DrawPowerupGlowDisk(obj);
-			DrawPowerupSparkles(obj);
 		}
 
 		if (obj->type == OBJ_PLAYER && RenderObject_pass != RENDER_OBJECT_OPAQUE)
@@ -1516,12 +1506,6 @@ static bool RenderObjectInternal(object* obj)
 			DrawPlayerRotatingBall(obj);
 			DrawPlayerTypingIndicator(obj);
 			DrawPlayerInvulSphere(obj);
-		}
-		if (RenderObject_pass != RENDER_OBJECT_OPAQUE &&
-			(obj->type == OBJ_PLAYER || obj->type == OBJ_ROBOT || (obj->type == OBJ_BUILDING && obj->ai_info)))
-		{
-			DrawSparkyDamageLightning(obj);
-			DrawVirusLightning(obj);
 		}
 		if (perf_scope.IsActive() && has_extra_effects)
 		{
@@ -2270,94 +2254,6 @@ int IsPointVisible(vector* pos, float size, float* pointz)
 }
 
 //Do powerup sparkles and stuff
-void DrawPowerupSparkles(object* obj)
-{
-	PERF_MARKER_SCOPE("RenderObject.PowerupSparkles");
-	extern bool Render_mirror_for_room;
-	if (!Render_powerup_sparkles)
-		return;
-
-	if (Game_paused)
-		return;
-
-	// we want to render if
-	// a) we are not rendering in a mirror
-	// b) we are rendering a mirror but the object is not visible from our position
-	if (Render_mirror_for_room && !IsPointVisible(&obj->pos, obj->size, NULL))
-		return;
-
-	if (obj->render_type != RT_POLYOBJ)
-		return;
-
-	// check to see if it's time to update
-	if (Last_powerup_sparkle_time < POWERUP_SPARKLE_INTERVAL)
-		return;
-
-	int num_sparks = ps_rand() & 7;
-	float obj_size_delta = obj->size * 0.3f;
-
-	// Create some sparks	
-	for (int i = 0; i < num_sparks; ++i)
-	{
-		const int randnum = ps_rand() % 10;
-
-		int index;
-		switch (randnum)
-		{
-		case 0:
-			index = HOT_SPARK_INDEX;
-			break;
-		case 1:
-			index = COOL_SPARK_INDEX;
-			break;
-		default:
-			index = GRAY_SPARK_INDEX;
-			break;
-		}
-
-		vector pos_delta;
-		pos_delta.x = (ps_rand() % 100) - 50;
-		pos_delta.y = (ps_rand() % 100) - 80;
-		pos_delta.z = (ps_rand() % 100) - 50;
-		vm_NormalizeVector(&pos_delta);
-		pos_delta = obj->last_pos + (obj_size_delta * pos_delta);
-
-		int sparknum = VisEffectCreate(VIS_FIREBALL, index, obj->roomnum, &pos_delta);
-		if (sparknum >= 0)
-		{
-			vis_effect* vis = &VisEffects[sparknum];
-
-			vis->end_pos = vis->pos;
-			vis->movement_type = MT_PHYSICS;
-			vis->mass = 1000.0f;
-			vis->drag = 0.2f;
-			vis->phys_flags |= PF_GRAVITY | PF_NO_COLLIDE;
-
-			vis->velocity.x = (ps_rand() % 50) - 25;
-			vis->velocity.y = -10 - (ps_rand() % 20);
-			vis->velocity.z = (ps_rand() % 50) - 25;
-			vm_NormalizeVector(&vis->velocity);
-			vis->velocity *= 3.0f + (ps_rand() % 4);
-
-			vis->size = 0.05f + ((ps_rand() % 10) * 0.008f);
-			vis->flags |= VF_USES_LIFELEFT | VF_NO_SOFT_PARTICLES;
-
-			const float lifetime = 0.25f + ((ps_rand() % 10) * 0.05f);
-			vis->lifeleft = lifetime;
-			vis->lifetime = lifetime;
-
-			light_info* li = ObjGetLightInfo(obj);
-			if (li)
-			{
-				vis->lighting_color = GR_RGB16(li->red_light1 * 255.0f, li->green_light1 * 255.0f, li->blue_light1 * 255.0f);
-			}
-			else
-			{
-				vis->lighting_color = GR_RGB16(255, 255, 255);
-			}
-		}
-	}
-}
 
 #define POWERUP_HALO_ALPHA	.3f
 // Draws the glowing disk around a powerup
@@ -2717,114 +2613,6 @@ void QueueMultiplayerPlayerNamesOnHud()
 }
 
 // Creates lightning sparks on a damaged object
-void DrawSparkyDamageLightning(object* obj)
-{
-	float max_shields = 100;
-	if (obj->type == OBJ_ROBOT || obj->type == OBJ_CLUTTER || obj->type == OBJ_BUILDING)
-		max_shields = Object_info[obj->id].hit_points;
-	if (obj->type == OBJ_PLAYER)
-		max_shields = INITIAL_SHIELDS;
-	// If less than 30% shields, make some lightning every now and then
-	if (max_shields > 0 && (obj->shields / max_shields) < .3 && obj->shields >= 0)
-	{
-		float shield_norm = (obj->shields / max_shields) / .3;
-		shield_norm = 1 - shield_norm;
-		ASSERT(shield_norm >= 0 && shield_norm <= 1);
-		int shield_modulo = 20 - (12 * shield_norm);
-		if (shield_modulo < 1)
-			shield_modulo = 1;
-		float lightning_ages[8] = {};
-		const int lightning_events = Get60HzVisualEventAges(OBJNUM(obj), obj->handle,
-			VIS60_DAMAGE_LIGHTNING, lightning_ages, 8);
-		for (int event = 0; event < lightning_events; ++event)
-		{
-			if ((ps_rand() % shield_modulo) != 0)
-				continue;
-			poly_model* pm = &Poly_models[obj->rtype.pobj_info.model_num];
-			if (pm->n_models == 0)
-				return;
-			int subnum = ps_rand() % pm->n_models;
-			if (IsNonRenderableSubmodel(pm, subnum))
-				return;
-
-			bsp_info* sm = &pm->submodel[subnum];
-			if (sm->nverts == 0)
-				return;
-			int visnum = VisEffectCreate(VIS_FIREBALL, LIGHTNING_BOLT_INDEX, obj->roomnum, &obj->pos);
-			if (visnum >= 0)
-			{
-				vis_effect* vis = &VisEffects[visnum];
-				vis->lifeleft = 1.0;
-				vis->lifetime = 1.0;
-				vis->creation_time -= lightning_ages[event];
-				vis->lifeleft -= lightning_ages[event];
-				vis->end_pos = obj->pos;
-				vis->velocity.x = .15f;
-				vis->velocity.y = 3;
-				vis->attach_info.obj_handle = obj->handle;
-				vis->attach_info.subnum = subnum;
-				vis->attach_info.vertnum = ps_rand() % sm->nverts;
-				vis->attach_info.end_vertnum = ps_rand() % sm->nverts;
-				vis->attach_info.modelnum = obj->rtype.pobj_info.model_num;
-				vis->flags = VF_USES_LIFELEFT | VF_EXPAND | VF_ATTACHED;
-			}
-		}
-	}
-}
-
-// Creates Virus infected lightning on an object
-void DrawVirusLightning(object* obj)
-{
-	if (!obj->effect_info)
-		return;
-	if (!(obj->effect_info->type_flags & EF_VIRUS_INFECTED))
-		return;
-
-	float lightning_ages[8] = {};
-	const int lightning_events = Get60HzVisualEventAges(OBJNUM(obj), obj->handle,
-		VIS60_VIRUS_LIGHTNING, lightning_ages, 8);
-	for (int event = 0; event < lightning_events; ++event)
-	{
-		float shield_norm = (float)(ps_rand() % RAND_MAX) / (float)RAND_MAX;
-		shield_norm = 1 - shield_norm;
-
-		ASSERT(shield_norm >= 0 && shield_norm <= 1);
-		int shield_modulo = 20 - (16 * shield_norm);
-		if (shield_modulo < 1)
-			shield_modulo = 1;
-		if ((ps_rand() % shield_modulo) != 0)
-			continue;
-		poly_model* pm = &Poly_models[obj->rtype.pobj_info.model_num];
-		if (pm->n_models == 0)
-			return;
-		int subnum = ps_rand() % pm->n_models;
-		if (IsNonRenderableSubmodel(pm, subnum))
-			return;
-
-		bsp_info* sm = &pm->submodel[subnum];
-		if (sm->nverts == 0)
-			return;
-		int visnum = VisEffectCreate(VIS_FIREBALL, GRAY_LIGHTNING_BOLT_INDEX, obj->roomnum, &obj->pos);
-		if (visnum >= 0)
-		{
-			vis_effect* vis = &VisEffects[visnum];
-			vis->lifeleft = 1.0;
-			vis->lifetime = 1.0;
-			vis->creation_time -= lightning_ages[event];
-			vis->lifeleft -= lightning_ages[event];
-			vis->end_pos = obj->pos;
-			vis->velocity.x = .15f;
-			vis->velocity.y = 3;
-			vis->attach_info.obj_handle = obj->handle;
-			vis->attach_info.subnum = subnum;
-			vis->attach_info.vertnum = ps_rand() % sm->nverts;
-			vis->attach_info.end_vertnum = ps_rand() % sm->nverts;
-			vis->attach_info.modelnum = obj->rtype.pobj_info.model_num;
-			vis->flags = VF_USES_LIFELEFT | VF_EXPAND | VF_ATTACHED;
-			vis->lighting_color = GR_RGB16(40, 250, 40);
-		}
-	}
-}
 
 void DrawPlayerSightVector(object* obj)
 {

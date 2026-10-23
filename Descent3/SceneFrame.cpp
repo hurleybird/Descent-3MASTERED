@@ -10,6 +10,8 @@
 #include "weather.h"
 
 namespace {
+struct ObservationStamp { uint64_t scene = 0, frame = 0; uint32_t handle = 0; bool valid = false; };
+ObservationStamp ObjectObservations[MAX_OBJECTS];
 struct ObservationSink {
     void validateRoom(int32_t id) const {
         if (id < 0 || id >= MAX_ROOMS || !Rooms[id].used)
@@ -28,6 +30,7 @@ struct ObservationSink {
             auto* object = ObjGet(handle); // preflight validated the complete transaction
             object->flags |= OF_RENDERED;
             object->renderframe = static_cast<ushort>(game_frame & 65535);
+            ObjectObservations[OBJNUM(object)] = {result.scene_lifetime,game_frame,handle,true};
             if (object->control_type == CT_AI && (mode == GAME_MODE || mode == EDITOR_GAME_MODE))
                 AI_RenderedList[AI_NumRendered++] = OBJNUM(object);
         }
@@ -36,6 +39,13 @@ struct ObservationSink {
     }
 };
 SceneFeedbackCommit Receipt;
+}
+
+bool GameObjectWasObservedLastFrame(uint64_t scene,uint64_t frame,uint32_t handle) {
+    const auto index = handle & HANDLE_OBJNUM_MASK;
+    if (!frame || index >= MAX_OBJECTS) return false;
+    const auto& stamp = ObjectObservations[index];
+    return stamp.valid && stamp.scene == scene && stamp.frame == frame-1 && stamp.handle == handle && ObjGet(int(handle));
 }
 
 bool CommitGameVisibility(const d3scene::Presentation& frame,const SceneFrameFeedback& result,uint64_t game_frame) {

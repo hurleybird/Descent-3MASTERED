@@ -196,3 +196,6 @@ public:
 // The only simulation writer for an accepted world-view transaction. Called
 // by the game frame owner, never by rendering or independent image requests.
 bool CommitGameVisibility(const d3scene::Presentation&,const SceneFrameFeedback&,uint64_t game_frame);
+// Full allocation/scene identity, not the legacy 16-bit renderframe field.
+// Previous accepted world observation controls next update's visual emissions.
+bool GameObjectWasObservedLastFrame(uint64_t scene,uint64_t frame,uint32_t handle);

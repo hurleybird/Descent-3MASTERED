@@ -66,6 +66,11 @@ int runGameFrameTests() {
     check(AI_NumRendered == 1 && AI_RenderedList[0] == 0);
     check((Objects[0].flags & OF_RENDERED) && (Objects[1].flags & OF_RENDERED));
     check(Objects[0].renderframe == 65535 && Objects[1].renderframe == 65535);
+    check(GameObjectWasObservedLastFrame(frame->data().scene_lifetime,65536,Objects[0].handle));
+    check(!GameObjectWasObservedLastFrame(frame->data().scene_lifetime,65535,Objects[0].handle));
+    check(!GameObjectWasObservedLastFrame(frame->data().scene_lifetime,65537,Objects[0].handle));
+    check(!GameObjectWasObservedLastFrame(frame->data().scene_lifetime+1,65536,Objects[0].handle));
+    check(!GameObjectWasObservedLastFrame(frame->data().scene_lifetime,65536,Objects[0].handle+HANDLE_COUNT_INCREMENT));
     check(WeatherDeliveries == 1 && !WeatherExterior && WeatherOwner == uint32_t(Objects[1].handle));
     check(!CommitGameVisibility(*frame,result,FrameCount));
     check(WeatherDeliveries == 1 && AI_NumRendered == 1);
@@ -78,6 +83,7 @@ int runGameFrameTests() {
     next_result.main_exterior_visible = true;
     const auto old_handle = Objects[0].handle;
     Objects[0].handle += HANDLE_COUNT_INCREMENT;
+    check(!GameObjectWasObservedLastFrame(frame->data().scene_lifetime,65536,old_handle));
     AutomapVisMap[7] = 0; Rooms[7].last_render_time = -1;
     rejects([&] { CommitGameVisibility(*next,next_result,FrameCount); });
     check(AutomapVisMap[7] == 0 && Rooms[7].last_render_time == -1 && WeatherDeliveries == 1);
