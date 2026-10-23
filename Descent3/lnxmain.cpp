@@ -569,7 +569,10 @@ int main(int argc,char *argv[])
     //if (getenv("SDL_VIDEO_YUV_HWACCEL") == NULL)
     //    putenv("SDL_VIDEO_YUV_HWACCEL=0");
 
-    GatherArgs(argv);
+    if (!GatherArgs(argv)) {
+        fprintf(stderr,"Invalid command line: %s\n",ArgumentErrorMessage());
+        return 1;
+    }
 
     snprintf(game_version_buffer, sizeof (game_version_buffer),
              "%d.%d.%d%s%s", D3_MAJORVER, D3_MINORVER, D3_BUILD, LOKI_VERSION,

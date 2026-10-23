@@ -728,7 +728,10 @@ int PASCAL HandledWinMain(HINSTANCE hInst, HINSTANCE hPrevInst, LPSTR szCmdLine,
 	extern bool joy_chpro_hack;				// located in winjoy.cpp
 
 	strupr(szCmdLine);
-	GatherArgs (szCmdLine);
+	if (!GatherArgs(szCmdLine)) {
+		MessageBox(NULL,ArgumentErrorMessage(),PRODUCT_NAME " Error",MB_OK|MB_ICONERROR);
+		return 1;
+	}
 	AutomatedCaptureLog("winmain arguments gathered");
 
 	//This must come AFTER the GatherArgs() call, because its constructer used FindArg()

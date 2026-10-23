@@ -136,7 +136,10 @@ static int m_resource_language = 0;
 int SharedMain(int argc, char** argv)
 {
 	SDLApplication* d3;
-	GatherArgs(argv);
+	if (!GatherArgs(argv)) {
+		fprintf(stderr,"Invalid command line: %s\n",ArgumentErrorMessage());
+		return 1;
+	}
 
 	oeSDLGameDatabase dbase;
 

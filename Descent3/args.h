@@ -23,9 +23,11 @@
 #define MAX_CHARS_PER_ARG	100
 extern char GameArgs[MAX_ARGS][MAX_CHARS_PER_ARG];
 
-// Gathers all arguments
-void GatherArgs (char *str);
-void GatherArgs (char **argv);
+// Bounded startup parsing. Failure clears the table; its exported module ABI
+// remains 64x100 bytes. Check ArgumentErrorMessage() before creating the app.
+bool GatherArgs (char *str);
+bool GatherArgs (char **argv);
+const char* ArgumentErrorMessage();
 
 // Returns index of argument sought, or 0 if not found
 int FindArg (char *which);

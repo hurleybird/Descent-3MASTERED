@@ -39,73 +39,76 @@ const char* GetArg(int index)
 	return GameArgs[index];
 }
 
-// Gathers all arguments
-void GatherArgs(char* str)
-{
-	int i, t;
-	static int curarg = 1;	//DAJ made static
-	int len = strlen(str);
-	bool gotquote = false;
-	for (t = 0, i = 0; i < len; i++)
-	{
-		if (t == 0)
-		{
-			if (str[i] == '\"')
-			{
-				gotquote = true;
-				continue;
-			}
-		}
-		if (gotquote)
-		{
-			if (str[i] != '\"' && str[i] != 0)
-				GameArgs[curarg][t++] = str[i];
-			else
-			{
-				GameArgs[curarg][t] = 0;
-				t = 0;
-				gotquote = false;
-				curarg++;
-			}
-		}
-		else
-		{
-			if (str[i] != ' ' && str[i] != 0)
-				GameArgs[curarg][t++] = str[i];
-			else
-			{
-				GameArgs[curarg][t] = 0;
-				t = 0;
-				curarg++;
-			}
-		}
-	}
-	GameArgs[curarg][t] = 0;
-	curarg++;
-	TotalArgs = curarg;
+namespace {
+const char* Argument_error = nullptr;
+void resetArguments() {
+    TotalArgs = 0; Argument_error = nullptr;
+    memset(GameArgs,0,sizeof(GameArgs));
+}
+bool invalidArguments(const char* reason) {
+    resetArguments(); Argument_error = reason; return false;
+}
+bool appendArgumentByte(int slot,int& length,char byte) {
+    if (length >= MAX_CHARS_PER_ARG-1) return false;
+    GameArgs[slot][length++] = byte; return true;
+}
+bool argumentSpace(char byte) {
+    return byte == ' ' || byte == '\t' || byte == '\r' || byte == '\n';
+}
+}
+const char* ArgumentErrorMessage() { return Argument_error; }
 
-	for (int q = 0; q < TotalArgs; q++)
-		mprintf((0, "GatherArgs: Arg (%d) is [%s].", q, GameArgs[q]));
+// Preserve the exported fixed table, but reject overflow atomically instead
+// of corrupting the following argument or applying a partial command line.
+bool GatherArgs(char* text)
+{
+    resetArguments();
+    int slot = 1; // WinMain excludes the executable-name operand.
+    const char* cursor = text ? text : "";
+    while (*cursor) {
+        while (argumentSpace(*cursor)) ++cursor;
+        if (!*cursor) break;
+        if (slot >= MAX_ARGS) return invalidArguments("Too many command-line arguments (maximum 63 options/values).");
+        bool quoted = false;
+        int length = 0;
+        while (*cursor && (quoted || !argumentSpace(*cursor))) {
+            if (*cursor == '"') { quoted = !quoted; ++cursor; continue; }
+            if (!appendArgumentByte(slot,length,*cursor++))
+                return invalidArguments("Command-line argument exceeds the legacy module ABI limit of 99 bytes.");
+        }
+        if (quoted) return invalidArguments("Unterminated quote in command-line arguments.");
+        ++slot;
+    }
+    TotalArgs = slot;
+    return true;
 }
 
-void GatherArgs(char** argv)
+bool GatherArgs(char** argv)
 {
-	TotalArgs = 0;
+    resetArguments();
+    if (!argv) return true;
+    for (int slot = 0; argv[slot]; ++slot) {
+        if (slot >= MAX_ARGS) return invalidArguments("Too many command-line arguments (maximum 63 options/values).");
+        // GetArg never exposes argv[0]. A bounded compatibility snapshot of the
+        // program name must not impose a path-size restriction on launching it.
+        if (!slot) strncpy(GameArgs[0],argv[0],MAX_CHARS_PER_ARG-1);
+        else {
+            int length = 0;
+            for (const char* byte = argv[slot]; *byte; ++byte)
+                if (!appendArgumentByte(slot,length,*byte))
+                    return invalidArguments("Command-line argument exceeds the legacy module ABI limit of 99 bytes.");
+        }
+        ++TotalArgs;
+    }
+    return true;
+}
 
-	for (int i = 0; ((i < MAX_ARGS) && (argv[i] != NULL)); i++)
-	{
-		TotalArgs++;
-		strncpy(GameArgs[i], argv[i], MAX_CHARS_PER_ARG);
-	} // for
-
-	for (int q = 0; q < TotalArgs; q++)
-		mprintf((0, "GatherArgs: Arg (%d) is [%s].", q, GameArgs[q]));
-} // GatherArgs
+// Returns index of argument sought, or 0 if not found
 
 
 int FindArg(char* which)
 {
-	if (which == NULL)
+	if (which == NULL || !*which)
 		return(0);
 
     // Argument storage is exported to modules, so do not cache mutable table

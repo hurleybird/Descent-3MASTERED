@@ -593,3 +593,15 @@ The monitor-opacity concern was traced to inherited alternate-cockpit styling:
 the old path explicitly draws weapon imagery at half opacity over scanlines
 with zero base darkness. The source path carries the same policy. No cockpit
 geometry or styling was changed; broader I18 composition qualification remains.
+
+## Startup argument safety found during module qualification
+
+The fixed, exported 64x100-byte argument table was being overrun by a 109-byte
+diagnostic module path. As a final operand it appeared to work; adding another
+option corrupted the path. Both startup parsers now reject excessive operands
+or argument counts atomically, with a clear startup error. Repeated parsing,
+termination, quoting, whitespace, empty values and boundary lengths are tested
+in both argument suites, including zero-allocation parsing. Windows, SDL and
+Linux startup callers check failure before application creation. The public
+module table remains unchanged; this does not introduce long-argument support.
+Final native-module captures use a short, task-owned directory alias instead.
