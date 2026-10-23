@@ -43,7 +43,8 @@ inline ImageMotion prepareImageMotion(const FrameData& frame,const ViewHistorySa
     // switch, resize, cut, reload or changed paused camera.
     const auto& prior = completed.camera;
     if (frame.paused && completed.valid && !camera.view.camera_cut &&
-        prior.lifetime == camera.lifetime && prior.sequence <= camera.sequence && camera.sequence-prior.sequence <= 1 &&
+        prior.lifetime == camera.lifetime &&
+        (prior.sequence == camera.sequence || prior.sequence == frame.temporal_predecessor) &&
         prior.view.history_key == camera.view.history_key &&
         prior.view.collection == camera.view.collection &&
         prior.view.target == camera.view.target &&
@@ -99,7 +100,7 @@ public:
                 throw std::logic_error("A view history key was reused for a different camera in one presentation");
             result.previous = prior.previous; result.previous_valid = prior.previous_valid;
         } else if (!view.camera_cut && prior.sequence < result.sequence &&
-            result.sequence-prior.sequence == 1 && compatible(prior,result)) {
+            prior.sequence == frame.temporal_predecessor && compatible(prior,result)) {
             result.previous = prior.current; result.previous_valid = true;
         }
         return result;

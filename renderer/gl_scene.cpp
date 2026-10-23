@@ -2035,9 +2035,14 @@ void main() {
         // Read the actual scene outputs at a few capture boundaries, including
         // the history fixture's cut. This never runs in interactive rendering.
         const int capture_frame = AutomatedCaptureFrameIndex();
+        const bool export_history_probe = FindArg("-scene-history-export-probe") &&
+            capture_frame >= 20 && capture_frame <= 22;
         if (writes_motion &&
             (capture_frame == 0 || capture_frame == 30 || capture_frame == 31 || capture_frame == 59 ||
+                export_history_probe ||
                 (FindArg("-scene-resource-probe") && capture_frame >= 10 && capture_frame <= 51 && capture_frame % 10 <= 1))) {
+            if (export_history_probe && !history.previous_valid)
+                Error("Independent save publication reset the main camera history");
             const size_t pixels = size_t(surface_records.ReadWidth())*surface_records.ReadHeight();
             std::vector<float> vectors(pixels*4);
             std::vector<GLuint> identities(pixels);

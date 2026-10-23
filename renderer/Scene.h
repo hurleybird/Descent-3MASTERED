@@ -922,6 +922,10 @@ struct FrameData {
     uint32_t compiled_surface_count = 0, compiled_part_count = 0;
     bool has_planar_surfaces = false; // compiled from published room mirror groups
     uint64_t sequence = 0, scene_lifetime = 0;
+    // Explicit predecessor in this producer's exposure stream. Publication IDs
+    // are globally unique, not consecutive: thumbnails/UI may publish between
+    // world exposures without advancing their camera or object history.
+    uint64_t temporal_predecessor = 0;
     double simulation_time = 0;
     float delta_time = 0;
     bool paused = false;

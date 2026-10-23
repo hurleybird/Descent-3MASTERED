@@ -495,6 +495,7 @@ void extractionTests() {
     const auto a = ExtractGamePresentation(1, 0.016f, false);
     check(a->data().rooms.size() == 1 && a->data().objects.size() == 1, "scene extraction omitted source content");
     check(!a->data().objects[0].has_previous, "new object has fabricated history");
+    check(!a->data().temporal_predecessor,"First scene exposure fabricated a predecessor");
     check(a->data().rooms[0].authored_flags == 0 && a->data().rooms[0].surfaces[0].authored_flags == 0,
         "camera traversal marks crossed scene boundary");
     check(source.flags == RF_MIRROR_VISIBLE && surface.flags == (FF_VISIBLE | FF_NOT_FACING | FF_TOUCHED | FF_SPEC_INVISIBLE),
@@ -502,6 +503,7 @@ void extractionTests() {
     Objects[0].pos.x = 5;
     const auto b = ExtractGamePresentation(2, 0.016f, false);
     check(b->data().rooms[0].asset == a->data().rooms[0].asset, "unchanged extraction copied geometry");
+    check(b->data().temporal_predecessor == a->data().sequence,"World exposure lost its source predecessor");
     check(b->data().objects[0].has_previous && b->data().objects[0].previous.position.x == 0 &&
         b->data().objects[0].current.position.x == 5, "presentation history not advanced correctly");
     const auto view = MakeGameSceneView(d3scene::ViewKind::Auxiliary, 2, &Objects[0], Objects[0].pos,
@@ -512,9 +514,14 @@ void extractionTests() {
     Objects[0].pos.x = 77;
     const auto thumbnail = ExtractGamePresentation(2.5, 0, false, false);
     check(thumbnail->data().objects[0].current.position.x == 77, "thumbnail did not capture its requested state");
+    check(!thumbnail->data().temporal_predecessor,"Independent export joined the world's temporal stream");
+    const auto ui_sequence = AllocateGamePresentationSequence();
     Objects[0].pos.x = 8;
     const auto after_thumbnail = ExtractGamePresentation(2.6, 0, false);
     check(after_thumbnail->data().objects[0].previous.position.x == 5, "thumbnail advanced gameplay presentation history");
+    check(after_thumbnail->data().sequence > ui_sequence && ui_sequence > thumbnail->data().sequence &&
+        after_thumbnail->data().temporal_predecessor == b->data().sequence,
+        "Independent UI/export publication changed temporal advancement or reused an identity");
     const auto retained = ExtractGamePresentation(2.7,0,false,false,after_thumbnail.get());
     check(retained->data().rooms[0].surfaces.data() == after_thumbnail->data().rooms[0].surfaces.data(),
         "Unchanged room appearance lost published storage");

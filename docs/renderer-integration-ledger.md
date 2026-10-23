@@ -141,3 +141,23 @@ integration-matcen-qualified-20261022 and integration-cinematic-*-20261022.
 These do not qualify real mission scripts, multiplayer Matcens or every remaining
 effect family. Next: omitted weapon/debris/weather/corona producers, real module
 consumers, lifecycle/history and normal no-probe qualification.
+
+## Independent publication identity and world exposure history
+
+Publication IDs are allocated independently of world/object history. A world
+publication explicitly names its temporal predecessor; UI/export publications
+have no world predecessor and do not advance object stamps. Camera and paused
+image-motion history follow that predecessor, not a numeric sequence difference
+of one. A skipped world exposure still invalidates history; an unrelated
+publication between consecutive world exposures does not. Frame validation
+rejects a predecessor that is not older than the publication.
+
+All three CPU suites and the engine build pass. Tests cover real extraction
+with interleaved thumbnail/UI identities, camera history, paused exposures and
+missing world exposures. The actual SaveGameState caller exports a thumbnail
+between world IDs20 and22 in the private integration-history-export-gpu-20261022
+capture. GPU readback on frames20–22 confirms camera_history=1 and all265/269/270
+visible model pixels have valid motion records. The export and backup are
+nonempty; final imagery was visually inspected and no GL errors were logged.
+This does not yet qualify reloading the exported save, scene retirement or
+the forthcoming real module/UI publication stream.

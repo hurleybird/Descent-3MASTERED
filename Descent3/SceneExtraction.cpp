@@ -104,14 +104,17 @@ void InvalidateGameSceneAppearance() {
     if (++AppearanceEpoch == 0) throw std::overflow_error("Room appearance epoch exhausted");
 }
 uint64_t GameSceneGeometryRevision() { return GeometryEpoch; }
+uint64_t AllocateGamePresentationSequence() {
+    if (Sequence == std::numeric_limits<uint64_t>::max())
+        throw std::overflow_error("Presentation sequence exhausted");
+    return ++Sequence;
+}
 
 d3scene::FrameData ExtractGameFrame(double time, float delta, bool paused, bool advance_history,
     const d3scene::Presentation* retained_frame,bool audit_geometry) {
-    if (Sequence == std::numeric_limits<uint64_t>::max())
-        throw std::overflow_error("Presentation sequence exhausted");
     auto& assets = d3scene::assets();
     auto data = d3scene::acquireFrameData();
-    data.sequence = Sequence + 1;
+    data.sequence = AllocateGamePresentationSequence();
     data.scene_lifetime = assets.lifetime();
     data.simulation_time = time;
     data.delta_time = delta;
@@ -202,6 +205,7 @@ d3scene::FrameData ExtractGameFrame(double time, float delta, bool paused, bool 
         data.rooms.push_back(std::move(state));
     }
     const bool history_current = PreviousSequence && PreviousLifetime == data.scene_lifetime && PreviousTime <= time;
+    data.temporal_predecessor = advance_history && history_current ? PreviousSequence : 0;
     for (int i = 0; i <= Highest_object_index; ++i) {
         const object& source = Objects[i];
         if (source.type == OBJ_NONE) continue;
@@ -223,7 +227,6 @@ d3scene::FrameData ExtractGameFrame(double time, float delta, bool paused, bool 
         data.objects.push_back(state);
     }
     // Commit presentation history once, never when rendering a view/pass.
-    ++Sequence;
     if (advance_history) {
         // Commit only after extraction succeeds. No allocation or source
         // pointers are retained, and thumbnail captures never advance stamps.

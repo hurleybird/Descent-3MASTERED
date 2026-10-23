@@ -8,6 +8,9 @@ struct ModelTransforms;
 struct HUDCanvasLayout;
 class SceneFeedbackTransaction;
 struct FrameScreenBlend;
+// Identity allocation only; independent UI/export publications cannot advance
+// the game world's temporal/object-history stream.
+uint64_t AllocateGamePresentationSequence();
 // Capture the physical main camera and its logical crop once, before scene
 // publication. World and camera-bound foregrounds consume the same value.
 struct GameMainView {

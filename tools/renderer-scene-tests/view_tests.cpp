@@ -1457,7 +1457,7 @@ int runSceneViewTests() {
     auto main_view = view(); main_view.camera_owner = 42;
     auto first = histories.prepare(tick,main_view,d3scene::prepareCamera(main_view));
     check(!first.previous_valid,"First view fabricated temporal history");
-    tick.sequence = 2;
+    tick.sequence = 2; tick.temporal_predecessor = 1;
     check(!histories.prepare(tick,main_view,d3scene::prepareCamera(main_view)).previous_valid,
         "Preparing an unexecuted view advanced history");
     histories.commit(first);
@@ -1470,7 +1470,7 @@ int runSceneViewTests() {
     const auto exposure = d3scene::prepareImageMotion(tick,second,{});
     check(exposure.valid && !exposure.paused && exposure.camera.previous_valid && exposure.delta_time == .02f,
         "Motion exposure lost its explicit main-view inputs");
-    auto pause_tick = tick; pause_tick.sequence++; pause_tick.paused = true;
+    auto pause_tick = tick; pause_tick.temporal_predecessor = tick.sequence; pause_tick.sequence++; pause_tick.paused = true;
     pause_tick.delta_time = 0; pause_tick.afterburner_factor = 0; pause_tick.player_control_delta = {};
     const auto pause_camera = histories.prepare(pause_tick,main_view,d3scene::prepareCamera(main_view));
     const auto paused_exposure = d3scene::prepareImageMotion(pause_tick,pause_camera,exposure);
@@ -1500,7 +1500,7 @@ int runSceneViewTests() {
     try { d3scene::prepareImageMotion(pause_tick,second,exposure); }
     catch (const std::logic_error&) { rejected_motion_camera = true; }
     check(rejected_motion_camera,"Motion exposure combined different presentation sequences");
-    auto interrupted_tick = pause_tick; interrupted_tick.sequence++;
+    auto interrupted_tick = pause_tick; interrupted_tick.temporal_predecessor = pause_tick.sequence; interrupted_tick.sequence++;
     auto interrupted_camera = pause_camera; interrupted_camera.sequence++;
     check(d3scene::prepareImageMotion(interrupted_tick,interrupted_camera,exposure).delta_time == 0,
         "Pause inherited an exposure from a skipped presentation");
@@ -1517,7 +1517,7 @@ int runSceneViewTests() {
         auto prior_tick = tick;
         const auto prior_collection = collection_history.prepare(prior_tick,preview,d3scene::prepareCamera(preview));
         collection_history.commit(prior_collection);
-        ++prior_tick.sequence;
+        prior_tick.temporal_predecessor = prior_tick.sequence; ++prior_tick.sequence;
         check(collection_history.prepare(prior_tick,preview,d3scene::prepareCamera(preview)).previous_valid,
             "Stable collection lost its completed view history");
         ++preview.collection;
@@ -1535,7 +1535,7 @@ int runSceneViewTests() {
     try { histories.prepare(tick,moved_replay,d3scene::prepareCamera(moved_replay)); }
     catch (const std::logic_error&) { conflicting_replay = true; }
     check(conflicting_replay,"One history key accepted two different cameras in one presentation");
-    tick.sequence = 3;
+    tick.sequence = 3; tick.temporal_predecessor = 2;
     for (int change = 0; change < 6; ++change) {
         auto changed = main_view;
         if (change == 0) changed.camera_owner++;
@@ -1549,7 +1549,16 @@ int runSceneViewTests() {
     }
     check(histories.prepare(tick,main_view,d3scene::prepareCamera(main_view)).previous_valid,
         "Uncommitted alternative views damaged main-view history");
-    tick.sequence = 4;
+    // Independent publication holes preserve the explicit world predecessor.
+    tick.sequence = 40;
+    const auto after_thumbnail = histories.prepare(tick,main_view,d3scene::prepareCamera(main_view));
+    check(after_thumbnail.previous_valid && after_thumbnail.previous.view_projection == second.current.view_projection,
+        "Independent UI/thumbnail publication reset world history");
+    auto paused_hole = pause_tick; paused_hole.sequence = 41;
+    auto paused_hole_camera = pause_camera; paused_hole_camera.sequence = 41;
+    check(d3scene::prepareImageMotion(paused_hole,paused_hole_camera,exposure).delta_time == .02f,
+        "Independent UI/thumbnail publication discarded a paused exposure");
+    tick.sequence = 4; tick.temporal_predecessor = 3;
     check(!histories.prepare(tick,main_view,d3scene::prepareCamera(main_view)).previous_valid,
         "Skipped presentation reused stale motion as a one-frame predecessor");
     tick.sequence = 3; tick.scene_lifetime++;

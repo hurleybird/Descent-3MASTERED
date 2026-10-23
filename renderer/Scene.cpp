@@ -854,6 +854,7 @@ PresentationRef Presentation::complete(FrameData data) {
     if (!storage || !storage.unique()) storage = std::make_shared<FrameCompilationStorage>();
     storage->clear();
     require(data.sequence != 0 && data.scene_lifetime != 0, "Unidentified presentation frame");
+    require(data.temporal_predecessor < data.sequence,"Invalid presentation predecessor");
     require(std::isfinite(data.simulation_time) && std::isfinite(data.delta_time) && data.delta_time >= 0,
         "Invalid presentation clock");
     require(finite(data.player_control_delta) && std::isfinite(data.afterburner_factor) &&

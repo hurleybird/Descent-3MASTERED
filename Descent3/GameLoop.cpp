@@ -3168,6 +3168,13 @@ void GameRenderFrame(void)
 		}
 		AdvanceCinematicPresentation(d3scene::assets().lifetime(),uint64_t(FrameCount));
 		const auto main_view = CaptureGameMainView();
+		if (FindArg("-scene-history-export-probe") && AutomatedCaptureFrameIndex() == 20) {
+			const int save_arg = FindArg("-capture-save-output");
+			const char* path = save_arg ? GetArg(save_arg+1) : nullptr;
+			if (!path || !*path || !SaveGameState(path,"Renderer interleaved publication check"))
+				Error("Interleaved save/export qualification failed");
+			AutomatedCaptureLog("scene interleaved save exported before world frame=%d",FrameCount);
+		}
 		const auto presentation = SceneGeometryInspection() && FindArg("-scene-automap-probe") ?
 			PrepareAutomapInspection() : PrepareGamePresentation(true,&main_view,&screen_overlays);
 		const ModuleSceneScope module_scene(presentation);
@@ -3191,8 +3198,8 @@ void GameRenderFrame(void)
 		const auto& observations = feedback.seal();
 		CommitGameVisibility(*presentation,observations,uint64_t(FrameCount));
 		if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
-			AutomatedCaptureLog("scene observations committed logical_frame=%d sequence=%llu automap=%u effects=%u objects=%u ai=%d terrain=%d main_present=%d main_exterior=%d main_owner=%u",
-				FrameCount,(unsigned long long)observations.frame_sequence,
+			AutomatedCaptureLog("scene observations committed logical_frame=%d sequence=%llu predecessor=%llu automap=%u effects=%u objects=%u ai=%d terrain=%d main_present=%d main_exterior=%d main_owner=%u",
+				FrameCount,(unsigned long long)observations.frame_sequence,(unsigned long long)presentation->data().temporal_predecessor,
 				(unsigned)observations.automap_rooms.size(),(unsigned)observations.effect_rooms.size(),
 				(unsigned)observations.objects.size(),AI_NumRendered,observations.terrain,
 				observations.main_view_present,observations.main_exterior_visible,observations.main_camera_owner);
