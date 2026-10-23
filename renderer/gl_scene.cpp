@@ -1881,7 +1881,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         record[63] = float(view.dynamic_lighting && !surface.unlit ? influences.count : 0);
         record[68] = float(surface.unlit);
         record[66] = float(static_cast<unsigned>(surface.occlusion_class));
-        record[67] = float(policy.layer == d3scene::RenderLayer::World ? surface.soft_depth_range : 0);
+        record[67] = float(view.soft_particles && policy.layer == d3scene::RenderLayer::World ? surface.soft_depth_range : 0);
         record[69] = float(policy.medium_transport);
         record[70] = float(policy.blend == d3scene::BlendMode::Additive);
         record[71] = float(policy.blend == d3scene::BlendMode::Multiply);

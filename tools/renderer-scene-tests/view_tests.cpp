@@ -97,6 +97,33 @@ int runSceneViewTests() {
         };
         data.meshes[0].view_style.camera_owner = 43; rejects_style();
         data.meshes[0].view_style.camera_owner = 42; data.meshes[0].view_style.directional_opacity = {2,0,0}; rejects_style();
+        auto& routed = data.meshes[0]; routed.view_style = {};
+        routed.primary_view_style.camera_owner = 42; routed.primary_view_style.match = CameraMatch::Except;
+        routed.primary_view_style.camera_kinds = 1u << uint32_t(ViewKind::Main); routed.alternate_collection = 99;
+        const auto shared = Presentation::freeze(data);
+        camera = view(); camera.portal_visibility = false; camera.attached_camera = true; camera.camera_owner = 42;
+        check(queryView(*shared,camera).surfaces.empty(),"Main camera rendered the world audience twice");
+        camera.kind = ViewKind::Auxiliary;
+        check(queryView(*shared,camera).surfaces.size() == 1,"Auxiliary camera lost shared world geometry");
+        camera.kind = ViewKind::Preview; camera.collection = 99;
+        check(queryView(*shared,camera).surfaces.size() == 1 && shared->data().meshes.size() == 1,
+            "Alternate audience duplicated or lost its geometry");
+        data.meshes[0].alternate_collection = 100;
+        const auto changed_audience = Presentation::freeze(data);
+        check(queryView(*changed_audience,camera).surfaces.empty() && queryView(*shared,camera).surfaces.size() == 1,
+            "Audience change retained a stale membership or mutated a held frame");
+        camera.collection = 100;
+        check(queryView(*changed_audience,camera).surfaces.size() == 1,"Replacement audience was not indexed");
+        data.meshes[0].surface.soft_depth_range = 2;
+        const auto soft_frame = Presentation::freeze(data);
+        camera.soft_particles = false;
+        const auto isolated = queryView(*soft_frame,camera);
+        check(!isolated.soft_particles,"Camera layer retained world soft-particle dependencies");
+        for (const auto& pass : buildViewPasses(*soft_frame,isolated,{}))
+            check(pass.kind != ViewPassKind::SnapshotOpaqueDepth,"Isolated layer requested world depth sampling");
+        bool invalid_kind = false; camera.kind = static_cast<ViewKind>(99);
+        try { validateView(camera); } catch (const std::invalid_argument&) { invalid_kind = true; }
+        check(invalid_kind,"Out-of-range camera kind reached selection bit shifting");
     }
     {
         using namespace d3scene;

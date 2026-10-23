@@ -545,3 +545,51 @@ emits two gun pulses. The normal003 no-firing image is unchanged, SHA
 24543B04…96EFA1F, integration-electrical-normal-final-20261023. These do not
 qualify full weapon/target/death/reload gameplay, close-screen I11 routing or
 performance under sustained combat; all release gates remain open.
+
+## Shared view audiences and close-screen routing (I11 implementation)
+
+Models and prepared meshes may now belong to a primary and an alternate
+collection without duplicating geometry, model variants, poses or material
+tables. The compiled membership proof includes both audiences and reuses its
+storage. Primary audience selection is separate from visual camera selection,
+so late routing cannot overwrite Omega's authored camera variants. Camera-kind
+masks preserve auxiliary/mirror world content while excluding it from the main
+world pass only. Owner validation reuses the compiled full-handle lookup; stale
+membership, duplicate audiences and unsupported isolated surface receivers reject.
+
+The source family policy precedes close/windshield flags. Physical lines, thick
+lightning, trails and mass-driver tubes remain world content. Ordinary flagged
+effects receive a main-camera audience, while actual windshield rain/snow is
+camera-local only. This removes blanket drops that were omitting content. In
+ordinary003, the five previously pending effects are four thick-lightning
+records and an axis billboard carrying a reused windshield bit; all now compile
+through their proper world family. Other cameras do not inherit a view-space
+windshield layer. A source scope applies routing to every contribution emitted
+by a family, not just its first sprite.
+
+Weapon routing samples the captured physical main camera and generation-keyed
+source marks, plus the existing attached/near-Napalm policy, once per source
+object. It applies the audience to model bodies and all owned contributions.
+The renderer no longer asks WeaponIsCloseScreenEffectObject (and thus mutable
+Viewer_object) while compiling sprite content. The camera layer is scheduled
+after all producers. Its isolated depth is explicit, and soft-particle world
+depth sampling is disabled consistently in pass planning and GPU parameters.
+No shader varyings or draw-time callbacks were added; 48byte visibility records
+remain unchanged. The extra audience is metadata, not another object renderer.
+
+CPU tests cover one model/variant and one mesh shared by both audiences,
+main/auxiliary/mirror admission, independent held frames, membership changes,
+family/flag combinations, camera-kind validation, and isolated depth dependencies.
+Engine and all three suites pass. GL-clean inspected captures include
+integration-close-napalm-input-20261023 (normal held primary, actual Napalm bank,
+real rear monitor), integration-close-model-mirror-20261023 (native ObjCreate
+model pair, one marked by the existing source API; both visible in mirror), and
+integration-close-normal-audit-20261023 (no producer probe, pending effects zero).
+The ordinary003 image intentionally changes around the restored world effects;
+it is not a zero-difference claim. Sustained combat/observer/rear/settings/weather
+transitions and performance qualification are still pending.
+
+The monitor-opacity concern was traced to inherited alternate-cockpit styling:
+the old path explicitly draws weapon imagery at half opacity over scanlines
+with zero base darkness. The source path carries the same policy. No cockpit
+geometry or styling was changed; broader I18 composition qualification remains.

@@ -51,6 +51,8 @@ View cameraOverlayView(View main,uint64_t collection,Rect display_viewport);
 bool reversesWinding(const Transform& camera);
 bool excludesObject(const View&,uint32_t handle);
 float meshViewOpacity(const MeshViewStyle&,const View&);
+float primitiveViewOpacity(const MeshViewStyle&,const MeshViewStyle& primary_audience,
+    uint64_t collection,uint64_t alternate_collection,const View&);
 bool excludesSurface(const View&,RoomSurfaceId);
 uint64_t viewImageSource(const View&,uint64_t slot);
 const ViewImageInput& viewImageInput(const View&,uint64_t slot);
@@ -106,6 +108,7 @@ struct ViewVisibility {
     ViewVisibility(ViewVisibility&&) noexcept = default;
     ViewVisibility& operator=(ViewVisibility&&) noexcept = default;
     ViewOrdering ordering = ViewOrdering::Depth;
+    bool soft_particles = true;
     uint64_t frame_sequence = 0, scene_lifetime = 0, history_key = 0;
     Camera camera;
     std::vector<VisibleSurface> surfaces;

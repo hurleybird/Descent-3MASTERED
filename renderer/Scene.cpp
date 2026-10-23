@@ -106,8 +106,8 @@ struct FrameCompilationStorage {
     std::vector<uint32_t> collection_models_,collection_meshes_;
     // Asset-free layout proofs survive recycling, like the identity indexes.
     // Payload changes do not change ordered collection membership.
-    std::vector<uint64_t> collection_model_keys_;
-    std::vector<std::pair<uint64_t,bool>> collection_mesh_keys_;
+    std::vector<std::pair<uint64_t,uint64_t>> collection_model_keys_;
+    std::vector<std::tuple<uint64_t,uint64_t,bool>> collection_mesh_keys_;
     bool collections_valid_ = false;
     void clear() {
         image_slots_.clear(); resolved_models_.clear(); releasePoses(); resolved_model_indices_.clear();
@@ -972,17 +972,23 @@ PresentationRef Presentation::complete(FrameData data) {
     require(!data.fog || data.fog->id().lifetime == data.scene_lifetime,"Stale fog asset");
     // Fog topology is immutable and validated by its publishing owner. Only
     // the asset lifetime belongs to this frame's validation boundary.
+    const auto validateViewStyle = [&](const MeshViewStyle& style) {
+        require(style.match == CameraMatch::Any || style.match == CameraMatch::Only || style.match == CameraMatch::Except,
+            "Invalid primitive camera selection");
+        require(style.camera_kinds == UINT32_MAX || !(style.camera_kinds & ~((1u<<6)-1)),"Invalid primitive camera-kind mask");
+        const float length = style.directional_opacity.x*style.directional_opacity.x+
+            style.directional_opacity.y*style.directional_opacity.y+style.directional_opacity.z*style.directional_opacity.z;
+        require(finite(style.directional_opacity) && (length == 0 || std::abs(length-1) < .001f),
+            "Invalid primitive view opacity axis");
+    };
     for (const auto& mesh : data.meshes) {
         require(mesh.raster_domain == RasterDomain::Surface || mesh.raster_domain == RasterDomain::SoftVolume,
             "Invalid prepared mesh raster domain");
         require(mesh.asset && mesh.asset->id().lifetime == data.scene_lifetime,"Stale generic mesh");
-        const auto& style = mesh.view_style;
-        require(style.match == CameraMatch::Any || style.match == CameraMatch::Only || style.match == CameraMatch::Except,
-            "Invalid mesh camera selection");
-        const float opacity_length = style.directional_opacity.x*style.directional_opacity.x+
-            style.directional_opacity.y*style.directional_opacity.y+style.directional_opacity.z*style.directional_opacity.z;
-        require(finite(style.directional_opacity) && (opacity_length == 0 || std::abs(opacity_length-1) < .001f),
-            "Invalid mesh view opacity axis");
+        validateViewStyle(mesh.view_style);
+        validateViewStyle(mesh.primary_view_style);
+        require(!mesh.alternate_collection || mesh.alternate_collection != mesh.collection,"Duplicate mesh collection audience");
+        require(!mesh.alternate_collection || mesh.receiver_polygon < 0,"Surface receivers cannot be isolated into an alternate audience");
         data.lightCandidates(mesh.light_candidates);
         require(mesh.vertices.empty() || mesh.vertices.size() == mesh.asset->geometry().vertices.size(),
             "Incomplete prepared mesh positions");
@@ -1134,6 +1140,15 @@ PresentationRef Presentation::complete(FrameData data) {
     for (auto& object : data.model_instances) {
         require(object.identity,"Absent model instance identity");
         object.compiled_owner = ownerIndex(object.has_owner,object.owner,object.compiled_owner);
+        validateViewStyle(object.view_style);
+        validateViewStyle(object.primary_view_style);
+        require(!object.alternate_collection || object.alternate_collection != object.collection,"Duplicate model collection audience");
+        if (object.view_style.match != CameraMatch::Any || object.view_style.directional_opacity.x != 0 ||
+            object.view_style.directional_opacity.y != 0 || object.view_style.directional_opacity.z != 0)
+            ownerIndex(true,object.view_style.camera_owner,size_t(-1));
+        if (object.primary_view_style.match != CameraMatch::Any || object.primary_view_style.directional_opacity.x != 0 ||
+            object.primary_view_style.directional_opacity.y != 0 || object.primary_view_style.directional_opacity.z != 0)
+            ownerIndex(true,object.primary_view_style.camera_owner,size_t(-1));
         require(finite(object.current) && finite(object.previous),"Invalid model placement");
         data.ambientFor(object);
         require(object.model_count && object.model_begin == model_end,"Model variants must partition frame storage");
@@ -1216,12 +1231,19 @@ PresentationRef Presentation::complete(FrameData data) {
         if (mesh.view_style.match != CameraMatch::Any || mesh.view_style.directional_opacity.x != 0 ||
             mesh.view_style.directional_opacity.y != 0 || mesh.view_style.directional_opacity.z != 0)
             ownerIndex(true,mesh.view_style.camera_owner,size_t(-1));
+        if (mesh.primary_view_style.match != CameraMatch::Any || mesh.primary_view_style.directional_opacity.x != 0 ||
+            mesh.primary_view_style.directional_opacity.y != 0 || mesh.primary_view_style.directional_opacity.z != 0)
+            ownerIndex(true,mesh.primary_view_style.camera_owner,size_t(-1));
         const auto* attachment = mesh.model_instance ? model_instances.find(mesh.model_instance) : nullptr;
         mesh.compiled_model = attachment ? attachment->second : size_t(-1);
         require(mesh.model_variant >= -1 && (mesh.model_instance == 0 ? mesh.model_variant == -1 :
             (attachment && mesh.model_variant >= 0 &&
                 size_t(mesh.model_variant) < data.model_instances[mesh.compiled_model].model_count &&
-                mesh.collection == data.model_instances[mesh.compiled_model].collection)),
+                (mesh.collection == data.model_instances[mesh.compiled_model].collection ||
+                    (data.model_instances[mesh.compiled_model].alternate_collection &&
+                        mesh.collection == data.model_instances[mesh.compiled_model].alternate_collection)) &&
+                (!mesh.alternate_collection || mesh.alternate_collection == data.model_instances[mesh.compiled_model].collection ||
+                    mesh.alternate_collection == data.model_instances[mesh.compiled_model].alternate_collection))),
             "Model attachment references an absent instance variant");
         require(mesh.model_part >= -1 && (mesh.model_part < 0 || (mesh.model_instance &&
             size_t(mesh.model_part) < data.modelsFor(mesh.compiled_model)[mesh.model_variant].parts.size())),
@@ -1230,17 +1252,18 @@ PresentationRef Presentation::complete(FrameData data) {
     std::shared_ptr<Presentation> prepared(new Presentation(std::move(data),std::move(storage)));
     // Compile domain membership once. Cockpit/HUD/module views must not walk
     // every world object and effect merely to discard their collection IDs.
-    require(prepared->data_.model_instances.size() <= UINT32_MAX && prepared->data_.meshes.size() <= UINT32_MAX,
+    require(prepared->data_.model_instances.size() <= UINT32_MAX/2 && prepared->data_.meshes.size() <= UINT32_MAX/2,
         "Too many scene collection members");
     auto& membership = *prepared->storage_;
     bool same_collections = membership.collections_valid_ &&
         membership.collection_model_keys_.size() == prepared->data_.model_instances.size() &&
         membership.collection_mesh_keys_.size() == prepared->data_.meshes.size();
     for (size_t i = 0; same_collections && i < prepared->data_.model_instances.size(); ++i)
-        same_collections = membership.collection_model_keys_[i] == prepared->data_.model_instances[i].collection;
+        same_collections = membership.collection_model_keys_[i] == std::make_pair(prepared->data_.model_instances[i].collection,
+            prepared->data_.model_instances[i].alternate_collection);
     for (size_t i = 0; same_collections && i < prepared->data_.meshes.size(); ++i) {
         const auto& mesh = prepared->data_.meshes[i];
-        same_collections = membership.collection_mesh_keys_[i] == std::make_pair(mesh.collection,mesh.receiver_polygon >= 0);
+        same_collections = membership.collection_mesh_keys_[i] == std::make_tuple(mesh.collection,mesh.alternate_collection,mesh.receiver_polygon >= 0);
     }
     if (!same_collections) {
     membership.collections_valid_ = false;
@@ -1253,10 +1276,14 @@ PresentationRef Presentation::complete(FrameData data) {
         if (found.second) prepared->storage_->collections_.emplace_back();
         return prepared->storage_->collections_[found.first->second];
     };
-    for (const auto& model : prepared->data_.model_instances) ++domain(model.collection).model_count;
+    for (const auto& model : prepared->data_.model_instances) {
+        ++domain(model.collection).model_count;
+        if (model.alternate_collection) ++domain(model.alternate_collection).model_count;
+    }
     for (const auto& mesh : prepared->data_.meshes) {
         auto& range = domain(mesh.collection); ++range.mesh_count;
         range.has_receivers = range.has_receivers || mesh.receiver_polygon >= 0;
+        if (mesh.alternate_collection) ++domain(mesh.alternate_collection).mesh_count;
     }
     uint32_t model_begin = 0,mesh_begin = 0;
     for (auto& range : prepared->storage_->collections_) {
@@ -1265,15 +1292,24 @@ PresentationRef Presentation::complete(FrameData data) {
     }
     prepared->storage_->collection_models_.resize(model_begin); prepared->storage_->collection_meshes_.resize(mesh_begin);
     for (uint32_t i = 0; i < prepared->data_.model_instances.size(); ++i) {
-        auto& range = domain(prepared->data_.model_instances[i].collection);
+        const auto& model = prepared->data_.model_instances[i];
+        auto& range = domain(model.collection);
         prepared->storage_->collection_models_[range.model_begin+range.model_count++] = i;
-        membership.collection_model_keys_.push_back(prepared->data_.model_instances[i].collection);
+        if (model.alternate_collection) {
+            auto& alternate = domain(model.alternate_collection);
+            prepared->storage_->collection_models_[alternate.model_begin+alternate.model_count++] = i;
+        }
+        membership.collection_model_keys_.emplace_back(model.collection,model.alternate_collection);
     }
     for (uint32_t i = 0; i < prepared->data_.meshes.size(); ++i) {
         auto& range = domain(prepared->data_.meshes[i].collection);
         prepared->storage_->collection_meshes_[range.mesh_begin+range.mesh_count++] = i;
         const auto& mesh = prepared->data_.meshes[i];
-        membership.collection_mesh_keys_.emplace_back(mesh.collection,mesh.receiver_polygon >= 0);
+        if (mesh.alternate_collection) {
+            auto& alternate = domain(mesh.alternate_collection);
+            prepared->storage_->collection_meshes_[alternate.mesh_begin+alternate.mesh_count++] = i;
+        }
+        membership.collection_mesh_keys_.emplace_back(mesh.collection,mesh.alternate_collection,mesh.receiver_polygon >= 0);
     }
     membership.collections_valid_ = true;
     }
@@ -1392,6 +1428,7 @@ void validateViewImageInputs(const FrameData& frame,const View& view) {
             "External image requires an earlier publication in the same scene lifetime");
 }
 void validateView(const View& view) {
+    require(uint32_t(view.kind) <= uint32_t(ViewKind::Preview),"Invalid camera kind");
     require(view.reflections == ReflectionPolicy::Images || view.reflections == ReflectionPolicy::SurfaceFilm,
         "Invalid planar reflection policy");
     require(view.fog_path_origin == FogPathOrigin::Camera || view.fog_path_origin == FogPathOrigin::ClipPlane,

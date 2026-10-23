@@ -3091,6 +3091,21 @@ void GameRenderFrame(void)
 
 		// Publish once. Every world view below sees this same owned scene, not
 		// a second traversal of mutable simulation state.
+		if (AutomatedCaptureFrameIndex() == 0 && FindArg("-scene-close-model-probe") && Player_object) {
+			int prototype = -1;
+			for (int i = 0; i < MAX_WEAPONS; ++i) if (Weapons[i].used && !(Weapons[i].flags &
+				(WF_IMAGE_BITMAP|WF_IMAGE_VCLIP|WF_ELECTRICAL|WF_INVISIBLE)) && Weapons[i].fire_image_handle >= 0) { prototype = i; break; }
+			if (prototype < 0) Error("Camera audience fixture has no authored model weapon");
+			for (int marked = 0; marked < 2; ++marked) {
+				auto position = Player_object->pos+Player_object->orient.fvec*10+Player_object->orient.rvec*((marked-.5f)*4);
+				const int index = ObjCreate(OBJ_WEAPON,prototype,Player_object->roomnum,&position,&Player_object->orient,Player_object->handle);
+				if (index < 0) Error("Camera audience model initialization failed");
+				auto& source = Objects[index]; source.control_type = CT_NONE; source.movement_type = MT_NONE;
+				source.size = 1; source.lifeleft = source.lifetime = 3;
+				if (marked) VisEffectMarkCloseScreenWeaponObject(&source);
+				AutomatedCaptureLog("scene real model audience fixture owner=%u marked=%d definition=%d",source.handle,marked,prototype);
+			}
+		}
 		if (AutomatedCaptureFrameIndex() == 0 && FindArg("-scene-object-emissions-probe") && Player_object) {
 			int powerup = -1,robot = GENOBJ_GUIDEBOT;
 			for (int i = 0; i <= Highest_object_index; ++i) {

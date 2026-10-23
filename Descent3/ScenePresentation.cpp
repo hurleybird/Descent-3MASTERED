@@ -682,6 +682,7 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance,const GameMainView
     { PERF_MARKER_SCOPE("Scene.PrepareModels"); PrepareGameModelInstances(data, previous_models.get(),retain_rooms); }
     { PERF_MARKER_SCOPE("Scene.PrepareObjectEffects"); PrepareGameObjectEffects(data); }
     { PERF_MARKER_SCOPE("Scene.PrepareScorches"); PrepareGameScorches(data); }
+    PrepareGameCameraEffects(data,main_view);
     if (overlays && main_view)
         PrepareFrameBlendCanvas(data,SceneFrameScreenBlend,main_view->world.viewport,*overlays,SceneGeometryInspection());
     if (main_view) {

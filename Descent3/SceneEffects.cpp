@@ -17,6 +17,7 @@
 #include "weapon.h"
 #include "SceneWeaponVisuals.h"
 #include "GameElectricalWeapons.h"
+#include "SceneEffectRouting.h"
 #include "matcen.h"
 #include "weather.h"
 #include "polymodel.h"
@@ -43,6 +44,31 @@ struct FragmentAsset {
 };
 std::array<FragmentAsset,MAX_OBJECTS> FragmentAssets{};
 uint64_t FragmentLifetime = 0;
+void cameraAudience(uint64_t& alternate,d3scene::MeshViewStyle& style,const GameMainView& main) {
+    alternate = SceneCloseScreenEffects;
+    style.camera_owner = main.world.camera_owner;
+    style.camera_kinds = 1u << uint32_t(d3scene::ViewKind::Main);
+    style.match = d3scene::CameraMatch::Except;
+}
+struct EffectAudienceScope {
+    d3scene::FrameData& frame;
+    const GameMainView* main;
+    EffectAudience audience;
+    size_t begin;
+    ~EffectAudienceScope() {
+        if (!main || !main->player_first_person || audience == EffectAudience::World) return;
+        for (size_t i = begin; i < frame.meshes.size(); ++i) {
+            auto& mesh = frame.meshes[i];
+            if (audience == EffectAudience::CameraLocal) {
+                if (mesh.collection != SceneCloseScreenEffects)
+                    mesh.world.position = d3scene::transformPoint(main->world.camera,mesh.world.position);
+                mesh.collection = SceneCloseScreenEffects; mesh.room = -1;
+                mesh.surface.depth = d3scene::DepthMode::Disabled;
+                mesh.surface.medium_transport = false; mesh.surface.soft_depth_range = 0;
+            } else cameraAudience(mesh.alternate_collection,mesh.primary_view_style,*main);
+        }
+    }
+};
 enum class EffectTopology { BlastRing, GravityDisk, WeaponRingEven, WeaponRingOdd, MassDriverTube,
     ElectricalTube, ElectricalTip, ElectricalDisk, Count };
 d3scene::MeshAssetRef effectTopology(EffectTopology kind) {
@@ -235,7 +261,7 @@ bool prepareLineEffect(d3scene::FrameData& frame,const vis_effect& effect,unsign
 }
 bool prepareRainDrop(d3scene::FrameData& frame,const vis_effect& effect,const d3scene::MeshAssetRef& quad,
     const GameMainView* main_view) {
-    const bool windshield = effect.id == RAINDROP_INDEX;
+    const bool windshield = (effect.flags & VF_WINDSHIELD_EFFECT) != 0;
     if (windshield && (!main_view || !main_view->player_first_person)) return false;
     if (!(effect.lifetime > 0) || !(effect.size > 0)) return false;
     const int bitmap = Fireballs[effect.id].bm_handle;
@@ -591,6 +617,7 @@ void prepareElectricalWeapon(d3scene::FrameData& frame,const d3scene::ObjectStat
         d3scene::MeshViewStyle style; style.camera_owner = pulse->source_owner;
         if (variants == 2) {
             style.forward_only = true;
+            style.camera_kinds = (1u << uint32_t(d3scene::ViewKind::Main)) | (1u << uint32_t(d3scene::ViewKind::Preview));
             style.match = variant ? d3scene::CameraMatch::Only : d3scene::CameraMatch::Except;
         }
         for (int i = segments-1; i >= 1; --i) {
@@ -742,7 +769,7 @@ void PrepareGameObjectEffects(d3scene::FrameData& frame) {
                 prepareElectricalWeapon(frame,owner,*source);
                 continue;
             }
-            if (CompileWeaponVisuals(weapon.flags).body != WeaponBodyVisual::Sprite || WeaponIsCloseScreenEffectObject(source)) continue;
+            if (CompileWeaponVisuals(weapon.flags).body != WeaponBodyVisual::Sprite) continue;
             if (weapon.flags & WF_IMAGE_VCLIP) {
                 const int clip = weapon.fire_image_handle;
                 if (clip < 0 || clip >= MAX_VCLIPS || !GameVClips[clip].used) continue;
@@ -850,8 +877,17 @@ void PrepareGameEffects(d3scene::FrameData& frame,const GameMainView* main_view)
     for (int slot = 0; VisEffects && slot <= Highest_vis_effect_index; ++slot) {
         const auto& effect = VisEffects[slot];
         if (effect.type == VIS_NONE || (effect.flags & VF_DEAD)) continue;
+        const auto audience = CompileEffectAudience(effect.type,effect.id,effect.flags);
+        if (AutomatedCapturePending() && (effect.flags & (VF_CLOSE_SCREEN_EFFECT|VF_WINDSHIELD_EFFECT)))
+            AutomatedCaptureLog("scene effect source audience slot=%d id=%u flags=%u domain=%u",slot,unsigned(effect.id),unsigned(effect.flags),unsigned(audience));
+        if (audience == EffectAudience::CameraLocal && (!main_view || !main_view->player_first_person)) continue;
+        EffectAudienceScope scope{frame,main_view,audience,frame.meshes.size()};
+        if (effect.type == VIS_FIREBALL && effect.id == SNOWFLAKE_INDEX && audience == EffectAudience::CameraLocal) {
+            if (prepareLegacySnow(frame,effect,quad)) { ++prepared; ++windshield; }
+            continue;
+        }
         if (effect.type == VIS_FIREBALL && effect.id == SNOWFLAKE_INDEX && (effect.flags & VF_ENHANCED_SNOW) &&
-            !(effect.flags & (VF_WINDSHIELD_EFFECT | VF_CLOSE_SCREEN_EFFECT))) {
+            !(effect.flags & VF_WINDSHIELD_EFFECT)) {
             enhanced_snow_particle particle{};
             particle.pos = effect.pos; particle.velocity = effect.velocity; particle.size = effect.size;
             particle.creation_time = effect.creation_time; particle.lifeleft = effect.lifeleft; particle.lifetime = effect.lifetime;
@@ -866,7 +902,7 @@ void PrepareGameEffects(d3scene::FrameData& frame,const GameMainView* main_view)
             continue;
         }
         if (effect.type == VIS_FIREBALL && effect.id == SNOWFLAKE_INDEX &&
-            !(effect.flags & (VF_ENHANCED_SNOW | VF_WINDSHIELD_EFFECT | VF_CLOSE_SCREEN_EFFECT))) {
+            !(effect.flags & (VF_ENHANCED_SNOW | VF_WINDSHIELD_EFFECT))) {
             if (prepareLegacySnow(frame,effect,quad)) { ++prepared; ++legacy_snow; }
             continue;
         }
@@ -886,18 +922,15 @@ void PrepareGameEffects(d3scene::FrameData& frame,const GameMainView* main_view)
             if (prepareFadingLine(frame,effect)) ++prepared;
             continue;
         }
-        if (effect.type == VIS_FIREBALL && effect.id == BLAST_RING_INDEX &&
-            !(effect.flags & (VF_WINDSHIELD_EFFECT | VF_CLOSE_SCREEN_EFFECT))) {
+        if (effect.type == VIS_FIREBALL && effect.id == BLAST_RING_INDEX) {
             if (prepareVisRing(frame,effect)) ++prepared;
             continue;
         }
-        if (effect.type == VIS_FIREBALL && (effect.id == AXIS_BILLBOARD_INDEX || effect.id == BILLBOARD_SMOKETRAIL_INDEX || effect.id == THICK_LIGHTNING_INDEX) &&
-            !(effect.flags & (VF_WINDSHIELD_EFFECT | VF_CLOSE_SCREEN_EFFECT))) {
+        if (effect.type == VIS_FIREBALL && (effect.id == AXIS_BILLBOARD_INDEX || effect.id == BILLBOARD_SMOKETRAIL_INDEX || effect.id == THICK_LIGHTNING_INDEX)) {
             if (prepareAxisEffect(frame,effect,quad)) ++prepared;
             continue;
         }
-        if (effect.type != VIS_FIREBALL || special(effect.id) || effect.id >= NUM_FIREBALLS ||
-            (effect.flags & (VF_WINDSHIELD_EFFECT | VF_CLOSE_SCREEN_EFFECT))) { ++pending; continue; }
+        if (effect.type != VIS_FIREBALL || special(effect.id) || effect.id >= NUM_FIREBALLS) { ++pending; continue; }
         const auto& definition = Fireballs[effect.id];
         const bool attached = (effect.flags & VF_ATTACHED) != 0;
         const float age = (std::max)(0.f,static_cast<float>(frame.simulation_time)-effect.creation_time);
@@ -1098,16 +1131,63 @@ void PrepareGameEffects(d3scene::FrameData& frame,const GameMainView* main_view)
         if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
             AutomatedCaptureLog("scene ring fixture facing=1 planar_reverse=1 object=1 gravity=1 shared_topology=1");
     }
-    if (windshield) {
-        d3scene::PreparedForeground foreground;
-        foreground.identity = SceneCloseScreenEffects; foreground.order = 35;
-        auto view = d3scene::cameraOverlayView(main_view->world,SceneCloseScreenEffects,main_view->display_viewport);
-        view.geometry_inspection = SceneGeometryInspection();
-        foreground.layer.display_views.push_back(std::move(view));
-        frame.foregrounds.push_back(std::move(foreground));
-    }
     if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
         AutomatedCaptureLog("scene effects sprites=%u pending=%u windshield=%u",prepared,pending,windshield);
     if ((mass_drivers || boss_mass_drivers || legacy_snow || enhanced_snow) && AutomatedCapturePending())
         AutomatedCaptureLog("scene effect families mass_drivers=%u boss_mass_drivers=%u legacy_snow=%u enhanced_snow=%u",mass_drivers,boss_mass_drivers,legacy_snow,enhanced_snow);
+}
+
+void PrepareGameCameraEffects(d3scene::FrameData& frame,const GameMainView* main) {
+    if (!main || !main->player_first_person) return;
+    const auto* camera = ObjGet(int(main->world.camera_owner));
+    if (!camera) throw std::logic_error("Camera effect routing lost its captured physical owner");
+    static uint64_t named_scene = 0;
+    static int napalm = -1;
+    if (named_scene != frame.scene_lifetime) { named_scene = frame.scene_lifetime; napalm = FindWeaponName("Napalm"); }
+    std::array<uint32_t,MAX_OBJECTS> close;
+    close.fill(UINT32_MAX);
+    const vector eye{main->world.camera.position.x,main->world.camera.position.y,main->world.camera.position.z};
+    const auto distance = [](vector a,vector b) { return vm_VectorDistanceQuick(&a,&b); };
+    const auto attached = [&](const object* source) {
+        return source && (uint32_t(source->handle) == main->world.camera_owner ||
+            ((source->flags & OF_ATTACHED) && uint32_t(source->attach_ultimate_handle) == main->world.camera_owner));
+    };
+    unsigned weapons = 0;
+    for (const auto& owner : frame.objects) {
+        const auto* source = ObjGet(int(owner.handle));
+        if (!source || source->type != OBJ_WEAPON || source->id >= MAX_WEAPONS) continue;
+        bool selected = VisEffectWasMarkedCloseScreenWeaponObject(source);
+        if (!selected && (source->id == napalm || (Weapons[source->id].flags & WF_NAPALM))) {
+            selected = attached(source);
+            if (!selected && attached(ObjGet(source->parent_handle))) {
+                const float player_envelope = distance(camera->pos,eye)+camera->size+source->size+30;
+                selected = distance(source->pos,camera->pos) <= player_envelope ||
+                    distance(source->pos,eye) <= source->size+30;
+            }
+        }
+        if (selected) { close[owner.handle&HANDLE_OBJNUM_MASK] = owner.handle; ++weapons; }
+    }
+    const auto closeOwner = [&](uint32_t owner) {
+        const auto index = owner&HANDLE_OBJNUM_MASK;
+        return index < close.size() && close[index] == owner;
+    };
+    bool content = false;
+    for (auto& model : frame.model_instances) {
+        if (model.collection == 0 && model.has_owner && closeOwner(model.owner))
+            cameraAudience(model.alternate_collection,model.primary_view_style,*main);
+        content = content || model.collection == SceneCloseScreenEffects || model.alternate_collection == SceneCloseScreenEffects;
+    }
+    for (auto& mesh : frame.meshes) {
+        if (mesh.collection == 0 && mesh.has_owner && closeOwner(mesh.owner))
+            cameraAudience(mesh.alternate_collection,mesh.primary_view_style,*main);
+        content = content || mesh.collection == SceneCloseScreenEffects || mesh.alternate_collection == SceneCloseScreenEffects;
+    }
+    if (!content) return;
+    d3scene::PreparedForeground foreground;
+    foreground.identity = SceneCloseScreenEffects; foreground.order = 35;
+    auto view = d3scene::cameraOverlayView(main->world,SceneCloseScreenEffects,main->display_viewport);
+    view.geometry_inspection = SceneGeometryInspection();
+    foreground.layer.display_views.push_back(std::move(view));
+    frame.foregrounds.push_back(std::move(foreground));
+    if (AutomatedCapturePending()) AutomatedCaptureLog("scene camera effect audience weapons=%u shared_geometry=1",weapons);
 }

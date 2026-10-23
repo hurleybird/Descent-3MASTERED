@@ -42,6 +42,7 @@ void PrepareGameTerrain(d3scene::FrameData&);
 void PrepareGameSky(d3scene::FrameData&);
 void PrepareGameEffects(d3scene::FrameData&,const GameMainView* = nullptr);
 void PrepareGameObjectEffects(d3scene::FrameData&);
+void PrepareGameCameraEffects(d3scene::FrameData&,const GameMainView*);
 void PrepareGameScorches(d3scene::FrameData&);
 constexpr uint64_t SceneCockpitBase = 0x434f434b50495401ull;
 constexpr uint64_t SceneCockpitLate = 0x434f434b50495402ull;

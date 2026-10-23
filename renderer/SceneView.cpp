@@ -271,6 +271,7 @@ View cameraOverlayView(View main,uint64_t collection,Rect display) {
     main.kind = ViewKind::Preview; main.target = ViewTarget::Display;
     main.collection = main.history_key = collection; main.feedback = NoFeedback;
     main.portal_visibility = false; main.dynamic_lighting = false; main.clear_depth = true;
+    main.soft_particles = false;
     main.room = -1; main.exterior_origin = false;
     main.exclude_camera_rig = false; main.excluded_objects.clear(); main.excluded_surfaces.clear(); main.image_inputs.clear();
     validateView(main);
@@ -456,10 +457,16 @@ bool sphereIntersects(const Camera& camera, Vec3 center, float radius) {
 }
 float meshViewOpacity(const MeshViewStyle& style,const View& view) {
     const bool source = view.attached_camera && view.kind != ViewKind::Mirror && view.camera_owner == style.camera_owner;
-    const bool selected = source && (!style.forward_only || view.camera_variant == 0);
+    const bool selected = source && uint32_t(view.kind) < 32 && (style.camera_kinds & (1u << uint32_t(view.kind))) &&
+        (!style.forward_only || view.camera_variant == 0);
     if ((style.match == CameraMatch::Only && !selected) || (style.match == CameraMatch::Except && selected)) return 0;
     return source || dot(style.directional_opacity,style.directional_opacity) == 0 ? 1.f :
         float((std::min)(1.0,std::abs(dot(view.camera.forward,style.directional_opacity))));
+}
+float primitiveViewOpacity(const MeshViewStyle& style,const MeshViewStyle& primary,uint64_t collection,uint64_t alternate,const View& view) {
+    if (view.collection == collection) return meshViewOpacity(style,view)*meshViewOpacity(primary,view);
+    if (!alternate || view.collection != alternate) return 0;
+    return meshViewOpacity(style,view);
 }
 View resolveView(const Presentation& frame, View view) {
     validateView(view);
@@ -635,6 +642,7 @@ ViewVisibility queryView(const Presentation& frame, const View& request) {
 static ViewVisibility queryResolvedView(const Presentation& frame,const View& view) {
     ViewVisibility result;
     result.ordering = view.ordering;
+    result.soft_particles = view.soft_particles;
     result.camera = prepareCamera(view);
     result.frame_sequence = frame.data().sequence;
     result.scene_lifetime = frame.data().scene_lifetime;
@@ -673,7 +681,7 @@ static ViewVisibility queryResolvedView(const Presentation& frame,const View& vi
             ++result.stats.surfaces_outside;
             return;
         }
-        const auto policy = modulatedMaterialPolicy(surface,alpha);
+        const auto policy = modulatedMaterialPolicy(surface,alpha*(item.view_alpha/255.f));
         item.blended = policy.blended();
         item.late = policy.requiresLatePass();
         item.depth = static_cast<float>(dot(view.camera.forward,subtract(point,view.camera.position)));
@@ -702,7 +710,8 @@ static ViewVisibility queryResolvedView(const Presentation& frame,const View& vi
         if (instance.has_owner) model_owners[instance.compiled_owner] = true;
     }
     const auto eligible = [&](const ModelInstance& instance) {
-        return instance.collection == view.collection && instance.visible && (!instance.has_owner || (frame.data().objects[instance.compiled_owner].visible &&
+        return primitiveViewOpacity(instance.view_style,instance.primary_view_style,instance.collection,instance.alternate_collection,view) > 0 &&
+            instance.visible && (!instance.has_owner || (frame.data().objects[instance.compiled_owner].visible &&
             !excludesObject(view,instance.owner)));
     };
     for (size_t i = 0; i < frame.data().objects.size(); ++i) {
@@ -732,6 +741,7 @@ static ViewVisibility queryResolvedView(const Presentation& frame,const View& vi
         // Publication compiled these bounds from the same pose/deformation as
         // execution. The simulation radius is not a rendering visibility bound.
         const auto model_surface_begin = result.surfaces.size();
+        const uint8_t view_alpha = uint8_t(std::lround(255.f*primitiveViewOpacity(object.view_style,object.primary_view_style,object.collection,object.alternate_collection,view)));
         for (size_t part = 0; part < model.parts.size(); ++part) {
             if (!model.parts[part].draw) continue;
             if (!model.parts[part].has_render_bounds || boundsOutside(result.camera,model.parts[part].render_bounds,window)) continue;
@@ -751,13 +761,14 @@ static ViewVisibility queryResolvedView(const Presentation& frame,const View& vi
               const auto& faces = asset_part.surface_groups[group];
               const auto first = faces.front();
               const auto& surface = model.parts[part].surface(asset_part,first);
-              const auto policy = modulatedMaterialPolicy(surface,model.modulation.alpha);
+              const auto policy = modulatedMaterialPolicy(surface,model.modulation.alpha*(view_alpha/255.f));
               const bool per_corner = surface.reflection && (!surface.reflection->data().corner_normals.empty() ||
                   !surface.reflection->data().field_corners.empty());
               if (faces.size() > 1 && model.parts[part].material_palette && model.parts[part].vertices.empty() &&
                   surface.draw_surface && policy.depth == DepthMode::ReadWrite &&
                   !policy.blended() && !policy.requiresLatePass() && !per_corner) {
                 VisibleSurface item;
+                item.view_alpha = view_alpha;
                 item.model = true; item.model_instance_index = static_cast<uint32_t>(i);
                 item.model_variant = variant; item.part_index = static_cast<uint32_t>(part);
                 item.polygon_index = first; item.model_material_group = true; item.placement = placement;
@@ -773,6 +784,7 @@ static ViewVisibility queryResolvedView(const Presentation& frame,const View& vi
             if (individual) for (size_t face = 0; face < geometry.polygons.size(); ++face) {
                 if (grouped[asset_part.surface_for_polygon[face]]) continue;
                 VisibleSurface item;
+                item.view_alpha = view_alpha;
                 item.model = true; item.model_instance_index = static_cast<uint32_t>(i);
                 item.model_variant = variant;
                 item.part_index = static_cast<uint32_t>(part); item.polygon_index = static_cast<uint32_t>(face);
@@ -814,8 +826,7 @@ static ViewVisibility queryResolvedView(const Presentation& frame,const View& vi
         visible_receivers.push_back((uint64_t(surface.room_index)<<32)|surface.polygon_index);
     for (const auto index : collection.meshes) {
         const auto& instance = frame.data().meshes[index];
-        if (instance.collection != view.collection) continue;
-        const float view_alpha = meshViewOpacity(instance.view_style,view);
+        const float view_alpha = primitiveViewOpacity(instance.view_style,instance.primary_view_style,instance.collection,instance.alternate_collection,view);
         if (view_alpha <= 0) continue;
         if (instance.receiver_polygon >= 0 && !std::binary_search(visible_receivers.begin(),visible_receivers.end(),
             (uint64_t(room_indices.at(instance.room))<<32)|uint32_t(instance.receiver_polygon))) continue;
@@ -950,7 +961,7 @@ std::vector<ViewPass> buildViewPasses(const Presentation& frame,const ViewVisibi
     if (index > opaque) passes.push_back({ViewPassKind::OpaqueWorld,opaque,index});
     bool depth_required = false;
     for (size_t i = index; i < view.surfaces.size(); ++i)
-        depth_required = depth_required || visibleSurfaceBinding(frame,view.surfaces[i]).soft_depth_range > 0;
+        depth_required = depth_required || (view.soft_particles && visibleSurfaceBinding(frame,view.surfaces[i]).soft_depth_range > 0);
     if (depth_required) passes.push_back({ViewPassKind::SnapshotOpaqueDepth,index,index});
     if (products.opaque_scene && !products.occlusion) passes.push_back({ViewPassKind::ExportOpaqueScene,index,index});
     if (!products.soft_volume_layer) {
@@ -964,7 +975,7 @@ std::vector<ViewPass> buildViewPasses(const Presentation& frame,const ViewVisibi
             frame.data().meshes[item.mesh_index].raster_domain != RasterDomain::SoftVolume) return false;
         const auto& surface = visibleSurfaceBinding(frame,item);
         const auto policy = visibleSurfacePolicy(frame,item);
-        return surface.unlit && surface.soft_depth_range > 0 && policy.depth == DepthMode::ReadOnly &&
+        return view.soft_particles && surface.unlit && surface.soft_depth_range > 0 && policy.depth == DepthMode::ReadOnly &&
             (policy.blend == BlendMode::Alpha || policy.blend == BlendMode::Additive);
     };
     // Preserve the exact sorted sequence, including intervening glass/models.

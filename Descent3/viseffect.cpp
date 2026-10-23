@@ -661,14 +661,16 @@ void VisEffectMarkCloseScreenWeaponObject(object* obj)
 	Close_screen_weapon_object_handles.push_back(obj->handle);
 }
 
-bool VisEffectIsCloseScreenWeaponObject(object* obj)
+bool VisEffectWasMarkedCloseScreenWeaponObject(const object* obj)
 {
 	if (obj == NULL || obj->type != OBJ_WEAPON)
 		return false;
-	if (!VisEffectViewerIsFirstPersonLocalPlayerView())
-		return false;
 
 	return std::find(Close_screen_weapon_object_handles.begin(), Close_screen_weapon_object_handles.end(), obj->handle) != Close_screen_weapon_object_handles.end();
+}
+bool VisEffectIsCloseScreenWeaponObject(object* obj)
+{
+	return VisEffectViewerIsFirstPersonLocalPlayerView() && VisEffectWasMarkedCloseScreenWeaponObject(obj);
 }
 
 // Creates vis effects but has the caller set their parameters

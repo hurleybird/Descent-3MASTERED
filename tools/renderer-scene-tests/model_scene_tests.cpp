@@ -84,6 +84,21 @@ int runModelSceneTests() {
         input.model_variants[0].parts[0].vertices.clear();
         check(queryView(*Presentation::freeze(input),request).surfaces.size() == 2 && queryView(*grouped,request).surfaces.size() == 2,
             "Batch eligibility transition changed a held frame or retained stale deformation");
+        ObjectState camera_owner; camera_owner.handle = 42; input.objects.push_back(camera_owner);
+        auto& shared_model = input.model_instances[0]; shared_model.alternate_collection = 99;
+        shared_model.primary_view_style.camera_owner = 42; shared_model.primary_view_style.match = CameraMatch::Except;
+        shared_model.primary_view_style.camera_kinds = 1u << uint32_t(ViewKind::Main);
+        const auto shared = Presentation::freeze(input);
+        request.attached_camera = true; request.camera_owner = 42;
+        check(queryView(*shared,request).surfaces.empty(),"Camera-local model remained in its main world audience");
+        request.kind = ViewKind::Auxiliary;
+        check(queryView(*shared,request).surfaces.size() == 2,"Shared model disappeared from auxiliary world view");
+        request.kind = ViewKind::Preview; request.collection = 99;
+        check(queryView(*shared,request).surfaces.size() == 2 && shared->data().model_instances.size() == 1 &&
+            shared->data().model_variants.size() == 1,"Alternate model audience duplicated pose or lost geometry");
+        input.model_instances[0].alternate_collection = 100;
+        check(queryView(*Presentation::freeze(input),request).surfaces.empty() && queryView(*shared,request).surfaces.size() == 2,
+            "Model audience change reused stale membership or changed held geometry");
     }
     {
         uint32_t seed = 0x42b07u;

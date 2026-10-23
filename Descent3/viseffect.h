@@ -52,6 +52,7 @@ bool VisEffectQueueCloseScreenAlpha(float r,float g,float b,float alpha);
 void VisEffectRenderCloseScreenEffectsPostAO();
 void VisEffectMarkCloseScreenWeaponObject(object *obj);
 bool VisEffectIsCloseScreenWeaponObject(object *obj);
+bool VisEffectWasMarkedCloseScreenWeaponObject(const object *obj);
 
 //link the viseffect  into the list for its room
 // Does nothing for effects over terrain

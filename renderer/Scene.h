@@ -377,6 +377,7 @@ enum class RasterDomain : uint8_t { Surface, SoftVolume };
 enum class CameraMatch : uint8_t { Any, Only, Except };
 struct MeshViewStyle {
     uint32_t camera_owner = 0;
+    uint32_t camera_kinds = UINT32_MAX; // selected camera kinds; all by default
     CameraMatch match = CameraMatch::Any;
     bool forward_only = false;
     // Nonzero unit axis gives abs(dot(camera.forward,axis)) opacity in other
@@ -386,6 +387,7 @@ struct MeshViewStyle {
 struct PreparedMesh {
     MeshAssetRef asset;
     MeshViewStyle view_style;
+    MeshViewStyle primary_view_style; // primary audience selection, independent of visual camera rules
     BillboardMotion billboard_motion;
     RasterDomain raster_domain = RasterDomain::Surface;
     // Pixel-width extrusion around the segment world.position +/- world.up.
@@ -395,6 +397,7 @@ struct PreparedMesh {
     bool light_influences_prepared = false;
     LightCandidateRange light_candidates;
     uint64_t collection = 0; // zero is the world; other collections are isolated view content
+    uint64_t alternate_collection = 0; // optional second audience; geometry is still prepared once
     std::vector<Vec3> vertices; // owned frame-local positions; empty uses authored geometry
     std::vector<Vec2> texture_uvs; // optional per-vertex base UVs; split vertices at seams
     SurfaceBinding surface;
@@ -745,6 +748,9 @@ struct ModelAmbientInput {
 struct ModelInstance {
     uint64_t identity = 0; // stable nonzero presentation identity; unique within a scene
     uint64_t collection = 0;
+    uint64_t alternate_collection = 0;
+    MeshViewStyle view_style;
+    MeshViewStyle primary_view_style;
     uint32_t owner = 0;
     bool has_owner = false, visible = true;
     int32_t room = -1;
@@ -850,6 +856,7 @@ struct View {
     Rect coverage;
     float zoom = 1;
     bool dynamic_lighting = true;
+    bool soft_particles = true;
     bool portal_visibility = true;
     bool exterior_origin = false; // explicit exterior root, not an unknown room fallback
     uint8_t feedback = NoFeedback;
