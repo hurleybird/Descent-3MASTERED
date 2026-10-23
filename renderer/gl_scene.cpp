@@ -9,6 +9,7 @@
 #include "SceneFog.h"
 #include "SceneFogShaders.h"
 #include "SceneMotion.h"
+#include "SceneDeformation.h"
 #include "gameloop.h"
 #include "args.h"
 #include <cstring>
@@ -33,7 +34,7 @@ static_assert(static_cast<int>(d3scene::OcclusionClass::Default) == RENDERER_AO_
     static_cast<int>(d3scene::OcclusionClass::Mine) == RENDERER_AO_CLASS_MINE,"Canvas AO class adapter differs from scene contract");
 struct SceneVertex { d3scene::Vec3 position; float u, v, lu, lv, alpha; d3scene::Vec3 normal, color; d3scene::Vec2 raster_offset; uint32_t polygon; };
 const char* SceneLightingShader = R"GLSL(#version 330 core
-layout(std140) uniform SceneViewBlock { vec4 view_params[14]; ivec4 view_options; };
+layout(std140) uniform SceneViewBlock { vec4 view_params[16]; uvec4 deformer_keys; ivec4 view_options; };
 #define eye (view_params[0].xyz)
 #define near_distance (view_params[0].w)
 #define camera_right (view_params[1].xyz)
@@ -48,10 +49,12 @@ layout(std140) uniform SceneViewBlock { vec4 view_params[14]; ivec4 view_options
 #define previous_view_projection mat4(view_params[8],view_params[9],view_params[10],view_params[11])
 #define exterior_fog_color (view_params[12].xyz)
 #define exterior_fog_range (view_params[13].xy)
+#define current_deformation (view_params[14].xyz)
+#define previous_deformation (view_params[15].xyz)
 #define lighting_per_pixel (view_options.x)
 #define fog_volume_count (view_options.y)
 #define fog_volume_offset (view_options.z)
-layout(std140) uniform SceneDrawBlock { vec4 draw_params[21]; uvec4 draw_identity; };
+layout(std140) uniform SceneDrawBlock { vec4 draw_params[22]; uvec4 draw_identity; };
 #define model_position (draw_params[0].xyz)
 #define effect_depth_offset (draw_params[0].w)
 #define model_right (draw_params[1].xyz)
@@ -106,6 +109,8 @@ layout(std140) uniform SceneDrawBlock { vec4 draw_params[21]; uvec4 draw_identit
 #define motion_identity (draw_identity.x)
 #define motion_valid (int(draw_identity.y))
 #define polygon_light_table (int(draw_identity.z))
+#define deformation_response (draw_params[21].xy)
+#define deformation_identity (draw_identity.w)
 uniform samplerBuffer scene_lights;
 uniform isamplerBuffer scene_influences;
 
@@ -170,6 +175,32 @@ out vec4 texture_coordinates;
 // XYZ world position + ambient RGB + dynamic RGB + authored RGB (12 scalars).
 out vec4 surface_payload[3];
 flat out ivec2 primitive_influences;
+uint deformationHash(uint h) {
+    h ^= h>>16; h *= 0x7feb352du; h ^= h>>15; h *= 0x846ca68bu; return h^(h>>16);
+}
+float deformationNoise(uint h) { return float(deformationHash(h)&65535u)/32767.5-1.0; }
+float deformationCell(vec3 p,uint seed) {
+    uvec3 bits = floatBitsToUint(vec3(p.x == 0.0 ? 0.0 : p.x,p.y == 0.0 ? 0.0 : p.y,p.z == 0.0 ? 0.0 : p.z));
+    return deformationNoise(bits.x*0x9e3779b9u ^ bits.y*0x85ebca6bu ^ bits.z*0xc2b2ae35u ^ seed);
+}
+float deformationField(vec3 point,uint seed,float spacing) {
+    vec3 q = point/spacing, cell = floor(q), f = fract(q); f = f*f*(3.0-2.0*f);
+    return mix(mix(mix(deformationCell(cell,seed),deformationCell(cell+vec3(1,0,0),seed),f.x),
+        mix(deformationCell(cell+vec3(0,1,0),seed),deformationCell(cell+vec3(1,1,0),seed),f.x),f.y),
+        mix(mix(deformationCell(cell+vec3(0,0,1),seed),deformationCell(cell+vec3(1,0,1),seed),f.x),
+        mix(deformationCell(cell+vec3(0,1,1),seed),deformationCell(cell+vec3(1,1,1),seed),f.x),f.y),f.z);
+}
+vec3 deformWorldPoint(vec3 point,vec3 axis,uint seed) {
+    if (all(equal(deformation_response,vec2(0))) || all(equal(axis,vec3(0)))) return point;
+    float spacing = max(64.0,length(axis)*8.0);
+    vec3 offset = vec3(0);
+    if (deformation_response.x != 0.0) offset = axis*(deformationField(point,seed,spacing)*deformation_response.x);
+    uint rigid = seed^deformation_identity;
+    if (deformation_response.y != 0.0)
+        offset += abs(axis)*deformation_response.y*vec3(deformationNoise(rigid^0x51ed270bu),
+            deformationNoise(rigid^0x68bc21ebu),deformationNoise(rigid^0x02e5be93u));
+    return point+offset;
+}
 void main() {
     primitive_influences = ivec2(influence_offset,influence_count);
     if (polygon_light_table != 0) {
@@ -180,6 +211,7 @@ void main() {
     vec3 prepared = use_instance_positions != 0 ? texelFetch(instance_positions,position_record).rgb : position;
     vec3 previous_prepared = use_instance_positions != 0 ? texelFetch(instance_positions,position_record+1).rgb : position;
     vec3 world = model_position + model_right*prepared.x + model_up*prepared.y + model_forward*prepared.z;
+    world = deformWorldPoint(world,current_deformation,deformer_keys.x);
     vec3 relative = world-eye;
     gl_ClipDistance[0] = dot(vec4(world,1),world_clip_plane);
     vec3 vertex_dynamic = lighting_per_pixel != 0 ? vec3(0) : sceneDynamicLighting(world,primitive_influences);
@@ -200,6 +232,7 @@ void main() {
     current_clip = gl_Position;
     vec3 previous_world = previous_position+previous_right*previous_prepared.x+
         previous_up*previous_prepared.y+previous_forward*previous_prepared.z;
+    previous_world = deformWorldPoint(previous_world,previous_deformation,deformer_keys.y);
     previous_clip = previous_view_projection*vec4(previous_world,1);
     texture_coordinates = vec4(uv,light_uv); normal_alpha.w = alpha;
     if (use_instance_uvs != 0) texture_coordinates.zw = texelFetch(instance_uvs,gl_VertexID+instance_uv_offset).rg;
@@ -1633,8 +1666,8 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     glActiveTexture(GL_TEXTURE6); glBindTexture(GL_TEXTURE_BUFFER,scene_fog_texture);
     if (new_fog_buffer) glTexBuffer(GL_TEXTURE_BUFFER,GL_RGBA32F,scene_fog_buffer);
     const auto& exterior_fog = presentation.data().exterior_fog;
-    struct ViewRecord { std::array<float,56> values{}; std::array<int32_t,4> options{}; } view_record;
-    static_assert(sizeof(ViewRecord) == 15*16,"Scene view std140 layout mismatch");
+    struct ViewRecord { std::array<float,64> values{}; std::array<uint32_t,4> deformer_keys{}; std::array<int32_t,4> options{}; } view_record;
+    static_assert(sizeof(ViewRecord) == 18*16,"Scene view std140 layout mismatch");
     const auto put = [&](size_t row,d3scene::Vec3 v,float w = 0) {
         const float values[4] = {v.x,v.y,v.z,w}; std::copy_n(values,4,view_record.values.data()+row*4);
     };
@@ -1645,6 +1678,8 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     put(7,{2.f/view.viewport.width,2.f/view.viewport.height,float(output.Width())},float(output.Height()));
     std::copy_n(history.previous.view_projection.data(),16,view_record.values.data()+32);
     put(12,exterior_fog.color); put(13,{exterior_fog.start,exterior_fog.end,0});
+    put(14,view.world_deformation.displacement); put(15,history.previous_deformation.displacement);
+    view_record.deformer_keys = {{view.world_deformation.seed,history.previous_deformation.seed,0,0}};
     view_record.options = {{int32_t(presentation.data().lighting_quality == d3scene::LightingQuality::Pixel),
         int32_t(scene_view_fog.count),int32_t(scene_view_fog.offset),0}};
     if (!scene_view_buffer) glGenBuffers(1,&scene_view_buffer);
@@ -1796,7 +1831,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     if (!scene_draw_record_bytes) {
         GLint alignment = 16;
         glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT,&alignment);
-        scene_draw_record_bytes = ((22*16+size_t(alignment)-1)/size_t(alignment))*size_t(alignment);
+        scene_draw_record_bytes = ((23*16+size_t(alignment)-1)/size_t(alignment))*size_t(alignment);
     }
     const size_t record_bytes = scene_draw_record_bytes;
     auto& records = scene_draw_records; records.assign(visibility.surfaces.size()*(record_bytes/sizeof(float)),0);
@@ -1874,7 +1909,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
             if (part.light_influences_prepared) {
                 influences = ElementRange();
                 const uint32_t table = view.dynamic_lighting && !surface.unlit ? scene_part_ranges[part.compiled_index].light_table : 0;
-                std::memcpy(record+86,&table,sizeof(table));
+                std::memcpy(record+90,&table,sizeof(table));
             }
         }
         record[62] = float(influences.offset);
@@ -1905,8 +1940,13 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         }
         { const auto value = motion.previous.position; record[16] = value.x; record[17] = value.y; record[18] = value.z; } { const auto value = motion.previous.right; record[20] = value.x; record[21] = value.y; record[22] = value.z; }
         { const auto value = motion.previous.up; record[24] = value.x; record[25] = value.y; record[26] = value.z; } { const auto value = motion.previous.forward; record[28] = value.x; record[29] = value.y; record[30] = value.z; }
-        { const uint32_t value = uint32_t(motion.identity); std::memcpy(record+84,&value,sizeof(value)); }
-        { const uint32_t value = uint32_t(motion.valid); std::memcpy(record+85,&value,sizeof(value)); }
+        const auto deformation = d3scene::deformationForGeometry(presentation.data(),item,surface.layer);
+        if (!resolved_part && history.previous_valid && d3scene::hasDeformationMotion(view.world_deformation,history.previous_deformation,deformation.response))
+            motion.valid = true;
+        { const uint32_t value = uint32_t(motion.identity); std::memcpy(record+88,&value,sizeof(value)); }
+        { const uint32_t value = uint32_t(motion.valid); std::memcpy(record+89,&value,sizeof(value)); }
+        record[84] = deformation.response.vertices; record[85] = deformation.response.translation;
+        std::memcpy(record+91,&deformation.identity,sizeof(deformation.identity));
         { const auto value = surface.base_color; record[40] = value.x; record[41] = value.y; record[42] = value.z; }
         { const auto value = modulation.color; record[44] = value.x; record[45] = value.y; record[46] = value.z; }
         { const auto value = modulation.ambient; record[32] = value.x; record[33] = value.y; record[34] = value.z; } { const auto value = surface.ambient_direction; record[36] = value.x; record[37] = value.y; record[38] = value.z; }
@@ -2048,9 +2088,11 @@ void main() {
         const int capture_frame = AutomatedCaptureFrameIndex();
         const bool export_history_probe = FindArg("-scene-history-export-probe") &&
             capture_frame >= 20 && capture_frame <= 22;
+        const bool deformation_probe = FindArg("-scene-view-deformation-probe") &&
+            ((capture_frame >= 20 && capture_frame <= 22) || AutomatedCapturePending());
         if (writes_motion &&
             (capture_frame == 0 || capture_frame == 30 || capture_frame == 31 || capture_frame == 59 ||
-                export_history_probe ||
+                export_history_probe || deformation_probe ||
                 (FindArg("-scene-resource-probe") && capture_frame >= 10 && capture_frame <= 51 && capture_frame % 10 <= 1))) {
             if (export_history_probe && !history.previous_valid)
                 Error("Independent save publication reset the main camera history");
@@ -2066,23 +2108,28 @@ void main() {
             glBindTexture(GL_TEXTURE_2D,identity_texture);
             glGetTexImage(GL_TEXTURE_2D,0,GL_RED_INTEGER,GL_UNSIGNED_INT,identities.data());
             glBindTexture(GL_TEXTURE_2D,texture_binding);
-            size_t model_pixels = 0, valid_pixels = 0, moving_pixels = 0;
+            size_t model_pixels = 0, valid_pixels = 0, moving_pixels = 0, static_valid = 0, static_moving = 0;
             float maximum = 0;
-            for (size_t pixel = 0; pixel < pixels; ++pixel) if (identities[pixel]) {
-                ++model_pixels;
+            for (size_t pixel = 0; pixel < pixels; ++pixel) {
                 const float x = vectors[pixel*4], y = vectors[pixel*4+1], valid = vectors[pixel*4+2];
                 if (!std::isfinite(x) || !std::isfinite(y) || (valid != 0 && valid != 1))
                     Error("Invalid scene motion record at pixel %u",static_cast<unsigned>(pixel));
-                if (valid != 0) ++valid_pixels;
                 const float magnitude = std::sqrt(x*x+y*y);
-                if (magnitude > 1.e-6f) ++moving_pixels;
+                if (identities[pixel]) {
+                    ++model_pixels;
+                    if (valid != 0) ++valid_pixels;
+                    if (magnitude > 1.e-6f) ++moving_pixels;
+                } else if (valid != 0) {
+                    ++static_valid;
+                    if (magnitude > 1.e-6f) ++static_moving;
+                }
                 maximum = (std::max)(maximum,magnitude);
             }
-            if (!history.previous_valid && valid_pixels)
+            if (!history.previous_valid && (valid_pixels || static_valid))
                 Error("Scene motion retained valid pixels across an invalid view history");
-            AutomatedCaptureLog("scene motion frame=%d camera_history=%d model_pixels=%u valid=%u moving=%u max_uv=%.9g",
+            AutomatedCaptureLog("scene motion frame=%d camera_history=%d model_pixels=%u valid=%u moving=%u max_uv=%.9g static_valid=%u static_moving=%u",
                 capture_frame,history.previous_valid,static_cast<unsigned>(model_pixels),
-                static_cast<unsigned>(valid_pixels),static_cast<unsigned>(moving_pixels),maximum);
+                static_cast<unsigned>(valid_pixels),static_cast<unsigned>(moving_pixels),maximum,unsigned(static_valid),unsigned(static_moving));
             check_scene_error("motion record readback");
         }
         bind_outputs();
@@ -2258,7 +2305,7 @@ void main() {
                   (ib.terrain || ib.model_material_group || (ib.mesh && !y.two_sided)) &&
               !x.view_image_slot && !y.view_image_slot && !a.policy.planar_slot && !b.policy.planar_slot &&
               std::memcmp(records.data()+first*(record_bytes/sizeof(float)),
-                  records.data()+next*(record_bytes/sizeof(float)),88*sizeof(float)) == 0;
+                  records.data()+next*(record_bytes/sizeof(float)),92*sizeof(float)) == 0;
       };
       static thread_local std::vector<GLint> draw_starts;
       static thread_local std::vector<GLsizei> draw_counts;
@@ -2305,7 +2352,7 @@ void main() {
         bind_image(surface.baked_image,1,surface.lightmap_wrap,true);
         bind_image(surface.specular_image,8,surface.texture_wrap,false);
         scene_shader.Use();
-        glBindBufferRange(GL_UNIFORM_BUFFER,7,scene_draw_buffer,item_index*record_bytes,22*16);
+        glBindBufferRange(GL_UNIFORM_BUFFER,7,scene_draw_buffer,item_index*record_bytes,23*16);
         const bool cull = item.terrain || item.model_material_group || (item.mesh && !surface.two_sided);
         // Authored polymodel fronts use clockwise winding, unlike the
         // terrain batches. CPU face-normal culling previously hid this

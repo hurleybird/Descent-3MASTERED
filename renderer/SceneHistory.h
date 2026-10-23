@@ -24,6 +24,7 @@ struct ViewHistorySample {
     uint64_t sequence = 0, lifetime = 0;
     View view;
     ViewMatrices current, previous;
+    ViewDeformation previous_deformation;
     bool previous_valid = false;
 };
 // Image-space consumers receive a complete camera pair and its time/movement
@@ -59,6 +60,7 @@ inline ImageMotion prepareImageMotion(const FrameData& frame,const ViewHistorySa
         prior.view.camera_variant == camera.view.camera_variant &&
         sameClipVolume(prior.view,camera.view) &&
         sameSurfaceSelection(prior.view,camera.view) &&
+        prior.view.world_deformation == camera.view.world_deformation &&
         prior.view.viewport.x == camera.view.viewport.x && prior.view.viewport.y == camera.view.viewport.y &&
         prior.view.viewport.width == camera.view.viewport.width && prior.view.viewport.height == camera.view.viewport.height &&
         prior.view.projection_anchor.x == camera.view.projection_anchor.x && prior.view.projection_anchor.y == camera.view.projection_anchor.y &&
@@ -66,6 +68,7 @@ inline ImageMotion prepareImageMotion(const FrameData& frame,const ViewHistorySa
         prior.current.projection == camera.current.projection &&
         prior.current.view_projection == camera.current.view_projection) {
         result.camera.previous = prior.previous;
+        result.camera.previous_deformation = prior.previous_deformation;
         result.camera.previous_valid = prior.previous_valid;
         result.delta_time = completed.delta_time;
         result.afterburner_factor = completed.afterburner_factor;
@@ -97,17 +100,21 @@ public:
         ViewHistorySample result;
         result.sequence = frame.sequence; result.lifetime = frame.scene_lifetime;
         result.view = view; result.current = viewMatrices(camera); result.previous = result.current;
+        result.previous_deformation = view.world_deformation;
         const auto found = completed_.find({view.kind,view.history_key});
         if (found == completed_.end()) return result;
         const auto& prior = found->second;
         if (prior.lifetime == result.lifetime && prior.sequence == result.sequence) {
             if (!compatible(prior,result) || prior.current.view_projection != result.current.view_projection ||
+                prior.view.world_deformation != result.view.world_deformation ||
                 prior.view.camera_cut != result.view.camera_cut)
                 throw std::logic_error("A view history key was reused for a different camera in one presentation");
             result.previous = prior.previous; result.previous_valid = prior.previous_valid;
+            result.previous_deformation = prior.previous_deformation;
         } else if (!view.camera_cut && prior.sequence < result.sequence &&
             prior.sequence == frame.temporal_predecessor && compatible(prior,result)) {
             result.previous = prior.current; result.previous_valid = true;
+            result.previous_deformation = prior.view.world_deformation;
         }
         return result;
     }

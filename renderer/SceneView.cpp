@@ -272,6 +272,7 @@ View cameraOverlayView(View main,uint64_t collection,Rect display) {
     main.collection = main.history_key = collection; main.feedback = NoFeedback;
     main.portal_visibility = false; main.dynamic_lighting = false; main.clear_depth = true;
     main.soft_particles = false;
+    main.world_deformation = {};
     main.room = -1; main.exterior_origin = false;
     main.exclude_camera_rig = false; main.excluded_objects.clear(); main.excluded_surfaces.clear(); main.image_inputs.clear();
     validateView(main);
@@ -609,7 +610,10 @@ PlanarViewPlan planPlanarViews(const Presentation& frame,const View& parent,uint
         const auto camera = prepareCamera(image.view);
         const auto width = image.view.viewport.width,height = image.view.viewport.height;
         double left = width,top = height,right = 0,bottom = 0;
-        bool bounded = true;
+        const auto warp = parent.world_deformation.displacement;
+        bool bounded = warp.x == 0 && warp.y == 0 && warp.z == 0;
+        // A visually displaced mirror film can need pixels outside its
+        // simulation aperture. Keep the full producer only while it is warped.
         for (const auto polygon : group.polygons) for (const auto& corner : room.asset->geometry().polygons[polygon].corners) {
             const auto p = project(camera,room.asset->geometry().vertices[corner.vertex]);
             // A near-plane crossing needs homogeneous clipping; retaining the

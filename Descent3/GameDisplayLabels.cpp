@@ -1,5 +1,6 @@
 // Descent 3MASTERED - GPL-3.0-or-later
 #include "GameDisplayLabels.h"
+#include "../renderer/SceneDeformation.h"
 #include "SceneExtraction.h"
 #include "SceneModuleContext.h"
 #include "SceneFeedback.h"
@@ -40,7 +41,10 @@ void QueueGamePlayerLabels(const d3scene::Presentation& world,const SceneFrameFe
         if (!source.visible) continue;
         ++eligible;
         d3scene::Vec2 position;
-        if (!ProjectGameLabel(camera,receipt.main_viewport,source.current.position,HudNameTan,position)) continue;
+        d3scene::ViewDeformationResponse response{0,0};
+        if (const auto* body = world.modelIndices().find(GameObjectModelIdentity(source.handle)))
+            response.translation = world.data().model_instances[body->second].deformation_response.translation;
+        if (!ProjectGameLabel(camera,receipt.main_viewport,d3scene::deformViewPoint(source.current.position,receipt.main_deformation,response,source.handle),HudNameTan,position)) continue;
         ++projected;
         // The game decides semantic visibility and module color before canvas
         // publication. No raycast, callback or global g3 projection reaches GL.

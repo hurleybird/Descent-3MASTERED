@@ -18,6 +18,8 @@ struct GameMainView {
     d3scene::Rect display_viewport;
     bool player_first_person = false;
 };
+inline uint64_t GameObjectModelIdentity(uint32_t owner) { return uint64_t(owner)+1; }
+inline d3scene::ViewDeformationResponse GameModelDeformationResponse() { return {1.f/19,10.f/19}; }
 d3scene::FrameData ExtractGameFrame(double time,float delta,bool paused,bool advance_history = true,
     const d3scene::Presentation* retained_frame = nullptr,bool audit_geometry = false);
 

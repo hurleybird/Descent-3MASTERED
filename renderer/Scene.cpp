@@ -1138,6 +1138,9 @@ PresentationRef Presentation::complete(FrameData data) {
         require(finite(transform),"Invalid composed model transform");
     size_t model_end = 0;
     for (auto& object : data.model_instances) {
+        require(std::isfinite(object.deformation_response.vertices) && object.deformation_response.vertices >= 0 &&
+            std::isfinite(object.deformation_response.translation) && object.deformation_response.translation >= 0,
+            "Invalid model deformation response");
         require(object.identity,"Absent model instance identity");
         object.compiled_owner = ownerIndex(object.has_owner,object.owner,object.compiled_owner);
         validateViewStyle(object.view_style);
@@ -1227,6 +1230,9 @@ PresentationRef Presentation::complete(FrameData data) {
     image_requirements.finish();
     for (const auto& dependency : image_requirements.values()) validateDependency(dependency);
     for (auto& mesh : data.meshes) {
+        require(std::isfinite(mesh.deformation_response.vertices) && mesh.deformation_response.vertices >= 0 &&
+            std::isfinite(mesh.deformation_response.translation) && mesh.deformation_response.translation >= 0,
+            "Invalid mesh deformation response");
         mesh.compiled_owner = ownerIndex(mesh.has_owner,mesh.owner,mesh.compiled_owner);
         if (mesh.view_style.match != CameraMatch::Any || mesh.view_style.directional_opacity.x != 0 ||
             mesh.view_style.directional_opacity.y != 0 || mesh.view_style.directional_opacity.z != 0)
@@ -1455,6 +1461,7 @@ void validateView(const View& view) {
     for (const auto& input : view.image_inputs)
         require(input.slot && input.image && image_slots.insert(input.slot).second,"Invalid or duplicate view image input");
     require(finite(view.camera) && finite(view.camera_velocity) && std::isfinite(view.zoom) && view.zoom > 0, "Invalid view camera");
+    require(finite(view.world_deformation.displacement),"Invalid view world deformation");
     if (view.has_clip_plane) {
         const auto n = view.clip_plane.normal;
         const double length2 = double(n.x)*n.x+double(n.y)*n.y+double(n.z)*n.z;

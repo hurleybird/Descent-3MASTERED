@@ -38,6 +38,7 @@ struct SceneFrameFeedback {
     // Owned receipt of the exact executable camera. Presentation producers
     // consume this without resolving/copying a View or traversing portals again.
     d3scene::Camera main_camera;
+    d3scene::ViewDeformation main_deformation;
     d3scene::Rect main_viewport;
     int32_t main_camera_room = -1;
     bool main_camera_cut = false;
@@ -62,6 +63,7 @@ class SceneFeedbackTransaction {
             result.main_view_present = result.main_exterior_visible = false;
             result.main_view_key = result.main_camera_variant = result.main_camera_owner = 0;
             result.main_camera = {}; result.main_viewport = {}; result.main_camera_room = -1;
+            result.main_deformation = {};
             result.main_camera_cut = false; result.main_excluded_objects.clear();
             result.automap_rooms.clear(); result.effect_rooms.clear(); result.objects.clear();
             room_domains.clear(); object_seen.clear(); view_indices.clear(); views.clear();

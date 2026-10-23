@@ -19,6 +19,13 @@ namespace d3scene {
 
 struct Vec2 { float x = 0, y = 0; };
 struct Vec3 { float x = 0, y = 0, z = 0; };
+struct ViewDeformation { Vec3 displacement; uint32_t seed = 0; };
+struct ViewDeformationResponse { float vertices = 1, translation = 0; };
+inline bool operator==(const ViewDeformation& a,const ViewDeformation& b) {
+    return a.displacement.x == b.displacement.x && a.displacement.y == b.displacement.y &&
+        a.displacement.z == b.displacement.z && a.seed == b.seed;
+}
+inline bool operator!=(const ViewDeformation& a,const ViewDeformation& b) { return !(a == b); }
 struct Plane { Vec3 normal; float constant = 0; };
 struct Transform {
     Vec3 position;
@@ -385,6 +392,7 @@ struct MeshViewStyle {
     Vec3 directional_opacity;
 };
 struct PreparedMesh {
+    ViewDeformationResponse deformation_response{0,0};
     MeshAssetRef asset;
     MeshViewStyle view_style;
     MeshViewStyle primary_view_style; // primary audience selection, independent of visual camera rules
@@ -746,6 +754,7 @@ struct ModelAmbientInput {
     bool blend_previous = false, clamp_after_multiplier = false;
 };
 struct ModelInstance {
+    ViewDeformationResponse deformation_response;
     uint64_t identity = 0; // stable nonzero presentation identity; unique within a scene
     uint64_t collection = 0;
     uint64_t alternate_collection = 0;
@@ -837,6 +846,7 @@ struct View {
     uint64_t history_key = 0;
     Transform camera;
     Vec3 camera_velocity; // physical motion input, not inferred from temporal images
+    ViewDeformation world_deformation; // visual-only; simulation visibility volumes remain unchanged
     bool has_clip_plane = false;
     Plane clip_plane; // world space; retain normal.point + constant >= 0
     FogPathOrigin fog_path_origin = FogPathOrigin::Camera;

@@ -647,6 +647,7 @@ int runModuleContextTests();
 int runModuleMutationTests();
 int runSkyWeatherTests();
 int runDisplayLabelTests();
+int runViewDeformationTests();
 int runAutomapTests();
 int runEffectTests();
 int runGameVisualTests();
@@ -700,6 +701,7 @@ int main() {
         Checks += runModuleMutationTests();
         Checks += runSkyWeatherTests();
         Checks += runDisplayLabelTests();
+        Checks += runViewDeformationTests();
         Checks += runAutomapTests();
         Checks += runEffectTests();
         Checks += runGameVisualTests();

@@ -701,3 +701,56 @@ the qualified distance-separated fixture hits the intervening robot instead.
 labels-normal-final-20261023 is pixel-identical to sky-normal003-20261023.
 Real two-process gameplay, all auxiliary modes and broader foreground composition
 remain in the end-to-end gate; I19 is not by itself a deployment signoff.
+
+## View-owned world deformation and explicit surface velocity (I16 implementation)
+
+MakeGameSceneView snapshots the physical viewer's EF_DEFORM range/decay and a
+deterministic visual phase. Rooms, terrain and placed models consume a shared
+vertex-shader field; visibility still uses simulation volumes. No per-view CPU
+geometry copies, source writes or gameplay RNG are introduced. Camera-local
+foregrounds clear the deformation descriptor; display canvases and sky remain
+undistorted. Model bindings publish smaller vertex and whole-object responses,
+and attached accents inherit their parent's full-owner-keyed rigid movement.
+The GPU sees response coefficients, not player/weapon branches. Callsign anchors
+reuse that published rigid response and the exact main-camera receipt.
+
+Intentional visual/RNG normalization: a spatially coherent, bounded-gradient
+noise field replaces the old independent draw-order jitter. It retains the
+authored room/terrain displacement scale and decay, with the smaller model
+response and whole-object wobble. Early independent point hashing produced
+severe face folds, and applying the room scale to models was excessive; neither
+is the qualified implementation. This is not an exact legacy random-pattern
+equivalence claim and still needs gameplay appearance review.
+
+View history carries current/previous deformation with the camera pair, rejects
+conflicting same-publication replay, and resets across cuts/reloads/independent
+streams. Warped mirror films use conservative full producer coverage rather
+than clipping to an undistorted aperture. Normal mirror footprint optimization
+is unchanged. Current and previous shader positions use the corresponding field.
+This exposed an upstream motion contract issue: explicit velocity was inferred
+from nonzero object identity. Static deforming surfaces now publish valid
+velocity with identity zero, and motion-blur/debug/temporal-AO consumers honor
+the validity channel independently. No fake object ID or extra varying is used.
+
+Engine and all three CPU suites pass. Tests cover source range/decay/phase,
+shared-point continuity, invalid view/response data, articulated/attached response,
+history/replay/pause/cut/reload, independent streams, foreground opt-out and
+mirror coverage. Native zero-shield-loss ApplyDamageToPlayer with an authored
+microwave weapon exercises the real damage entry point; benchmark invulnerability
+flags are temporarily cleared and immediately restored only inside that fixture.
+Inspected GL-clean captures: warp-{indoor,outdoor,mirror}-field-20261023 and
+warp-blur-20261023. The latter also exercises real modern motion-blur composition.
+warp-motion-final-20261023 audits actual GPU records: over1.05million static pixels
+have valid finite deformation velocity during the hit. warp-expiry-final-20261023
+has zero displacement and zero static deformation velocities at frame100; its
+image differs from the no-hit control by at most2/255 per channel (mean0.0353),
+not a pixel-identical claim. warp-zero-final-20261023 is pixel-identical to the
+pre-feature ordinary003 image.
+
+Current-renderer reference only, not a pre-rewrite comparison: at1280x720,
+SSAA2/MSAA4, AO/bloom/modern motion blur, pinned CPU2, frames240–479 of480,
+warp-perf-current-20261023 averages3.31ms actual frame-start intervals (median3.22),
+2.69ms GPU and2.34ms CPU rendering. These are overlapping intervals, not additive.
+The extra velocity validity read and active deformation cost still require the
+broader equal-workload scaling/performance gate. No overall speedup claim follows
+from this slice; I16 implementation is not whole-renderer deployment signoff.

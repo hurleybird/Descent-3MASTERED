@@ -448,6 +448,11 @@ int runSceneViewTests() {
         check(viewImageSource(plan.consumer.view(),material.planar_slot) == child.image &&
             orderViewImages(plan.images) == std::vector<size_t>({0}),"Mirror consumer has no scheduled producer");
         check(planPlanarViews(*frame,child.view).images.empty(),"Terminal reflection scheduled recursion");
+        auto warped = parent; warped.world_deformation = {{1,-1,1},123};
+        const auto warped_plan = planPlanarViews(*frame,warped);
+        check(warped_plan.images.size() == 1 && warped_plan.images[0].view.coverage.width == 0 &&
+            warped_plan.images[0].view.world_deformation == warped.world_deformation,
+            "Warped mirror lost its displacement or clipped the displaced film's source pixels");
         auto moved = parent; moved.camera.position.x = .25f;
         check(planPlanarViews(*frame,moved).images[0].image == child.image,"Mirror image identity changed with camera motion");
         auto near_film = parent; near_film.camera.position.z = 2;
@@ -1601,7 +1606,7 @@ int runSceneViewTests() {
         paused_exposure.player_control_delta.x == 1 &&
         paused_exposure.camera.previous.view_projection == first.current.view_projection,
         "Pause lost the completed exposure or mixed it with new timing inputs");
-    for (int change = 0; change < 8; ++change) {
+    for (int change = 0; change < 9; ++change) {
         auto changed = pause_camera;
         if (change == 0) changed.view.camera_owner++;
         if (change == 1) changed.view.camera_variant++;
@@ -1611,6 +1616,7 @@ int runSceneViewTests() {
         if (change == 5) changed.current.view_projection[12] += 1;
         if (change == 6) changed.view.history_key++;
         if (change == 7) changed.view.projection_anchor.width++;
+        if (change == 8) changed.view.world_deformation.seed++;
         check(d3scene::prepareImageMotion(pause_tick,changed,exposure).delta_time == 0,
             "Changed paused view borrowed an incompatible exposure");
     }

@@ -3,6 +3,8 @@
 #include "object.h"
 #include "room.h"
 #include "gametexture.h"
+#include "game.h"
+#include <cmath>
 #include <algorithm>
 #include <limits>
 #include <stdexcept>
@@ -255,6 +257,16 @@ d3scene::View MakeGameSceneView(d3scene::ViewKind kind, uint64_t history_key,
     view.camera = transform(eye, orientation);
     view.attached_camera = viewer != nullptr;
     if (viewer) view.camera_owner = static_cast<uint32_t>(viewer->handle);
+    if (viewer && viewer->effect_info && (viewer->effect_info->type_flags & EF_DEFORM)) {
+        const auto& effect = *viewer->effect_info;
+        const float amount = effect.deform_range*effect.deform_time;
+        if (amount > 0 && std::isfinite(Gametime)) {
+            view.world_deformation.displacement = {19*amount,-19*amount,19*amount};
+            double phase = std::fmod(std::floor(double(Gametime)*60),4294967296.0);
+            if (phase < 0) phase += 4294967296.0;
+            view.world_deformation.seed = uint32_t(phase) ^ view.camera_owner*0x9e3779b9u;
+        }
+    }
     if (viewer && viewer->movement_type == MT_PHYSICS) view.camera_velocity = value(viewer->mtype.phys_info.velocity);
     if (rear) {
         auto& r = view.camera.right; r = {-r.x, -r.y, -r.z};

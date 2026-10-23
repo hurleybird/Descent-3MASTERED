@@ -169,6 +169,7 @@ bool SceneFeedbackTransaction::observe(const d3scene::PreparedView& prepared) {
     if (main && result.main_view_present &&
         (result.main_view_key != view.history_key || result.main_camera_owner != view.camera_owner ||
          result.main_camera_variant != view.camera_variant ||
+         result.main_deformation != view.world_deformation ||
          !same_camera || a.x != b.x || a.y != b.y || a.width != b.width || a.height != b.height ||
          result.main_camera_room != view.room || result.main_camera_cut != view.camera_cut ||
          result.main_excluded_objects != view.excluded_objects ||
@@ -182,6 +183,7 @@ bool SceneFeedbackTransaction::observe(const d3scene::PreparedView& prepared) {
         result.main_camera_owner = view.camera_owner; result.main_camera_variant = view.camera_variant;
         result.main_exterior_visible = prepared.visibility().exterior_visible;
         result.main_camera = camera; result.main_viewport = view.viewport;
+        result.main_deformation = view.world_deformation;
         result.main_camera_room = view.room; result.main_camera_cut = view.camera_cut;
         result.main_excluded_objects.assign(view.excluded_objects.begin(),view.excluded_objects.end());
     }

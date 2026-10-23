@@ -134,6 +134,8 @@ int runFeedbackTests() {
         rejects([&] { live.observe(prepareView(*observed_frame,shifted_main)); });
         auto cropped_main = view; cropped_main.viewport.x += 1;
         rejects([&] { live.observe(prepareView(*observed_frame,cropped_main)); });
+        auto deformed_main = view; deformed_main.world_deformation = {{1,0,0},99};
+        rejects([&] { live.observe(prepareView(*observed_frame,deformed_main)); });
         auto auxiliary = view; auxiliary.kind = ViewKind::Auxiliary; auxiliary.history_key = 2;
         auxiliary.exterior_origin = true; auxiliary.room = -2;
         check(live.observe(prepareView(*observed_frame,auxiliary)));

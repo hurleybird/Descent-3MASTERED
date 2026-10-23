@@ -3369,7 +3369,26 @@ void GameRenderFrame(void)
 			if (!Cinematic_Start(&info,text)) Error("Integration cinematic did not start");
 		}
 		AdvanceCinematicPresentation(d3scene::assets().lifetime(),uint64_t(FrameCount));
+		if (FindArg("-scene-view-deformation-probe") && AutomatedCaptureFrameIndex() == 20 && Player_object) {
+			int microwave = -1;
+			for (int i = 0; i < MAX_WEAPONS; ++i) if (Weapons[i].used && (Weapons[i].flags & WF_MICROWAVE)) { microwave = i; break; }
+			// Benchmark saves may be invulnerable. Exercise the real damage entry
+			// with zero shield loss, restoring those fixture flags immediately.
+			const auto player_flags = Players[Player_num].flags;
+			const auto object_flags = Player_object->flags;
+			Players[Player_num].flags &= ~PLAYER_FLAGS_INVULNERABLE; Player_object->flags |= OF_DESTROYABLE;
+			const bool applied = microwave >= 0 && ApplyDamageToPlayer(Player_object,nullptr,PD_ENERGY_WEAPON,0,0,microwave,false);
+			Players[Player_num].flags = player_flags; Player_object->flags = object_flags;
+			if (!applied ||
+				!Player_object->effect_info || !(Player_object->effect_info->type_flags & EF_DEFORM))
+				Error("Native microwave damage fixture did not set viewer deformation");
+		}
 		const auto main_view = CaptureGameMainView();
+		if (FindArg("-scene-view-deformation-probe") && AutomatedCapturePending()) {
+			const auto& effect = main_view.world.world_deformation;
+			AutomatedCaptureLog("scene viewer deformation owner=%u displacement=%.6g,%.6g,%.6g seed=%u",
+				main_view.world.camera_owner,effect.displacement.x,effect.displacement.y,effect.displacement.z,effect.seed);
+		}
 		const auto hud_layout = CaptureGameHUDLayout();
 		if (FindArg("-scene-history-export-probe") && AutomatedCaptureFrameIndex() == 20) {
 			const int save_arg = FindArg("-capture-save-output");

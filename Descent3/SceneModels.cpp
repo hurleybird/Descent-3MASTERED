@@ -273,7 +273,8 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::Presenta
         if (source->render_type != RT_POLYOBJ && source->render_type != RT_WEAPON) continue;
         if (source->render_type == RT_WEAPON && CompileWeaponVisuals(Weapons[source->id].flags).body != WeaponBodyVisual::Model) continue;
         d3scene::ModelInstance instance;
-        instance.identity = uint64_t(owner.handle)+1;
+        instance.identity = GameObjectModelIdentity(owner.handle);
+        instance.deformation_response = GameModelDeformationResponse();
         instance.owner = owner.handle; instance.has_owner = true; instance.room = owner.room;
         instance.compiled_owner = size_t(&owner-data.objects.data());
         instance.current = owner.current; instance.previous = owner.previous; instance.has_previous = owner.has_previous;
@@ -553,6 +554,7 @@ void PrepareGameStaticModel(d3scene::FrameData& data,int number,const d3scene::T
     const auto* source = GetPolymodelPointer(number);
     d3scene::ModelInstance instance;
     instance.identity = identity; instance.collection = collection; instance.current = instance.previous = placement;
+    instance.deformation_response = GameModelDeformationResponse();
     d3scene::PreparedModel model;
     model.asset = PrepareGameModelAsset(number,FindArg("-scene-geometry-revision-audit") != 0);
     const auto& animation = *model.asset->geometry().animation;
