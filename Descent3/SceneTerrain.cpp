@@ -6,6 +6,7 @@
 #include "../renderer/SceneTerrain.h"
 #include "../renderer/SceneGeometry.h"
 #include "../renderer/SceneMeshExposure.h"
+#include "../renderer/SceneCache.h"
 #include "terrain.h"
 #include "lightmap.h"
 #include "bitmap.h"
@@ -132,16 +133,13 @@ void PrepareGameSky(d3scene::FrameData& frame,bool advance_history) {
     // its inputs alongside immutable assets; rotation/materials remain frame
     // data. Compare only geometry inputs (not mutable fog or rotation state).
     struct SkyGeometry {
-        uint64_t lifetime = 0;
         terrain_sky source{};
         d3scene::MeshAssetRef dome, horizon, stars, lightning_flash, lightning_segment;
         d3scene::MeshExposureHistory star_exposure;
     };
-    static SkyGeometry retained;
-    if (retained.lifetime != frame.scene_lifetime) {
-        retained = {};
-        retained.lifetime = frame.scene_lifetime;
-    }
+    static d3scene::SceneCache<SkyGeometry> cache;
+    const auto state = cache.acquire(d3scene::assets());
+    auto& retained = *state;
     const auto& prior = retained.source;
     const bool same_horizon = std::memcmp(prior.horizon_vectors,Terrain_sky.horizon_vectors,sizeof(prior.horizon_vectors)) == 0;
     if (!same_horizon) retained.lightning_flash.reset();

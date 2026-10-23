@@ -1,5 +1,6 @@
 // Descent 3MASTERED - GPL-3.0-or-later
 #include "SceneCanvas.h"
+#include "../renderer/SceneCache.h"
 #include "gameevent.h"
 #include "../renderer/SceneGeometry.h"
 #include "grtext.h"
@@ -160,12 +161,19 @@ void PrepareSceneText(d3scene::FrameData& frame,uint64_t collection,int32_t& nex
         uint64_t used = 0;
         std::vector<d3scene::PreparedMesh> runs;
     };
-    static thread_local std::array<TextEntry,64> cache;
-    static thread_local uint64_t lifetime = 0, font_revision = 0, clock = 0;
-    const auto current_lifetime = d3scene::assets().lifetime(), current_font = grfont_LayoutRevision();
-    if (lifetime != current_lifetime || font_revision != current_font) {
+    struct TextCache {
+        std::array<TextEntry,64> entries;
+        uint64_t font_revision = 0, clock = 0;
+    };
+    static d3scene::SceneCache<TextCache> text_cache;
+    const auto state = text_cache.acquire(d3scene::assets());
+    auto& cache = state->entries;
+    auto& font_revision = state->font_revision;
+    auto& clock = state->clock;
+    const auto current_font = grfont_LayoutRevision();
+    if (font_revision != current_font) {
         for (auto& entry : cache) entry = {};
-        lifetime = current_lifetime; font_revision = current_font; clock = 0;
+        font_revision = current_font; clock = 0;
     }
     const auto emit = [&](const std::vector<d3scene::PreparedMesh>& runs) {
         for (const auto& source : runs) {

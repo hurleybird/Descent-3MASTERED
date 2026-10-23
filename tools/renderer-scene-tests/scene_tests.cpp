@@ -1,5 +1,6 @@
 // Descent 3MASTERED - GPL-3.0-or-later
 #include "../../renderer/Scene.h"
+#include "../../renderer/SceneCache.h"
 #include "../../renderer/SceneGeometry.h"
 #include "../../renderer/SceneGeometryAllocator.h"
 #include "../../Descent3/SceneExtraction.h"
@@ -189,6 +190,41 @@ void collectionReuseTests() {
             "Recycling changed a held collection snapshot");
     }
 }
+void cacheLifetimeTests() {
+    using namespace d3scene;
+    struct State { MeshAssetRef mesh; int value = 0; };
+    SceneCache<State> cache;
+    SceneAssets owner, other;
+    auto borrowed = cache.acquire(owner);
+    borrowed->mesh = owner.createMesh(triangle()); borrowed->value = 42;
+    std::weak_ptr<State> weak_state = borrowed;
+    std::weak_ptr<const MeshAsset> weak_mesh = borrowed->mesh;
+    FrameData data; data.scene_lifetime = owner.lifetime(); data.sequence = 1;
+    PreparedMesh mesh; mesh.asset = borrowed->mesh; data.meshes.push_back(std::move(mesh));
+    auto held = Presentation::publish(std::move(data));
+    check(owner.retainedProducerStates() == 1 && cache.acquire(owner) == borrowed,"Cache failed scene ownership");
+    const auto foreign = cache.acquire(other);
+    check(foreign != borrowed && !foreign->mesh && other.retainedProducerStates() == 1,"Cache aliased a different owner");
+    owner.reset();
+    check(owner.retainedProducerStates() == 0 && borrowed->value == 42,"Retirement destroyed a live producer borrow");
+    borrowed.reset();
+    check(weak_state.expired() && !weak_mesh.expired(),"Retirement leaked producer state or broke held immutable data");
+    check(held->data().meshes[0].asset->geometry().vertices.size() == 3,"Retirement invalidated held snapshot geometry");
+    held.reset();
+    check(weak_mesh.expired(),"Released snapshot retained retired cache geometry");
+    auto fresh = cache.acquire(owner);
+    check(fresh->value == 0 && !fresh->mesh && owner.retainedProducerStates() == 1,"New lifetime inherited producer data");
+    std::weak_ptr<State> destroyed_owner;
+    {
+        SceneAssets temporary;
+        destroyed_owner = cache.acquire(temporary);
+        check(!destroyed_owner.expired(),"Scene did not retain its cache");
+    }
+    check(destroyed_owner.expired(),"Weak producer handle extended destroyed scene");
+    fresh.reset(); owner.reset(); owner.reset();
+    check(owner.retainedProducerStates() == 0,"Repeated retirement recreated caches");
+}
+
 void assetTests() {
     {
         using namespace d3scene;
@@ -702,7 +738,7 @@ int main() {
             check(signed_index.find(-1) == address && signed_index.at(-1) == 7,
                 "Identity lookup clear discarded reusable storage");
         }
-        storageTests(); collectionReuseTests(); assetTests(); frameTests(); extractionTests();
+        storageTests(); collectionReuseTests(); cacheLifetimeTests(); assetTests(); frameTests(); extractionTests();
         Checks += runSceneViewTests();
         Checks += runModelPoseTests();
         Checks += runModelSceneTests();

@@ -1273,6 +1273,12 @@ void rend_ResetCache()
 	renderer_inst->ResetCache();
 }
 
+// Explicit scene lifetime, independent of legacy image-cache invalidation.
+void rend_RetireScene()
+{
+	if (Renderer_initted) renderer_inst->RetireScene();
+}
+
 // Takes a bitmap and blits it to the screen using linear frame buffer stuff
 // X and Y are the destination X,Y.
 void rend_CopyBitmapToFramebuffer(int bm_handle, int x, int y)

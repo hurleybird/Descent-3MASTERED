@@ -3013,6 +3013,14 @@ void GameRenderFrame(void)
 		return;
 
 	PerfMarkersBeginFrame();
+	if (SceneGeometryInspection() && FindArg("-scene-retirement-probe") && AutomatedCaptureFrameIndex() == 20) {
+		// A live source world can be republished after explicit retirement. This
+		// exercises re-creation/history reset without deleting gameplay objects.
+		ResetGamePresentationScene();
+		rend_RetireScene();
+		rend_RetireScene(); // Idempotence is part of the lifecycle contract.
+		AutomatedCaptureLog("scene retirement live reset frame=20");
+	}
 	if (SceneGeometryInspection() && FindArg("-scene-hud-small-probe")) {
 		Game_window_w = Max_window_w*3/5; Game_window_h = Max_window_h*3/5;
 		Game_window_x = (Max_window_w-Game_window_w)/2; Game_window_y = (Max_window_h-Game_window_h)/2;

@@ -98,6 +98,7 @@ class ViewHistory {
     }
 public:
     void clear() { completed_.clear(); }
+    size_t size() const { return completed_.size(); }
     ViewHistorySample prepare(const FrameData& frame,const View& view,const Camera& camera) const {
         ViewHistorySample result;
         result.sequence = frame.sequence; result.lifetime = frame.scene_lifetime;

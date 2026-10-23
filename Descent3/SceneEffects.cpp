@@ -3,6 +3,7 @@
 #include "../renderer/SceneGeometry.h"
 #include "../renderer/SceneView.h"
 #include "../renderer/SceneAnimation.h"
+#include "../renderer/SceneCache.h"
 #include "viseffect.h"
 #include "fireball.h"
 #include "vclip.h"
@@ -42,8 +43,7 @@ struct FragmentAsset {
     d3scene::MeshAssetRef mesh;
     int texture = -1;
 };
-std::array<FragmentAsset,MAX_OBJECTS> FragmentAssets{};
-uint64_t FragmentLifetime = 0;
+using FragmentAssets = std::array<FragmentAsset,MAX_OBJECTS>;
 void cameraAudience(uint64_t& alternate,d3scene::MeshViewStyle& style,const GameMainView& main) {
     alternate = SceneCloseScreenEffects;
     style.camera_owner = main.world.camera_owner;
@@ -72,10 +72,10 @@ struct EffectAudienceScope {
 enum class EffectTopology { BlastRing, GravityDisk, WeaponRingEven, WeaponRingOdd, MassDriverTube,
     ElectricalTube, ElectricalTip, ElectricalDisk, Count };
 d3scene::MeshAssetRef effectTopology(EffectTopology kind) {
-    static uint64_t lifetime = 0;
-    static std::array<d3scene::MeshAssetRef,size_t(EffectTopology::Count)> assets{};
-    if (lifetime != d3scene::assets().lifetime()) { assets.fill({}); lifetime = d3scene::assets().lifetime(); }
-    auto& asset = assets[size_t(kind)];
+    using Topologies = std::array<d3scene::MeshAssetRef,size_t(EffectTopology::Count)>;
+    static d3scene::SceneCache<Topologies> cache;
+    const auto topologies = cache.acquire(d3scene::assets());
+    auto& asset = (*topologies)[size_t(kind)];
     if (!asset) {
         if (kind == EffectTopology::ElectricalDisk) {
             asset = d3scene::assets().createMesh(d3scene::billboardRing(0,255,0,8));
@@ -128,11 +128,11 @@ d3scene::MeshAssetRef effectTopology(EffectTopology kind) {
     }
     return asset;
 }
-bool prepareFragment(d3scene::FrameData& frame,const d3scene::ObjectState& owner,const object& source) {
+bool prepareFragment(d3scene::FrameData& frame,const d3scene::ObjectState& owner,const object& source,FragmentAssets& fragments) {
     const bool shard = source.type == OBJ_SHARD && source.render_type == RT_SHARD;
     const bool splinter = source.type == OBJ_SPLINTER && source.render_type == RT_SPLINTER;
     if (!shard && !splinter) return false;
-    auto& cached = FragmentAssets[OBJNUM(&source)];
+    auto& cached = fragments[OBJNUM(&source)];
     if (!cached.mesh || cached.owner != owner.handle) {
         d3scene::MeshGeometry geometry;
         d3scene::MeshPolygon polygon;
@@ -723,10 +723,8 @@ void prepareWeaponContributions(d3scene::FrameData& frame,const d3scene::ObjectS
 // after object eligibility; per-view exclusion is applied by the scene query.
 void PrepareGameObjectEffects(d3scene::FrameData& frame) {
     const auto quad = d3scene::assets().quadMesh();
-    if (FragmentLifetime != frame.scene_lifetime) {
-        for (auto& fragment : FragmentAssets) fragment = {};
-        FragmentLifetime = frame.scene_lifetime;
-    }
+    static d3scene::SceneCache<FragmentAssets> fragment_cache;
+    const auto fragment_assets = fragment_cache.acquire(d3scene::assets());
     unsigned fragments = 0;
     for (const auto& owner : frame.objects) {
         auto* source = ObjGet(owner.handle);
@@ -738,7 +736,7 @@ void PrepareGameObjectEffects(d3scene::FrameData& frame) {
                 AutomatedCaptureLog("scene weapon independent contributions owner=%u invisible=%d meshes=%u",owner.handle,
                     (Weapons[source->id].flags & WF_INVISIBLE) != 0,unsigned(frame.meshes.size()-before));
         }
-        if (prepareFragment(frame,owner,*source)) { ++fragments; continue; }
+        if (prepareFragment(frame,owner,*source,*fragment_assets)) { ++fragments; continue; }
         if (source->render_type == RT_FIREBALL && source->type == OBJ_FIREBALL && source->id == SMOLDERING_INDEX) {
             const int clip = Fireballs[SMOLDERING_INDEX].bm_handle;
             if (clip < 0 || clip >= MAX_VCLIPS || !GameVClips[clip].used || !(source->ctype.blast_info.max_size > 0)) continue;
@@ -859,7 +857,7 @@ void PrepareGameObjectEffects(d3scene::FrameData& frame) {
     }
     // Drop source ownership for dead allocations. Retained presentations keep
     // their own assets alive; a recycled object index cannot inherit geometry.
-    for (auto& fragment : FragmentAssets) if (fragment.mesh) {
+    for (auto& fragment : *fragment_assets) if (fragment.mesh) {
         const auto* source = ObjGet(fragment.owner);
         if (!source || (source->render_type != RT_SHARD && source->render_type != RT_SPLINTER)) fragment = {};
     }

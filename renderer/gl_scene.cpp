@@ -664,6 +664,19 @@ void GL4Renderer::SceneDepthSnapshot::Destroy() {
     if (framebuffer) glDeleteFramebuffers(1,&framebuffer);
     texture = framebuffer = 0; width = height = 0;
 }
+void GL4Renderer::RetireScene() {
+    const auto lifetime = scene_asset_lifetime;
+    const auto pages = scene_geometry_pages.size(), images = scene_images.size(), views = scene_view_images.size();
+    DestroySceneResources();
+    if (scene_asset_lifetime || !scene_geometry_pages.empty() || !scene_images.empty() ||
+        !scene_view_images.empty() || scene_view_history.size() || !scene_depth_snapshots.empty() ||
+        !scene_rooms.empty() || !scene_models.empty() || !scene_terrain.empty() || scene_meshes.size() ||
+        !scene_frame_owner.expired() || scene_draw_buffer || scene_view_buffer || scene_fog_texture)
+        Error("Scene retirement left live world resources");
+    AutomatedCaptureLog("scene retirement gpu lifetime=%llu pages=%u images=%u views=%u remaining=0",
+        lifetime,unsigned(pages),unsigned(images),unsigned(views));
+}
+
 void GL4Renderer::DestroySceneResources() {
     scene_ao_debug_shader.Destroy();
     for (auto& image : scene_view_images) { image.second.buffer.Destroy(); image.second.depth.Destroy(); }
@@ -2113,14 +2126,18 @@ void main() {
         const int capture_frame = AutomatedCaptureFrameIndex();
         const bool export_history_probe = FindArg("-scene-history-export-probe") &&
             capture_frame >= 20 && capture_frame <= 22;
+        const bool retirement_probe = FindArg("-scene-retirement-probe") &&
+            capture_frame >= 20 && capture_frame <= 22;
         const bool deformation_probe = FindArg("-scene-view-deformation-probe") &&
             ((capture_frame >= 20 && capture_frame <= 22) || AutomatedCapturePending());
         if (writes_motion &&
             (capture_frame == 0 || capture_frame == 30 || capture_frame == 31 || capture_frame == 59 ||
-                export_history_probe || deformation_probe ||
+                export_history_probe || deformation_probe || retirement_probe ||
                 (FindArg("-scene-resource-probe") && capture_frame >= 10 && capture_frame <= 51 && capture_frame % 10 <= 1))) {
             if (export_history_probe && !history.previous_valid)
                 Error("Independent save publication reset the main camera history");
+            if (retirement_probe && history.previous_valid != (capture_frame > 20))
+                Error("Retired scene did not restart and recover camera history");
             const size_t pixels = size_t(surface_records.ReadWidth())*surface_records.ReadHeight();
             std::vector<float> vectors(pixels*4);
             std::vector<GLuint> identities(pixels);

@@ -355,6 +355,7 @@ void SceneAssets::reset() {
     const uint64_t lifetime = NextLifetime.fetch_add(1);
     if (!lifetime || lifetime == std::numeric_limits<uint64_t>::max())
         throw std::overflow_error("Scene lifetime exhausted");
+    producer_states_.clear();
     rooms_.clear();
     models_.clear();
     images_.clear();
@@ -369,6 +370,10 @@ void SceneAssets::reset() {
     fog_.reset();
     lifetime_ = lifetime;
     revision_ = 0;
+}
+void SceneAssets::retainProducerState(uint64_t lifetime,std::shared_ptr<void> state) {
+    require(lifetime == lifetime_ && state != nullptr,"Producer cache belongs to a retired scene");
+    producer_states_.push_back(std::move(state));
 }
 RoomAssetRef SceneAssets::room(uint32_t slot) const {
     return slot < rooms_.size() ? rooms_[slot] : nullptr;

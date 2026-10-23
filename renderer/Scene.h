@@ -221,9 +221,12 @@ using FogAssetRef = std::shared_ptr<const FogAsset>;
 
 // Immutable revisions keep already-published frames alive across level unload,
 // slot reuse, and geometry changes. Reset never invalidates an existing frame.
+template<class T> class SceneCache;
 class SceneAssets final {
 public:
     SceneAssets();
+    SceneAssets(const SceneAssets&) = delete;
+    SceneAssets& operator=(const SceneAssets&) = delete;
     void reset();
     RoomAssetRef room(uint32_t slot) const;
     RoomAssetRef publishRoom(uint32_t slot, MeshGeometry geometry, VolumeGrid volume = {});
@@ -252,7 +255,10 @@ public:
     MeshAssetRef gradientQuadMesh();
     FogAssetRef publishFog(const std::vector<RoomState>&);
     uint64_t lifetime() const { return lifetime_; }
+    size_t retainedProducerStates() const { return producer_states_.size(); }
 private:
+    template<class T> friend class SceneCache;
+    void retainProducerState(uint64_t lifetime,std::shared_ptr<void> state);
     uint64_t lifetime_ = 0;
     uint64_t revision_ = 0;
     std::vector<RoomAssetRef> rooms_;
@@ -269,6 +275,9 @@ private:
     MeshAssetRef fading_stroke_mesh_;
     MeshAssetRef stroke_mesh_, radial_disk_mesh_, gradient_quad_mesh_;
     FogAssetRef fog_;
+    // Publisher-side cache data only, never deferred gameplay callbacks. Weak
+    // cache handles cannot extend the scene; held producer borrows may finish.
+    std::vector<std::shared_ptr<void>> producer_states_;
 };
 
 enum class RenderLayer : uint8_t { Background, World };

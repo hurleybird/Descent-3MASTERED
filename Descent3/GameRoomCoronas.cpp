@@ -2,6 +2,7 @@
 #include "GameRoomCoronas.h"
 #include "SceneExtraction.h"
 #include "../renderer/SceneView.h"
+#include "../renderer/SceneCache.h"
 #include "room.h"
 #include "gametexture.h"
 #include "fireball.h"
@@ -25,16 +26,22 @@ struct RoomSources {
     std::vector<GameRoomCorona> sources;
     std::vector<int> polygons;
 };
-std::array<RoomSources,MAX_ROOMS> Sources;
-GameRoomCoronaClock Clock;
-uint64_t Lifetime = 0, WorldSequence = 0, LogicalFrame = 0;
+struct CoronaState {
+    std::array<RoomSources,MAX_ROOMS> sources;
+    GameRoomCoronaClock clock;
+    uint64_t lifetime = 0, world_sequence = 0, logical_frame = 0;
+    int main_room = -1;
+    d3scene::PresentationRef published;
+    d3scene::View camera;
+};
+std::shared_ptr<CoronaState> coronaState() {
+    static d3scene::SceneCache<CoronaState> cache;
+    return cache.acquire(d3scene::assets());
+}
 uint64_t Materials = 1;
-int MainRoom = -1;
-d3scene::PresentationRef Published;
-d3scene::View Camera;
 
-const RoomSources& roomSources(const d3scene::RoomState& room) {
-    auto& cache = Sources.at(room.number);
+const RoomSources& roomSources(CoronaState& state,const d3scene::RoomState& room) {
+    auto& cache = state.sources.at(room.number);
     if (cache.geometry == room.asset->id() && cache.appearance == room.source_material_revision && cache.materials == Materials && cache.fast == bool(FastCoronas))
         return cache;
     cache.geometry = room.asset->id(); cache.appearance = room.source_material_revision; cache.materials = Materials; cache.fast = FastCoronas != 0;
@@ -98,6 +105,8 @@ void AdvanceGameRoomCoronaFixture() {
     if (!stricmp(mode,"replay")) return;
     if (stricmp(mode,"blocked") && stricmp(mode,"recolor") && stricmp(mode,"pulse")) Error("Unknown room corona fixture");
     if (frame != 10) return;
+    const auto state = coronaState();
+    auto& Clock = state->clock;
     if (!Clock.count()) Error("Room corona fixture requires a visible authored corona");
     const auto source = Clock[0].source;
     if (!stricmp(mode,"recolor")) {
@@ -106,9 +115,9 @@ void AdvanceGameRoomCoronaFixture() {
     } else if (!stricmp(mode,"pulse")) {
         auto& room = Rooms[source.room]; room.flags |= RF_STROBE; room.pulse_time = 8; room.pulse_offset = 0;
     } else {
-        const auto eye = Camera.camera.position;
+        const auto eye = state->camera.camera.position;
         vector from{eye.x,eye.y,eye.z},to{(eye.x+source.center.x)/2,(eye.y+source.center.y)/2,(eye.z+source.center.z)/2};
-        fvi_query query{}; fvi_info hit{}; query.p0 = &from; query.p1 = &to; query.startroom = MainRoom; query.thisobjnum = -1;
+        fvi_query query{}; fvi_info hit{}; query.p0 = &from; query.p1 = &to; query.startroom = state->main_room; query.thisobjnum = -1;
         if (fvi_FindIntersection(&query,&hit) != HIT_NONE || hit.hit_room < 0) Error("Corona occluder fixture cannot locate its room");
         matrix facing = IDENTITY_MATRIX;
         const int object = ObjCreate(OBJ_ROBOT,GENOBJ_GUIDEBOT,hit.hit_room,&to,&facing);
@@ -122,13 +131,21 @@ void AdvanceGameRoomCoronaFixture() {
 void CaptureGameRoomCoronaView(const d3scene::PreparedView& main) {
     const auto& world = main.frame(); const auto& request = main.view();
     if (request.kind != d3scene::ViewKind::Main || request.collection || request.target != d3scene::ViewTarget::Scene) return;
+    const auto state = coronaState();
+    auto& Clock = state->clock;
+    auto& Lifetime = state->lifetime;
+    auto& WorldSequence = state->world_sequence;
+    auto& LogicalFrame = state->logical_frame;
+    auto& Published = state->published;
+    auto& Camera = state->camera;
     if (Lifetime == world.data().scene_lifetime && WorldSequence == world.data().sequence) {
         if (AutomatedCapturePending() && FindArg("-scene-room-corona-probe")) AutomatedCaptureLog("scene room corona publication replay retained=%u",Clock.count());
         return;
     }
     if (Lifetime == world.data().scene_lifetime && LogicalFrame == uint64_t(FrameCount) && WorldSequence)
         throw std::logic_error("Corona clock received two world publications in one game frame");
-    if (Lifetime != world.data().scene_lifetime) { Sources = {}; Published.reset(); }
+    if (d3scene::assets().lifetime() != world.data().scene_lifetime)
+        throw std::logic_error("Cannot capture corona sources from a retired world");
     if (!request.attached_camera || !request.portal_visibility || request.has_clip_plane) {
         // Synthetic main-role diagnostic views are not a physical gameplay
         // observer. Publish an explicit empty exposure, not a stale last view.
@@ -140,7 +157,7 @@ void CaptureGameRoomCoronaView(const d3scene::PreparedView& main) {
     if (Detail_settings.Coronas_enabled) for (const auto& item : main.visibility().surfaces) {
         if (item.model || item.mesh || item.terrain || candidates.count == GameRoomCoronaLimit) continue;
         const auto& room = world.data().rooms.at(item.room_index);
-        const auto& cache = roomSources(room);
+        const auto& cache = roomSources(*state,room);
         if (item.polygon_index >= cache.polygons.size() || cache.polygons[item.polygon_index] < 0) continue;
         const auto& source = cache.sources[cache.polygons[item.polygon_index]]; ++authored;
         // Visibility exposure is independent of a pulsing lamp's instantaneous
@@ -151,7 +168,7 @@ void CaptureGameRoomCoronaView(const d3scene::PreparedView& main) {
     }
     Clock.advance(world.data().scene_lifetime,uint64_t(FrameCount),world.data().paused ? 0 : world.data().delta_time,candidates);
     Lifetime = world.data().scene_lifetime; WorldSequence = world.data().sequence; LogicalFrame = uint64_t(FrameCount);
-    MainRoom = request.room;
+    state->main_room = request.room;
     Camera = request;
     Camera.kind = d3scene::ViewKind::Preview; Camera.history_key = Collection;
     Camera.camera = main.visibility().camera.transform; Camera.camera_effects_resolved = true;
@@ -194,7 +211,8 @@ void CaptureGameRoomCoronaView(const d3scene::PreparedView& main) {
 }
 
 void RenderGameRoomCoronas(const d3scene::Presentation& world) {
-    if (Lifetime != world.data().scene_lifetime || WorldSequence != world.data().sequence)
+    const auto state = coronaState();
+    if (state->lifetime != world.data().scene_lifetime || state->world_sequence != world.data().sequence)
         throw std::logic_error("Room corona exposure does not belong to the main world");
-    if (Published) d3scene::renderView(*Published,Camera);
+    if (state->published) d3scene::renderView(*state->published,state->camera);
 }

@@ -7,6 +7,7 @@
 #include "SceneFeedback.h"
 #include "SmallViews.h"
 #include "GameRoomCoronas.h"
+#include "../renderer/SceneCache.h"
 #include "gamecinematics.h"
 #include "../renderer/SceneGeometry.h"
 #include "../renderer/SceneDependencies.h"
@@ -568,7 +569,10 @@ void PrepareGameInspectionBanner(d3scene::FrameData& data) {
 d3scene::PresentationRef PrepareGamePresentation(bool advance,const GameMainView* main_view,
     const std::vector<FrameScreenBlend>* overlays,const HUDCanvasLayout* hud_layout) {
     PERF_MARKER_SCOPE("Scene.PreparePresentation");
-    static d3scene::PresentationRef previous_models;
+    struct Publications { d3scene::PresentationRef previous_models; };
+    static d3scene::SceneCache<Publications> publications;
+    const auto publication_state = publications.acquire(d3scene::assets());
+    auto& previous_models = publication_state->previous_models;
     const bool retain_rooms = [&] { PERF_MARKER_SCOPE("Scene.MaterialInputs"); return roomMaterialInputsUnchanged(); }();
     if (!retain_rooms) { ResetSplitSpecularTexturePairCache(); InvalidateGameRoomCoronaMaterials(); }
     const unsigned int simulation_random = ps_rand_get_state();

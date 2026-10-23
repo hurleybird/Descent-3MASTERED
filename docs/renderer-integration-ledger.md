@@ -950,3 +950,45 @@ Normal root entry point (from an MSVC developer environment):
 
     cmake -S . -B out/build/renderer -DBUILD_TESTING=ON
     cmake --build out/build/renderer --target renderer_integration_check --config Release --parallel 4
+
+## Explicit scene retirement and publisher-cache ownership (I28/R2)
+
+The actual end-level FlushDataCache boundary now retires both the CPU scene and
+its GPU residency, before freeing native texture/model source data. A separate
+rend_RetireScene/IRenderer::RetireScene contract preserves window, final-display
+and legacy UI resources; rend_ResetCache retains its narrower image-remap role.
+The backend releases world geometry pages, image/view/depth caches, buffers,
+samplers, programs and temporal history. Repeated retirement is harmless. This
+does not flush a held immutable presentation or invoke game callbacks in GL.
+
+SceneAssets owns publisher-cache data through typed weak SceneCache handles.
+The last world publication, sky/star exposure, model transaction scratch, effect
+topologies/fragments, text meshes and room-corona publication now share the scene
+lifetime instead of surviving until their next producer call. A producer's active
+borrow may finish; a held snapshot retains its own immutable assets, not the
+mutable publisher cache. Pure source revision/ID caches remain epoch-qualified.
+No callbacks, per-frame registration or warm-path allocation were introduced.
+
+CPU tests cover independent owners, reset/destruction, held producer borrows,
+held/released immutable snapshot geometry and fresh state after retirement.
+256 warm cache acquisitions retain one state and perform zero tracked operator-
+new allocations, including checked-STL Debug. Root Release and standalone Debug
+all3suites pass. Native retire-history-003-20261023 exercises double retirement
+atframe20, validates invalid camera/motion history20 and recovered history21–22,
+then checks the real end-level flush. Seven publisher caches and all world GPU
+residency retire at exit. retire-mirror-006-20261023 also retires/recreates a real
+mirror image; retire-fog-settings-002-20261023 combines reset with SSAA/MSAA
+1/0->2/2->4/4->1/0->2/4 transitions. Both are GL-clean and visually inspected,
+with AO, bloom and modern blur. The no-reset retire-plain-003-20261023 image is
+pixel-identical to frozen integration-stars-candidate (retire-base-003-20261023).
+Forced live retirement intentionally restarts corona exposure/history; it is
+not an assertion that these temporal pixels equal an uninterrupted scene.
+
+The first hosted run caught an ignored version-header dependency in standalone
+tests;2092b79 generates their version header in the build tree. Both hosted
+Debug/Release suites then passed. The integration configure next exposed an
+unquoted PowerShell '-DD3_GAMEDIR=./' operand becoming empty; reproduced locally
+from a fresh build directory and fixed by quoting it in b704c8f. A full hosted
+integration pass is still pending, not implied by the local passes. All ordinary
+interactive save/reload, mission transitions, context teardown and promotion
+gates remain open. Candidate/Previous Candidate are unchanged.

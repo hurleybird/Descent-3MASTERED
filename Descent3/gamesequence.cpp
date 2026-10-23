@@ -55,6 +55,7 @@
 #include "scorch.h"
 #include "render.h"
 #include "retained_room.h"
+#include "SceneExtraction.h"
 #include "renderer.h"
 #include "stringtable.h"
 #include "ddio_common.h"
@@ -880,6 +881,15 @@ void FlushDataCache()
 #endif
 
 	int texfreed = 0;
+	// End the converted world's lifetime now, not when another level happens
+	// to publish its first frame. Held immutable snapshots remain valid; source
+	// caches and GPU residency do not retain the previous gameplay world.
+	const auto retired_lifetime = d3scene::assets().lifetime();
+	const auto producer_states = d3scene::assets().retainedProducerStates();
+	ResetGamePresentationScene();
+	rend_RetireScene();
+	AutomatedCaptureLog("scene retirement game lifetime=%llu producers=%u remaining=%u",
+		retired_lifetime,unsigned(producer_states),unsigned(d3scene::assets().retainedProducerStates()));
 	int modelsfreed = 0;
 	int soundsfreed = 0;
 

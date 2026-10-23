@@ -898,6 +898,7 @@ public:
 
 	// Clears the texture cache
 	void ResetCache() override;
+	void RetireScene() override;
 
 	//DRAWING
 

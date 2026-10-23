@@ -876,6 +876,8 @@ void rend_ClearZBuffer ();
 
 // Clears the texture cache
 void rend_ResetCache ();
+// End the world-resource lifetime without discarding the displayed UI/backdrop.
+void rend_RetireScene();
 
 // Takes a bitmap and blits it to the screen using linear frame buffer stuff
 // X and Y are the destination X,Y.

@@ -1,5 +1,6 @@
 // Descent 3MASTERED - GPL-3.0-or-later
 #include "SceneExtraction.h"
+#include "../renderer/SceneCache.h"
 #include "SceneMaterialBindings.h"
 #include "gametexture.h"
 #include "bitmap.h"
@@ -232,8 +233,14 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::Presenta
     const int player_color_texture = FindTextureName("MultiColor");
     // Reuse only lookup capacity. Every transaction discards all old entries
     // before resolving this frame's model revisions; no mutable source is kept.
-    static thread_local std::array<d3scene::ModelAssetRef,MAX_POLY_MODELS> frame_assets;
-    static thread_local std::vector<int> frame_asset_slots;
+    struct FrameAssetScratch {
+        std::array<d3scene::ModelAssetRef,MAX_POLY_MODELS> assets;
+        std::vector<int> slots;
+    };
+    static d3scene::SceneCache<FrameAssetScratch> cache;
+    const auto scratch = cache.acquire(d3scene::assets());
+    auto& frame_assets = scratch->assets;
+    auto& frame_asset_slots = scratch->slots;
     for (const auto slot : frame_asset_slots) frame_assets[slot].reset();
     frame_asset_slots.clear();
     // A published palette belongs to an asset/appearance, not an object pose.

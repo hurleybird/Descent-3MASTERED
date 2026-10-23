@@ -165,6 +165,8 @@ public:
 
 	// Clears the texture cache
 	virtual void ResetCache() = 0;
+	// Explicit world retirement. Preserve window/presentation/UI resources.
+	virtual void RetireScene() = 0;
 
 	//DRAWING
 
