@@ -801,3 +801,63 @@ alternate cockpit and broader settings/lifecycle scenarios remain release gates.
 aux-zero-final-20261023 is pixel-identical to warp-zero-final-20261023 with no
 auxiliary requests. aux-noao-depth-20261023 also passes the real stationary-mask
 audit with SSAA/MSAA and modern blur but without AO's independent prepass.
+
+## Authored room coronas and abandoned frame-buffer leases (I14 implementation)
+
+The game main-view schedule captures authored corona candidates from the exact
+prepared visible-face inventory, with no second portal walk. Persistent source
+geometry is keyed by room asset/revision and face; appearance and material-table
+revisions invalidate cached color/type/eligibility. The existing material-input
+census now includes light RGB and corona type. Source rays and the bounded100-
+source visibility/fade clock run before main-view GPU execution, once per logical
+frame. Paused/repeated exposures cannot advance it. Synthetic unbound/clipped
+main-role diagnostics explicitly have no gameplay corona exposure.
+
+Published additive billboards render after the main world and before auxiliary
+windows, from owned resources and the exact executable camera. Rendering performs
+no live face lookup, raycast, fade update or legacy glow call. Normal coronas keep
+depth disabled; FastCoronas retains its short visibility ray and half-size depth
+bias with read-only depth. Both keep near/distance/facing attenuation, authored
+color and pulse/strobe modulation. Visibility fades do not restart during a dark
+lamp phase. The physical camera object is explicitly ignored by its own ray.
+Old PreUpdateAllLightGlows/PostUpdateAllLightGlows scheduling is removed; the new
+path does not repopulate or render the legacy LightGlows array.
+
+Three CPU suites and the engine build pass. Clock tests cover pre-draw fade,
+pause/replay/reorder, disappearance, source/material revision replacement, scene
+retirement, capacity/preflight and near/facing/light attenuation. Actual saved
+rooms001/002/006 produce native authored coronas. Inspected captures
+coro-saveg{001,006}-{before,after}-20261023 compare with the frozen pre-feature
+renderer: visible halo additions are intentional, not an image-equivalence claim.
+corona-{normal,fast,blocked,recolor}-final-20261023 exercise native face sources,
+both depth policies, a real intervening robot and live authored light RGB change,
+with rear-window composition, SSAA2/MSAA4/AO/bloom/modern blur. The blocked source
+is absent after its fade. coro-pulse-pooled-20261023 keeps6visible sources while
+the strobe is dark (zero draws), with cached same-publication replay. The earlier
+corona-pulse-final capture predates that visibility/intensity separation fix.
+coro-resource-pooled-20261023 passes real SSAA/MSAA resource changes through
+1/0,2/2,4/4,1/0,2/4 and retains5native glows. No scene GL errors were observed.
+
+Timing exposed a buffer-lease ownership defect: acquireFrameData builders returned
+capacity only after successful publication. An optional empty producer could
+therefore discard warm world buffers. FrameData now returns its own lease on
+destruction, including abandoned builders and failed publication; Presentation
+hands it the compilation storage on last-reader release. Foreign-thread releases
+remain non-pooling; copied builders cannot mutate another reader's compilation.
+A tracked-operator-new CPU test proves256warm acquire/resize/abandon iterations
+perform zero allocations and retain4096-object capacity. Existing held-reader,
+foreign-thread, publisher-exit and copied-compilation tests still pass.
+
+Current-reference performance is noisy, not an overall renderer speedup claim.
+At1280x720 SSAA2/MSAA4 AO/bloom/modern blur, pinned CPU2, frames240–479,
+interleaved coro-cycles-{a,c} (frozen pre-feature) average3.63/3.62ms whole-frame;
+{b,d} (coronas plus lease fix) average3.36/3.40ms, CPU rendering2.46/2.46ms and
+GPU2.71/2.70ms. Other interleavings show substantial host variance, including one
+fixed-build3.86ms run; do not infer a dependable percentage win from these pairs.
+The abandoned-buffer defect is independently proven/fixed, but the full dense,
+active-corona, high-resolution and pre-rewrite performance gates remain open.
+Door occlusion, complete reload/fade timing and broader gameplay qualification
+also remain release gates. This implementation is not whole-renderer acceptance.
+coro-zero-pooled-20261023 is pixel-identical to the preceding ordinary003 frame
+(a view without admitted coronas). coro-mirror-policy-20261023 confirms an
+independent synthetic mirror camera does not inherit a stale main-view glow set.

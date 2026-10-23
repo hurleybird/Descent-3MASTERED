@@ -974,6 +974,12 @@ struct ResolvedModel {
     bool has_render_bounds = false;
 };
 struct FrameData {
+    FrameData() = default;
+    FrameData(const FrameData&) = default;
+    FrameData& operator=(const FrameData&) = default;
+    FrameData(FrameData&&) noexcept = default;
+    FrameData& operator=(FrameData&&) noexcept = default;
+    ~FrameData();
     uint32_t compiled_surface_count = 0, compiled_part_count = 0;
     bool has_planar_surfaces = false; // compiled from published room mirror groups
     bool has_reflection_fields = false; // compiled dependency demand, not a caller policy
@@ -1100,7 +1106,8 @@ private:
     std::shared_ptr<FrameCompilationStorage> compilation_storage_;
 };
 // Empty builder backed by released snapshot storage. No storage is reclaimed
-// until its presentation's last reader releases it; at most two spare sets
+// until its presentation's last reader releases it. An abandoned builder also
+// returns its lease without throwing away warm capacity; at most two spare sets
 // are retained per publishing thread. Ordinary FrameData builders remain valid.
 FrameData acquireFrameData();
 

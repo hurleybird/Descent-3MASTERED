@@ -131,6 +131,20 @@ void storageTests() {
     publish.join();
     check(outlives_publisher->data().sequence == 3,"Snapshot did not outlive publishing thread");
     outlives_publisher.reset();
+    // Optional producers and failed publication must return their buffer
+    // leases even when they never construct a Presentation.
+    for (int iteration = 0; iteration < 8; ++iteration) {
+        auto abandoned = acquireFrameData();
+        if (!iteration) abandoned.objects.reserve(4096);
+        check(abandoned.objects.capacity() >= 4096,"Abandoned builder discarded warm frame capacity");
+        abandoned.objects.resize(1); abandoned.objects[0].handle = 91;
+    }
+    {
+        auto failed = acquireFrameData();
+        rejects([&] { Presentation::publish(std::move(failed)); },"Unidentified builder was published");
+        auto recovered = acquireFrameData();
+        check(recovered.objects.capacity() >= 4096 && recovered.objects.empty(),"Failed publication discarded its buffer lease");
+    }
     {
         auto input = acquireFrameData(); input.sequence = 4; input.scene_lifetime = assets.lifetime();
         input.objects.resize(1); input.objects[0].handle = 61;
@@ -649,6 +663,8 @@ int runSkyWeatherTests();
 int runDisplayLabelTests();
 int runViewDeformationTests();
 int runAuxiliaryViewTests();
+int runFrameStorageTests();
+int runRoomCoronaTests();
 int runAutomapTests();
 int runEffectTests();
 int runGameVisualTests();
@@ -704,6 +720,8 @@ int main() {
         Checks += runDisplayLabelTests();
         Checks += runViewDeformationTests();
         Checks += runAuxiliaryViewTests();
+        Checks += runFrameStorageTests();
+        Checks += runRoomCoronaTests();
         Checks += runAutomapTests();
         Checks += runEffectTests();
         Checks += runGameVisualTests();

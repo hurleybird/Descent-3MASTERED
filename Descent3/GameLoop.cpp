@@ -65,6 +65,7 @@
 #include "bsp.h"
 #include "gauges.h"
 #include "SmallViews.h"
+#include "GameRoomCoronas.h"
 #include "newui.h"
 #include "Inventory.h"
 #include "PHYSICS.H"
@@ -3047,11 +3048,6 @@ void GameRenderFrame(void)
 	Mine_depth = 0;
 #endif
 
-	{
-		PERF_MARKER_SCOPE("PreUpdateAllLightGlows");
-		PreUpdateAllLightGlows();
-	}
-
 	// Don't render if receiving data
 	if ((Game_mode & GM_MULTI) && NetPlayers[Player_num].sequence != NETSEQ_PLAYING)
 	{
@@ -3431,6 +3427,7 @@ void GameRenderFrame(void)
 				!Player_object->effect_info || !(Player_object->effect_info->type_flags & EF_DEFORM))
 				Error("Native microwave damage fixture did not set viewer deformation");
 		}
+		AdvanceGameRoomCoronaFixture();
 		const auto main_view = CaptureGameMainView();
 		if (FindArg("-scene-view-deformation-probe") && AutomatedCapturePending()) {
 			const auto& effect = main_view.world.world_deformation;
@@ -3460,6 +3457,7 @@ void GameRenderFrame(void)
 			PERF_MARKER_SCOPE("GameDrawMainView.Total");
 			GameDrawMainView(*presentation,feedback,main_view);
 		}
+		if (!FindArg("-scene-automap-probe")) RenderGameRoomCoronas(*presentation);
 		rend_PerfGpuSceneMark(RENDERER_GPU_SCENE_AFTER_MAIN_VIEW);
 
 		//Do the small views.  These should be before GameDrawHUD() for the small windows
@@ -3606,11 +3604,6 @@ void GameRenderFrame(void)
 	frames_one_second++;
 	gamegauge_total_frames++;
 	//#endif
-		// Update our glows
-	{
-		PERF_MARKER_SCOPE("PostUpdateAllLightGlows");
-		PostUpdateAllLightGlows();
-	}
 
 }
 

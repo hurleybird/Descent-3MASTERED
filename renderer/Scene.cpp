@@ -799,37 +799,42 @@ FrameData acquireFrameData() {
     return data;
 }
 Presentation::~Presentation() {
+    data_.compilation_storage_ = std::move(storage_);
+}
+FrameData::~FrameData() {
     // The snapshot owns its pool reference, so teardown is safe even if its
     // publishing thread has exited. Foreign-thread releases free normally;
     // only the publisher accesses spare storage. Spares never own the pool.
-    const auto pool = data_.storage_pool_;
+    const auto pool = std::move(storage_pool_);
     if (!pool || pool->publisher != std::this_thread::get_id() || pool->count == pool->spare.size()) return;
     FrameData clean;
     const auto reclaim = [](auto& source,auto& destination) {
         source.clear(); destination.swap(source);
     };
-    reclaim(data_.rooms,clean.rooms);
-    reclaim(data_.objects,clean.objects);
-    reclaim(data_.model_instances,clean.model_instances);
-    reclaim(data_.model_variants,clean.model_variants);
-    reclaim(data_.model_pose_inputs,clean.model_pose_inputs);
-    reclaim(data_.model_transforms,clean.model_transforms);
-    reclaim(data_.model_ambient_inputs,clean.model_ambient_inputs);
-    reclaim(data_.lights,clean.lights);
-    reclaim(data_.light_candidate_indices,clean.light_candidate_indices);
-    reclaim(data_.images,clean.images);
-    reclaim(data_.camera_perturbations,clean.camera_perturbations);
-    reclaim(data_.meshes,clean.meshes);
-    reclaim(data_.foregrounds,clean.foregrounds);
-    reclaim(data_.view_regions,clean.view_regions);
-    reclaim(data_.terrain.materials,clean.terrain.materials);
-    reclaim(data_.terrain.patches,clean.terrain.patches);
+    reclaim(rooms,clean.rooms);
+    reclaim(objects,clean.objects);
+    reclaim(model_instances,clean.model_instances);
+    reclaim(model_variants,clean.model_variants);
+    reclaim(model_pose_inputs,clean.model_pose_inputs);
+    reclaim(model_transforms,clean.model_transforms);
+    reclaim(model_ambient_inputs,clean.model_ambient_inputs);
+    reclaim(lights,clean.lights);
+    reclaim(light_candidate_indices,clean.light_candidate_indices);
+    reclaim(images,clean.images);
+    reclaim(camera_perturbations,clean.camera_perturbations);
+    reclaim(meshes,clean.meshes);
+    reclaim(foregrounds,clean.foregrounds);
+    reclaim(view_regions,clean.view_regions);
+    reclaim(terrain.materials,clean.terrain.materials);
+    reclaim(terrain.patches,clean.terrain.patches);
     // Drop frame-owned pose/asset references now; retain only allocation
     // capacity and asset-free identity indexes. Each ordered inventory is
     // checked exactly before its index can be reused by a subsequent frame.
-    storage_->resolved_models_.clear();
-    storage_->releasePoses();
-    clean.compilation_storage_ = std::move(storage_);
+    if (compilation_storage_ && compilation_storage_.unique()) {
+        compilation_storage_->resolved_models_.clear();
+        compilation_storage_->releasePoses();
+        clean.compilation_storage_ = std::move(compilation_storage_);
+    }
     pool->spare[pool->count++] = std::move(clean);
 }
 PresentationRef Presentation::freeze(const FrameData& data) {

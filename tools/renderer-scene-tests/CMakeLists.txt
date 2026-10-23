@@ -13,6 +13,7 @@ add_executable(renderer_scene_tests
     fog_tests.cpp
     feedback_tests.cpp
     frame_tests.cpp
+    frame_storage_tests.cpp
     event_tests.cpp
     effect_tests.cpp
     game_visual_tests.cpp
@@ -24,6 +25,7 @@ add_executable(renderer_scene_tests
     display_label_tests.cpp
     view_deformation_tests.cpp
     auxiliary_view_tests.cpp
+    room_corona_tests.cpp
     automap_tests.cpp
     ../../Descent3/SceneCanvas.cpp
     ../../Descent3/SceneModuleContext.cpp

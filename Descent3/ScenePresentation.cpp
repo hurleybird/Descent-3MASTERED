@@ -6,6 +6,7 @@
 #include "SceneModuleContext.h"
 #include "SceneFeedback.h"
 #include "SmallViews.h"
+#include "GameRoomCoronas.h"
 #include "gamecinematics.h"
 #include "../renderer/SceneGeometry.h"
 #include "../renderer/SceneDependencies.h"
@@ -96,8 +97,8 @@ bool roomMaterialInputsUnchanged() {
     for (int i = 0; i < MAX_TEXTURES; ++i) {
         const auto& a = GameTextures[i]; auto& b = previous[i];
         const bool equal = a.used == b.used && (!a.used ||
-            (std::tie(a.flags,a.alpha,a.reflectivity,a.slide_u,a.slide_v,a.destroy_handle,a.bm_handle,a.speed) ==
-             std::tie(b.flags,b.alpha,b.reflectivity,b.slide_u,b.slide_v,b.destroy_handle,b.bm_handle,b.speed) &&
+            (std::tie(a.flags,a.alpha,a.reflectivity,a.slide_u,a.slide_v,a.destroy_handle,a.bm_handle,a.speed,a.r,a.g,a.b,a.corona_type) ==
+             std::tie(b.flags,b.alpha,b.reflectivity,b.slide_u,b.slide_v,b.destroy_handle,b.bm_handle,b.speed,b.r,b.g,b.b,b.corona_type) &&
              std::memcmp(a.name,b.name,sizeof(a.name)) == 0));
         same = same && equal;
         if (!equal) b = a;
@@ -569,7 +570,7 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance,const GameMainView
     PERF_MARKER_SCOPE("Scene.PreparePresentation");
     static d3scene::PresentationRef previous_models;
     const bool retain_rooms = [&] { PERF_MARKER_SCOPE("Scene.MaterialInputs"); return roomMaterialInputsUnchanged(); }();
-    if (!retain_rooms) ResetSplitSpecularTexturePairCache();
+    if (!retain_rooms) { ResetSplitSpecularTexturePairCache(); InvalidateGameRoomCoronaMaterials(); }
     const unsigned int simulation_random = ps_rand_get_state();
     auto data = [&] { PERF_MARKER_SCOPE("Scene.Extract"); return ExtractGameFrame(Gametime, advance ? Frametime : 0, Game_paused,advance,
         retain_rooms ? previous_models.get() : nullptr,FindArg("-scene-geometry-revision-audit") != 0); }();
@@ -1104,6 +1105,10 @@ void RenderGameSceneView(const d3scene::Presentation& frame, d3scene::View view,
             if (image.producer().view().kind == d3scene::ViewKind::Mirror)
                 game_observations->observe(image.producer());
         game_observations->observe(planar.consumer);
+        if (planar.consumer.view().kind == d3scene::ViewKind::Main)
+            CaptureGameRoomCoronaView(planar.consumer);
+        if (FindArg("-scene-room-corona-probe") && planar.consumer.view().kind == d3scene::ViewKind::Main)
+            CaptureGameRoomCoronaView(planar.consumer); // cached publication replay, no second clock or ray pass
     }
     d3scene::renderViewImages(producers);
     if (FindArg("-scene-observation-probe") && (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)) {
