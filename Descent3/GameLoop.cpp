@@ -3091,6 +3091,37 @@ void GameRenderFrame(void)
 
 		// Publish once. Every world view below sees this same owned scene, not
 		// a second traversal of mutable simulation state.
+		if (AutomatedCaptureFrameIndex() == 1 && FindArg("-scene-mass-snow-probe") && Player_object) {
+			// Legacy flakes are deliberately retired by the simulation while the
+			// enhanced-weather option is active. Exercise their actual setting.
+			Render_enhanced_weather = false;
+			const int weapon = FindWeaponName("Mass Driver");
+			if (weapon < 0 || FireWeaponFromObject(Player_object,weapon,-1,true,false) < 0)
+				Error("Real mass-driver firing fixture failed");
+			vis_effect* trail = nullptr;
+			for (int i = 0; i <= Highest_vis_effect_index; ++i) if (VisEffects[i].type == VIS_FIREBALL && VisEffects[i].id == MASSDRIVER_EFFECT_INDEX)
+				trail = &VisEffects[i];
+			if (!trail) Error("Real mass-driver firing did not emit its trail");
+			const auto center = Player_object->pos+Player_object->orient.fvec*16;
+			trail->pos = center-Player_object->orient.rvec*6+Player_object->orient.uvec*2;
+			trail->end_pos = trail->pos+Player_object->orient.rvec*12;
+			trail->flags &= ~VF_LINK_TO_VIEWER;
+			auto position = center-Player_object->orient.rvec*6-Player_object->orient.uvec*2;
+			const int index = VisEffectCreate(VIS_FIREBALL,MERCBOSS_MASSDRIVER_EFFECT_INDEX,Player_object->roomnum,&position);
+			if (index < 0) Error("Boss mass-driver fixture allocation failed");
+			auto& boss = VisEffects[index]; boss.end_pos = position+Player_object->orient.rvec*12;
+			boss.custom_handle = trail->custom_handle; boss.billboard_info.width = 1;
+			boss.lifeleft = boss.lifetime = 1.5f; boss.flags |= VF_USES_LIFELEFT;
+			boss.lighting_color = GR_RGB16(240,10,10);
+			for (int i = 0; i < 3; ++i) {
+				position = center+Player_object->orient.uvec*(i-1.f);
+				const int snow = VisEffectCreate(VIS_FIREBALL,SNOWFLAKE_INDEX,Player_object->roomnum,&position);
+				if (snow < 0) Error("Legacy snow fixture allocation failed");
+				auto& flake = VisEffects[snow]; flake.lifetime = 3; flake.lifeleft = 2.7f; flake.creation_time = Gametime-.3f;
+				flake.size = .08f*(i+1); flake.flags |= VF_USES_LIFELEFT; flake.lighting_color = GR_RGB16(255,255,255);
+			}
+			AutomatedCaptureLog("scene mass/snow fixture real_fired_mass=1 boss_record=1 legacy_flakes=3");
+		}
 		if (AutomatedCaptureFrameIndex() == 0 && FindArg("-scene-weapon-contributions-probe") && Player_object) {
 			int sprite = -1,model = -1;
 			for (int i = 0; i < MAX_WEAPONS; ++i) if (Weapons[i].used && !(Weapons[i].flags & (WF_ELECTRICAL | WF_INVISIBLE))) {

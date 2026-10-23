@@ -41,13 +41,30 @@ struct FragmentAsset {
 };
 std::array<FragmentAsset,MAX_OBJECTS> FragmentAssets{};
 uint64_t FragmentLifetime = 0;
-enum class EffectTopology { BlastRing, GravityDisk, WeaponRingEven, WeaponRingOdd };
+enum class EffectTopology { BlastRing, GravityDisk, WeaponRingEven, WeaponRingOdd, MassDriverTube, Count };
 d3scene::MeshAssetRef effectTopology(EffectTopology kind) {
     static uint64_t lifetime = 0;
-    static std::array<d3scene::MeshAssetRef,4> assets{};
+    static std::array<d3scene::MeshAssetRef,size_t(EffectTopology::Count)> assets{};
     if (lifetime != d3scene::assets().lifetime()) { assets.fill({}); lifetime = d3scene::assets().lifetime(); }
     auto& asset = assets[size_t(kind)];
     if (!asset) {
+        if (kind == EffectTopology::MassDriverTube) {
+            d3scene::MeshGeometry geometry;
+            for (int end = 0; end < 2; ++end) for (int i = 0; i < 16; ++i) {
+                const auto angle = static_cast<::angle>(i*(65536/16));
+                geometry.vertices.push_back({-FixCos(angle),FixSin(angle),float(end)});
+            }
+            for (uint32_t i = 0; i < 16; ++i) {
+                const uint32_t next = (i+1)%16;
+                d3scene::MeshPolygon polygon;
+                const auto angle = static_cast<::angle>((i+.5f)*(65536/16));
+                polygon.normal = {-FixCos(angle),FixSin(angle),0};
+                polygon.corners = {{i+16,0,0},{i,0,1},{next,1,1},{next+16,1,0}};
+                geometry.polygons.push_back(std::move(polygon));
+            }
+            asset = d3scene::assets().createMesh(std::move(geometry));
+            return asset;
+        }
         const bool disk = kind == EffectTopology::GravityDisk;
         const bool weapon = kind == EffectTopology::WeaponRingEven || kind == EffectTopology::WeaponRingOdd;
         const int segments = disk ? 32 : 20;
@@ -422,6 +439,79 @@ bool prepareAxisEffect(d3scene::FrameData& frame,const vis_effect& effect,const 
     frame.meshes.push_back(std::move(rod));
     return true;
 }
+bool prepareMassDriver(d3scene::FrameData& frame,const vis_effect& effect,const d3scene::MeshAssetRef& quad) {
+    if (!(effect.lifetime > 0) || !(effect.billboard_info.width > 0) ||
+        effect.custom_handle < 0 || effect.custom_handle >= MAX_TEXTURES || !GameTextures[effect.custom_handle].used) return false;
+    vector direction = effect.end_pos-effect.pos;
+    const float length = vm_NormalizeVector(&direction);
+    if (!(length > .001f) || !std::isfinite(length)) return false;
+    const bool boss = effect.id == MERCBOSS_MASSDRIVER_EFFECT_INDEX;
+    const float radius = effect.billboard_info.width*.25f*(boss ? 3.f : 1.f);
+    const float alpha = std::max(0.f,std::min(1.f,effect.lifeleft/effect.lifetime*.5f));
+    if (!(alpha > 0)) return true;
+    const int bitmap = GetTextureBitmapAtTime(effect.custom_handle,0,float(frame.simulation_time));
+    if (bitmap <= BAD_BITMAP_HANDLE || bitmap >= MAX_BITMAPS || !GameBitmaps[bitmap].used) return false;
+    matrix plane; vm_VectorToMatrix(&plane,&direction,nullptr,nullptr);
+    const auto packed = GR_16_TO_COLOR(effect.lighting_color);
+    const d3scene::Vec3 outer{GR_COLOR_RED(packed)/255.f,GR_COLOR_GREEN(packed)/255.f,GR_COLOR_BLUE(packed)/255.f};
+    for (int layer = 0; layer < 2; ++layer) {
+        const float size = layer ? radius : radius*.25f;
+        d3scene::PreparedMesh tube; tube.asset = effectTopology(EffectTopology::MassDriverTube);
+        tube.world = basis(plane); tube.world.position = value(effect.pos);
+        tube.world.right = value(plane.rvec*size); tube.world.up = value(plane.uvec*size); tube.world.forward = value(plane.fvec*length);
+        tube.room = effect.roomnum; tube.surface.bitmap = bitmap;
+        tube.surface.unlit = tube.surface.two_sided = tube.surface.texture_alpha = true;
+        tube.surface.blend = d3scene::BlendMode::Additive; tube.surface.depth = d3scene::DepthMode::ReadOnly;
+        tube.surface.alpha = alpha; tube.surface.texture_scale.y = length*.5f;
+        tube.surface.color_modulation = layer ? outer : boss ? d3scene::Vec3{1,170/255.f,170/255.f} : d3scene::Vec3{200/255.f,200/255.f,1};
+        frame.meshes.push_back(std::move(tube));
+    }
+    if (boss) return true;
+    static int trail_texture = -1;
+    if (trail_texture < 0 || trail_texture >= MAX_TEXTURES || !GameTextures[trail_texture].used ||
+        stricmp(GameTextures[trail_texture].name,"MassTrail")) trail_texture = FindTextureName("MassTrail");
+    if (trail_texture < 0) return true;
+    const int trail_bitmap = GetTextureBitmapAtTime(trail_texture,0,float(frame.simulation_time));
+    if (trail_bitmap <= BAD_BITMAP_HANDLE || trail_bitmap >= MAX_BITMAPS || !GameBitmaps[trail_bitmap].used) return true;
+    const int width = bm_w(trail_bitmap,0),height = bm_h(trail_bitmap,0);
+    if (width <= 0 || height <= 0) return true;
+    const int rings = int(std::min(400.f,length/3));
+    const float interval = length/3 > 400 ? length/400 : 3;
+    const auto roll = d3scene::visualAngle(frame.simulation_time,-4*65536.f,0);
+    for (int i = 1; i < rings; ++i) {
+        const float size = 1+FixSin(static_cast<::angle>(i*9000+roll))*.3f;
+        matrix spin; vm_AnglesToMatrix(&spin,0,0,static_cast<::angle>(i*2000));
+        d3scene::PreparedMesh ring; ring.asset = quad; ring.world = d3scene::compose(basis(plane),basis(spin));
+        ring.world.right = d3scene::transformDirection(basis(plane),value(spin.rvec*size));
+        ring.world.up = d3scene::transformDirection(basis(plane),value(spin.uvec*(size*height/width)));
+        ring.world.position = value(effect.pos+direction*(i*interval)); ring.room = effect.roomnum;
+        ring.surface.bitmap = trail_bitmap; ring.surface.unlit = ring.surface.two_sided = ring.surface.texture_alpha = true;
+        ring.surface.blend = d3scene::BlendMode::Additive; ring.surface.depth = d3scene::DepthMode::ReadOnly;
+        ring.surface.alpha = alpha; ring.surface.texture_wrap = false;
+        frame.meshes.push_back(std::move(ring));
+    }
+    return true;
+}
+bool prepareLegacySnow(d3scene::FrameData& frame,const vis_effect& effect,const d3scene::MeshAssetRef& quad) {
+    if (!(effect.lifetime > 0) || !(effect.size > 0)) return false;
+    const int bitmap = Fireballs[SNOWFLAKE_INDEX].bm_handle;
+    if (bitmap <= BAD_BITMAP_HANDLE || bitmap >= MAX_BITMAPS || !GameBitmaps[bitmap].used) return false;
+    const int width = bm_w(bitmap,0),height = bm_h(bitmap,0);
+    if (width <= 0 || height <= 0) return false;
+    const float age = std::max(0.f,float(frame.simulation_time)-effect.creation_time);
+    const float life = std::min(.99999f,age/effect.lifetime);
+    d3scene::PreparedMesh snow; snow.asset = quad; snow.room = effect.roomnum;
+    snow.alignment = d3scene::MeshAlignment::Camera; snow.world.position = value(effect.pos);
+    snow.world.right.x = effect.size; snow.world.up.y = effect.size*height/width;
+    const auto color = GR_16_TO_COLOR(effect.lighting_color);
+    snow.surface.bitmap = bitmap; snow.surface.color_modulation = {GR_COLOR_RED(color)/255.f,GR_COLOR_GREEN(color)/255.f,GR_COLOR_BLUE(color)/255.f};
+    snow.surface.unlit = snow.surface.two_sided = snow.surface.texture_alpha = true;
+    snow.surface.texture_wrap = false; snow.surface.blend = d3scene::BlendMode::Additive; snow.surface.depth = d3scene::DepthMode::ReadOnly;
+    snow.surface.alpha = alphaByte((1-life)*std::min(1.f,age/.1f)*.6f);
+    snow.surface.soft_depth_range = Render_soft_vis_effects && !(effect.flags & VF_NO_SOFT_PARTICLES) ? 2.f : 0;
+    frame.meshes.push_back(std::move(snow));
+    return true;
+}
 void prepareWeaponContributions(d3scene::FrameData& frame,const d3scene::ObjectState& owner,
     const object& source,const d3scene::MeshAssetRef& quad) {
     const auto& weapon = Weapons[source.id];
@@ -638,9 +728,19 @@ void PrepareGameEffects(d3scene::FrameData& frame,const GameMainView* main_view)
     if (!VisEffects) return;
     const auto quad = d3scene::assets().quadMesh();
     unsigned prepared = 0, pending = 0, windshield = 0;
+    unsigned mass_drivers = 0,boss_mass_drivers = 0,legacy_snow = 0;
     for (int slot = 0; slot <= Highest_vis_effect_index; ++slot) {
         const auto& effect = VisEffects[slot];
         if (effect.type == VIS_NONE || (effect.flags & VF_DEAD)) continue;
+        if (effect.type == VIS_FIREBALL && (effect.id == MASSDRIVER_EFFECT_INDEX || effect.id == MERCBOSS_MASSDRIVER_EFFECT_INDEX)) {
+            if (prepareMassDriver(frame,effect,quad)) { ++prepared; if (effect.id == MASSDRIVER_EFFECT_INDEX) ++mass_drivers; else ++boss_mass_drivers; }
+            continue;
+        }
+        if (effect.type == VIS_FIREBALL && effect.id == SNOWFLAKE_INDEX &&
+            !(effect.flags & (VF_ENHANCED_SNOW | VF_WINDSHIELD_EFFECT | VF_CLOSE_SCREEN_EFFECT))) {
+            if (prepareLegacySnow(frame,effect,quad)) { ++prepared; ++legacy_snow; }
+            continue;
+        }
         if (effect.type == VIS_FIREBALL && (effect.id == LIGHTNING_BOLT_INDEX ||
             effect.id == GRAY_LIGHTNING_BOLT_INDEX || effect.id == SINE_WAVE_INDEX)) {
             if (prepareLineEffect(frame,effect,slot)) ++prepared;
@@ -879,4 +979,6 @@ void PrepareGameEffects(d3scene::FrameData& frame,const GameMainView* main_view)
     }
     if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
         AutomatedCaptureLog("scene effects sprites=%u pending=%u windshield=%u",prepared,pending,windshield);
+    if ((mass_drivers || boss_mass_drivers || legacy_snow) && AutomatedCapturePending())
+        AutomatedCaptureLog("scene effect families mass_drivers=%u boss_mass_drivers=%u legacy_snow=%u",mass_drivers,boss_mass_drivers,legacy_snow);
 }

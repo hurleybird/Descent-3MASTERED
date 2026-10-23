@@ -394,3 +394,27 @@ above2; ordinary003 differs in0.0051%, also maximum1, from transform arithmetic.
 No appearance degradation was detected. Evidence: integration-ring-{before,after}
 and integration-weapon-normal-20261023. Engine and all three suites pass. No
 whole-frame performance claim or I10/I11 completion is made from these fixtures.
+
+## Mass-driver variants and legacy snow (I09 remaining producer families)
+
+Both mass-driver trails now publish two instances of one immutable16-sided tube
+asset, with authored inner/outer radius, colors, lifetime alpha and texture
+repeat. Normal trails also emit their capped400-planar-ring profile using the
+shared quad. This replaces per-quad source geometry construction; no draw or RNG
+is invoked by publication. The legacy snow family publishes shared billboards
+with authored fade-in/lifetime opacity, color, size and soft-depth policy.
+Enhanced snow and close-screen snow admission remain separate open work.
+
+The fixture fires the real mass-driver weapon through FireWeaponFromObject,
+stages that trail for inspection, and creates a boss record plus three legacy
+flakes through VisEffectCreate. An initial outdoor frame0 run failed the existing
+terrain-visibility creation gate; moving the fixture after its first real
+observation (frame1) fixes the fixture, not the gate. Indoor flakes correctly
+retire below world height1, so only the outdoor capture qualifies snow. It logs
+mass_drivers=1,boss_mass_drivers=1,legacy_snow=3 and visibly shows both trails and
+the three flakes. No GL errors. Evidence:
+integration-mass-snow-outdoor-after-observation-20261023. The boss record is not
+evidence for natural boss firing. The ordinary003 capture matches the prior
+weapon checkpoint SHA A0E0C7E7…55641834. Engine builds; source CPU suites remain
+passing from that checkpoint. I09 still needs broad natural/multiview/content
+qualification; no release bit was cleared.
