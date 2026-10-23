@@ -49,6 +49,9 @@ struct weather
 };
 
 extern weather Weather;
+struct GameSkyWeatherFrame;
+void AdvanceWeatherSkyVisuals(uint64_t scene,uint64_t frame,bool paused);
+const GameSkyWeatherFrame* GetWeatherSkyVisuals(uint64_t scene);
 
 struct enhanced_snow_particle
 {

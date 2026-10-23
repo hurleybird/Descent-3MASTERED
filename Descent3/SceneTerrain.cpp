@@ -11,6 +11,9 @@
 #include "gameloop.h"
 #include "args.h"
 #include "pserror.h"
+#include "weather.h"
+#include "GameSkyWeather.h"
+#include "fireball.h"
 #include <algorithm>
 #include <map>
 #include <cmath>
@@ -130,7 +133,7 @@ void PrepareGameSky(d3scene::FrameData& frame) {
     struct SkyGeometry {
         uint64_t lifetime = 0;
         terrain_sky source{};
-        d3scene::MeshAssetRef dome, horizon, stars;
+        d3scene::MeshAssetRef dome, horizon, stars, lightning_flash, lightning_segment;
     };
     static SkyGeometry retained;
     if (retained.lifetime != frame.scene_lifetime) {
@@ -139,6 +142,7 @@ void PrepareGameSky(d3scene::FrameData& frame) {
     }
     const auto& prior = retained.source;
     const bool same_horizon = std::memcmp(prior.horizon_vectors,Terrain_sky.horizon_vectors,sizeof(prior.horizon_vectors)) == 0;
+    if (!same_horizon) retained.lightning_flash.reset();
     if (!same_horizon || std::memcmp(prior.horizon_u,Terrain_sky.horizon_u,sizeof(prior.horizon_u)) ||
         std::memcmp(prior.horizon_v,Terrain_sky.horizon_v,sizeof(prior.horizon_v))) retained.dome.reset();
     if (!same_horizon || prior.sky_color != Terrain_sky.sky_color || prior.horizon_color != Terrain_sky.horizon_color)
@@ -294,6 +298,78 @@ void PrepareGameSky(d3scene::FrameData& frame) {
             }
         }
     }
+    const auto* lightning = GetWeatherSkyVisuals(frame.scene_lifetime);
+    if (lightning && lightning->phase == 1) {
+        if (!retained.lightning_flash) {
+            d3scene::MeshGeometry flash;
+            for (int t = 0; t < MAX_HORIZON_PIECES; ++t) {
+                const int next = (t+1)%MAX_HORIZON_PIECES;
+                polygon(flash,{{t,0},{next,1},{t,1}},false);
+                for (int ring = 1; ring < 5; ++ring)
+                    polygon(flash,{{t,ring},{next,ring},{next,ring+1},{t,ring+1}},false);
+            }
+            retained.lightning_flash = d3scene::assets().createMesh(std::move(flash));
+        }
+        d3scene::PreparedMesh flash;
+        flash.asset = retained.lightning_flash; flash.world = rotation;
+        flash.camera_translation = {1,.5f,1};
+        flash.surface.layer = d3scene::RenderLayer::Background;
+        flash.surface.depth = d3scene::DepthMode::Disabled;
+        flash.surface.unlit = flash.surface.two_sided = true;
+        flash.surface.medium_transport = false;
+        flash.surface.blend = d3scene::BlendMode::Additive;
+        flash.surface.alpha = 76/255.f; flash.surface.base_color = {.8f,.8f,1};
+        frame.meshes.push_back(std::move(flash));
+    } else if (lightning && lightning->phase == 2) {
+        if (!retained.lightning_segment) {
+            d3scene::MeshGeometry segment;
+            segment.vertices = {{-1,1,0},{0,1,0},{1,1,0},{1,-1,0},{0,-1,0},{-1,-1,0}};
+            d3scene::MeshPolygon left, right; left.normal = right.normal = {0,0,-1};
+            left.corners = {{0,0,0,0,0,76},{1},{4},{5,0,0,0,0,76}};
+            right.corners = {{1},{2,0,0,0,0,76},{3,0,0,0,0,76},{4}};
+            segment.polygons = {std::move(left),std::move(right)};
+            retained.lightning_segment = d3scene::assets().createMesh(std::move(segment));
+        }
+        for (unsigned i = 0; i < lightning->count; ++i) {
+            const auto& source = lightning->segments[i];
+            const d3scene::Vec3 from{source.from.x,source.from.y,source.from.z}, to{source.to.x,source.to.y,source.to.z};
+            d3scene::PreparedMesh segment;
+            segment.asset = retained.lightning_segment;
+            segment.world = d3scene::axisBillboardPlacement(from,to,10);
+            segment.alignment = d3scene::MeshAlignment::Axis;
+            segment.surface.layer = d3scene::RenderLayer::Background;
+            segment.surface.depth = d3scene::DepthMode::Disabled;
+            segment.surface.unlit = segment.surface.two_sided = true;
+            segment.surface.medium_transport = false;
+            segment.surface.blend = d3scene::BlendMode::Additive;
+            segment.surface.base_color = {.2f,.4f,1};
+            frame.meshes.push_back(segment);
+            segment.asset = d3scene::assets().strokeMesh();
+            segment.alignment = d3scene::MeshAlignment::World;
+            segment.raster_stroke_width = 1;
+            frame.meshes.push_back(std::move(segment));
+        }
+        if (lightning->origin_type >= 0 && lightning->origin_size > 0) {
+            const int bitmap = Fireballs[lightning->origin_type ? LIGHTNING_ORIGIN_INDEXA : LIGHTNING_ORIGIN_INDEXB].bm_handle;
+            const int width = bm_w(bitmap,0), height = bm_h(bitmap,0);
+            if (width > 0 && height > 0) {
+                d3scene::PreparedMesh origin;
+                origin.asset = d3scene::assets().quadMesh();
+                origin.world.position = {lightning->origin.x,lightning->origin.y,lightning->origin.z};
+                origin.world.right.x = lightning->origin_size; origin.world.up.y = lightning->origin_size*height/width;
+                origin.alignment = d3scene::MeshAlignment::Camera;
+                origin.surface.layer = d3scene::RenderLayer::Background;
+                origin.surface.depth = d3scene::DepthMode::Disabled;
+                origin.surface.unlit = origin.surface.two_sided = origin.surface.texture_alpha = true;
+                origin.surface.medium_transport = false; origin.surface.bitmap = bitmap;
+                origin.surface.alpha = 127/255.f; origin.surface.blend = d3scene::BlendMode::Additive;
+                frame.meshes.push_back(std::move(origin));
+            }
+        }
+    }
+    if (lightning && lightning->phase && (AutomatedCapturePending() || FindArg("-scene-sky-lightning-probe")))
+        AutomatedCaptureLog("scene sky lightning phase=%u frame=%llu segments=%u truncated=%d owner=%u",
+            lightning->phase,static_cast<unsigned long long>(lightning->frame),lightning->count,lightning->truncated,lightning->camera_owner);
 }
 // Simulation (including outdoor damage) and presentation share one authored
 // exposure sampler. The adapter borrows data only for this call.

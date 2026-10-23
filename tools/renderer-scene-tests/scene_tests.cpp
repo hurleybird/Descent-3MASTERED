@@ -645,6 +645,7 @@ int runFrameEventTests();
 int runCanvasTests();
 int runModuleContextTests();
 int runModuleMutationTests();
+int runSkyWeatherTests();
 int runAutomapTests();
 int runEffectTests();
 int runGameVisualTests();
@@ -696,6 +697,7 @@ int main() {
         Checks += runCanvasTests();
         Checks += runModuleContextTests();
         Checks += runModuleMutationTests();
+        Checks += runSkyWeatherTests();
         Checks += runAutomapTests();
         Checks += runEffectTests();
         Checks += runGameVisualTests();

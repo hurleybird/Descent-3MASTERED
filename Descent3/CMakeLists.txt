@@ -13,6 +13,8 @@ SET (MAIN_SOURCES
 		Descent3/GameVisualClock.h
 		Descent3/GameElectricalWeapons.cpp
 		Descent3/GameElectricalWeapons.h
+		Descent3/GameSkyWeather.cpp
+		Descent3/GameSkyWeather.h
 		Descent3/SceneModels.cpp
 		Descent3/SceneLights.cpp
 		Descent3/SceneTerrain.cpp

@@ -40,6 +40,7 @@
 #include <vector>
 
 #include "psrand.h"
+#include "GameSkyWeather.h"
 
 weather Weather = { 0 };
 static bool Main_weather_exterior = false;
@@ -52,6 +53,15 @@ static object* WeatherObserver() {
 		if (auto* owner = ObjGet(static_cast<int>(Main_weather_owner))) return owner;
 	return Viewer_object;
 }
+static GameSkyWeatherController Sky_visuals;
+void AdvanceWeatherSkyVisuals(uint64_t scene,uint64_t frame,bool paused) {
+	const auto* camera = WeatherObserver();
+	const vector nowhere{};
+	matrix identity{}; identity.rvec.x = identity.uvec.y = identity.fvec.z = 1;
+	Sky_visuals.advance(scene,frame,paused,Weather,camera ? uint32_t(camera->handle) : 0,
+		camera ? camera->pos : nowhere,camera ? camera->orient : identity);
+}
+const GameSkyWeatherFrame* GetWeatherSkyVisuals(uint64_t scene) { return Sky_visuals.find(scene); }
 static bool MainWeatherSeesExterior() {
 	// The observation describes one physical camera, not a union of all views.
 	const auto* viewer = WeatherObserver();

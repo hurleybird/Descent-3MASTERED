@@ -45,6 +45,7 @@ void RenderMine(int viewer_roomnum, int flag_automap, int called_from_terrain, b
 #include "findintersection.h"
 #include "weapon.h"
 #include "weather.h"
+#include "GameSkyWeather.h"
 #include "viseffect.h"
 #ifdef EDITOR
 #include "editor\d3edit.h"
@@ -1881,77 +1882,24 @@ void DrawLightningSegment(vector* from, vector* to)
 	g3_DrawPoly(6, pntlist, 0);
 }
 
-#define PUSH_LIGHTNING_TREE(f,l,sp) {froms[si]=f; stack_level[si]=l; splits[si]=sp; si++;}
-#define POP_LIGHTNING_TREE()	{si--; cur_from=froms[si]; level=stack_level[si]; cur_splits=splits[si];}
 // Draws an entire strip of lightning
 void DrawLightning(void)
 {
-	static PSRand lightning_rand;
-	angvec player_angs;
-	matrix mat;
-	vector froms[50];
-	int si = 0, level;
-	int stack_level[50];
-	int splits[50];
-	int cur_splits = 0;
-	int new_heading;
-	float scalar;
-	scalar = ((lightning_rand() % 1000) - 500) / 500.0;
-	scalar *= 15000;
-	vm_ExtractAnglesFromMatrix(&player_angs, &Viewer_object->orient);
-	new_heading = (player_angs.h + (int)scalar) % 65536;
-	vm_AnglesToMatrix(&mat, 0, new_heading, 0);
-	// Put the starting point way up in the air
-	float ylimit = (-(Viewer_object->pos.y * 2)) + (lightning_rand() % 400);
-	vector cur_from = Viewer_object->pos + (mat.fvec * 4000);
-	vector new_vec;
-	cur_from.y += 800.0f;
-	cur_from.y += (lightning_rand() % 100);
-	// Set some states
-
+	const auto* strike = GetWeatherSkyVisuals(d3scene::assets().lifetime());
+	if (!strike || strike->phase != 2) return;
 	rend_SetAlphaType(AT_SATURATE_TEXTURE);
 	rend_SetAlphaValue(.5 * 255);
 	rend_SetLighting(LS_NONE);
-	int bm_handle;
-
-	// See if we should drawn an origin bitmap
-	if (lightning_rand() % 3)
-	{
-		// Pick an origin bitmap
-		if (lightning_rand() % 2)
-			bm_handle = Fireballs[LIGHTNING_ORIGIN_INDEXA].bm_handle;
-		else
-			bm_handle = Fireballs[LIGHTNING_ORIGIN_INDEXB].bm_handle;
-		//Draw the origin bitmap
-		int size = 300 + (lightning_rand() % 200);
-		g3_DrawRotatedBitmap(&cur_from, 0, size, (size * bm_h(bm_handle, 0)) / bm_w(bm_handle, 0), bm_handle);
+	if (strike->origin_type >= 0 && strike->origin_size > 0) {
+		const int bitmap = Fireballs[strike->origin_type ? LIGHTNING_ORIGIN_INDEXA : LIGHTNING_ORIGIN_INDEXB].bm_handle;
+		auto origin = strike->origin;
+		g3_DrawRotatedBitmap(&origin,0,strike->origin_size,
+			strike->origin_size*bm_h(bitmap,0)/bm_w(bitmap,0),bitmap);
 	}
-	PUSH_LIGHTNING_TREE(cur_from, 0, 0)
-		while (si > 0)
-		{
-			POP_LIGHTNING_TREE()
-				ASSERT(level < 50);
-			float x_adjust = ((lightning_rand() % 200) - 100) / 100.0;
-			float y_adjust = .3 + ((lightning_rand() % 100) / 100.0);
-
-			new_vec = cur_from;
-			new_vec += x_adjust * (mat.rvec * 70);
-			new_vec -= y_adjust * (mat.uvec * 100);
-			DrawLightningSegment(&cur_from, &new_vec);
-			if (cur_from.y < ylimit) // We're close to the ground, so just bail!
-				continue;
-
-			if ((lightning_rand() % ((level * level * 20) + 8)) == 0 && cur_splits < 2)
-			{
-				// Make this branch split
-				PUSH_LIGHTNING_TREE(new_vec, level, cur_splits + 1)
-					PUSH_LIGHTNING_TREE(new_vec, level, cur_splits + 1)
-			}
-			else
-			{
-				PUSH_LIGHTNING_TREE(new_vec, level, cur_splits)
-			}
-		}
+	for (unsigned i = 0; i < strike->count; ++i) {
+		auto from = strike->segments[i].from, to = strike->segments[i].to;
+		DrawLightningSegment(&from,&to);
+	}
 }
 
 // Draws a lightning sky
@@ -2651,18 +2599,17 @@ void DrawSky(vector* veye, matrix* vorient)
 	}
 
 #ifndef NEWEDITOR
-	if ((Weather.flags & WEATHER_FLAGS_LIGHTNING) && Weather.lightning_sequence == 2)
+	const auto* strike = GetWeatherSkyVisuals(d3scene::assets().lifetime());
+	if (strike && strike->phase == 2)
 	{
 		DisableSkyDepth();
 		DrawLightning();
-		Weather.lightning_sequence = 0;
 	}
 
-	if ((Weather.flags & WEATHER_FLAGS_LIGHTNING) && Weather.lightning_sequence == 1)
+	if (strike && strike->phase == 1)
 	{
 		DisableSkyDepth();
 		DrawLightningSky();
-		Weather.lightning_sequence = 2;
 	}
 #endif
 

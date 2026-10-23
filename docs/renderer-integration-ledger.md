@@ -637,3 +637,33 @@ tracked controls average3.030/2.839ms, using frames240–479. GPU averages remai
 0.270–0.274ms. This low-resolution CPU-sensitive case is noisy, supports only a
 modest local improvement, and does not qualify whole-renderer performance or
 two-process multiplayer. All broader release gates remain open.
+
+## Game-owned sky lightning (I15 partial implementation)
+
+Lightning's flash/bolt clock and branch generation now belong to the weather
+game phase. One bounded immutable strike is shared by all views; publication,
+rear monitors, exports and diagnostic legacy drawing cannot advance it or use
+a draw-owned RNG. The gameplay weather trigger and thunder RNG remain in
+DoWeatherForFrame. The branch generator uses an explicit local event seed and
+fixed storage; its 512-segment cap prevents extreme camera heights from creating
+unbounded geometry. Ordinary strike generation does not clear that storage on
+every inactive frame. Flash geometry and bolt ribbon topology are retained;
+segments use shared topology plus placements, not per-segment geometry assets.
+
+Intentional normalization: a triggered strike lasts one logical flash frame,
+then one bolt frame, even indoors. The old draw-count clock could consume both
+phases in a multi-view frame or keep an indoor strike pending indefinitely.
+The strike is anchored once at the physical weather observer, rather than
+regenerated for each camera. Alpha, color, sky footprint, origin sprites and
+nearby bolt shape retain the authored policy. Sky-only depth/medium behavior
+is explicit; foreground terrain/rooms continue to occlude it.
+
+Engine and all three CPU suites pass. Controller tests cover replay, pause,
+scene retirement, reordered frames, deterministic topology, disable, missing
+camera and bounded/invalid positions. Inspected GL-clean native captures
+sky-native-{flash,bolt}-20261023 use SetLightningState and the real weather
+trigger with a live rear monitor. sky-after-final-20261023 shows termination.
+sky-normal003-20261023 is pixel-identical to the prior no-producer-probe003
+capture. The first outdoor attempt rejected an incorrect raster-stroke alignment;
+that was fixed before these successful captures. Star-streak history and broad
+weather/lifecycle qualification remain open; I15 is not fully signed off.

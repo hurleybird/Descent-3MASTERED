@@ -35,6 +35,7 @@
 #include "SceneFeedback.h"
 #include "GameVisualEffects.h"
 #include "GameElectricalWeapons.h"
+#include "GameSkyWeather.h"
 #include "../renderer/SceneLighting.h"
 #include "../renderer/SceneAnimation.h"
 #include "game.h"
@@ -4003,7 +4004,20 @@ void GameFrame(void)
 
 		// Weather frame
 		RTP_tSTARTTIME(weatherframe_time, curr_time);
+		if (FindArg("-scene-sky-lightning-probe") && AutomatedCaptureFrameIndex() == 20) {
+			SetLightningState(1,0,0x7fff); // real weather trigger on its next evaluation
+		}
 		DoWeatherForFrame();
+		if (FindArg("-scene-sky-lightning-probe") && AutomatedCaptureFrameIndex() == 20)
+			Weather.lightning_interval_time = 10000;
+		AdvanceWeatherSkyVisuals(d3scene::assets().lifetime(),uint64_t(FrameCount),false);
+		if (FindArg("-scene-emitter-replay-probe")) {
+			const auto before = GetWeatherSkyVisuals(d3scene::assets().lifetime());
+			const unsigned phase = before ? before->phase : 0, count = before ? before->count : 0;
+			AdvanceWeatherSkyVisuals(d3scene::assets().lifetime(),uint64_t(FrameCount),false);
+			const auto after = GetWeatherSkyVisuals(d3scene::assets().lifetime());
+			if (!after || after->phase != phase || after->count != count) Error("Sky weather replay advanced");
+		}
 		RTP_tENDTIME(weatherframe_time, curr_time);
 
 		// Ambient sounds
