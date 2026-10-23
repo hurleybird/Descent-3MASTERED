@@ -30,6 +30,7 @@ struct SceneTextStyle {
     float scale = 1, alpha = 1;
     d3scene::Vec3 color{1,1,1};
     bool additive = false;
+    d3scene::TextureFilter texture_filter = d3scene::TextureFilter::Default;
     int tab_columns = 4;
 };
 struct SceneTextExtent { int width = 0, height = 0; };
@@ -45,6 +46,7 @@ struct SceneQuadStyle {
     d3scene::Vec3 color{1,1,1};
     d3scene::Vec2 uv_min{0,0}, uv_max{1,1};
     bool additive = false;
+    d3scene::TextureFilter texture_filter = d3scene::TextureFilter::Default;
 };
 void PrepareSceneQuad(d3scene::FrameData&,uint64_t collection,int32_t& next_order,
     d3scene::Rect rectangle,const SceneQuadStyle&);

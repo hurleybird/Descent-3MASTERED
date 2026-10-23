@@ -226,6 +226,8 @@ void require(bool condition, const char* message) {
     if (!condition) throw std::invalid_argument(message);
 }
 void validateSurface(const SurfaceBinding& surface) {
+    require(surface.texture_filter == TextureFilter::Default || surface.texture_filter == TextureFilter::Nearest ||
+        surface.texture_filter == TextureFilter::Linear,"Invalid surface texture filtering");
     require(!surface.view_image_slot || (!surface.color_image && surface.bitmap < 0),
         "A surface cannot sample both an asset and a view image");
     require(finite(surface.raster_stripe) && (surface.raster_stripe.x == 0 || surface.raster_stripe.x >= 1) &&

@@ -248,3 +248,21 @@ or two-player/menu/observer acceptance. I21/I22 remain open until those callers,
 the 2D translator and their ordering/lifecycle are qualified together.
 The ordinary inspection path without module probes remains byte-identical to
 the prior normal capture: integration-module-normal-20261022 (SHA0C5AFFFD…A79FBB44).
+
+## Per-binding image sampling for source canvas compatibility
+
+The shipped DMFC taunt/icon caller changes filtering around its bitmap draw.
+Filtering is now Default/Nearest/Linear on an immutable surface binding, not a
+GPU-global mutation from that callback. Text/quad descriptions carry the choice;
+text layout cache hits reuse geometry while replacing sampling policy. Binding
+caches and draw batching distinguish policies. Asset and view-image consumers
+share the existing bounded sampler cache; view images no longer rewrite texture
+filter/wrap parameters per draw. Default sampling preserves the prior policy.
+
+Engine and three suites pass. The live canvas fixture samples one2x2 image twice
+consecutively in the same pass: nearest yields adjacent edge values255/0, linear
+yields129/126. Both were visually inspected with real module previews present;
+no GL errors. Without the fixture, the normal capture remains byte-identical
+(SHA0C5AFFFD…A79FBB44). Evidence: integration-canvas-sampler{,-normal}-20261022.
+This provides the required renderer capability; the source API setters and
+actual module callbacks still need to be connected to the complete translator.

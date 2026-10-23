@@ -88,9 +88,11 @@ int runCanvasTests() {
         const int glyph_calls = GlyphCalls;
         data.meshes.clear(); order = 17;
         auto changed_style = style; changed_style.alpha = .4f; changed_style.additive = true;
+        changed_style.texture_filter = d3scene::TextureFilter::Nearest;
         PrepareSceneText(data,9,order,0,0,"AB",changed_style);
         check(data.meshes[0].asset == asset && GlyphCalls == glyph_calls && data.meshes[0].collection == 9 &&
             data.meshes[0].surface.alpha == .4f && data.meshes[0].surface.blend == d3scene::BlendMode::Additive &&
+            data.meshes[0].surface.texture_filter == d3scene::TextureFilter::Nearest &&
             data.meshes[0].surface.composition_order == 17 && order == 18,
             "Text cache rebuilt geometry or retained instance composition state");
         ++FontRevision; FontWidth = 7;
@@ -134,11 +136,21 @@ int runCanvasTests() {
     check(rejected,"Zero-width tab policy accepted");
     data.meshes.clear(); order = 0;
     SceneQuadStyle quad; quad.alpha = .5f; quad.uv_min = {1,0}; quad.uv_max = {0,1};
+    quad.texture_filter = d3scene::TextureFilter::Linear;
     PrepareSceneQuad(data,7,order,{10,20,30,40},quad);
     PrepareSceneQuad(data,7,order,{0,0,0,10},quad);
     check(data.meshes.size() == 1 && data.meshes[0].vertices[2].x == 40 &&
         data.meshes[0].texture_uvs[0].x == 1 && data.meshes[0].texture_uvs[1].x == 0,
         "Canvas quad lost reflected UVs or emitted empty geometry");
+    check(data.meshes[0].surface.texture_filter == d3scene::TextureFilter::Linear,
+        "Canvas quad lost its explicit sampling policy");
+    {
+        auto invalid = data;
+        invalid.meshes[0].surface.texture_filter = static_cast<d3scene::TextureFilter>(99);
+        bool rejected_filter = false;
+        try { d3scene::Presentation::freeze(invalid); } catch (const std::invalid_argument&) { rejected_filter = true; }
+        check(rejected_filter,"Unknown image sampling policy accepted");
+    }
     const auto canvas = MakeSceneCanvasView(7,{20,30,800,600},d3scene::ViewTarget::Display,true);
     check(canvas.viewport.x == 20 && canvas.projection_anchor.x == 0 && canvas.collection == 7 &&
         canvas.ordering == d3scene::ViewOrdering::Compositing && canvas.camera.up.y == -1,

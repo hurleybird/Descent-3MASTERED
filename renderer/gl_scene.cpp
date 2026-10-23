@@ -693,7 +693,7 @@ void GL4Renderer::DestroySceneResources() {
     for (auto& program : scene_programs) program.shader.Destroy();
 }
 
-void GL4Renderer::BindSceneImage(const d3scene::ImageAsset& image,int unit,bool wrap,bool baked) {
+void GL4Renderer::BindSceneImage(const d3scene::ImageAsset& image,int unit,bool wrap,bool baked,d3scene::TextureFilter sampling) {
     auto& gpu = scene_images[image.id().slot];
     glActiveTexture(GL_TEXTURE0+unit);
     if (gpu.id != image.id()) {
@@ -729,8 +729,12 @@ void GL4Renderer::BindSceneImage(const d3scene::ImageAsset& image,int unit,bool 
         glPixelStorei(GL_UNPACK_ALIGNMENT,2);
         gpu.id = image.id(); gpu.width = width; gpu.height = height; gpu.levels = levels;
     } else glBindTexture(GL_TEXTURE_2D,gpu.texture);
-    const bool filter = baked || OpenGL_preferred_state.filtering;
+    const bool filter = sampling == d3scene::TextureFilter::Default ? baked || OpenGL_preferred_state.filtering :
+        sampling == d3scene::TextureFilter::Linear;
     const bool mip = !baked && OpenGL_preferred_state.mipping && (image.generatedLevels() > 1 || image.mipCount() > 1);
+    BindSceneSampler(unit,wrap,filter,mip);
+}
+void GL4Renderer::BindSceneSampler(int unit,bool wrap,bool filter,bool mip) {
     const int sampling = int(wrap)|(int(filter)<<1)|(int(mip)<<2);
     const float anisotropy = mip ? std::min(OpenGL_max_anisotropy,std::max(1.f,static_cast<float>(OpenGL_preferred_state.anisotropy))) : 1;
     // Sampling belongs to a binding, not to image storage: one image may be
@@ -2229,22 +2233,22 @@ void main() {
       RasterKey previous_raster;
       bool raster_bound = false;
       GLuint previous_vao = 0;
-      struct ImageBinding { uint32_t image = 0; bool wrap = false; };
+      struct ImageBinding { uint32_t image = 0; bool wrap = false; d3scene::TextureFilter filter = d3scene::TextureFilter::Default; };
       std::array<ImageBinding,9> image_bindings{};
-      const auto bind_image = [&](uint32_t image,int unit,bool wrap,bool baked) {
+      const auto bind_image = [&](uint32_t image,int unit,bool wrap,bool baked,d3scene::TextureFilter filter = d3scene::TextureFilter::Default) {
           if (!image) return;
           auto& previous = image_bindings[unit];
           // Each unit has a fixed baked/non-baked role throughout this pass.
-          if (previous.image == image && previous.wrap == wrap) return;
-          BindSceneImage(presentation.image(image),unit,wrap,baked);
-          previous = {image,wrap};
+          if (previous.image == image && previous.wrap == wrap && previous.filter == filter) return;
+          BindSceneImage(presentation.image(image),unit,wrap,baked,filter);
+          previous = {image,wrap,filter};
       };
       const auto compatible = [&](uint32_t first,uint32_t next) {
           const auto& a = packets[first]; const auto& b = packets[next];
           const auto& x = *a.binding; const auto& y = *b.binding;
           const auto& ia = visibility.surfaces[first]; const auto& ib = visibility.surfaces[next];
           const auto images = [](const d3scene::SurfaceBinding& s) {
-              return std::make_tuple(s.color_image,s.baked_image,s.specular_image,s.texture_wrap,s.lightmap_wrap);
+              return std::make_tuple(s.color_image,s.baked_image,s.specular_image,s.texture_wrap,s.lightmap_wrap,s.texture_filter);
           };
           const auto raster = [](const d3scene::MaterialPolicy& p) { return std::make_tuple(p.layer,p.blend,p.depth); };
           return !a.index_buffer && !b.index_buffer && a.vao == b.vao && images(x) == images(y) && raster(a.policy) == raster(b.policy) &&
@@ -2272,7 +2276,7 @@ void main() {
         if ((surface.bitmap >= 0 && !surface.color_image) || (surface.lightmap_bitmap >= 0 && !surface.baked_image) ||
             (surface.specular_bitmap >= 0 && !surface.specular_image))
             Error("Scene surface reached execution without prepared image assets");
-        bind_image(surface.color_image,0,surface.texture_wrap,false);
+        bind_image(surface.color_image,0,surface.texture_wrap,false,surface.texture_filter);
         const auto bind_view_image = [&](uint64_t slot,int unit) -> const SceneViewImageGpu& {
             const auto& input = d3scene::viewImageInput(view,slot);
             const auto sequence = input.producer ? input.producer->data().sequence : presentation.data().sequence;
@@ -2286,12 +2290,8 @@ void main() {
             const auto texture = found->second.buffer.ColorTextureForRead();
             glBindFramebuffer(GL_DRAW_FRAMEBUFFER,draw); glBindFramebuffer(GL_READ_FRAMEBUFFER,read);
             image_bindings = {};
-            glBindSampler(unit,0);
+            BindSceneSampler(unit,false,surface.texture_filter != d3scene::TextureFilter::Nearest,false);
             glActiveTexture(GL_TEXTURE0+unit); glBindTexture(GL_TEXTURE_2D,texture);
-            glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
-            glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
-            glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);
-            glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
             return found->second;
         };
         if (surface.view_image_slot) bind_view_image(surface.view_image_slot,0);

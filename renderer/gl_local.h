@@ -246,7 +246,9 @@ class GL4Renderer : public IRenderer
 		uint64_t sequence = 0;
 	};
 	std::unordered_map<uint64_t,SceneViewImageGpu> scene_view_images;
-	void BindSceneImage(const d3scene::ImageAsset&,int unit,bool wrap,bool baked);
+	void BindSceneImage(const d3scene::ImageAsset&,int unit,bool wrap,bool baked,
+		d3scene::TextureFilter filter = d3scene::TextureFilter::Default);
+	void BindSceneSampler(int unit,bool wrap,bool filter,bool mip);
 	void DestroySceneResources();
 	void EnsureSceneLifetime(const d3scene::Presentation&);
 	enum class SceneOutputRole { MainWorld, SceneLayer, Display, Image };

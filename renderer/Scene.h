@@ -265,6 +265,7 @@ enum class RenderLayer : uint8_t { Background, World };
 enum class BlendMode : uint8_t { Solid, Alpha, Additive, Multiply };
 enum class DepthMode : uint8_t { Automatic, ReadWrite, ReadOnly, Disabled };
 enum class TextureAlpha : uint8_t { Ignore, Cutout, Continuous };
+enum class TextureFilter : uint8_t { Default, Nearest, Linear };
 enum class OcclusionClass : uint8_t { Default, Terrain, Model, MineRock, Mine };
 struct MaterialPolicy {
     uint64_t planar_slot = 0; // compiled layered reflection; alpha belongs to its surface film
@@ -311,6 +312,7 @@ struct SurfaceBinding {
     // covered fraction. Zero period disables it; no application/widget identity.
     Vec3 raster_stripe;
     bool texture_wrap = true;
+    TextureFilter texture_filter = TextureFilter::Default;
     float soft_depth_range = 0; // zero disables intersection fading; positive requires opaque depth
     // Authored translucent effect depth in eye units, not a geometry/fog shift.
     // Excluded from opaque depth and temporal surface products.

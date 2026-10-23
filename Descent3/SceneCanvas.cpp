@@ -65,6 +65,7 @@ void PrepareSceneQuad(d3scene::FrameData& frame,uint64_t collection,int32_t& nex
     surface.texture_alpha = true; surface.texture_wrap = false;
     surface.unlit = true; surface.two_sided = true; surface.depth = d3scene::DepthMode::Disabled;
     surface.medium_transport = false;
+    surface.texture_filter = style.texture_filter;
     surface.blend = style.additive ? d3scene::BlendMode::Additive : d3scene::BlendMode::Alpha;
     surface.alpha = style.alpha; surface.color_modulation = style.color;
     frame.meshes.push_back(std::move(quad));
@@ -164,6 +165,7 @@ void PrepareSceneText(d3scene::FrameData& frame,uint64_t collection,int32_t& nex
             auto mesh = source;
             mesh.collection = collection; mesh.surface.composition_order = next_order++;
             mesh.surface.alpha = style.alpha;
+            mesh.surface.texture_filter = style.texture_filter;
             mesh.surface.blend = style.additive ? d3scene::BlendMode::Additive : d3scene::BlendMode::Alpha;
             frame.meshes.push_back(std::move(mesh));
         }
@@ -217,6 +219,7 @@ void PrepareSceneText(d3scene::FrameData& frame,uint64_t collection,int32_t& nex
                     surface.bitmap = glyph.bitmap; surface.texture_alpha = true; surface.texture_wrap = false;
                     surface.unlit = true; surface.two_sided = true; surface.depth = d3scene::DepthMode::Disabled;
                     surface.medium_transport = false;
+                    surface.texture_filter = style.texture_filter;
                     surface.blend = style.additive ? d3scene::BlendMode::Additive : d3scene::BlendMode::Alpha;
                     surface.alpha = style.alpha; surface.color_modulation = color;
                 }

@@ -844,6 +844,28 @@ d3scene::PresentationRef PrepareGameOverlayPresentation(const d3scene::Presentat
         data.foregrounds.push_back(std::move(foreground));
     }
     PrepareGameSceneResources(data);
+    if (FindArg("-scene-canvas-sampler-probe")) {
+        constexpr uint64_t collection = 0x53414d504c455201ull;
+        constexpr uint32_t binding = 0x7ffffffe;
+        static const std::array<uint8_t,16> pixels{{255,255,255,255,0,0,0,255,0,0,0,255,255,255,255,255}};
+        d3scene::ImageSource source; source.format = d3scene::ImageFormat::RGBA8; source.content_revision = 1;
+        source.mips.push_back({2,2,pixels.data(),pixels.size()});
+        const auto asset = d3scene::assets().publishImage(MAX_BITMAPS+MAX_LIGHTMAPS,source);
+        data.images.push_back({binding,asset});
+        int32_t order = 0;
+        for (int i = 0; i < 2; ++i) {
+            SceneQuadStyle style;
+            style.texture_filter = i == 0 ? d3scene::TextureFilter::Nearest : d3scene::TextureFilter::Linear;
+            PrepareSceneQuad(data,collection,order,{layout.display.width-288+i*144,72,128,128},style);
+            auto& surface = data.meshes.back().surface;
+            surface.color_image = binding; surface.color_format = d3scene::ImageFormat::RGBA8;
+            surface.texture_alpha = false;
+        }
+        d3scene::PreparedForeground foreground; foreground.identity = collection; foreground.order = 50;
+        foreground.phase = d3scene::ForegroundPhase::FinalOverlay;
+        foreground.layer.display_views.push_back(MakeSceneCanvasView(collection,layout.display,d3scene::ViewTarget::Display,true));
+        data.foregrounds.push_back(std::move(foreground));
+    }
     return d3scene::Presentation::publish(std::move(data));
 }
 
