@@ -52,6 +52,16 @@ target_sources(renderer_scene_tests PRIVATE ../../Descent3/GameSkyWeather.cpp)
 target_sources(renderer_scene_tests PRIVATE ../../Descent3/gameevent.cpp)
 target_compile_features(renderer_scene_tests PRIVATE cxx_std_17)
 target_include_directories(renderer_scene_tests PRIVATE ../../lib ../../Descent3)
+# Standalone clean checkouts have no game-build-generated version header.
+# Generate their own copy in the build tree; never depend on an ignored source
+# header or stamp a hand-written fake game version into the contract fixture.
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/generated")
+add_custom_target(renderer_scene_test_revision
+    COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/../UpdateRevision.cmake"
+        "${CMAKE_CURRENT_BINARY_DIR}/generated/gitinfo.h"
+    BYPRODUCTS "${CMAKE_CURRENT_BINARY_DIR}/generated/gitinfo.h")
+add_dependencies(renderer_scene_tests renderer_scene_test_revision)
+target_include_directories(renderer_scene_tests BEFORE PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 if(MSVC)
     target_compile_options(renderer_scene_tests PRIVATE /W4 /EHsc)
     target_compile_definitions(renderer_scene_tests PRIVATE WIN32 IS_WINDOWS)
