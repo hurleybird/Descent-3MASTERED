@@ -149,12 +149,14 @@ Invoke-VsCommand x64 (
 )
 Invoke-VsCommand x64 "cmake --build $quotedX64 --config Release --parallel"
 Invoke-VsCommand x64 "cd /d $quotedX64 && ctest -C Release --output-on-failure"
+$cmakeVersion = @(cmake --version)
+if ($LASTEXITCODE -ne 0) { throw "Cannot identify CMake" }
 [ordered]@{
     source = (git -C $root rev-parse HEAD)
     sourceDirty = [bool](git -C $root status --porcelain --untracked-files=no)
     configuration = "Release"
     executableSha256 = (Get-FileHash -LiteralPath (Join-Path $x64Build "Descent 3MASTERED.exe")).Hash
-    cmake = (cmake --version | Select-Object -First 1)
+    cmake = $cmakeVersion[0]
 } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $x64Build "renderer-contract-identity.json")
 Invoke-VsCommand x64 "cmake --install $quotedX64 --config Release --prefix $quotedStage"
 

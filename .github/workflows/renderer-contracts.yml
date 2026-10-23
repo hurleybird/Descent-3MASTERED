@@ -30,11 +30,15 @@ jobs:
         shell: powershell
         run: |
           New-Item -ItemType Directory -Force out/contracts | Out-Null
+          $source = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot identify contract source' }
+          $cmakeVersion = @(cmake --version)
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot identify CMake' }
           @{
-            source = (git rev-parse HEAD)
+            source = $source
             configuration = '${{ matrix.configuration }}'
             target = 'renderer_scene_tests;renderer_args_tests;renderer_args_gnu_tests'
-            cmake = (cmake --version | Select-Object -First 1)
+            cmake = $cmakeVersion[0]
             runner = '${{ runner.os }} / windows-2022 / x64'
           } | ConvertTo-Json | Set-Content out/contracts/identity.json
       - uses: actions/upload-artifact@v4
@@ -64,12 +68,16 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force out/integration | Out-Null
           $binary = Get-ChildItem out/integration -Recurse -Filter 'Descent 3MASTERED.exe' | Select-Object -First 1
+          $source = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot identify integration source' }
+          $cmakeVersion = @(cmake --version)
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot identify CMake' }
           @{
-            source = (git rev-parse HEAD)
+            source = $source
             configuration = 'Release'
             target = 'renderer_integration_check'
             executableSha256 = $(if ($binary) { (Get-FileHash -LiteralPath $binary.FullName).Hash } else { $null })
-            cmake = (cmake --version | Select-Object -First 1)
+            cmake = $cmakeVersion[0]
           } | ConvertTo-Json | Set-Content out/integration/identity.json
       - uses: actions/upload-artifact@v4
         if: always()
