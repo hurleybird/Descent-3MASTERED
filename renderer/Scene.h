@@ -365,12 +365,18 @@ struct TerrainState {
     bool light_influences_prepared = false;
     const SurfaceBinding& surface(size_t patch,size_t batch) const;
 };
-enum class MeshAlignment : uint8_t { World, Camera, FacingEye, CameraUpright, Axis };
+enum class MeshAlignment : uint8_t { World, Camera, FacingEye, CameraUpright, Axis, Velocity };
+struct BillboardMotion {
+    Vec3 velocity;
+    float bank = 0; // view-independent angular perturbation, radians
+    float speed_stretch = 0,maximum_stretch = 0,proximity_range = 0;
+};
 // Author permits display-resolution sampling for low-frequency volume sprites.
 // The view scheduler must still establish safe depth and compositing semantics.
 enum class RasterDomain : uint8_t { Surface, SoftVolume };
 struct PreparedMesh {
     MeshAssetRef asset;
+    BillboardMotion billboard_motion;
     RasterDomain raster_domain = RasterDomain::Surface;
     // Pixel-width extrusion around the segment world.position +/- world.up.
     // Geometry supplies signed transverse/longitudinal raster offsets. Facing
@@ -814,6 +820,7 @@ struct View {
     uint64_t collection = 0; // selects content, independently of camera/history/target
     uint64_t history_key = 0;
     Transform camera;
+    Vec3 camera_velocity; // physical motion input, not inferred from temporal images
     bool has_clip_plane = false;
     Plane clip_plane; // world space; retain normal.point + constant >= 0
     FogPathOrigin fog_path_origin = FogPathOrigin::Camera;

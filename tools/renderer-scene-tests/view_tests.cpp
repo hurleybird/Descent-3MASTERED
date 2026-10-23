@@ -560,8 +560,11 @@ int runSceneViewTests() {
         appendRoom(assets,data,triangle(0,7,false));
         const auto frame = Presentation::freeze(data);
         auto parent = view(); parent.room = 0; parent.portal_visibility = false;
+        parent.camera_velocity = {3,4,5};
         parent.excluded_objects = {42};
         auto reflected = reflectedView(*frame,parent,{{0,0,2},-10},2,0);
+        check(reflected.camera_velocity.x == 3 && reflected.camera_velocity.y == 4 && reflected.camera_velocity.z == -5 &&
+            parent.camera_velocity.z == 5,"Mirror lost reflected physical camera motion or mutated its source");
         check(near(reflected.camera.position.z,10) && near(reflected.camera.forward.z,-1),"Mirror camera reflection failed");
         check(reversesWinding(reflected.camera) && !reversesWinding(parent.camera),"Reflection lost orientation parity");
         check(reflected.fog_path_origin == FogPathOrigin::ClipPlane && parent.fog_path_origin == FogPathOrigin::Camera,
@@ -1621,5 +1624,32 @@ int runSceneViewTests() {
     check(d3scene::nearestDepthSample({.8f,.2f,.2f,.8f}) == 1,"Depth tie did not select a deterministic surface record");
     check(d3scene::nearestDepthSample({1,1,1,1}) == 0,"Background resolve has no stable sample");
     check(d3scene::nearestDepthSample({.7f,.6f,.5f,.4f,.3f,.2f,.1f,0}) == 7,"Resolve silently capped the sample count");
+    {
+        d3scene::PreparedMesh particle;
+        particle.alignment = d3scene::MeshAlignment::Velocity;
+        particle.world.position = {0,0,10}; particle.world.up = {0,2,0};
+        particle.billboard_motion.velocity = {0,-10,0}; particle.billboard_motion.speed_stretch = .1f;
+        particle.billboard_motion.maximum_stretch = 1; particle.billboard_motion.proximity_range = 20;
+        auto request = view();
+        const auto stretched = d3scene::resolveMeshTransform(particle,d3scene::prepareCamera(request));
+        check(std::abs(stretched.up.y-2.5f) < .00001f && std::abs(stretched.right.x-1) < .00001f,
+            "Motion billboard lost its per-view speed/proximity stretch");
+        request.camera_velocity = {0,-10,0};
+        const auto matched = d3scene::resolveMeshTransform(particle,d3scene::prepareCamera(request));
+        check(std::abs(matched.up.y-2) < .00001f && std::abs(matched.right.x-1) < .00001f,
+            "Motion billboard inherited a different view's camera velocity");
+        check(particle.world.up.y == 2 && request.camera_velocity.y == -10,
+            "Motion billboard resolution mutated its publication/request");
+        request.camera_velocity.x = std::numeric_limits<float>::infinity();
+        bool rejected = false;
+        try { d3scene::prepareCamera(request); } catch (const std::invalid_argument&) { rejected = true; }
+        check(rejected,"Nonfinite physical camera motion entered view preparation");
+        d3scene::SceneAssets motion_assets;
+        particle.asset = motion_assets.quadMesh(); particle.billboard_motion.speed_stretch = -1;
+        d3scene::FrameData invalid; invalid.sequence = 1; invalid.scene_lifetime = motion_assets.lifetime(); invalid.meshes.push_back(particle);
+        rejected = false;
+        try { d3scene::Presentation::freeze(invalid); } catch (const std::invalid_argument&) { rejected = true; }
+        check(rejected,"Negative motion-billboard stretch entered an immutable publication");
+    }
     return Checks;
 }

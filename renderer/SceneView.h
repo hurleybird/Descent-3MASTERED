@@ -32,6 +32,7 @@ struct Camera {
     Transform transform;
     Projection projection;
     std::array<Plane, 6> planes; // left, right, bottom, top, near, optional world clip
+    Vec3 velocity;
 };
 Camera prepareCamera(const View& view);
 // Column-major matrices for downstream image-space consumers. They describe

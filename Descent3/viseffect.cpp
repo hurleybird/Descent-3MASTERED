@@ -218,6 +218,10 @@ static bool VisEffectCreateEnhancedSnowTextures()
 	return true;
 }
 
+int PrepareEnhancedSnowAtlas() {
+	return VisEffectCreateEnhancedSnowTextures() ? Enhanced_snow_atlas_handle : BAD_BITMAP_HANDLE;
+}
+
 struct EnhancedSnowRenderParams
 {
 	angle rotation;

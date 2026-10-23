@@ -1007,7 +1007,12 @@ PresentationRef Presentation::complete(FrameData data) {
                 (mesh.size_fade_range.x >= 0 && mesh.size_fade_range.y > mesh.size_fade_range.x)),"Invalid mesh size fade range");
         require(mesh.alignment == MeshAlignment::World || mesh.alignment == MeshAlignment::Camera ||
             mesh.alignment == MeshAlignment::FacingEye || mesh.alignment == MeshAlignment::CameraUpright ||
-            mesh.alignment == MeshAlignment::Axis,"Invalid mesh alignment");
+            mesh.alignment == MeshAlignment::Axis || mesh.alignment == MeshAlignment::Velocity,"Invalid mesh alignment");
+        const auto& motion = mesh.billboard_motion;
+        require(finite(motion.velocity) && std::isfinite(motion.bank) &&
+            std::isfinite(motion.speed_stretch) && motion.speed_stretch >= 0 &&
+            std::isfinite(motion.maximum_stretch) && motion.maximum_stretch >= 0 &&
+            std::isfinite(motion.proximity_range) && motion.proximity_range >= 0,"Invalid motion billboard input");
         validateSurface(mesh.surface); validateIndices(mesh.surface);
     }
     require(!data.terrain.occlusion || data.terrain.occlusion->id().lifetime == data.scene_lifetime,
@@ -1402,7 +1407,7 @@ void validateView(const View& view) {
     std::unordered_set<uint64_t> image_slots;
     for (const auto& input : view.image_inputs)
         require(input.slot && input.image && image_slots.insert(input.slot).second,"Invalid or duplicate view image input");
-    require(finite(view.camera) && std::isfinite(view.zoom) && view.zoom > 0, "Invalid view camera");
+    require(finite(view.camera) && finite(view.camera_velocity) && std::isfinite(view.zoom) && view.zoom > 0, "Invalid view camera");
     if (view.has_clip_plane) {
         const auto n = view.clip_plane.normal;
         const double length2 = double(n.x)*n.x+double(n.y)*n.y+double(n.z)*n.z;

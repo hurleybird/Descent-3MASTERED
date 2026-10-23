@@ -213,6 +213,7 @@ Camera prepareCamera(const View& view) {
     validateView(view);
     Camera camera;
     camera.transform = view.camera;
+    camera.velocity = view.camera_velocity;
     // Keep operation order identical to the first verified GPU projection.
     const float aspect = static_cast<float>(view.projection_anchor.width)/view.projection_anchor.height;
     const float zoom = view.zoom*.75f;
@@ -310,6 +311,7 @@ View reflectedView(const Presentation& frame,View parent,Plane mirror,uint64_t h
     result.camera.right = reflect_direction(result.camera.right);
     result.camera.up = reflect_direction(result.camera.up);
     result.camera.forward = reflect_direction(result.camera.forward);
+    result.camera_velocity = reflect_direction(result.camera_velocity);
     result.kind = ViewKind::Mirror; result.history_key = history_key;
     result.feedback = NoFeedback; result.room = room; result.exterior_origin = false;
     result.has_clip_plane = true; result.clip_plane = mirror;
@@ -368,6 +370,22 @@ Transform resolveMeshTransform(const PreparedMesh& instance,const Camera& camera
         // An end-on or zero-length rod has zero projected area. Collapse it;
         // never normalize zero or choose a camera-dependent random meridian.
         world.right = length2 > 1.e-16 ? combine(side,static_cast<float>(radius/std::sqrt(length2)),{},0) : Vec3{};
+    } else if (instance.alignment == MeshAlignment::Velocity) {
+        const auto& motion = instance.billboard_motion;
+        const auto relative = subtract(motion.velocity,camera.velocity);
+        const double speed = std::sqrt(dot(relative,relative));
+        const double x = dot(relative,camera.transform.right),y = dot(relative,camera.transform.up);
+        const double angle = (x != 0 || y != 0 ? std::atan2(-x,-y) : 0)+motion.bank;
+        const float c = float(std::cos(angle)),s = float(std::sin(angle));
+        const float width = float(std::sqrt(dot(world.right,world.right)));
+        float height = float(std::sqrt(dot(world.up,world.up)));
+        const auto delta = subtract(world.position,camera.transform.position);
+        const float proximity = motion.proximity_range > 0 ?
+            std::max(0.f,1-float(std::sqrt(dot(delta,delta)))/motion.proximity_range) : 1;
+        height += std::min(motion.maximum_stretch,float(speed)*motion.speed_stretch*proximity);
+        world.right = combine(camera.transform.right,c*width,camera.transform.up,-s*width);
+        world.up = combine(camera.transform.right,s*height,camera.transform.up,c*height);
+        world.forward = camera.transform.forward;
     } else if (instance.alignment == MeshAlignment::Camera) {
         world.right = transformDirection(camera.transform,world.right);
         world.up = transformDirection(camera.transform,world.up);

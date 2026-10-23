@@ -519,8 +519,14 @@ void extractionTests() {
     check(b->data().temporal_predecessor == a->data().sequence,"World exposure lost its source predecessor");
     check(b->data().objects[0].has_previous && b->data().objects[0].previous.position.x == 0 &&
         b->data().objects[0].current.position.x == 5, "presentation history not advanced correctly");
+    const auto movement = Objects[0].movement_type;
+    const auto velocity = Objects[0].mtype.phys_info.velocity;
+    Objects[0].movement_type = MT_PHYSICS; Objects[0].mtype.phys_info.velocity = {3,4,5};
     const auto view = MakeGameSceneView(d3scene::ViewKind::Auxiliary, 2, &Objects[0], Objects[0].pos,
         0, Objects[0].orient, 1, true, {0, 0, 320, 180}, {0, 0, 320, 180});
+    Objects[0].movement_type = movement; Objects[0].mtype.phys_info.velocity = velocity;
+    check(view.camera_velocity.x == 3 && view.camera_velocity.y == 4 && view.camera_velocity.z == 5,
+        "Game view failed to own physical velocity or reversed it with rear-view orientation");
     check(view.camera.forward.z == -1 && Objects[0].orient.fvec.z == 1, "rear view changed simulation pose");
     check(!view.dynamic_lighting && view.exclude_camera_rig && view.camera_owner == 2048, "auxiliary view lost explicit policy");
     check(b->data().sequence == a->data().sequence + 1, "view request advanced presentation history");

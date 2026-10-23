@@ -32,6 +32,8 @@ uint64_t VisEffectGeneration(int slot);
 int VisEffectFree (int visnum);
 
 int VisEffectInitType (vis_effect *vis);
+// Source resource preparation only; no view globals, draw or simulation advance.
+int PrepareEnhancedSnowAtlas();
 
 //initialize a new viseffect.  adds to the list for the given room
 //returns the object number

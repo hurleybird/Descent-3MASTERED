@@ -418,3 +418,31 @@ evidence for natural boss firing. The ordinary003 capture matches the prior
 weapon checkpoint SHA A0E0C7E7…55641834. Engine builds; source CPU suites remain
 passing from that checkpoint. I09 still needs broad natural/multiview/content
 qualification; no release bit was cleared.
+
+## Enhanced snow and physical camera inputs (I15 partial)
+
+The game-owned enhanced-snow pool now publishes its real particles, including
+four atlas variants, flutter/tumble, lifetime/impact fade and settled surface
+orientation. The legacy flagged VisEffect representation uses the same source
+compiler. Resource preparation exposes only the atlas handle; no g3/viewer state
+or GPU draw is called. Every flake uses shared quad topology and per-binding UV
+scale/offset, not per-particle vertex/UV arrays. Simulation emission/collision
+remains in weather.cpp, once per game frame.
+
+View now explicitly owns physical camera velocity. MakeGameSceneView captures
+it; rear views keep the physical velocity and mirror requests reflect it.
+Velocity-aligned billboards carry motion/bank/stretch parameters; the pure view
+compiler resolves their shape from each camera, including conservative geometry.
+No shader varyings or renderer-global viewer substitutions were added. Zero
+relative motion has a stable bank instead of deriving orientation from signed
+zero atan2 inputs. Tests cover source ownership, rear policy, mirror reflection,
+per-view relative stretch, nonmutation and invalid motion inputs. Engine and all
+three CPU suites pass.
+
+Actual outdoor DoWeatherForFrame/DoSnowEffect emission with -force-snow produces
+512published flakes at frame120. Main and real rear-monitor captures are
+GL-clean and visually inspected: integration-enhanced-snow-{outdoor,rear}-20261023.
+The ordinary003 capture remains byte-identical to the prior weapon/mass checkpoint
+(SHA A0E0C7E7…55641834), integration-enhanced-snow-normal-20261023. These are not
+formal performance or settled-collision/transition signoff. Sky lightning/star
+history and the broader I11 close-screen routing still remain open.

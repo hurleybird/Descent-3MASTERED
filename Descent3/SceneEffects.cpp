@@ -17,6 +17,7 @@
 #include "weapon.h"
 #include "SceneWeaponVisuals.h"
 #include "matcen.h"
+#include "weather.h"
 #include "polymodel.h"
 #include <array>
 #include <cmath>
@@ -512,6 +513,42 @@ bool prepareLegacySnow(d3scene::FrameData& frame,const vis_effect& effect,const 
     frame.meshes.push_back(std::move(snow));
     return true;
 }
+bool prepareEnhancedSnow(d3scene::FrameData& frame,const enhanced_snow_particle& particle,
+    int bitmap,const d3scene::MeshAssetRef& quad) {
+    if (!(particle.lifetime > 0) || !(particle.size > 0) || !(particle.lifeleft > 0) || bitmap <= BAD_BITMAP_HANDLE) return false;
+    const float age = std::max(0.f,float(frame.simulation_time)-particle.creation_time);
+    const float life = std::min(.99999f,age/particle.lifetime);
+    const bool settled = (particle.flags & 2) != 0;
+    const float phase = particle.phase+age*particle.flutter_frequency;
+    d3scene::PreparedMesh snow; snow.asset = quad; snow.room = particle.roomnum;
+    float alpha;
+    if (settled) {
+        vector normal = particle.velocity;
+        if (!(vm_NormalizeVector(&normal) > .000001f)) return false;
+        matrix plane; vm_VectorToMatrix(&plane,&normal,nullptr,nullptr);
+        snow.world = basis(plane);
+        snow.world.right = value(plane.rvec*(particle.size*.82f)); snow.world.up = value(plane.uvec*(particle.size*.48f));
+        alpha = std::min(1.f,particle.lifeleft/.32f)*.26f;
+    } else {
+        snow.alignment = d3scene::MeshAlignment::Velocity;
+        snow.world.right.x = particle.size*(.42f+(.48f+.52f*std::abs(std::cos(phase*.73f)))*.38f);
+        snow.world.up.y = particle.size*1.10f;
+        snow.billboard_motion.velocity = value(particle.velocity); snow.billboard_motion.bank = std::sin(phase)*.42f;
+        snow.billboard_motion.speed_stretch = particle.size*.015f;
+        snow.billboard_motion.maximum_stretch = particle.size*1.45f; snow.billboard_motion.proximity_range = 85;
+        alpha = std::min(1.f,age/.24f)*(life > .82f ? (1-life)/.18f : 1)*std::min(.75f,.45f+particle.size*.28f);
+        if (particle.flags & 4) alpha *= std::min(1.f,particle.lifeleft/.32f);
+    }
+    snow.world.position = value(particle.pos);
+    const auto color = GR_16_TO_COLOR(particle.lighting_color);
+    auto& surface = snow.surface;
+    surface.color_modulation = {GR_COLOR_RED(color)/255.f,GR_COLOR_GREEN(color)/255.f,GR_COLOR_BLUE(color)/255.f};
+    surface.bitmap = bitmap; surface.unlit = surface.two_sided = surface.texture_alpha = true;
+    surface.texture_scale.x = .25f; surface.u_offset = (particle.variant&3)*.25f; surface.texture_wrap = false;
+    surface.alpha = alphaByte(alpha); surface.blend = d3scene::BlendMode::Additive; surface.depth = d3scene::DepthMode::ReadOnly;
+    frame.meshes.push_back(std::move(snow));
+    return true;
+}
 void prepareWeaponContributions(d3scene::FrameData& frame,const d3scene::ObjectState& owner,
     const object& source,const d3scene::MeshAssetRef& quad) {
     const auto& weapon = Weapons[source.id];
@@ -725,13 +762,27 @@ void PrepareGameObjectEffects(d3scene::FrameData& frame) {
 }
 void PrepareGameEffects(d3scene::FrameData& frame,const GameMainView* main_view) {
     prepareMatcens(frame);
-    if (!VisEffects) return;
     const auto quad = d3scene::assets().quadMesh();
     unsigned prepared = 0, pending = 0, windshield = 0;
-    unsigned mass_drivers = 0,boss_mass_drivers = 0,legacy_snow = 0;
-    for (int slot = 0; slot <= Highest_vis_effect_index; ++slot) {
+    unsigned mass_drivers = 0,boss_mass_drivers = 0,legacy_snow = 0,enhanced_snow = 0;
+    int snow_count = 0;
+    const auto* snow_particles = Render_enhanced_weather ? GetEnhancedSnowParticles(&snow_count) : nullptr;
+    const int snow_atlas = snow_count > 0 ? PrepareEnhancedSnowAtlas() : BAD_BITMAP_HANDLE;
+    for (int i = 0; i < snow_count; ++i) if (prepareEnhancedSnow(frame,snow_particles[i],snow_atlas,quad)) { ++prepared; ++enhanced_snow; }
+    for (int slot = 0; VisEffects && slot <= Highest_vis_effect_index; ++slot) {
         const auto& effect = VisEffects[slot];
         if (effect.type == VIS_NONE || (effect.flags & VF_DEAD)) continue;
+        if (effect.type == VIS_FIREBALL && effect.id == SNOWFLAKE_INDEX && (effect.flags & VF_ENHANCED_SNOW) &&
+            !(effect.flags & (VF_WINDSHIELD_EFFECT | VF_CLOSE_SCREEN_EFFECT))) {
+            enhanced_snow_particle particle{};
+            particle.pos = effect.pos; particle.velocity = effect.velocity; particle.size = effect.size;
+            particle.creation_time = effect.creation_time; particle.lifeleft = effect.lifeleft; particle.lifetime = effect.lifetime;
+            particle.phase = effect.mass; particle.flutter_frequency = effect.drag;
+            particle.roomnum = effect.roomnum; particle.lighting_color = effect.lighting_color; particle.variant = effect.custom_handle&3;
+            particle.flags = ((effect.custom_handle&4) ? 2 : 0) | ((effect.custom_handle&8) ? 4 : 0);
+            if (prepareEnhancedSnow(frame,particle,PrepareEnhancedSnowAtlas(),quad)) { ++prepared; ++enhanced_snow; }
+            continue;
+        }
         if (effect.type == VIS_FIREBALL && (effect.id == MASSDRIVER_EFFECT_INDEX || effect.id == MERCBOSS_MASSDRIVER_EFFECT_INDEX)) {
             if (prepareMassDriver(frame,effect,quad)) { ++prepared; if (effect.id == MASSDRIVER_EFFECT_INDEX) ++mass_drivers; else ++boss_mass_drivers; }
             continue;
@@ -979,6 +1030,6 @@ void PrepareGameEffects(d3scene::FrameData& frame,const GameMainView* main_view)
     }
     if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
         AutomatedCaptureLog("scene effects sprites=%u pending=%u windshield=%u",prepared,pending,windshield);
-    if ((mass_drivers || boss_mass_drivers || legacy_snow) && AutomatedCapturePending())
-        AutomatedCaptureLog("scene effect families mass_drivers=%u boss_mass_drivers=%u legacy_snow=%u",mass_drivers,boss_mass_drivers,legacy_snow);
+    if ((mass_drivers || boss_mass_drivers || legacy_snow || enhanced_snow) && AutomatedCapturePending())
+        AutomatedCaptureLog("scene effect families mass_drivers=%u boss_mass_drivers=%u legacy_snow=%u enhanced_snow=%u",mass_drivers,boss_mass_drivers,legacy_snow,enhanced_snow);
 }
