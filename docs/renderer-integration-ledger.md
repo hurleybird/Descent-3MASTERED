@@ -98,3 +98,46 @@ damage/energy/fusion callbacks on frames20–22 with a rear-view monitor. Visual
 inspection confirms world tinting while cockpit/HUD/monitor remain unaffected;
 no GL errors. Evidence: integration-frame-events-{control,events}-20261022.
 This closes the event producer/caller gap, not the other pending effect families.
+
+## Matcen, cinematic and normal foreground scheduling
+
+Matcen advancement now runs with DoMatcensFrame, once with simulation, not per
+camera. It creates/updates persistent VisEffects; const disk descriptions become
+ordinary shared-topology world meshes. Recycled VisEffect indices are checked
+against allocation generations. Corrected the old object-definition bounds bug:
+MAX_OBJECT_TYPES is26 categories, not the910-entry Object_info table. The private
+fixture uses real definition267 and exercises the real production update.
+
+Line/gray lightning and sine effects are published with shared constant-opacity
+raster-stroke topology. Paths are fixed for the published frame without consuming
+simulation RNG. Sine paths are bounded to256points and terminate at their endpoint;
+lightning retains its50point bound. Matcen effects now appear in the next world
+publication uniformly across views, rather than being born after main drawing
+and possibly first appearing in an auxiliary camera. This timing normalization
+is intentional. Generic VisEffect billboard depth offsets now honor radius,
+VF_NO_Z_ADJUST and the no-radius-bias policy for soft smoke.
+
+Cinematic start/transition/text-mode updates are game-owned. Text, wipe gradient,
+fade/white/wacky overlays become ordinary immutable canvases in the explicit
+post-HUD phase. Frame callbacks commit once after the current world is frozen
+and drawn, so mutations first affect the next publication. A stop/restart
+generation prevents a stale callback from a retired cinematic. Post-stop tails
+remain active without Cinematic_inuse. Removed the draw-time bitmap rewriting
+and the now-unused black/white/temp/wipe bitmap allocations.
+
+Cockpit/reticle/HUD publication no longer depends on three opt-in probe flags.
+One captured HUD layout owns cockpit admission too: hidden/guided/zoom/rear/
+cinematic/observer views cannot inherit it. A non-dormant cockpit may still
+animate closed in fullscreen mode. Independent thumbnail publication has no
+main-view foreground consumers. The ordinary launch gate is still retained.
+
+All three CPU suites and the engine build pass. Actual private captures at
+1280x720,SSAA2,MSAA4,AO+bloom show the Matcen disk/beam and three line families;
+active cinematic text, post-stop fade, restored cockpit, wacky/wipe mode,
+transition-before-text and fade-white all execute without GL errors. Deliberate
+duplicate game callback commits do not duplicate callbacks. Visual inspection
+covered active text, fade tail, restored game, wacky and white outputs. Evidence:
+integration-matcen-qualified-20261022 and integration-cinematic-*-20261022.
+These do not qualify real mission scripts, multiplayer Matcens or every remaining
+effect family. Next: omitted weapon/debris/weather/corona producers, real module
+consumers, lifecycle/history and normal no-probe qualification.

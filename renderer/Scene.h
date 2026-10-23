@@ -234,9 +234,12 @@ public:
     TerrainOcclusionRef publishTerrainOcclusion(const TerrainOcclusionData&);
     MeshAssetRef publishMesh(uint32_t,MeshGeometry);
     // Canonical topology belongs to the scene lifetime, not to each sprite or
-    // text run. Slots 2, 9 and 258..384 are reserved for these primitives.
+    // text run. Slots 2, 9..12 and 258..384 are reserved for these primitives.
     MeshAssetRef quadMesh(uint32_t count = 1);
     MeshAssetRef fadingStrokeMesh();
+    MeshAssetRef strokeMesh();
+    MeshAssetRef radialDiskMesh();
+    MeshAssetRef gradientQuadMesh();
     FogAssetRef publishFog(const std::vector<RoomState>&);
     uint64_t lifetime() const { return lifetime_; }
 private:
@@ -254,6 +257,7 @@ private:
     std::vector<MeshAssetRef> meshes_;
     std::array<MeshAssetRef,128> quad_meshes_{};
     MeshAssetRef fading_stroke_mesh_;
+    MeshAssetRef stroke_mesh_, radial_disk_mesh_, gradient_quad_mesh_;
     FogAssetRef fog_;
 };
 
@@ -885,7 +889,7 @@ void renderForeground(const Presentation& frame, const ForegroundLayer& layer);
 
 // Game layout publishes camera, placement and ordering alongside geometry.
 // Execution selects a named layer; it never consults live window/HUD state.
-enum class ForegroundPhase { AfterMainWorld, WorldOverlay, FinalOverlay };
+enum class ForegroundPhase { AfterMainWorld, WorldOverlay, PostHUD, FinalOverlay };
 struct PreparedForeground {
     uint64_t identity = 0;
     ForegroundLayer layer;

@@ -1238,6 +1238,13 @@ int runSceneViewTests() {
         d3scene::FrameData strokes; strokes.sequence = 1; strokes.scene_lifetime = assets.lifetime();
         d3scene::PreparedMesh stroke; stroke.asset = assets.fadingStrokeMesh();
         check(stroke.asset == assets.fadingStrokeMesh(),"Stroke topology allocated per instance");
+        const auto solid = assets.strokeMesh();
+        check(solid == assets.strokeMesh() && !solid->hasVertexAlpha() &&
+            solid->geometry().raster_offsets.size() == 4,"Solid stroke lost shared constant-opacity topology");
+        const auto disk = assets.radialDiskMesh();
+        check(disk == assets.radialDiskMesh() && disk->geometry().polygons.size() == 16 &&
+            disk->geometry().polygons[0].corners[0].alpha == 0 &&
+            disk->geometry().polygons[0].corners[2].alpha == 255,"Matcen disk radial coverage changed");
         check(stroke.asset->geometry().polygons[0].corners[0].alpha == 255 &&
             stroke.asset->geometry().polygons[0].corners[2].alpha == 0,"Stroke endpoint opacity lost");
         stroke.world = placement; stroke.raster_stroke_width = 1; stroke.surface.unlit = true;

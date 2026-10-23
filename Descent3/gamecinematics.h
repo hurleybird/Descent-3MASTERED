@@ -22,6 +22,7 @@
 #include "vecmat_external.h"
 #include "gamecinematics_external.h"
 #include "hud.h"
+#include <cstdint>
 
 //	Cinematic_Init
 //
@@ -49,8 +50,11 @@ void Cinematic_Stop(void);
 //	Processes a frame for the Cinematics
 void Cinematic_Frame(void);
 
-// Renders anything that needs to be rendered for the cinematic frame
-void Cinematic_RenderFrame(void);
+// Once-only game phase, immutable canvas publication, then post-world callback.
+namespace d3scene { struct FrameData; }
+void AdvanceCinematicPresentation(uint64_t lifetime,uint64_t logical_frame);
+void PrepareCinematicCanvas(d3scene::FrameData&);
+void CommitCinematicFrame(uint64_t lifetime,uint64_t logical_frame);
 
 void Cinematic_LevelInit(void);
 

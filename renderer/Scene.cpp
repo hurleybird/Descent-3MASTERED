@@ -363,6 +363,7 @@ void SceneAssets::reset() {
     meshes_.clear();
     quad_meshes_.fill({});
     fading_stroke_mesh_.reset();
+    stroke_mesh_.reset(); radial_disk_mesh_.reset(); gradient_quad_mesh_.reset();
     fog_.reset();
     lifetime_ = lifetime;
     revision_ = 0;
@@ -553,6 +554,26 @@ MeshAssetRef SceneAssets::quadMesh(uint32_t count) {
 MeshAssetRef SceneAssets::fadingStrokeMesh() {
     if (!fading_stroke_mesh_) fading_stroke_mesh_ = publishMesh(9,unitFadingStroke());
     return fading_stroke_mesh_;
+}
+MeshAssetRef SceneAssets::strokeMesh() {
+    if (!stroke_mesh_) {
+        auto geometry = unitFadingStroke();
+        for (auto& corner : geometry.polygons[0].corners) corner.alpha = 255;
+        stroke_mesh_ = publishMesh(10,std::move(geometry));
+    }
+    return stroke_mesh_;
+}
+MeshAssetRef SceneAssets::radialDiskMesh() {
+    if (!radial_disk_mesh_) radial_disk_mesh_ = publishMesh(11,billboardRing(0,255,0,16));
+    return radial_disk_mesh_;
+}
+MeshAssetRef SceneAssets::gradientQuadMesh() {
+    if (!gradient_quad_mesh_) {
+        auto geometry = unitBillboardQuad();
+        for (auto& corner : geometry.polygons[0].corners) corner.alpha = corner.vertex == 0 || corner.vertex == 3 ? 0 : 255;
+        gradient_quad_mesh_ = publishMesh(12,std::move(geometry));
+    }
+    return gradient_quad_mesh_;
 }
 MeshAsset::MeshAsset(AssetId id,MeshGeometry geometry) : id_(id), geometry_(std::move(geometry)) {
     for (const auto& polygon : geometry_.polygons)
@@ -855,7 +876,8 @@ PresentationRef Presentation::complete(FrameData data) {
         require(foreground.identity,"Invalid or duplicate foreground identity");
         foreground_ids.push_back(foreground.identity);
         require(foreground.phase == ForegroundPhase::AfterMainWorld ||
-            foreground.phase == ForegroundPhase::WorldOverlay || foreground.phase == ForegroundPhase::FinalOverlay,
+            foreground.phase == ForegroundPhase::WorldOverlay || foreground.phase == ForegroundPhase::PostHUD ||
+            foreground.phase == ForegroundPhase::FinalOverlay,
             "Unknown foreground phase");
         foreground_order.emplace_back(foreground.phase,foreground.order);
         validateForeground(foreground.layer);

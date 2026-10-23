@@ -23,7 +23,9 @@ HUDCanvasLayout CompileHUDCanvasLayout(const HUDCanvasRequest& request) {
     case HUDViewMode::Hidden: case HUDViewMode::Rear: return layout;
     case HUDViewMode::Guided: layout.aim = HUDAimMode::Guided; return layout;
     case HUDViewMode::Zoom: layout.aim = HUDAimMode::Zoom; return layout;
-    case HUDViewMode::Ship: layout.aim = request.show_ship_reticle ? HUDAimMode::Ship : HUDAimMode::Hidden; break;
+    case HUDViewMode::Ship:
+        layout.cockpit = request.show_cockpit;
+        layout.aim = request.show_ship_reticle ? HUDAimMode::Ship : HUDAimMode::Hidden; break;
     case HUDViewMode::Letterbox: case HUDViewMode::Observer: break;
     default: throw std::invalid_argument("Unknown HUD view mode");
     }

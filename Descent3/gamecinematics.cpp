@@ -34,6 +34,7 @@
 #include "player.h"
 #include "ddio.h"
 #include "gamefont.h"
+#include "gameloop.h"
 #include "AIMain.h"
 #include "controls.h"
 #include "d3music.h"
@@ -42,6 +43,12 @@
 #include "osiris_dll.h"
 #include "multi.h"
 #include "weapon.h"
+#include "SceneCanvas.h"
+#include "SceneExtraction.h"
+#include "gamefont.h"
+#include <algorithm>
+#include <cmath>
+#include <stdexcept>
 
 #ifdef _DEBUG
 bool Cinematics_enabled = true;
@@ -71,7 +78,6 @@ struct
 	int target_objhandle;
 	int camera_objhandle;
 
-	int bmp_handle;
 	int longest_line;
 
 	uint flags;
@@ -96,6 +102,7 @@ struct
 
 	bool controls_suspended;
 } GameCinema;
+static uint64_t CinematicGeneration = 0;
 
 #define CDI_NOT_CANNED		0
 #define CDI_CANNED			1
@@ -118,18 +125,11 @@ struct tCinematicDemoInfo
 void Cinematic_WriteDemoFileData(tCinematicDemoInfo* info);
 bool Cinematic_StartCine(tGameCinematic* info, char* text_string, int camera_objhandle);
 
-void Cinematic_DrawText(void);
-void Cinematic_DoEndTransition(void);
-void Cinematic_DoStartTransition(void);
-
 bool Cinematic_inuse;
 tGameCinematic Cinematic_fake_info;
 bool Cinematic_fake_queued = false;
 
-int gc_fade_bmp_handle = BAD_BITMAP_HANDLE;
-int gc_fadewhite_bmp_handle = BAD_BITMAP_HANDLE;
 int gc_wacky_bmp_handle = BAD_BITMAP_HANDLE;
-int gc_temp_bmp_handle = BAD_BITMAP_HANDLE;
 
 #define END_TRANSITION_TIME		1.0f
 
@@ -148,24 +148,6 @@ void Cinematic_Close(void)
 {
 	if (Cinematic_inuse) {
 		Cinematic_Stop();
-	}
-
-	if (gc_fade_bmp_handle > BAD_BITMAP_HANDLE)
-	{
-		bm_FreeBitmap(gc_fade_bmp_handle);
-		gc_fade_bmp_handle = BAD_BITMAP_HANDLE;
-	}
-
-	if (gc_fadewhite_bmp_handle > BAD_BITMAP_HANDLE)
-	{
-		bm_FreeBitmap(gc_fadewhite_bmp_handle);
-		gc_fadewhite_bmp_handle = BAD_BITMAP_HANDLE;
-	}
-
-	if (gc_temp_bmp_handle > BAD_BITMAP_HANDLE)
-	{
-		bm_FreeBitmap(gc_temp_bmp_handle);
-		gc_temp_bmp_handle = BAD_BITMAP_HANDLE;
 	}
 
 	if (gc_wacky_bmp_handle > BAD_BITMAP_HANDLE)
@@ -188,31 +170,7 @@ void Cinematic_Init(void)
 	memset(&GameCinema, 0, sizeof(GameCinema));
 
 	GameCinema.doing_end_transition = false;
-	gc_fade_bmp_handle = BAD_BITMAP_HANDLE;
-
-	gc_fade_bmp_handle = bm_AllocBitmap(32, 32, 0);
-	if (gc_fade_bmp_handle > BAD_BITMAP_HANDLE)
-	{
-		ushort* data = bm_data(gc_fade_bmp_handle, 0);
-		int i, size = 32 * 32;
-
-		for (i = 0; i < size; i++)
-			data[i] = GR_RGB16(0, 0, 0) | OPAQUE_FLAG;
-	}
-
 	gc_wacky_bmp_handle = bm_AllocLoadFileBitmap("ShieldBitmap.ogf", 0);
-
-	gc_fadewhite_bmp_handle = bm_AllocBitmap(32, 32, 0);
-	if (gc_fadewhite_bmp_handle > BAD_BITMAP_HANDLE)
-	{
-		ushort* data = bm_data(gc_fadewhite_bmp_handle, 0);
-		int i, size = 32 * 32;
-
-		for (i = 0; i < size; i++)
-			data[i] = GR_RGB16(255, 255, 255) | OPAQUE_FLAG;
-	}
-
-	gc_temp_bmp_handle = bm_AllocBitmap(32, 32, 0);
 
 	if (!called_once)
 	{
@@ -647,20 +605,7 @@ bool Cinematic_StartCine(tGameCinematic* info, char* text_string, int camera_obj
 		break;
 	}
 
-	GameCinema.bmp_handle = -1;
 	GameCinema.longest_line = 0;
-
-	if ((GameCinema.flags & GCF_TEXT_MASK) == GCF_TEXT_WIPEIN) {
-
-		//create overlay bitmap
-		GameCinema.bmp_handle = bm_AllocBitmap(128, 128, 0);
-		if (GameCinema.bmp_handle > BAD_BITMAP_HANDLE) {
-			ushort* data = bm_data(GameCinema.bmp_handle, 0);
-			for (int j = 0; j < 128 * 128; j++) {
-				data[j] = GR_RGB16(0, 0, 0) | OPAQUE_FLAG;
-			}
-		}
-	}
 
 	//determine longest line and add text to game messages
 	int old_font = grtext_GetFont();
@@ -688,6 +633,7 @@ bool Cinematic_StartCine(tGameCinematic* info, char* text_string, int camera_obj
 	grtext_SetFont(old_font);
 
 	Cinematic_inuse = true;
+	++CinematicGeneration;
 	HUDPauseMessages();
 	D3MusicStartCinematic();
 
@@ -771,6 +717,7 @@ void Cinematic_Stop(void)
 {
 	if (!Cinematic_inuse)
 		return;
+	++CinematicGeneration;
 
 	if (GameCinema.text)
 	{
@@ -803,10 +750,6 @@ void Cinematic_Stop(void)
 	//go back to full screen
 	if (!Cinematic_IsPlayerDead() && GetScreenMode() == SM_GAME)	//player death cam has started
 		SetHUDMode(Cinematic_GetOldHudMode());
-
-	if (GameCinema.bmp_handle > BAD_BITMAP_HANDLE) {
-		bm_FreeBitmap(GameCinema.bmp_handle);
-	}
 
 	//delete the camera
 	if (!dont_restore_viewer)
@@ -1094,546 +1037,145 @@ continue_frame:
 	}
 }
 
-// Renders anything that needs to be rendered for the cinematic frame
-void Cinematic_RenderFrame(void)
-{
-	if (!Cinematic_inuse)
-	{
-		if (GameCinema.doing_end_transition)
-			Cinematic_DoEndTransition();
-		return;
-	}
-
-	if (GetHUDMode() == HUD_LETTERBOX)
-	{
-		//clear letterbox areas
-		Clear_screen = 4;
-	}
-
-	if (GameCinema.start_transition_type != GCTT_NONE)
-	{
-		Cinematic_DoStartTransition();
-	}
-
-	if (GameCinema.flags & GCF_DOTRANSBEFORETEXT)
-	{
-		//some end transitions start early...process now
-		if (GameCinema.doing_end_transition)
-			Cinematic_DoEndTransition();
-
-		//see if we should be displaying text
-		if (Gametime >= GameCinema.text_display_start && Gametime < GameCinema.text_display_stop)
-		{
-			//Display text
-			Cinematic_DrawText();
-		}
-
-	}
-	else
-	{
-		//see if we should be displaying text
-		if (Gametime >= GameCinema.text_display_start && Gametime < GameCinema.text_display_stop)
-		{
-			//Display text
-			Cinematic_DrawText();
-		}
-
-		//some end transitions start early...process now
-		if (GameCinema.doing_end_transition)
-			Cinematic_DoEndTransition();
-	}
-
-	if (GameCinema.callback)
-		(*GameCinema.callback)(GCCT_FRAME);
+namespace {
+struct CinematicFrameReceipt {
+    uint64_t lifetime = 0, frame = 0, generation = 0;
+    bool valid = false, committed = false;
+    void (*callback)(int) = nullptr;
+} CinemaFrame;
+float unit(float value) { return (std::max)(0.f,(std::min)(1.f,value)); }
 }
 
-void Cinematic_DrawText(void)
+// Game-owned visual scheduling; no canvas, text or GL execution can enter here.
+void AdvanceCinematicPresentation(uint64_t lifetime,uint64_t frame)
 {
-	int old_left, old_top, old_right, old_bottom;
-	grtext_GetParameters(&old_left, &old_top, &old_right, &old_bottom, NULL);
-	grtext_SetParameters(0, 0, Max_window_w, Max_window_h);
-
-	int font_height = grfont_GetHeight(BIG_BRIEFING_FONT) + 2;
-	int old_font = grtext_GetFont();
-	grtext_SetFont(BIG_BRIEFING_FONT);
-	grtext_SetColor(GR_RGB(255, 255, 255));
-
-	int start_y;
-	int end_y;
-
-	//determine y positions
-	switch (GameCinema.flags & GCF_LAYOUT_MASK)
-	{
-	case GCF_LAYOUT_LOW:
-	{
-		end_y = 0.6667f * (float)(Max_window_h);
-		start_y = end_y - (GameCinema.num_lines * font_height);
-
-		ASSERT(start_y >= 0);//too many lines of text!
-
-	}break;
-	case GCF_LAYOUT_BOTTOM:
-	{
-		end_y = Max_window_h;
-		start_y = end_y - (GameCinema.num_lines * font_height);
-
-		ASSERT(start_y >= 0);	//too many lines of text!		
-	}break;
-	case GCF_LAYOUT_TOP:
-	{
-		start_y = 2;
-		end_y = (GameCinema.num_lines * font_height) + start_y;
-
-		ASSERT(end_y < Max_window_h);	//too many lines of text!
-	}break;
-	case GCF_LAYOUT_MIDDLE:
-	{
-		int total_height = GameCinema.num_lines * font_height;
-		start_y = (Max_window_h / 2) - (total_height / 2);
-		end_y = start_y + total_height;
-
-		ASSERT(start_y >= 0 && end_y < Max_window_h);	//too many lines of text
-
-	}break;
-	}
-
-	if ((GameCinema.flags & GCF_TEXT_MASK) == GCF_TEXT_WIPEIN)
-	{
-		//see if this mode is allowed (only if letterbox and not in middle layout)
-		if ((GameCinema.flags & GCF_SCREENFORMAT) != GCF_LETTERBOX)
-		{
-			GameCinema.flags &= ~GCF_TEXT_WIPEIN;
-			GameCinema.flags |= GCF_TEXT_FADEINOUT;
-		}
-		else {
-			//it's letter box, make sure it's not middle
-			if ((GameCinema.flags & GCF_LAYOUT_MASK) == GCF_LAYOUT_MIDDLE)
-			{
-				GameCinema.flags &= ~GCF_TEXT_WIPEIN;
-				GameCinema.flags |= GCF_TEXT_FADEINOUT;
-			}
-			if ((GameCinema.flags & GCF_LAYOUT_MASK) == GCF_LAYOUT_LOW)
-			{
-				GameCinema.flags &= ~GCF_TEXT_WIPEIN;
-				GameCinema.flags |= GCF_TEXT_FADEINOUT;
-			}
-		}
-	}
-
-
-	float total_text_time = GameCinema.text_display_stop - GameCinema.text_display_start;
-	if (total_text_time <= 0.0f)
-	{
-		grtext_SetFont(old_font);
-		grtext_SetParameters(old_left, old_top, old_right, old_bottom);
-		return;
-	}
-
-	float time_in = Gametime - GameCinema.text_display_start;
-	float perc = time_in / total_text_time;
-	if (perc < 0.0f) perc = 0.0f;
-	if (perc > 1.0f) perc = 1.0f;
-
-	switch (GameCinema.flags & GCF_TEXT_MASK)
-	{
-	case GCF_TEXT_WIPEIN:
-	{
-		//first 1/3 is alpha in
-		//last 2/3 is solid
-		ubyte alpha;
-
-		if (perc > 0.33f)
-		{
-			//middle 1/3
-			alpha = 255;
-		}
-		else if (perc <= 0.33f) {
-			//first 1/3
-			float new_p = perc / 0.33f;
-			alpha = (ubyte)(new_p * 255.0f);
-		}
-		grtext_SetAlpha(alpha);
-
-		int len, pos = 0;
-		int y = start_y;
-		for (int i = 0; i < GameCinema.num_lines; i++)
-		{
-			len = strlen(&GameCinema.text[pos]);
-			grtext_CenteredPrintf(0, y, &GameCinema.text[pos]);
-
-			y += font_height;
-			pos += len + 1;
-		}
-		grtext_Flush();
-
-		//Due alpha overlay effect
-		if (GameCinema.bmp_handle > BAD_BITMAP_HANDLE)
-		{
-			float alphas[4] = { 0.0f,1.0f,1.0f,0.0f };
-			float p = (perc > 0.18f) ? 1.0f : (perc / 0.18f);
-
-			int gl, gr, gt, gb;
-			grtext_GetParameters(&gl, &gt, &gr, &gb, NULL);
-
-			int width = (1.0f - p) * GameCinema.longest_line;
-			int rx = gl + (gr - gl) / 2 + (GameCinema.longest_line / 2);
-			int lx = gl + rx - width;
-
-			rend_SetAlphaType(AT_VERTEX);
-			rend_SetLighting(LS_NONE);
-			rend_SetColorModel(CM_MONO);
-			rend_SetOverlayType(OT_NONE);
-			rend_SetFiltering(0);
-			rend_SetWrapType(WT_CLAMP);
-			rend_SetZBufferState(0);
-
-			int t_y, b_y;
-			if ((GameCinema.flags & GCF_LAYOUT_MASK) == GCF_LAYOUT_TOP) {
-				t_y = 0;
-				b_y = Game_window_y;
-			}
-			else
-			{
-				t_y = Game_window_y + Game_window_h;
-				b_y = Max_window_h;
-			}
-
-			rend_DrawScaledBitmap(lx, t_y, rx, b_y, GameCinema.bmp_handle, 0, 0, 1, 1, -1, alphas);
-
-			rend_SetFiltering(1);
-			rend_SetZBufferState(1);
-		}
-	}break;
-	case GCF_TEXT_FADEINOUT:
-	{
-		//first 1/3 is alpha in
-		//middle 1/3 is solid
-		//last 1/3 is alpha out
-		ubyte alpha;
-
-		if (perc > 0.33f && perc <= 0.66f)
-		{
-			//middle 1/3
-			alpha = 255;
-		}
-		else if (perc <= 0.33f)
-		{
-			//first 1/3
-			float new_p = perc / 0.33f;
-			alpha = (ubyte)(new_p * 255.0f);
-		}
-		else
-		{
-			//last 1/3
-			float new_p = (perc - 0.66f) / 0.33f;
-			if (new_p < 0.0f) new_p = 0.0f;
-			if (new_p > 1.0f) new_p = 1.0f;
-			alpha = (ubyte)(255.0f - (new_p * 255.0f));
-		}
-		grtext_SetAlpha(alpha);
-
-		int len, pos = 0;
-		int y = start_y;
-		for (int i = 0; i < GameCinema.num_lines; i++) {
-			len = strlen(&GameCinema.text[pos]);
-			grtext_CenteredPrintf(0, y, &GameCinema.text[pos]);
-
-			y += font_height;
-			pos += len + 1;
-		}
-		grtext_Flush();
-	}break;
-	case GCF_TEXT_NOEFFECT:
-	{
-		int len, pos = 0;
-		int y = start_y;
-		for (int i = 0; i < GameCinema.num_lines; i++)
-		{
-			len = strlen(&GameCinema.text[pos]);
-			grtext_CenteredPrintf(0, y, &GameCinema.text[pos]);
-
-			y += font_height;
-			pos += len + 1;
-		}
-		grtext_Flush();
-	}break;
-	}
-
-
-	grtext_SetFont(old_font);
-	grtext_SetParameters(old_left, old_top, old_right, old_bottom);
+    if (CinemaFrame.valid && CinemaFrame.lifetime == lifetime) {
+        if (frame == CinemaFrame.frame) return;
+        if (frame < CinemaFrame.frame) throw std::logic_error("Cinematic frame reordered");
+    }
+    CinemaFrame = {lifetime,frame,CinematicGeneration,true,false,Cinematic_inuse ? GameCinema.callback : nullptr};
+    if (Cinematic_inuse) {
+        if (GetHUDMode() == HUD_LETTERBOX) Clear_screen = 4;
+        if (GameCinema.start_transition_type != GCTT_NONE && GameCinema.start_transition_start_time == -1) {
+            GameCinema.start_transition_start_time = Gametime;
+            GameCinema.start_transition_end_time = Gametime+2;
+        }
+        if ((GameCinema.flags & GCF_TEXT_MASK) == GCF_TEXT_WIPEIN &&
+            ((GameCinema.flags & GCF_SCREENFORMAT) != GCF_LETTERBOX ||
+             (GameCinema.flags & GCF_LAYOUT_MASK) == GCF_LAYOUT_MIDDLE ||
+             (GameCinema.flags & GCF_LAYOUT_MASK) == GCF_LAYOUT_LOW)) {
+            GameCinema.flags = (GameCinema.flags & ~GCF_TEXT_MASK) | GCF_TEXT_FADEINOUT;
+        }
+    }
+    // A stopped cinematic may retain a transition. It still advances here.
+    if (GameCinema.doing_end_transition &&
+        (Gametime > GameCinema.end_transition_end_time || Gametime < GameCinema.end_transition_start_time ||
+         GameCinema.end_transition_type == GCTT_NONE)) GameCinema.doing_end_transition = false;
 }
 
-void Cinematic_DoStartTransition(void)
+void CommitCinematicFrame(uint64_t lifetime,uint64_t frame)
 {
-	if (GameCinema.start_transition_type == GCTT_NONE)
-		return;
-
-	if (GameCinema.start_transition_start_time == -1.0f)
-	{
-		//calculate
-		GameCinema.start_transition_start_time = Gametime;
-		GameCinema.start_transition_end_time = Gametime + 2.0f;
-	}
-
-	if (GameCinema.start_transition_end_time < Gametime)
-		return;
-
-	float total_time = GameCinema.start_transition_end_time - GameCinema.start_transition_start_time;
-	float time_in = Gametime - GameCinema.start_transition_start_time;
-
-	if (time_in <0 || time_in>total_time)
-		return;
-
-	float perc = time_in / total_time;
-
-	if (perc < 0.0f) perc = 0.0f;
-	if (perc > 1.0f) perc = 1.0f;
-
-	if (gc_fade_bmp_handle <= BAD_BITMAP_HANDLE || gc_fadewhite_bmp_handle <= BAD_BITMAP_HANDLE)
-	{
-		GameCinema.start_transition_type = GCTT_NONE;
-		return;
-	}
-
-	float alpha = 1.0f - perc;
-
-	rend_SetAlphaType(AT_CONSTANT);
-	rend_SetAlphaValue(alpha * 255.0f);
-	rend_SetLighting(LS_NONE);
-	rend_SetColorModel(CM_MONO);
-	rend_SetOverlayType(OT_NONE);
-	rend_SetWrapType(WT_CLAMP);
-	rend_SetFiltering(0);
-	rend_SetZBufferState(0);
-
-	rend_DrawScaledBitmap(0, 0, Max_window_w, Max_window_h, (GameCinema.start_transition_type == GCTT_FADEWHITE) ? gc_fadewhite_bmp_handle : gc_fade_bmp_handle, 0, 0, 1, 1);
-
-	rend_SetFiltering(1);
-	rend_SetZBufferState(1);
+    if (!CinemaFrame.valid || CinemaFrame.lifetime != lifetime || CinemaFrame.frame != frame)
+        throw std::logic_error("Cinematic callback without its game frame");
+    if (CinemaFrame.committed) return;
+    CinemaFrame.committed = true;
+    // This callback can teleport objects. It deliberately runs AFTER the
+    // current world is frozen/executed, affecting only the next publication.
+    if (Cinematic_inuse && CinemaFrame.generation == CinematicGeneration && CinemaFrame.callback)
+        (*CinemaFrame.callback)(GCCT_FRAME);
 }
 
-void Cinematic_DoEndTransition(void)
+void PrepareCinematicCanvas(d3scene::FrameData& frame)
 {
-	if (!GameCinema.doing_end_transition)
-		return;
-
-	if (Gametime > GameCinema.end_transition_end_time)
-	{
-		GameCinema.doing_end_transition = false;
-		return;
-	}
-
-	if (Gametime < GameCinema.end_transition_start_time)
-	{
-		GameCinema.doing_end_transition = false;
-		return;
-	}
-
-	float time_in = Gametime - GameCinema.end_transition_start_time;
-	float time_full = GameCinema.end_transition_end_time - GameCinema.end_transition_start_time;
-	float perc = time_in / time_full;
-
-	if (perc < 0.0f) perc = 0.0f;
-	if (perc > 1.0f) perc = 1.0f;
-
-	switch (GameCinema.end_transition_type)
-	{
-	case GCTT_WACKY:
-	{
-		if (gc_wacky_bmp_handle <= BAD_BITMAP_HANDLE)
-		{
-			GameCinema.doing_end_transition = false;
-			return;
-		}
-		int w, h;
-		w = bm_w(gc_wacky_bmp_handle, 0);
-		h = bm_h(gc_wacky_bmp_handle, 0);
-
-		float wscale, hscale;
-		wscale = (float)(Max_window_w) / (float)(w);
-		hscale = (float)(Max_window_h) / (float)(h);
-
-		if (wscale < hscale)
-		{
-			float whratio = (float)(w) / (float)(h);
-
-			//width is bigger
-			h = Max_window_h * whratio;
-			w = Max_window_w;
-		}
-		else
-		{
-			float hwratio = (float)(h) / (float)(w);
-
-			//height is bigger
-			h = Max_window_h;
-			w = Max_window_w * hwratio;
-		}
-
-		float ratio = 0.0f;
-
-		if (perc < 0.5f)
-		{
-			//small->large
-			ratio = perc / 0.5f;
-		}
-		else {
-			//large->small
-			ratio = 1.0f - ((perc - 0.5f) / 0.5f);
-		}
-
-		w *= ratio;
-		h *= ratio;
-
-		int x, y;
-
-		x = (Max_window_w / 2) - (w / 2);
-		y = (Max_window_h / 2) - (h / 2);
-
-		rend_SetAlphaType(AT_TEXTURE);
-		rend_SetLighting(LS_NONE);
-		rend_SetColorModel(CM_MONO);
-		rend_SetOverlayType(OT_NONE);
-		rend_SetWrapType(WT_CLAMP);
-		rend_SetFiltering(0);
-		rend_SetZBufferState(0);
-
-		rend_DrawScaledBitmap(x, y, x + w, y + h, gc_wacky_bmp_handle, 0, 0, 1, 1);
-
-		rend_SetFiltering(1);
-		rend_SetZBufferState(1);
-
-	}break;
-
-	case GCTT_FADE:
-	{
-		if (gc_fade_bmp_handle <= BAD_BITMAP_HANDLE)
-		{
-			GameCinema.doing_end_transition = false;
-			return;
-		}
-
-		float alpha = 1.0f - perc;
-
-		rend_SetAlphaType(AT_CONSTANT);
-		rend_SetAlphaValue(alpha * 255.0f);
-		rend_SetLighting(LS_NONE);
-		rend_SetColorModel(CM_MONO);
-		rend_SetOverlayType(OT_NONE);
-		rend_SetWrapType(WT_CLAMP);
-		rend_SetFiltering(0);
-		rend_SetZBufferState(0);
-
-		rend_DrawScaledBitmap(0, 0, Max_window_w, Max_window_h, gc_fade_bmp_handle, 0, 0, 1, 1);
-
-		rend_SetFiltering(1);
-		rend_SetZBufferState(1);
-
-	}break;
-
-	case GCTT_FADEINOUT:
-	{
-		if (gc_fade_bmp_handle <= BAD_BITMAP_HANDLE)
-		{
-			GameCinema.doing_end_transition = false;
-			return;
-		}
-
-		float alpha = 0.0f;
-
-		if (perc < 0.5f)
-		{
-			//transparent->opaque
-			alpha = perc / 0.5f;
-		}
-		else {
-			//opaque->transparent
-			alpha = 1.0f - ((perc - 0.5f) / 0.5f);
-		}
-
-		rend_SetAlphaType(AT_CONSTANT);
-		rend_SetAlphaValue(alpha * 255.0f);
-		rend_SetLighting(LS_NONE);
-		rend_SetColorModel(CM_MONO);
-		rend_SetOverlayType(OT_NONE);
-		rend_SetWrapType(WT_CLAMP);
-		rend_SetFiltering(0);
-		rend_SetZBufferState(0);
-
-		rend_DrawScaledBitmap(0, 0, Max_window_w, Max_window_h, gc_fade_bmp_handle, 0, 0, 1, 1);
-
-		rend_SetFiltering(1);
-		rend_SetZBufferState(1);
-
-	}break;
-	case GCTT_FADEWHITE:
-	{
-		if (gc_fade_bmp_handle <= BAD_BITMAP_HANDLE)
-		{
-			GameCinema.doing_end_transition = false;
-			return;
-		}
-
-#define CUTOFF	0.8f
-
-		float alpha;
-		bool use_white;
-		if (perc < CUTOFF)
-		{
-			//to white
-			alpha = perc / CUTOFF;
-			use_white = true;
-		}
-		else {
-			//to black
-			alpha = 1.0f;
-			use_white = false;
-		}
-
-		rend_SetAlphaType(AT_CONSTANT);
-		rend_SetAlphaValue(alpha * 255.0f);
-		rend_SetLighting(LS_NONE);
-		rend_SetColorModel(CM_MONO);
-		rend_SetOverlayType(OT_NONE);
-		rend_SetWrapType(WT_CLAMP);
-		rend_SetFiltering(0);
-		rend_SetZBufferState(0);
-
-		if (use_white)
-		{
-			rend_DrawScaledBitmap(0, 0, Max_window_w, Max_window_h, gc_fadewhite_bmp_handle, 0, 0, 1, 1);
-		}
-		else
-		{
-			if (gc_temp_bmp_handle > BAD_BITMAP_HANDLE)
-			{
-				float fade_out_perc = 1.0f - ((perc - CUTOFF) / (1.0f - CUTOFF));
-				int grey = 255.0f * fade_out_perc;
-				ushort* data = bm_data(gc_temp_bmp_handle, 0);
-				int i, size = 32 * 32;
-
-				for (i = 0; i < size; i++)
-					data[i] = GR_RGB16(grey, grey, grey) | OPAQUE_FLAG;
-
-				GameBitmaps[gc_temp_bmp_handle].flags |= BF_CHANGED;
-				bm_MarkChanged(gc_temp_bmp_handle);
-
-				rend_DrawScaledBitmap(0, 0, Max_window_w, Max_window_h, gc_temp_bmp_handle, 0, 0, 1, 1);
-			}
-		}
-
-		rend_SetFiltering(1);
-		rend_SetZBufferState(1);
-
-	}break;
-
-	case GCTT_NONE:
-		GameCinema.doing_end_transition = false;
-		return;
-		break;
-	}
-
+    if (!Cinematic_inuse && !GameCinema.doing_end_transition) return;
+    constexpr uint64_t collection = 0x43494e454d410001ull;
+    const d3scene::Rect viewport{0,0,Max_window_w,Max_window_h};
+    const auto begin = frame.meshes.size();
+    int32_t order = 0;
+    const auto quad = [&](d3scene::Rect rect,float alpha,d3scene::Vec3 color,int bitmap = -1) {
+        SceneQuadStyle style; style.alpha = unit(alpha); style.color = color; style.bitmap = bitmap;
+        if (style.alpha > 0) PrepareSceneQuad(frame,collection,order,rect,style);
+    };
+    const auto transition = [&](bool start) {
+        if (start && (!Cinematic_inuse || GameCinema.start_transition_type == GCTT_NONE)) return;
+        if (!start && !GameCinema.doing_end_transition) return;
+        const float first = start ? GameCinema.start_transition_start_time : GameCinema.end_transition_start_time;
+        const float last = start ? GameCinema.start_transition_end_time : GameCinema.end_transition_end_time;
+        if (!(last > first) || Gametime < first || Gametime > last) return;
+        const float progress = unit((Gametime-first)/(last-first));
+        const int type = start ? GameCinema.start_transition_type : GameCinema.end_transition_type;
+        if (start) { quad(viewport,1-progress,type == GCTT_FADEWHITE ? d3scene::Vec3{1,1,1} : d3scene::Vec3{}); return; }
+        switch (type) {
+        case GCTT_FADE: quad(viewport,1-progress,{}); break;
+        case GCTT_FADEINOUT: quad(viewport,1-std::abs(progress*2-1),{}); break;
+        case GCTT_FADEWHITE:
+            if (progress < .8f) quad(viewport,progress/.8f,{1,1,1});
+            else { const float grey = unit(1-(progress-.8f)/.2f); quad(viewport,1,{grey,grey,grey}); }
+            break;
+        case GCTT_WACKY: {
+            const int bitmap = gc_wacky_bmp_handle;
+            if (bitmap <= BAD_BITMAP_HANDLE || !GameBitmaps[bitmap].used) break;
+            const float width = float(bm_w(bitmap,0)), height = float(bm_h(bitmap,0));
+            if (!(width > 0 && height > 0)) break;
+            int w, h;
+            if (Max_window_w/width < Max_window_h/height) { w = Max_window_w; h = int(Max_window_h*width/height); }
+            else { h = Max_window_h; w = int(Max_window_w*height/width); }
+            const float scale = 1-std::abs(progress*2-1);
+            w = int(w*scale); h = int(h*scale);
+            quad({(Max_window_w-w)/2,(Max_window_h-h)/2,w,h},1,{1,1,1},bitmap);
+            break;
+        }
+        }
+    };
+    const auto text = [&] {
+        if (!Cinematic_inuse || !GameCinema.text || Gametime < GameCinema.text_display_start ||
+            Gametime >= GameCinema.text_display_stop) return;
+        const float duration = GameCinema.text_display_stop-GameCinema.text_display_start;
+        if (!(duration > 0)) return;
+        const float progress = unit((Gametime-GameCinema.text_display_start)/duration);
+        const int effect = GameCinema.flags & GCF_TEXT_MASK;
+        SceneTextStyle style; style.font = BIG_BRIEFING_FONT; style.color = {1,1,1};
+        if (effect == GCF_TEXT_WIPEIN || effect == GCF_TEXT_FADEINOUT)
+            style.alpha = progress <= .33f ? unit(progress/.33f) :
+                effect == GCF_TEXT_FADEINOUT && progress > .66f ? unit(1-(progress-.66f)/.33f) : 1;
+        style.alpha = int(style.alpha*255)/255.f;
+        const int line_height = grfont_GetHeight(style.font)+2;
+        const int height = GameCinema.num_lines*line_height;
+        int y = 2;
+        switch (GameCinema.flags & GCF_LAYOUT_MASK) {
+        case GCF_LAYOUT_LOW: y = int(Max_window_h*.6667f)-height; break;
+        case GCF_LAYOUT_BOTTOM: y = Max_window_h-height; break;
+        case GCF_LAYOUT_MIDDLE: y = (Max_window_h-height)/2; break;
+        }
+        const char* line = GameCinema.text;
+        for (int i = 0; i < GameCinema.num_lines; ++i) {
+            const int width = MeasureSceneText(line,style).width;
+            PrepareSceneText(frame,collection,order,(Max_window_w-width)/2,y,line,style);
+            y += line_height; line += std::strlen(line)+1;
+        }
+        if (effect == GCF_TEXT_WIPEIN) {
+            const float p = unit(progress/.18f);
+            const int width = int((1-p)*GameCinema.longest_line);
+            const int right = (Max_window_w+GameCinema.longest_line)/2;
+            const int top = (GameCinema.flags & GCF_LAYOUT_MASK) == GCF_LAYOUT_TOP ? 0 : Game_window_y+Game_window_h;
+            const int bottom = top == 0 ? Game_window_y : Max_window_h;
+            const auto before = frame.meshes.size();
+            quad({right-width,top,width,bottom-top},1,{});
+            if (frame.meshes.size() != before) frame.meshes.back().asset = d3scene::assets().gradientQuadMesh();
+        }
+    };
+    transition(true);
+    const bool transition_first = GameCinema.flags & GCF_DOTRANSBEFORETEXT;
+    if (transition_first) transition(false);
+    text();
+    if (!transition_first) transition(false);
+    if (frame.meshes.size() == begin) return;
+    d3scene::PreparedForeground layer; layer.identity = collection;
+    layer.phase = d3scene::ForegroundPhase::PostHUD;
+    layer.layer.display_views.push_back(MakeSceneCanvasView(collection,viewport,d3scene::ViewTarget::Display,SceneGeometryInspection()));
+    frame.foregrounds.push_back(std::move(layer));
+    if (AutomatedCapturePending()) AutomatedCaptureLog("scene cinematic canvas active=%d tail=%d meshes=%u",
+        Cinematic_inuse,GameCinema.doing_end_transition,unsigned(frame.meshes.size()-begin));
 }
 
 

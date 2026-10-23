@@ -28,10 +28,10 @@ int runCanvasTests() {
     const auto check = [&](bool value,const char* message) { ++checks; if (!value) throw std::runtime_error(message); };
     SceneTextStyle style; style.font = 0;
     HUDCanvasRequest hud; hud.world = {0,0,1280,720}; hud.display = hud.world;
-    hud.mode = HUDViewMode::Ship; hud.item_mask = 123;
+    hud.mode = HUDViewMode::Ship; hud.item_mask = 123; hud.show_cockpit = true;
     auto hud_layout = CompileHUDCanvasLayout(hud);
     check(hud_layout.primary.x == 160 && hud_layout.primary.width == 960 && !hud_layout.auxiliary &&
-        hud_layout.aim == HUDAimMode::Ship && hud_layout.item_mask == 123,"Ship HUD did not compile its centered authored canvas");
+        hud_layout.aim == HUDAimMode::Ship && hud_layout.item_mask == 123 && hud_layout.cockpit,"Ship HUD did not compile its centered authored canvas");
     hud.world = {256,144,768,432}; hud_layout = CompileHUDCanvasLayout(hud);
     check(hud_layout.primary.x == 352 && hud_layout.primary.width == 576 && hud_layout.auxiliary &&
         hud_layout.display.width == 1280,"Reduced HUD changed the auxiliary display extent");
@@ -39,7 +39,7 @@ int runCanvasTests() {
     check(CompileHUDCanvasLayout(hud).aim == HUDAimMode::Hidden,"Ship reticle toggle ignored");
     for (auto mode : {HUDViewMode::Guided,HUDViewMode::Zoom,HUDViewMode::Rear,HUDViewMode::Hidden}) {
         hud.mode = mode; hud_layout = CompileHUDCanvasLayout(hud);
-        check(!hud_layout.item_mask && !hud_layout.auxiliary,"Special view inherited normal HUD items");
+        check(!hud_layout.item_mask && !hud_layout.auxiliary && !hud_layout.cockpit,"Special view inherited normal HUD items/cockpit");
         const auto aim = mode == HUDViewMode::Guided ? HUDAimMode::Guided : mode == HUDViewMode::Zoom ? HUDAimMode::Zoom : HUDAimMode::Hidden;
         check(hud_layout.aim == aim,"Special aim mode incorrectly followed the ship reticle toggle");
     }
@@ -47,7 +47,7 @@ int runCanvasTests() {
     for (auto mode : {HUDViewMode::Letterbox,HUDViewMode::Observer}) {
         hud.mode = mode; hud_layout = CompileHUDCanvasLayout(hud);
         check(hud_layout.primary.x == 256 && hud_layout.primary.width == 768 && hud_layout.item_mask == 123 &&
-            hud_layout.aim == HUDAimMode::Hidden,"Non-ship HUD inherited a ship aspect or reticle");
+            hud_layout.aim == HUDAimMode::Hidden && !hud_layout.cockpit,"Non-ship HUD inherited a ship aspect/reticle/cockpit");
     }
     bool invalid_hud = false; hud.mode = static_cast<HUDViewMode>(99);
     try { CompileHUDCanvasLayout(hud); } catch (const std::invalid_argument&) { invalid_hud = true; }

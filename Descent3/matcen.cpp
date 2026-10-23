@@ -492,7 +492,7 @@ bool matcen::ComputeCreatePnt()
 	{
 		float spawn_dist;
 
-		if (m_cached_prod_index >= 0 && m_cached_prod_index < m_num_prod_types && m_prod_type[m_cached_prod_index] >= 0 && m_prod_type[m_cached_prod_index] <= MAX_OBJECT_TYPES && Object_info[m_prod_type[m_cached_prod_index]].type != OBJ_NONE)
+		if (m_cached_prod_index >= 0 && m_cached_prod_index < m_num_prod_types && m_prod_type[m_cached_prod_index] >= 0 && m_prod_type[m_cached_prod_index] < MAX_OBJECT_IDS && Object_info[m_prod_type[m_cached_prod_index]].type != OBJ_NONE)
 		{
 			spawn_dist = Object_info[m_prod_type[m_cached_prod_index]].size + 1.0f;
 		}
@@ -1543,297 +1543,64 @@ void matcen::DoThinkFrame()
 	}
 }
 
-void matcen::DoRenderFrame()
+bool matcen::GetVisualDisk(MatcenVisualDisk& disk) const
 {
-	// MATCEN NOTE:  The objref of the created object is valid from the creation time to the
-	// creation of the next object
-
-	// Useful member variables:
-	//    m_prod_mode         -- See below
-	//		m_last_prod_objref
-	//		m_prod_mode_time    -- Zero the first frame of the current production mode
-	//		m_preprod_time
-	//		m_postprod_time
-
-	// Useful status members:
-	// MSTAT_CREATE_OBJ_FRAME
-
-	//DAJ	FIXES YET ANOTHER BUG WHERE THE ARRAY INDEX IS NOT CHECKED BEFORE USE (m_prod_type[m_cached_prod_index] == -1)
-	if (!(m_cached_prod_index >= 0 && m_cached_prod_index < m_num_prod_types && m_prod_type[m_cached_prod_index] >= 0 && m_prod_type[m_cached_prod_index] <= MAX_OBJECT_TYPES && Object_info[m_prod_type[m_cached_prod_index]].type != OBJ_NONE))
-		return;
-
-	// MATCEN NOTE: If an effect does something graphical, add it here
-	switch (m_prod_mode)
-	{
-	case MMODE_NOTPROD:
-	{
-		switch (m_creation_effect)
-		{
-		case MEFFECT_LINE_LIGHTNING:
-		default:
-			return;
-		}
-	}
-	break;
-
-	case MMODE_PREPROD:
-	{
-		switch (m_creation_effect)
-		{
-		case MEFFECT_LINE_LIGHTNING:
-		{
-			int i;
-
-			int oi_index = m_prod_type[m_cached_prod_index];
-
-			if (oi_index < 0 || oi_index >= MAX_POLY_MODELS)
-				break;
-
-			PageInPolymodel(Object_info[oi_index].render_handle, Object_info[oi_index].type, &Object_info[oi_index].size);
-			float size;
-
-			if (oi_index >= 0)
-				size = Object_info[oi_index].size * 1.5;
-			else
-				size = 0.0f;
-
-			if (m_cur_saturation_count < 1)
-			{
-				for (i = 0; i < m_num_spawn_pnts; i++)
-				{
-					int croom = m_create_room;
-					if (!ROOMNUM_OUTSIDE(m_create_room) && (Rooms[m_create_room].flags & RF_EXTERNAL))
-					{
-						croom = GetTerrainRoomFromPos(&m_create_pnt);
-					}
-
-					m_spawn_vis_effects[m_cur_saturation_count][i] = -1;
-
-					int visnum = VisEffectCreate(VIS_FIREBALL, LIGHTNING_BOLT_INDEX, croom, &m_create_pnt);
-					if (visnum >= 0)
-					{
-						vis_effect* vis = &VisEffects[visnum];
-						vis->lifeleft = .8f;
-						vis->lifetime = .8f;
-						vis->end_pos = m_spawn_vec[i];
-						vis->flags = VF_USES_LIFELEFT | VF_EXPAND;
-						vis->velocity.x = .8f;
-						vis->velocity.y = 1;
-						m_spawn_vis_effects[m_cur_saturation_count][i] = visnum;
-					}
-
-				}
-				m_cur_saturation_count++;
-			}
-
-			// Move the viseffects if needed
-			for (i = 0; i < m_cur_saturation_count; i++)
-			{
-				for (int t = 0; t < m_num_spawn_pnts; t++)
-				{
-					int visnum = m_spawn_vis_effects[i][t];
-					if (visnum == -1)
-						continue;
-
-					ASSERT(visnum >= 0 && visnum < MAX_VIS_EFFECTS);
-					vis_effect* vis = &VisEffects[visnum];
-
-					vis->pos = m_create_pnt;
-					vis->end_pos = m_spawn_vec[t];
-				}
-
-			}
-
-
-			vector center = m_create_pnt;
-			size = (m_prod_mode_time / m_preprod_time) * size;
-
-			if (size > 0.0)
-				DrawColoredDisk(&center, 0.3f, 0.5f, 1.0f, .7f, 0, size, 1);
-
-		}
-		break;
-
-		case MEFFECT_LINE_SINE_WAVE:
-		{
-			int i;
-
-			int oi_index = m_prod_type[m_cached_prod_index];
-
-			if (oi_index < 0 || oi_index >= MAX_POLY_MODELS)
-				break;
-
-			PageInPolymodel(Object_info[oi_index].render_handle, Object_info[oi_index].type, &Object_info[oi_index].size);
-			float size;
-
-			if (oi_index >= 0)
-				size = Object_info[oi_index].size * 1.5;
-			else
-				size = 0.0f;
-
-			if (m_cur_saturation_count < 1)
-			{
-				for (i = 0; i < m_num_spawn_pnts; i++)
-				{
-					int croom = m_create_room;
-					if (!ROOMNUM_OUTSIDE(m_create_room) && (Rooms[m_create_room].flags & RF_EXTERNAL))
-					{
-						croom = GetTerrainRoomFromPos(&m_create_pnt);
-					}
-
-					m_spawn_vis_effects[m_cur_saturation_count][i] = -1;
-
-
-					int visnum = VisEffectCreate(VIS_FIREBALL, SINE_WAVE_INDEX, croom, &m_create_pnt);
-					if (visnum >= 0)
-					{
-						vis_effect* vis = &VisEffects[visnum];
-						vis->lifeleft = 1;
-						vis->lifetime = 1;
-						vis->end_pos = m_spawn_vec[i];
-						vis->flags = VF_USES_LIFELEFT | VF_EXPAND;
-						vis->velocity.x = 1;
-						vis->velocity.y = 1;
-						m_spawn_vis_effects[m_cur_saturation_count][i] = visnum;
-					}
-				}
-
-				m_cur_saturation_count++;
-			}
-
-
-			// Move the viseffects if needed
-			for (i = 0; i < m_cur_saturation_count; i++)
-			{
-				for (int t = 0; t < m_num_spawn_pnts; t++)
-				{
-					int visnum = m_spawn_vis_effects[i][t];
-
-					if (visnum == -1)
-						continue;
-
-					ASSERT(visnum >= 0 && visnum < MAX_VIS_EFFECTS);
-
-
-					vis_effect* vis = &VisEffects[visnum];
-
-					vis->pos = m_create_pnt;
-					vis->end_pos = m_spawn_vec[t];
-				}
-			}
-
-
-			vector center = m_create_pnt;
-			size = (m_prod_mode_time / m_preprod_time) * size;
-
-
-			if (size > 0.0)
-				DrawColoredDisk(&center, 0.6f, 0.4f, 1.0f, .7f, 0, size, 1);
-		}
-		break;
-
-		case MEFFECT_PROCEDURAL_LIGHTNING:
-		{
-			int i;
-
-			int oi_index = m_prod_type[m_cached_prod_index];
-			PageInPolymodel(Object_info[oi_index].render_handle, Object_info[oi_index].type, &Object_info[oi_index].size);
-			float size;
-
-			if (oi_index >= 0)
-				size = Object_info[oi_index].size * 1.5;
-			else
-				size = 0.0f;
-
-			if (m_cur_saturation_count < MAX_MATCEN_EFFECT_SATURATION)
-			{
-				for (i = 0; i < m_num_spawn_pnts; i++)
-				{
-					int croom = m_create_room;
-					if (!ROOMNUM_OUTSIDE(m_create_room) && (Rooms[m_create_room].flags & RF_EXTERNAL))
-					{
-						croom = GetTerrainRoomFromPos(&m_create_pnt);
-					}
-
-					m_spawn_vis_effects[m_cur_saturation_count][i] = -1;
-
-					int visnum = VisEffectCreate(VIS_FIREBALL, THICK_LIGHTNING_INDEX, croom, &m_create_pnt);
-					if (visnum >= 0)
-					{
-						vis_effect* vis = &VisEffects[visnum];
-
-						vis->end_pos = m_spawn_vec[i];
-						vis->lifeleft = 1;
-						vis->lifetime = 1;
-						vis->flags = VF_USES_LIFELEFT | VF_EXPAND | VF_LINK_TO_VIEWER;
-						vis->billboard_info.width = std::max(1.f, size / 2);
-						vis->billboard_info.texture = 1;
-						vis->velocity.x = 1;
-						vis->velocity.y = 1;
-						vis->velocity.z = .5;
-						vis->lighting_color = GR_RGB16(255, 255, 255);
-
-						vis->custom_handle = m_creation_texture;
-						vis->size = vm_VectorDistanceQuick(&vis->pos, &vis->end_pos);
-						m_spawn_vis_effects[m_cur_saturation_count][i] = visnum;
-
-					}
-				}
-				m_cur_saturation_count++;
-			}
-
-			// Move the viseffects if needed
-			for (i = 0; i < m_cur_saturation_count; i++)
-			{
-				for (int t = 0; t < m_num_spawn_pnts; t++)
-				{
-					int visnum = m_spawn_vis_effects[i][t];
-
-					if (visnum == -1)
-						continue;
-
-					ASSERT(visnum >= 0 && visnum < MAX_VIS_EFFECTS);
-
-
-					vis_effect* vis = &VisEffects[visnum];
-					vis->pos = m_create_pnt;
-					vis->end_pos = m_spawn_vec[t];
-
-				}
-			}
-
-			vector center = m_create_pnt;
-			size = (m_prod_mode_time / m_preprod_time) * size;
-
-			if (size > 0.0)
-				DrawColoredDisk(&center, 0.3f, 0.5f, 1.0f, .7f, 0, size, 1);
-
-		}
-		break;
-
-		default:
-			return;
-		}
-	}
-	break;
-
-	case MMODE_POSTPROD:
-	{
-
-		/*switch(m_creation_effect)
-		{
-
-
-		}*/
-
-		return;
-
-	}
-	break;
-
-	default:
-		Int3(); // Get chris immediately
-	}
+    if (m_prod_mode != MMODE_PREPROD || !(m_preprod_time > 0) ||
+        m_cached_prod_index < 0 || m_cached_prod_index >= m_num_prod_types) return false;
+    const int type = m_prod_type[m_cached_prod_index];
+    if (type < 0 || type >= MAX_OBJECT_IDS || Object_info[type].type == OBJ_NONE) return false;
+    if (m_creation_effect != MEFFECT_LINE_LIGHTNING && m_creation_effect != MEFFECT_LINE_SINE_WAVE &&
+        m_creation_effect != MEFFECT_PROCEDURAL_LIGHTNING) return false;
+    disk.position = m_create_pnt; disk.room = m_create_room;
+    disk.radius = std::max(0.f,m_prod_mode_time/m_preprod_time)*Object_info[type].size*1.5f;
+    disk.sine = m_creation_effect == MEFFECT_LINE_SINE_WAVE;
+    return true;
+}
+
+void matcen::AdvanceVisuals()
+{
+    // Simulation owns persistent effects. A camera/thumbnail publication only
+    // reads the resulting effects and disk description; it never creates them.
+    MatcenVisualDisk disk;
+    if (!GetVisualDisk(disk)) return;
+    const int type = m_prod_type[m_cached_prod_index];
+    PageInPolymodel(Object_info[type].render_handle,Object_info[type].type,&Object_info[type].size);
+    const bool procedural = m_creation_effect == MEFFECT_PROCEDURAL_LIGHTNING;
+    const int id = procedural ? THICK_LIGHTNING_INDEX : disk.sine ? SINE_WAVE_INDEX : LIGHTNING_BOLT_INDEX;
+    const int saturation = procedural ? MAX_MATCEN_EFFECT_SATURATION : 1;
+    if (m_cur_saturation_count < saturation) {
+        int room = m_create_room;
+        if (!ROOMNUM_OUTSIDE(room) && (Rooms[room].flags & RF_EXTERNAL)) room = GetTerrainRoomFromPos(&m_create_pnt);
+        const int row = m_cur_saturation_count++;
+        for (int point = 0; point < m_num_spawn_pnts; ++point) {
+            const int slot = VisEffectCreate(VIS_FIREBALL,id,room,&m_create_pnt);
+            m_spawn_vis_effects[row][point] = slot;
+            if (slot < 0) continue;
+            auto& effect = VisEffects[slot];
+            effect.lifeleft = effect.lifetime = disk.sine || procedural ? 1.f : .8f;
+            effect.end_pos = m_spawn_vec[point]; effect.flags = VF_USES_LIFELEFT | VF_EXPAND;
+            effect.velocity.x = effect.lifeleft; effect.velocity.y = 1;
+            m_spawn_visual_generation[row][point] = VisEffectGeneration(slot);
+            if (procedural) {
+                effect.flags |= VF_LINK_TO_VIEWER;
+                effect.billboard_info.width = std::max(1.f,Object_info[type].size*.75f);
+                effect.billboard_info.texture = 1; effect.velocity.z = .5f;
+                effect.lighting_color = GR_RGB16(255,255,255);
+                effect.custom_handle = m_creation_texture;
+                effect.size = vm_VectorDistanceQuick(&effect.pos,&effect.end_pos);
+            }
+        }
+    }
+    for (int row = 0; row < m_cur_saturation_count; ++row)
+        for (int point = 0; point < m_num_spawn_pnts; ++point) {
+            const int slot = m_spawn_vis_effects[row][point];
+            if (slot < 0 || slot >= MAX_VIS_EFFECTS) continue;
+            auto& effect = VisEffects[slot];
+            // A recycled effect index is not this Matcen's allocation.
+            if (effect.type != VIS_FIREBALL || effect.id != id ||
+                VisEffectGeneration(slot) != m_spawn_visual_generation[row][point]) continue;
+            effect.pos = m_create_pnt; effect.end_pos = m_spawn_vec[point];
+        }
 }
 
 #endif // NEWEDITOR
@@ -2122,6 +1889,7 @@ void DoMatcensFrame()
 		if (Matcen[i])
 		{
 			Matcen[i]->DoThinkFrame();
+			Matcen[i]->AdvanceVisuals();
 		}
 	}
 }
@@ -2138,21 +1906,6 @@ void InitMatcensForLevel()
 		}
 	}
 }
-
-#ifndef NEWEDITOR
-
-void DoMatcensRenderFrame()
-{
-	for (int i = 0; i < Num_matcens; i++)
-	{
-		if (Matcen[i])
-		{
-			Matcen[i]->DoRenderFrame();
-		}
-	}
-}
-
-#endif // NEWEDITOR
 
 void DestroyMatcen(int id, bool f_resort = false)
 {

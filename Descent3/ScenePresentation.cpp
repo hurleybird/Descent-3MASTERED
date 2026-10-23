@@ -5,6 +5,7 @@
 #include "SceneCanvas.h"
 #include "SceneModuleContext.h"
 #include "SceneFeedback.h"
+#include "gamecinematics.h"
 #include "../renderer/SceneGeometry.h"
 #include "../renderer/SceneDependencies.h"
 #include "../renderer/SceneView.h"
@@ -683,15 +684,16 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance,const GameMainView
     { PERF_MARKER_SCOPE("Scene.PrepareScorches"); PrepareGameScorches(data); }
     if (overlays && main_view)
         PrepareFrameBlendCanvas(data,SceneFrameScreenBlend,main_view->world.viewport,*overlays,SceneGeometryInspection());
-    if (SceneGeometryInspection() && FindArg("-scene-cockpit-probe")) {
-        PERF_MARKER_SCOPE("Scene.PrepareCockpit");
-        PrepareGameCockpit(data,advance,previous_models ? &previous_models->data() : nullptr,retain_rooms);
-        PrepareCockpitComposition(data,{Game_window_x,Game_window_y,Game_window_w,Game_window_h},SceneCockpitZoom);
-    }
-    if (SceneGeometryInspection() && (FindArg("-scene-reticle-probe") || FindArg("-scene-hud-probe"))) {
+    if (main_view) PrepareCinematicCanvas(data);
+    if (main_view) {
         const auto layout = CaptureGameHUDLayout();
-        if (FindArg("-scene-reticle-probe")) PrepareGameReticle(data,layout);
-        if (FindArg("-scene-hud-probe")) PrepareGameHUD(data,layout,advance);
+        if (layout.cockpit && main_view->player_first_person) {
+            PERF_MARKER_SCOPE("Scene.PrepareCockpit");
+            PrepareGameCockpit(data,advance,previous_models ? &previous_models->data() : nullptr,retain_rooms);
+            PrepareCockpitComposition(data,{Game_window_x,Game_window_y,Game_window_w,Game_window_h},SceneCockpitZoom);
+        }
+        PrepareGameReticle(data,layout);
+        PrepareGameHUD(data,layout,advance);
     }
     PrepareGameInspectionBanner(data);
     if (SceneGeometryInspection() && FindArg("-scene-view-image-probe")) {

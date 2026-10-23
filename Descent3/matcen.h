@@ -52,6 +52,8 @@ extern char *MatcenEffectStrings[NUM_MATCEN_EFFECTS];
 // 2 - Added matcen effects
 // 3 - Added matcen active_sound_handle
 
+struct MatcenVisualDisk { vector position; float radius; int room; bool sine; };
+
 class matcen
 {
 	private:
@@ -80,6 +82,7 @@ class matcen
 	vector m_spawn_vec[MAX_SPAWN_PNTS];
 	vector m_spawn_normal[MAX_SPAWN_PNTS];
 	short m_spawn_vis_effects[MAX_MATCEN_EFFECT_SATURATION][MAX_SPAWN_PNTS];
+	uint64_t m_spawn_visual_generation[MAX_MATCEN_EFFECT_SATURATION][MAX_SPAWN_PNTS]{};
 
 	int m_max_prod;
 	
@@ -182,7 +185,8 @@ class matcen
 	bool SetStatus(int status, bool f_enable);  // Not all flags are settable
 	
 	void DoThinkFrame();
-	void DoRenderFrame();
+	void AdvanceVisuals();
+	bool GetVisualDisk(MatcenVisualDisk&) const;
 	
 	char GetCreationEffect();
 	bool SetCreationEffect(char effect_index);
@@ -214,7 +218,6 @@ void DestroyMatcen(int id, bool f_resort);
 bool MatcenValid(int id);
 
 void DoMatcensFrame();
-void DoMatcensRenderFrame();
 void InitMatcensForLevel();
 
 #endif

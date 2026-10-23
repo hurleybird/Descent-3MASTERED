@@ -15,6 +15,7 @@
 #include "object.h"
 #include "args.h"
 #include "weapon.h"
+#include "matcen.h"
 #include <cmath>
 #include <algorithm>
 namespace {
@@ -30,6 +31,70 @@ bool special(int id) {
 d3scene::Vec3 value(const vector& v) { return {v.x,v.y,v.z}; }
 d3scene::Transform basis(const matrix& m) { return {{},value(m.rvec),value(m.uvec),value(m.fvec)}; }
 float alphaByte(float alpha) { return static_cast<int>((std::max)(0.f,(std::min)(255.f,alpha*255.f)))/255.f; }
+void prepareMatcens(d3scene::FrameData& frame) {
+    unsigned count = 0;
+    for (int i = 0; i < Num_matcens; ++i) {
+        MatcenVisualDisk disk;
+        if (!Matcen[i] || !Matcen[i]->GetVisualDisk(disk) || !(disk.radius > 0)) continue;
+        d3scene::PreparedMesh mesh;
+        mesh.asset = d3scene::assets().radialDiskMesh(); mesh.room = disk.room;
+        mesh.world.position = value(disk.position); mesh.alignment = d3scene::MeshAlignment::Camera;
+        mesh.world.right.x = mesh.world.up.y = disk.radius;
+        auto& surface = mesh.surface;
+        surface.unlit = surface.two_sided = true; surface.blend = d3scene::BlendMode::Additive;
+        surface.depth = d3scene::DepthMode::ReadOnly; surface.alpha = .7f;
+        surface.color_modulation = disk.sine ? d3scene::Vec3{.6f,.4f,1} : d3scene::Vec3{.3f,.5f,1};
+        frame.meshes.push_back(std::move(mesh));
+        ++count;
+    }
+    if (count && AutomatedCapturePending()) AutomatedCaptureLog("scene Matcen disks=%u",count);
+}
+void prepareStroke(d3scene::FrameData& frame,d3scene::Vec3 from,d3scene::Vec3 to,
+    int room,d3scene::Vec3 color,float alpha,float bias = 0) {
+    if (from.x == to.x && from.y == to.y && from.z == to.z) return;
+    d3scene::PreparedMesh mesh;
+    mesh.asset = d3scene::assets().strokeMesh(); mesh.room = room;
+    mesh.world = d3scene::axisBillboardPlacement(from,to,0); mesh.raster_stroke_width = 1;
+    mesh.surface.unlit = mesh.surface.two_sided = true;
+    mesh.surface.depth = d3scene::DepthMode::ReadOnly;
+    mesh.surface.blend = d3scene::BlendMode::Additive; mesh.surface.alpha = alphaByte(alpha);
+    mesh.surface.base_color = color; mesh.surface.effect_depth_offset = bias;
+    frame.meshes.push_back(std::move(mesh));
+}
+bool prepareLineEffect(d3scene::FrameData& frame,const vis_effect& effect,unsigned slot) {
+    const bool sine = effect.id == SINE_WAVE_INDEX;
+    auto direction = effect.end_pos-effect.pos;
+    const float length = vm_NormalizeVector(&direction);
+    if (!(length >= 1) || !(effect.lifetime > 0)) return false;
+    const float density = sine ? effect.velocity.x : effect.velocity.y;
+    if (!std::isfinite(density) || !(density > 0)) return false;
+    const int count = int(std::min(sine ? 256.f : 50.f,length*density));
+    if (count < 2) return false;
+    float alpha = sine || (effect.flags & VF_EXPAND) ? effect.lifeleft/effect.lifetime : .7f;
+    if (!sine && !(effect.flags & VF_EXPAND) && (effect.flags & VF_NO_Z_ADJUST) && length > 30)
+        alpha *= std::max(0.f,1-(length-30)/150);
+    matrix plane; vm_VectorToMatrix(&plane,&direction,nullptr,nullptr);
+    auto previous = effect.pos;
+    uint32_t noise = uint32_t(std::floor(frame.simulation_time*60))*1664525u+slot*1013904223u;
+    const auto jitter = [&] { noise ^= noise << 13; noise ^= noise >> 17; noise ^= noise << 5;
+        return (int(noise%200)-100)/100.f; };
+    const auto packed = GR_16_TO_COLOR(effect.lighting_color);
+    const auto color = effect.id == GRAY_LIGHTNING_BOLT_INDEX ?
+        d3scene::Vec3{GR_COLOR_RED(packed)/255.f,GR_COLOR_GREEN(packed)/255.f,GR_COLOR_BLUE(packed)/255.f} :
+        d3scene::Vec3{10/255.f,60/255.f,200/255.f};
+    // One immutable path for all cameras, generated without simulation RNG.
+    // Segments share canonical topology and allocate no per-segment geometry.
+    for (int i = 1; i < count; ++i) {
+        auto next = i == count-1 ? effect.end_pos : effect.pos+direction*(length*i/(count-1));
+        if (sine) {
+            const auto phase = d3scene::visualAngle(frame.simulation_time,2000,slot*5000+i*4000);
+            if (i < count-1) next += plane.rvec*(FixCos(phase)*effect.velocity.y)+plane.uvec*(FixSin(phase)*effect.velocity.y);
+        } else if (i < count-1) next += plane.rvec*(jitter()*effect.velocity.x)+plane.uvec*(jitter()*effect.velocity.x);
+        prepareStroke(frame,value(previous),value(next),effect.roomnum,color,alpha,(effect.flags & VF_ATTACHED) ? -.1f : 0);
+        previous = next;
+    }
+    return true;
+}
 bool prepareRainDrop(d3scene::FrameData& frame,const vis_effect& effect,const d3scene::MeshAssetRef& quad,
     const GameMainView* main_view) {
     const bool windshield = effect.id == RAINDROP_INDEX;
@@ -364,12 +429,18 @@ void PrepareGameObjectEffects(d3scene::FrameData& frame) {
     }
 }
 void PrepareGameEffects(d3scene::FrameData& frame,const GameMainView* main_view) {
+    prepareMatcens(frame);
     if (!VisEffects) return;
     const auto quad = d3scene::assets().quadMesh();
     unsigned prepared = 0, pending = 0, windshield = 0;
     for (int slot = 0; slot <= Highest_vis_effect_index; ++slot) {
         const auto& effect = VisEffects[slot];
         if (effect.type == VIS_NONE || (effect.flags & VF_DEAD)) continue;
+        if (effect.type == VIS_FIREBALL && (effect.id == LIGHTNING_BOLT_INDEX ||
+            effect.id == GRAY_LIGHTNING_BOLT_INDEX || effect.id == SINE_WAVE_INDEX)) {
+            if (prepareLineEffect(frame,effect,slot)) ++prepared;
+            continue;
+        }
         if (effect.type == VIS_FIREBALL && (effect.id == RAINDROP_INDEX || effect.id == PUDDLEDROP_INDEX)) {
             if (prepareRainDrop(frame,effect,quad,main_view)) {
                 ++prepared;
@@ -454,6 +525,8 @@ void PrepareGameEffects(d3scene::FrameData& frame,const GameMainView* main_view)
         sprite.surface.unlit = true; sprite.surface.two_sided = true;
         sprite.surface.texture_alpha = true; sprite.surface.texture_wrap = false;
         sprite.surface.soft_depth_range = Render_soft_vis_effects && !(effect.flags & VF_NO_SOFT_PARTICLES) ? 2.f : 0.f;
+        sprite.surface.effect_depth_offset = (effect.flags & VF_NO_Z_ADJUST) ||
+            (definition.type == FT_SMOKE && sprite.surface.soft_depth_range > 0) ? 0 : -size;
         if (custom) sprite.surface.blend = material->flags & TF_SATURATE ? d3scene::BlendMode::Additive : d3scene::BlendMode::Alpha;
         else if (effect.id == BLACK_SMOKE_INDEX) sprite.surface.blend = d3scene::BlendMode::Multiply;
         else if ((definition.type == FT_SMOKE && effect.id != MED_SMOKE_INDEX) || effect.id == RUBBLE1_INDEX || effect.id == RUBBLE2_INDEX)

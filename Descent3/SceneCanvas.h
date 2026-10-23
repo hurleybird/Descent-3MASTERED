@@ -8,6 +8,7 @@ struct HUDCanvasRequest {
     d3scene::Rect world, display;
     HUDViewMode mode = HUDViewMode::Hidden;
     bool centered_four_three = true, show_ship_reticle = true;
+    bool show_cockpit = false;
     uint16_t item_mask = 0;
     bool aim_on_target = false;
     float zoom_distance = 0;
@@ -17,6 +18,7 @@ struct HUDCanvasLayout {
     HUDAimMode aim = HUDAimMode::Hidden;
     uint16_t item_mask = 0;
     bool auxiliary = false;
+    bool cockpit = false;
     bool aim_on_target = false;
     float zoom_distance = 0;
 };

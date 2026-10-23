@@ -2608,6 +2608,7 @@ HUDCanvasLayout CaptureGameHUDLayout()
     const auto mode = GetHUDMode();
     request.centered_four_three = mode == HUD_FULLSCREEN || mode == HUD_COCKPIT;
     request.show_ship_reticle = Game_toggles.show_reticle;
+    request.show_cockpit = IsValidCockpit() && CockpitState() != COCKPIT_STATE_DORMANT;
     request.item_mask = Hud_stat_mask;
     if (IsCleanGameplayScreenshotActive())
         request.item_mask &= STAT_PRIMARYLOAD | STAT_SECONDARYLOAD | STAT_SHIELDS | STAT_ENERGY | STAT_AFTERBURN;

@@ -2910,11 +2910,7 @@ void GameDrawMainView(const d3scene::Presentation& presentation, SceneFeedbackTr
 	}
 	rend_PerfGpuSceneMark(RENDERER_GPU_SCENE_AFTER_ROOM_CHANGE);
 
-	// Draw Matcen Effects
-	{
-		PERF_MARKER_SCOPE("DoMatcensRenderFrame");
-		if (!SceneGeometryInspection()) DoMatcensRenderFrame();
-	}
+	// Matcen effects already belong to the published world. No draw-time update.
 	rend_PerfGpuSceneMark(RENDERER_GPU_SCENE_AFTER_MATCENS);
 
 	// Render only immutable screen-blend data. Queue callbacks already advanced
@@ -3106,10 +3102,71 @@ void GameRenderFrame(void)
 			float rgba[4] = {1,1,1,.1f};
 			CreateNewEvent(RENDER_EVENT,FUSION_EFFECT,0,rgba,sizeof(rgba),DrawAlphaEvent);
 		}
+		if (SceneGeometryInspection() && FindArg("-scene-integration-effects-probe") && AutomatedCaptureFrameIndex() == 20 && Viewer_object) {
+			const auto center = Viewer_object->pos+Viewer_object->orient.fvec*12;
+			for (int i = 0; i < 3; ++i) {
+				auto from = center-Viewer_object->orient.rvec*4+Viewer_object->orient.uvec*float(2-i*2);
+				const int slot = VisEffectCreate(VIS_FIREBALL,i == 0 ? LIGHTNING_BOLT_INDEX : i == 1 ? GRAY_LIGHTNING_BOLT_INDEX : SINE_WAVE_INDEX,Viewer_object->roomnum,&from);
+				if (slot < 0) Error("Integration line effect allocation failed");
+				auto& effect = VisEffects[slot]; effect.end_pos = from+Viewer_object->orient.rvec*8;
+				effect.lifeleft = effect.lifetime = 8; effect.flags = VF_USES_LIFELEFT | VF_EXPAND;
+				effect.velocity = {2,1,0}; effect.lighting_color = GR_RGB16(220,240,255);
+			}
+			if (ROOMNUM_OUTSIDE(Viewer_object->roomnum)) Error("Integration Matcen fixture requires an indoor save");
+			int type = -1;
+			for (int i = 0; i <= Highest_object_index; ++i) if (Objects[i].type == OBJ_ROBOT) { type = Objects[i].id; break; }
+			bool changed = false; char name[] = "IntegrationVisuals";
+			const int index = CreateMatcen(name,&changed);
+			if (index < 0 || type < 0) Error("Integration Matcen fixture has no producer/type");
+			auto& producer = *Matcen[index];
+			producer.SetAttachType(MT_ROOM); producer.SetAttach(Viewer_object->roomnum);
+			producer.SetNumSpawnPnts(1); producer.SetSpawnPnt(0,0);
+			producer.SetStatus(MSTAT_MANUAL_UPDATE_CREATE_PNT | MSTAT_NOT_HURT_PLAYER | MSTAT_ACTIVE,true);
+			auto position = center-Viewer_object->orient.uvec*4;
+			producer.SetCreatePnt(&position); producer.SetCreateRoom(Viewer_object->roomnum);
+			producer.SetMaxProd(-1); producer.SetNumProdTypes(1);
+			int priority = 100, maximum = -1; float delay = 0;
+			producer.SetProdInfo(0,&type,&priority,&delay,&maximum);
+			producer.SetPreProdTime(2); producer.Reset();
+			producer.SetStatus(MSTAT_ACTIVE,true);
+			producer.DoThinkFrame(); producer.AdvanceVisuals();
+			MatcenVisualDisk disk;
+			if (!producer.GetVisualDisk(disk)) Error("Integration Matcen failed to enter preproduction: attach=%d status=%d",producer.GetAttachType(),producer.GetStatus());
+			AutomatedCaptureLog("scene integration Matcen created index=%d source_type=%d",index,type);
+		}
 		const auto& screen_overlays = AdvanceFrameOverlayEvents(d3scene::assets().lifetime(),uint64_t(FrameCount));
 		if (!screen_overlays.empty() && AutomatedCapturePending())
 			AutomatedCaptureLog("scene frame overlays logical_frame=%d count=%u queued=%d",FrameCount,
 				(unsigned)screen_overlays.size(),Num_events);
+		if (SceneGeometryInspection() && FindArg("-scene-integration-cinematic-probe") && AutomatedCaptureFrameIndex() == 20 && Viewer_object) {
+			tGameCinematic info{};
+			info.flags = GCF_USEPOINT | GCF_LAYOUT_MIDDLE | GCF_TEXT_FADEINOUT;
+			info.target_objhandle = Player_object->handle; info.position = Viewer_object->pos;
+			info.orient = &Viewer_object->orient; info.room = Viewer_object->roomnum;
+			info.max_time_play = 1.5f; info.end_transition = GCTT_FADE;
+			const int option = FindArg("-scene-integration-cinematic-probe");
+			const char* transition = GetArg(option+1);
+			if (transition && transition[0] >= '0' && transition[0] <= '4' && !transition[1])
+				info.end_transition = transition[0]-'0';
+			if (info.end_transition == GCTT_WACKY)
+				info.flags = GCF_USEPOINT | GCF_LAYOUT_TOP | GCF_TEXT_WIPEIN;
+			if (info.end_transition == GCTT_FADEINOUT) info.flags |= GCF_DOTRANSBEFORETEXT;
+			info.text_display = info.player_disabled = info.in_camera_view = {0,1};
+			info.track_target = info.quick_exit = {1,1};
+			info.callback = [](int type) {
+				static int last_frame = -1, calls = 0;
+				if (type == GCCT_START) { last_frame = -1; calls = 0; }
+				if (type == GCCT_FRAME) {
+					if (last_frame == FrameCount) Error("Cinematic callback repeated within logical frame");
+					last_frame = FrameCount; ++calls;
+				}
+				if (type != GCCT_FRAME || AutomatedCapturePending())
+					AutomatedCaptureLog("scene cinematic callback type=%d logical_frame=%d calls=%d",type,FrameCount,calls);
+			};
+			char text[] = "Renderer integration|Cinematic presentation";
+			if (!Cinematic_Start(&info,text)) Error("Integration cinematic did not start");
+		}
+		AdvanceCinematicPresentation(d3scene::assets().lifetime(),uint64_t(FrameCount));
 		const auto main_view = CaptureGameMainView();
 		const auto presentation = SceneGeometryInspection() && FindArg("-scene-automap-probe") ?
 			PrepareAutomapInspection() : PrepareGamePresentation(true,&main_view,&screen_overlays);
@@ -3166,7 +3223,7 @@ void GameRenderFrame(void)
 		if (SceneGeometryInspection()) RenderGameForegrounds(*presentation,d3scene::ForegroundPhase::WorldOverlay);
 
 		// Do Cockpit/Hud
-		// Cinematics own their presentation through Cinematic_RenderFrame below.
+		// Cinematics own their immutable final canvas below.
 		// Do not run either the primary or auxiliary gameplay HUD while one is active.
 		if (!HUD_disabled && !Cinematic_inuse && !SceneGeometryInspection())
 		{
@@ -3177,13 +3234,11 @@ void GameRenderFrame(void)
 
 		// Render Ingame Cinematics
 		{
-			PERF_MARKER_SCOPE("Cinematic_RenderFrame");
-			const bool cinematic_frame = Cinematic_inuse;
-			if (cinematic_frame)
-				StartFrame(0, 0, Max_window_w, Max_window_h, false);
-			if (!SceneGeometryInspection()) Cinematic_RenderFrame();
-			if (cinematic_frame)
-				EndFrame();
+			PERF_MARKER_SCOPE("Scene.CinematicPresentation");
+			RenderGameForegrounds(*presentation,d3scene::ForegroundPhase::PostHUD);
+			CommitCinematicFrame(d3scene::assets().lifetime(),uint64_t(FrameCount));
+			if (FindArg("-scene-integration-cinematic-probe"))
+				CommitCinematicFrame(d3scene::assets().lifetime(),uint64_t(FrameCount)); // deliberate cadence replay
 		}
 		rend_PerfGpuSceneMark(RENDERER_GPU_SCENE_AFTER_CINEMATIC);
 
