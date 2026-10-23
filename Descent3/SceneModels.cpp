@@ -9,6 +9,7 @@
 #include "objinfo.h"
 #include "polymodel.h"
 #include "weapon.h"
+#include "SceneWeaponVisuals.h"
 #include "marker.h"
 #include "../model/ModelPose.h"
 #include "../model/SceneModelAsset.h"
@@ -270,8 +271,7 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::Presenta
         }
         if (!owner.visible) continue;
         if (source->render_type != RT_POLYOBJ && source->render_type != RT_WEAPON) continue;
-        if (source->render_type == RT_WEAPON && (Weapons[source->id].flags &
-            (WF_IMAGE_BITMAP | WF_IMAGE_VCLIP | WF_INVISIBLE | WF_ELECTRICAL))) continue;
+        if (source->render_type == RT_WEAPON && CompileWeaponVisuals(Weapons[source->id].flags).body != WeaponBodyVisual::Model) continue;
         d3scene::ModelInstance instance;
         instance.identity = uint64_t(owner.handle)+1;
         instance.owner = owner.handle; instance.has_owner = true; instance.room = owner.room;

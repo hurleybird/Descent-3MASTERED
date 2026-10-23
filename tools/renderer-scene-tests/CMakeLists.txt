@@ -14,6 +14,7 @@ add_executable(renderer_scene_tests
     feedback_tests.cpp
     frame_tests.cpp
     event_tests.cpp
+    effect_tests.cpp
     canvas_tests.cpp
     module_context_tests.cpp
     automap_tests.cpp

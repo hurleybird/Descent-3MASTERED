@@ -15,6 +15,7 @@
 #include "object.h"
 #include "args.h"
 #include "weapon.h"
+#include "SceneWeaponVisuals.h"
 #include "matcen.h"
 #include "polymodel.h"
 #include <array>
@@ -40,6 +41,39 @@ struct FragmentAsset {
 };
 std::array<FragmentAsset,MAX_OBJECTS> FragmentAssets{};
 uint64_t FragmentLifetime = 0;
+enum class EffectTopology { BlastRing, GravityDisk, WeaponRingEven, WeaponRingOdd };
+d3scene::MeshAssetRef effectTopology(EffectTopology kind) {
+    static uint64_t lifetime = 0;
+    static std::array<d3scene::MeshAssetRef,4> assets{};
+    if (lifetime != d3scene::assets().lifetime()) { assets.fill({}); lifetime = d3scene::assets().lifetime(); }
+    auto& asset = assets[size_t(kind)];
+    if (!asset) {
+        const bool disk = kind == EffectTopology::GravityDisk;
+        const bool weapon = kind == EffectTopology::WeaponRingEven || kind == EffectTopology::WeaponRingOdd;
+        const int segments = disk ? 32 : 20;
+        const float inner = disk ? 0.f : weapon ? .8f : .5f;
+        auto geometry = d3scene::billboardRing(inner,disk ? 255 : weapon ? 85 : 0,disk ? 0 : 255,segments);
+        for (int i = 0; i < segments; ++i) {
+            const auto angle = static_cast<::angle>(i*(65536/segments));
+            geometry.vertices[i*2] = {FixCos(angle),FixSin(angle),0};
+            geometry.vertices[i*2+1] = {FixCos(angle)*inner,FixSin(angle)*inner,0};
+        }
+        if (weapon) {
+            const size_t odd = kind == EffectTopology::WeaponRingOdd ? 1 : 0;
+            for (size_t i = 0; i < 10; ++i) if (i != i*2+odd) geometry.polygons[i] = std::move(geometry.polygons[i*2+odd]);
+            geometry.polygons.resize(10);
+        } else if (!disk) {
+            for (auto& polygon : geometry.polygons) {
+                polygon.corners[0].u = 0; polygon.corners[0].v = 0;
+                polygon.corners[1].u = 1; polygon.corners[1].v = 0;
+                polygon.corners[2].u = 1; polygon.corners[2].v = 1;
+                polygon.corners[3].u = 0; polygon.corners[3].v = 1;
+            }
+        }
+        asset = d3scene::assets().createMesh(std::move(geometry));
+    }
+    return asset;
+}
 bool prepareFragment(d3scene::FrameData& frame,const d3scene::ObjectState& owner,const object& source) {
     const bool shard = source.type == OBJ_SHARD && source.render_type == RT_SHARD;
     const bool splinter = source.type == OBJ_SPLINTER && source.render_type == RT_SPLINTER;
@@ -233,23 +267,13 @@ bool prepareFadingLine(d3scene::FrameData& frame,const vis_effect& effect) {
     return true;
 }
 d3scene::PreparedMesh prepareRing(float radius,float phase,float alpha,int bitmap,int room) {
-    // One immutable topology/material-coordinate layout, with frame-owned
-    // procedural positions. No new asset revision for every expanding ring.
-    auto geometry = d3scene::billboardRing(.5f,0,255,20);
-    for (auto& polygon : geometry.polygons) {
-        polygon.corners[0].u = 0; polygon.corners[0].v = 0;
-        polygon.corners[1].u = 1; polygon.corners[1].v = 0;
-        polygon.corners[2].u = 1; polygon.corners[2].v = 1;
-        polygon.corners[3].u = 0; polygon.corners[3].v = 1;
-    }
+    // Shape and opacity profile are canonical; radius/phase are instance data.
     d3scene::PreparedMesh ring;
-    ring.asset = d3scene::assets().publishMesh(5,std::move(geometry));
+    ring.asset = effectTopology(EffectTopology::BlastRing);
     ring.room = room;
-    for (int i = 0; i < 20; ++i) {
-        const auto angle = static_cast<::angle>((i*(65536/20)+static_cast<int>(phase*65536))%65536);
-        const float x = FixCos(angle)*radius, y = FixSin(angle)*radius;
-        ring.vertices.push_back({x,y,0}); ring.vertices.push_back({x*.5f,y*.5f,0});
-    }
+    const auto angle = static_cast<::angle>(int(phase*65536)%65536);
+    ring.world.right = {FixCos(angle)*radius,FixSin(angle)*radius,0};
+    ring.world.up = {-FixSin(angle)*radius,FixCos(angle)*radius,0};
     auto& surface = ring.surface;
     surface.bitmap = bitmap; surface.unlit = true; surface.two_sided = true;
     surface.texture_alpha = true; surface.texture_wrap = true;
@@ -268,12 +292,13 @@ bool prepareVisRing(d3scene::FrameData& frame,const vis_effect& effect) {
         vector normal = effect.end_pos;
         if (vm_GetMagnitudeFast(&normal) < .5f) return false;
         matrix plane; vm_VectorToMatrix(&plane,&normal,nullptr,nullptr);
-        ring.world = basis(plane);
+        ring.world = d3scene::compose(basis(plane),ring.world);
     } else {
         ring.alignment = d3scene::MeshAlignment::FacingEye;
         // FacingEye's canonical forward points away from the eye; this authored
         // effect uses the opposite normal, including its texture handedness.
-        ring.world.right = {-1,0,0}; ring.world.forward = {0,0,-1};
+        d3scene::Transform flip; flip.right = {-1,0,0}; flip.forward = {0,0,-1};
+        ring.world = d3scene::compose(flip,ring.world);
     }
     ring.world.position = value(effect.pos);
     ring.surface.u_offset = life; ring.surface.effect_depth_offset = -1;
@@ -294,8 +319,9 @@ bool prepareObjectRing(d3scene::FrameData& frame,const d3scene::ObjectState& own
     // The old gravity draw forced ObjSetOrient(identity) during rendering.
     // This is a presentation choice, never a simulation orientation update.
     const auto& orientation = gravity ? Identity_matrix : source.orient;
-    ring.world = basis(orientation);
-    ring.world.up = value(orientation.fvec); ring.world.forward = value(-orientation.uvec);
+    auto plane = basis(orientation);
+    plane.up = value(orientation.fvec); plane.forward = value(-orientation.uvec);
+    ring.world = d3scene::compose(plane,ring.world);
     ring.world.position = value(source.pos); ring.has_owner = true; ring.owner = owner.handle;
     ring.surface.effect_depth_offset = -radius*.5f;
     ring.surface.soft_depth_range = Render_soft_vis_effects ? 2.f : 0.f;
@@ -303,14 +329,11 @@ bool prepareObjectRing(d3scene::FrameData& frame,const d3scene::ObjectState& own
     const int disk_bitmap = Fireballs[SHRINKING_BLAST_INDEX].bm_handle;
     if (gravity && disk_scale > 0) {
         d3scene::PreparedMesh disk;
-        disk.asset = d3scene::assets().publishMesh(6,d3scene::billboardRing(0,255,0,32));
+        disk.asset = effectTopology(EffectTopology::GravityDisk);
         disk.has_owner = true; disk.owner = owner.handle; disk.room = source.roomnum;
         disk.alignment = d3scene::MeshAlignment::Camera; disk.world.position = value(source.pos);
         const float size = disk_scale*source.ctype.blast_info.max_size;
-        for (int i = 0; i < 32; ++i) {
-            disk.vertices.push_back({FixCos(i*(65536/32))*size,FixSin(i*(65536/32))*size,0});
-            disk.vertices.push_back({0,0,0});
-        }
+        disk.world.right.x = size; disk.world.up.y = size;
         disk.surface = ring.surface; disk.surface.bitmap = -1; disk.surface.texture_alpha = false;
         disk.surface.alpha = .9f; disk.surface.base_color = {.3f,.5f,1};
         frame.meshes.push_back(std::move(disk));
@@ -399,6 +422,74 @@ bool prepareAxisEffect(d3scene::FrameData& frame,const vis_effect& effect,const 
     frame.meshes.push_back(std::move(rod));
     return true;
 }
+void prepareWeaponContributions(d3scene::FrameData& frame,const d3scene::ObjectState& owner,
+    const object& source,const d3scene::MeshAssetRef& quad) {
+    const auto& weapon = Weapons[source.id];
+    const auto plan = CompileWeaponVisuals(weapon.flags);
+    const float remaining = source.lifetime > 0 ? std::max(0.f,std::min(1.f,source.lifeleft/source.lifetime)) : 0;
+    const float streamer_remaining = source.lifetime > 0 ?
+        std::max(0.f,std::min(1.f,1-float(frame.simulation_time-source.creation_time)/source.lifetime)) : 0;
+    const d3scene::Vec3 color{weapon.lighting_info.red_light1,weapon.lighting_info.green_light1,weapon.lighting_info.blue_light1};
+    if (plan.streamer && source.lifetime > 0) {
+        const auto* parent = ObjGet(source.parent_handle);
+        if (parent) {
+            const float length = vm_VectorDistance(&parent->pos,&source.pos);
+            if (length > .00001f && streamer_remaining > 0) {
+                d3scene::PreparedMesh stroke;
+                stroke.asset = d3scene::assets().fadingStrokeMesh();
+                stroke.world = d3scene::axisBillboardPlacement(value(source.pos),value(source.pos-source.orient.fvec*length),0);
+                stroke.raster_stroke_width = 1; stroke.room = owner.room;
+                stroke.has_owner = true; stroke.owner = owner.handle;
+                stroke.surface.unlit = stroke.surface.two_sided = true;
+                stroke.surface.blend = d3scene::BlendMode::Alpha;
+                stroke.surface.depth = d3scene::DepthMode::ReadOnly;
+                stroke.surface.alpha = streamer_remaining*.3f; stroke.surface.base_color = color;
+                frame.meshes.push_back(std::move(stroke));
+            }
+        }
+    }
+    if (!plan.ring || !(source.size > 0) || !(remaining > 0)) return;
+    if (weapon.flags & (WF_IMAGE_BITMAP | WF_IMAGE_VCLIP)) {
+        int bitmap = -1;
+        if (weapon.flags & WF_IMAGE_BITMAP) bitmap = GetWeaponFireImageAtTime(source.id,0,float(frame.simulation_time));
+        else {
+            const int clip = weapon.fire_image_handle;
+            if (clip < 0 || clip >= MAX_VCLIPS || !GameVClips[clip].used) return;
+            PageInVClip(clip);
+            const auto& animation = GameVClips[clip];
+            if (!animation.frames || animation.num_frames <= 0) return;
+            bitmap = animation.frames[d3scene::animationFrames(animation.num_frames,std::min(.999f,1-remaining),false).frame0];
+        }
+        if (bitmap <= BAD_BITMAP_HANDLE || bitmap >= MAX_BITMAPS || !GameBitmaps[bitmap].used) return;
+        const int width = bm_w(bitmap,0),height = bm_h(bitmap,0);
+        if (width <= 0 || height <= 0) return;
+        for (int i = 0; i < 20; ++i) {
+            const auto angle = static_cast<::angle>(i*(65536/20));
+            matrix spin; vm_AnglesToMatrix(&spin,0,0,angle); vm_TransposeMatrix(&spin);
+            d3scene::PreparedMesh blob; blob.asset = quad;
+            blob.world = basis(spin); blob.alignment = d3scene::MeshAlignment::Camera;
+            blob.world.position = value(source.pos+(source.orient.rvec*FixCos(angle)+source.orient.uvec*FixSin(angle))*source.size);
+            blob.world.right = value(spin.rvec*(source.size*.25f));
+            blob.world.up = value(spin.uvec*(source.size*.25f*height/width));
+            blob.has_owner = true; blob.owner = owner.handle; blob.room = owner.room;
+            blob.surface.bitmap = bitmap; blob.surface.texture_alpha = true; blob.surface.texture_wrap = false;
+            blob.surface.unlit = blob.surface.two_sided = true; blob.surface.alpha = alphaByte(remaining);
+            blob.surface.blend = d3scene::BlendMode::Alpha; blob.surface.depth = d3scene::DepthMode::ReadOnly;
+            frame.meshes.push_back(std::move(blob));
+        }
+    } else {
+        d3scene::PreparedMesh ring;
+        ring.asset = effectTopology(OBJNUM(&source)%2 ? EffectTopology::WeaponRingOdd : EffectTopology::WeaponRingEven);
+        ring.world = owner.current;
+        ring.world.right = value(source.orient.rvec*source.size);
+        ring.world.up = value(source.orient.uvec*source.size);
+        ring.has_owner = true; ring.owner = owner.handle; ring.room = owner.room;
+        ring.surface.unlit = ring.surface.two_sided = true;
+        ring.surface.blend = d3scene::BlendMode::Additive; ring.surface.depth = d3scene::DepthMode::ReadOnly;
+        ring.surface.base_color = color; ring.surface.alpha = remaining*.3f;
+        frame.meshes.push_back(std::move(ring));
+    }
+}
 }
 // Object effects share owned geometry with model attachments. Publication is
 // after object eligibility; per-view exclusion is applied by the scene query.
@@ -412,6 +503,13 @@ void PrepareGameObjectEffects(d3scene::FrameData& frame) {
     for (const auto& owner : frame.objects) {
         auto* source = ObjGet(owner.handle);
         if (!source || !owner.visible) continue;
+        if (source->render_type == RT_WEAPON && source->type == OBJ_WEAPON && source->id < MAX_WEAPONS) {
+            const auto before = frame.meshes.size();
+            prepareWeaponContributions(frame,owner,*source,quad);
+            if (frame.meshes.size() != before && AutomatedCapturePending())
+                AutomatedCaptureLog("scene weapon independent contributions owner=%u invisible=%d meshes=%u",owner.handle,
+                    (Weapons[source->id].flags & WF_INVISIBLE) != 0,unsigned(frame.meshes.size()-before));
+        }
         if (prepareFragment(frame,owner,*source)) { ++fragments; continue; }
         if (source->render_type == RT_FIREBALL && source->type == OBJ_FIREBALL && source->id == SMOLDERING_INDEX) {
             const int clip = Fireballs[SMOLDERING_INDEX].bm_handle;
@@ -424,7 +522,7 @@ void PrepareGameObjectEffects(d3scene::FrameData& frame) {
             smoke.has_owner = true; smoke.owner = owner.handle; smoke.room = owner.room;
             smoke.alignment = d3scene::MeshAlignment::Axis;
             auto top = value(source->pos); top.y += source->ctype.blast_info.max_size;
-            smoke.world = d3scene::axisBillboardPlacement(value(source->pos),top,10);
+            smoke.world = d3scene::axisBillboardPlacement(top,value(source->pos),10);
             smoke.surface.bitmap = bitmap; smoke.surface.unlit = smoke.surface.two_sided = true;
             smoke.surface.texture_alpha = true; smoke.surface.texture_wrap = false;
             smoke.surface.alpha = alphaByte(.4f); smoke.surface.blend = d3scene::BlendMode::Alpha;
@@ -439,8 +537,7 @@ void PrepareGameObjectEffects(d3scene::FrameData& frame) {
         }
         if (source->render_type == RT_WEAPON && source->type == OBJ_WEAPON) {
             const auto& weapon = Weapons[source->id];
-            if (!(weapon.flags & (WF_IMAGE_BITMAP | WF_IMAGE_VCLIP)) ||
-                (weapon.flags & (WF_INVISIBLE | WF_ELECTRICAL)) || WeaponIsCloseScreenEffectObject(source)) continue;
+            if (CompileWeaponVisuals(weapon.flags).body != WeaponBodyVisual::Sprite || WeaponIsCloseScreenEffectObject(source)) continue;
             if (weapon.flags & WF_IMAGE_VCLIP) {
                 const int clip = weapon.fire_image_handle;
                 if (clip < 0 || clip >= MAX_VCLIPS || !GameVClips[clip].used) continue;
@@ -770,7 +867,7 @@ void PrepareGameEffects(d3scene::FrameData& frame,const GameMainView* main_view)
         for (size_t i = first_gravity_mesh; i < frame.meshes.size(); ++i) frame.meshes[i].has_owner = false;
         prepared += 6;
         if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
-            AutomatedCaptureLog("scene ring fixture facing=1 planar_reverse=1 object=1 gravity=1 prepared_positions=224");
+            AutomatedCaptureLog("scene ring fixture facing=1 planar_reverse=1 object=1 gravity=1 shared_topology=1");
     }
     if (windshield) {
         d3scene::PreparedForeground foreground;

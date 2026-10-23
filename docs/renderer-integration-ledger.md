@@ -365,3 +365,32 @@ alpha0.4. No live gameplay caller has been established. Its fixture visibly
 produces a rectangular haze, so appearance is NOT signed off merely because the
 API executes. Evidence: integration-fragments-smolder-20261023. I12 remains open
 for natural destruction/portal/mirror/reuse qualification and this content review.
+
+## Independent weapon contributions and canonical rings (I10 partial)
+
+CompileWeaponVisuals is the shared source contract for body Model/Sprite/
+Electrical/None and independent ring/streamer admission. Model and effect
+publishers consume it; an invisible or nonsprite body no longer discards those
+contributions.80CPU combinations cover body precedence and independent flags.
+Streamers publish shared one-pixel fading stroke topology with authored lifetime
+alpha/endpoints/color. Sprite rings use the authored20camera-facing blobs and
+lifetime animation selection. Model rings use one of two shared alternating-
+sector assets, with pose/radius/alpha only in the instance. Owner handles retain
+allocation generations. Electrical body and close-screen domain work remain.
+
+The real ObjCreate/ObjInitWeapon fixture uses private copies of authored sprite
+and model definitions, with visible and invisible variants. It emits21independent
+meshes for each sprite variant and2for each model variant, while only visible
+bodies appear. integration-weapon-contributions-20261023 and
+integration-weapon-plan-final-20261023 execute GL-clean. The sprite rings and
+body suppression are plainly visible; the low-opacity model-ring/stroke output
+still needs more isolated visual qualification, not just admission counts.
+
+Existing blast/gravity rings also now share canonical source-created assets.
+Their old path rebuilt nested polygon vectors and procedural position arrays
+every publication; expansion/phase now compose an affine instance transform.
+The paired ring fixture differs in0.0384%of pixels, maximum1/255/channel, none
+above2; ordinary003 differs in0.0051%, also maximum1, from transform arithmetic.
+No appearance degradation was detected. Evidence: integration-ring-{before,after}
+and integration-weapon-normal-20261023. Engine and all three suites pass. No
+whole-frame performance claim or I10/I11 completion is made from these fixtures.

@@ -3091,6 +3091,32 @@ void GameRenderFrame(void)
 
 		// Publish once. Every world view below sees this same owned scene, not
 		// a second traversal of mutable simulation state.
+		if (AutomatedCaptureFrameIndex() == 0 && FindArg("-scene-weapon-contributions-probe") && Player_object) {
+			int sprite = -1,model = -1;
+			for (int i = 0; i < MAX_WEAPONS; ++i) if (Weapons[i].used && !(Weapons[i].flags & (WF_ELECTRICAL | WF_INVISIBLE))) {
+				if (Weapons[i].flags & (WF_IMAGE_BITMAP | WF_IMAGE_VCLIP)) { if (sprite < 0) sprite = i; }
+				else if (model < 0 && Weapons[i].fire_image_handle >= 0) model = i;
+			}
+			if (sprite < 0 || model < 0) Error("Weapon contribution fixture has no authored sprite/model prototype");
+			for (int variant = 0; variant < 4; ++variant) {
+				const int definition = AllocWeapon();
+				if (definition < 0) Error("Weapon contribution fixture has no definition slot");
+				Weapons[definition] = Weapons[variant < 2 ? sprite : model];
+				strcpy(Weapons[definition].name,"Integration contributions");
+				Weapons[definition].flags |= WF_STREAMER | WF_RING;
+				if (variant%2) Weapons[definition].flags |= WF_INVISIBLE;
+				Weapons[definition].lighting_info.red_light1 = .4f;
+				Weapons[definition].lighting_info.green_light1 = .8f;
+				Weapons[definition].lighting_info.blue_light1 = 1;
+				auto position = Player_object->pos+Player_object->orient.fvec*12+
+					Player_object->orient.rvec*((variant-1.5f)*3);
+				const int index = ObjCreate(OBJ_WEAPON,definition,Player_object->roomnum,&position,&Player_object->orient,Player_object->handle);
+				if (index < 0) Error("Weapon contribution fixture object initialization failed");
+				auto& object = Objects[index]; object.control_type = CT_NONE; object.movement_type = MT_NONE;
+				object.size = 1; object.lifetime = object.lifeleft = 3;
+				AutomatedCaptureLog("scene real weapon-init fixture variant=%d owner=%u template=%d definition=%d",variant,object.handle,variant < 2 ? sprite : model,definition);
+			}
+		}
 		if (AutomatedCaptureFrameIndex() == 0 && FindArg("-scene-fragment-probe") && Viewer_object) {
 			if (ROOMNUM_OUTSIDE(Viewer_object->roomnum)) Error("Fragment fixture requires an indoor save");
 			auto& room = Rooms[Viewer_object->roomnum];
