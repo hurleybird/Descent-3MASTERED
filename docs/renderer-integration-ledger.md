@@ -266,3 +266,28 @@ no GL errors. Without the fixture, the normal capture remains byte-identical
 (SHA0C5AFFFD…A79FBB44). Evidence: integration-canvas-sampler{,-normal}-20261022.
 This provides the required renderer capability; the source API setters and
 actual module callbacks still need to be connected to the complete translator.
+
+### Next bounded slice: actual module canvas producers
+
+Extend ModuleCanvasScope, not the GPU executor. Translate the graphics exports
+at Game2DLL.cpp into descriptions when that scope is active. Stock call sites
+(excluding pointer declarations in dmfcfunctions.cpp) require HUD/raw text and
+metrics, alpha/color/font state, bitmap quads, filtering/wrap, lines and the
+chunked Outrage-logo bitmap. DMFC stats uses the preview exports already added.
+Unsupported 3D/LFB operations must reject inside capture rather than draw through
+the legacy backend; outside capture retain the declared UI compatibility path.
+
+Use fixed bounded text records/byte storage, not per-Printf string allocations.
+Preserve explicit grtext_Flush ordering: it emits buffered text, then resets
+alpha255/scale1/flags0/color black while retaining font. HUD text uses virtual HUD
+coordinates; RenderHUDTextFlags uses screen coordinates. Capture requested
+filtering into the new per-binding policy, never the renderer-global setter.
+Nested text clipping needs an explicit implementation or a census-backed bound.
+
+SceneHUDLayout::item must invoke custom callbacks at their actual item position,
+sharing collection/order with built-in descriptions. Pass their image inputs
+into the owning HUD canvas and world requests into GameLoop's source schedule.
+Restore EVT_CLIENT_HUD_INTERVAL in the game-owned post-observation preparation
+phase. Derive its display order from HUD/cockpit policy, not one guessed layer.
+Do not invoke callbacks from GPU execution, image production or thumbnail work.
+Then qualify loaded shipped DMFC consumers, not only the existing table fixture.
