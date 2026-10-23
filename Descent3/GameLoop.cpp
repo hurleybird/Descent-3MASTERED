@@ -3091,6 +3091,41 @@ void GameRenderFrame(void)
 
 		// Publish once. Every world view below sees this same owned scene, not
 		// a second traversal of mutable simulation state.
+		if (AutomatedCaptureFrameIndex() == 0 && FindArg("-scene-fragment-probe") && Viewer_object) {
+			if (ROOMNUM_OUTSIDE(Viewer_object->roomnum)) Error("Fragment fixture requires an indoor save");
+			auto& room = Rooms[Viewer_object->roomnum];
+			if (!room.num_portals) Error("Fragment fixture requires a portal for the real glass-break producer");
+			auto& portal = room.portals[0];
+			portal.flags |= PF_RENDER_FACES;
+			const int previous_highest = Highest_object_index;
+			BreakGlassFace(&room,portal.portal_face);
+			CreateSplintersFromBody(Player_object,10,3);
+			unsigned shards = 0,splinters = 0;
+			for (int i = 0; i <= Highest_object_index; ++i) {
+				auto& piece = Objects[i];
+				if (piece.type != OBJ_SHARD && piece.type != OBJ_SPLINTER) continue;
+				// Stage/scalewise separate the real producer's results for inspection;
+				// retain their UV/material/shape rather than fabricating GPU triangles.
+				const bool shard = piece.type == OBJ_SHARD;
+				const unsigned ordinal = shard ? shards++ : splinters++;
+				if (shard) for (auto& point : piece.rtype.shard_info.points) point *= .08f;
+				else for (auto& point : piece.ctype.splinter_info.verts) point *= .4f;
+				auto position = Viewer_object->pos+Viewer_object->orient.fvec*12+
+					Viewer_object->orient.rvec*((shard ? -5.5f : 1.5f)+(ordinal%3)*1.5f)+
+					Viewer_object->orient.uvec*(3-int(ordinal/3)*1.1f);
+				ObjSetPos(&piece,&position,Viewer_object->roomnum,nullptr,false);
+				piece.movement_type = MT_NONE; piece.lifeleft = piece.lifetime = 3;
+			}
+			if (!shards || !splinters) Error("Real fragment producers did not both emit geometry");
+			AutomatedCaptureLog("scene fragment fixture real_shards=%u real_splinters=%u previous_highest=%d",shards,splinters,previous_highest);
+			if (FindArg("-scene-smolder-probe")) {
+				auto position = Viewer_object->pos+Viewer_object->orient.fvec*25;
+				const int index = CreateSmolderingObject(&position,SMOLDERING_INDEX,3,6,Viewer_object->roomnum);
+				if (index < 0) Error("Smolder API fixture failed");
+				ObjSetPos(&Objects[index],&position,Viewer_object->roomnum,nullptr,false);
+				AutomatedCaptureLog("scene real smolder API fixture object=%d",index);
+			}
+		}
 		if (FindArg("-scene-module-live-probe") && (AutomatedCaptureFrameIndex() == 0 ||
 			(AutomatedCaptureFrameIndex() == 10 && FindArg("-scene-module-reload-probe")))) {
 			if (Game_mode & GM_MULTI) Error("The module UI fixture must not start a network game");

@@ -16,6 +16,8 @@
 #include "args.h"
 #include "weapon.h"
 #include "matcen.h"
+#include "polymodel.h"
+#include <array>
 #include <cmath>
 #include <algorithm>
 namespace {
@@ -31,6 +33,80 @@ bool special(int id) {
 d3scene::Vec3 value(const vector& v) { return {v.x,v.y,v.z}; }
 d3scene::Transform basis(const matrix& m) { return {{},value(m.rvec),value(m.uvec),value(m.fvec)}; }
 float alphaByte(float alpha) { return static_cast<int>((std::max)(0.f,(std::min)(255.f,alpha*255.f)))/255.f; }
+struct FragmentAsset {
+    uint32_t owner = 0;
+    d3scene::MeshAssetRef mesh;
+    int texture = -1;
+};
+std::array<FragmentAsset,MAX_OBJECTS> FragmentAssets{};
+uint64_t FragmentLifetime = 0;
+bool prepareFragment(d3scene::FrameData& frame,const d3scene::ObjectState& owner,const object& source) {
+    const bool shard = source.type == OBJ_SHARD && source.render_type == RT_SHARD;
+    const bool splinter = source.type == OBJ_SPLINTER && source.render_type == RT_SPLINTER;
+    if (!shard && !splinter) return false;
+    auto& cached = FragmentAssets[OBJNUM(&source)];
+    if (!cached.mesh || cached.owner != owner.handle) {
+        d3scene::MeshGeometry geometry;
+        d3scene::MeshPolygon polygon;
+        int texture = -1;
+        if (shard) {
+            const auto& fragment = source.rtype.shard_info;
+            texture = fragment.tmap;
+            for (uint32_t i = 0; i < 3; ++i) {
+                geometry.vertices.push_back(value(fragment.points[i]));
+                d3scene::MeshCorner corner; corner.vertex = i; corner.u = fragment.u[i]; corner.v = fragment.v[i];
+                polygon.corners.push_back(corner);
+            }
+        } else {
+            if (source.id >= MAX_POLY_MODELS || !Poly_models[source.id].used) return false;
+            const auto& model = Poly_models[source.id];
+            const auto& fragment = source.ctype.splinter_info;
+            if (fragment.subobj_num >= model.n_models) return false;
+            const auto& part = model.submodel[fragment.subobj_num];
+            if (fragment.facenum < 0 || fragment.facenum >= part.num_faces) return false;
+            const auto& face = part.faces[fragment.facenum];
+            if (face.texnum < 0 || face.texnum >= model.n_textures) return false;
+            texture = model.textures[face.texnum];
+            const int count = std::min(int(face.nverts),MAX_VERTS_PER_SPLINTER);
+            if (count < 3) return false;
+            for (int i = 0; i < count; ++i) {
+                geometry.vertices.push_back(value(fragment.verts[i]));
+                d3scene::MeshCorner corner; corner.vertex = uint32_t(i); corner.u = face.u[i]; corner.v = face.v[i];
+                polygon.corners.push_back(corner);
+            }
+        }
+        if (texture < 0 || texture >= MAX_TEXTURES || !GameTextures[texture].used) return false;
+        vector a{geometry.vertices[1].x-geometry.vertices[0].x,geometry.vertices[1].y-geometry.vertices[0].y,geometry.vertices[1].z-geometry.vertices[0].z};
+        vector b{geometry.vertices[2].x-geometry.vertices[0].x,geometry.vertices[2].y-geometry.vertices[0].y,geometry.vertices[2].z-geometry.vertices[0].z};
+        vector normal; vm_CrossProduct(&normal,&a,&b);
+        if (!(vm_NormalizeVector(&normal) > .000001f)) return false;
+        polygon.normal = value(normal); geometry.polygons.push_back(std::move(polygon));
+        cached.mesh = d3scene::assets().createMesh(std::move(geometry));
+        cached.owner = owner.handle; cached.texture = texture;
+        if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
+            AutomatedCaptureLog("scene fragment asset owner=%u type=%s revision=%llu",owner.handle,shard ? "shard" : "splinter",
+                (unsigned long long)cached.mesh->id().revision);
+    }
+    const int bitmap = GetTextureBitmapAtTime(cached.texture,0,float(frame.simulation_time));
+    if (bitmap <= BAD_BITMAP_HANDLE || bitmap >= MAX_BITMAPS || !GameBitmaps[bitmap].used) return false;
+    d3scene::PreparedMesh mesh; mesh.asset = cached.mesh;
+    mesh.owner = owner.handle; mesh.has_owner = true; mesh.compiled_owner = size_t(&owner-frame.objects.data());
+    mesh.room = owner.room; mesh.world = owner.current;
+    if (splinter) {
+        // The producer stores world-relative vertices and its original draw
+        // rotates them by the matrix rows, unlike normal model-local pieces.
+        mesh.world.right = {source.orient.rvec.x,source.orient.uvec.x,source.orient.fvec.x};
+        mesh.world.up = {source.orient.rvec.y,source.orient.uvec.y,source.orient.fvec.y};
+        mesh.world.forward = {source.orient.rvec.z,source.orient.uvec.z,source.orient.fvec.z};
+    }
+    mesh.surface.bitmap = bitmap; mesh.surface.unlit = true; mesh.surface.two_sided = shard;
+    mesh.surface.alpha = alphaByte(shard ? .2f+.8f*GameTextures[cached.texture].alpha :
+        source.lifetime > 0 ? source.lifeleft/source.lifetime : 0);
+    mesh.surface.blend = mesh.surface.alpha < 1 ? d3scene::BlendMode::Alpha : d3scene::BlendMode::Solid;
+    mesh.surface.depth = mesh.surface.alpha < 1 ? d3scene::DepthMode::ReadOnly : d3scene::DepthMode::ReadWrite;
+    frame.meshes.push_back(std::move(mesh));
+    return true;
+}
 void prepareMatcens(d3scene::FrameData& frame) {
     unsigned count = 0;
     for (int i = 0; i < Num_matcens; ++i) {
@@ -328,9 +404,34 @@ bool prepareAxisEffect(d3scene::FrameData& frame,const vis_effect& effect,const 
 // after object eligibility; per-view exclusion is applied by the scene query.
 void PrepareGameObjectEffects(d3scene::FrameData& frame) {
     const auto quad = d3scene::assets().quadMesh();
+    if (FragmentLifetime != frame.scene_lifetime) {
+        for (auto& fragment : FragmentAssets) fragment = {};
+        FragmentLifetime = frame.scene_lifetime;
+    }
+    unsigned fragments = 0;
     for (const auto& owner : frame.objects) {
         auto* source = ObjGet(owner.handle);
         if (!source || !owner.visible) continue;
+        if (prepareFragment(frame,owner,*source)) { ++fragments; continue; }
+        if (source->render_type == RT_FIREBALL && source->type == OBJ_FIREBALL && source->id == SMOLDERING_INDEX) {
+            const int clip = Fireballs[SMOLDERING_INDEX].bm_handle;
+            if (clip < 0 || clip >= MAX_VCLIPS || !GameVClips[clip].used || !(source->ctype.blast_info.max_size > 0)) continue;
+            PageInVClip(clip);
+            if (!GameVClips[clip].frames || GameVClips[clip].num_frames < 4) continue;
+            const int bitmap = GameVClips[clip].frames[3];
+            if (bitmap <= BAD_BITMAP_HANDLE || bitmap >= MAX_BITMAPS || !GameBitmaps[bitmap].used) continue;
+            d3scene::PreparedMesh smoke; smoke.asset = quad;
+            smoke.has_owner = true; smoke.owner = owner.handle; smoke.room = owner.room;
+            smoke.alignment = d3scene::MeshAlignment::Axis;
+            auto top = value(source->pos); top.y += source->ctype.blast_info.max_size;
+            smoke.world = d3scene::axisBillboardPlacement(value(source->pos),top,10);
+            smoke.surface.bitmap = bitmap; smoke.surface.unlit = smoke.surface.two_sided = true;
+            smoke.surface.texture_alpha = true; smoke.surface.texture_wrap = false;
+            smoke.surface.alpha = alphaByte(.4f); smoke.surface.blend = d3scene::BlendMode::Alpha;
+            smoke.surface.depth = d3scene::DepthMode::ReadOnly;
+            frame.meshes.push_back(std::move(smoke));
+            continue;
+        }
         if (source->render_type == RT_FIREBALL && source->type == OBJ_FIREBALL &&
             (source->id == BLAST_RING_INDEX || source->id == GRAVITY_FIELD_INDEX)) {
             prepareObjectRing(frame,owner,*source,quad);
@@ -376,7 +477,7 @@ void PrepareGameObjectEffects(d3scene::FrameData& frame) {
             continue;
         }
         if (source->render_type != RT_FIREBALL || source->type != OBJ_FIREBALL) continue;
-        if (source->id >= NUM_FIREBALLS || source->id == SMOLDERING_INDEX) continue;
+        if (source->id >= NUM_FIREBALLS) continue;
         const auto& definition = Fireballs[source->id];
         const float age = (std::max)(0.f,static_cast<float>(frame.simulation_time)-source->creation_time);
         const float normalized = source->lifetime > 0 ? (std::min)(.99999f,age/source->lifetime) : .99999f;
@@ -427,6 +528,13 @@ void PrepareGameObjectEffects(d3scene::FrameData& frame) {
         surface.effect_depth_offset = Render_soft_vis_effects && smoke ? 0.f : -2.f;
         frame.meshes.push_back(std::move(sprite));
     }
+    // Drop source ownership for dead allocations. Retained presentations keep
+    // their own assets alive; a recycled object index cannot inherit geometry.
+    for (auto& fragment : FragmentAssets) if (fragment.mesh) {
+        const auto* source = ObjGet(fragment.owner);
+        if (!source || (source->render_type != RT_SHARD && source->render_type != RT_SPLINTER)) fragment = {};
+    }
+    if (fragments && AutomatedCapturePending()) AutomatedCaptureLog("scene fragments instances=%u",fragments);
 }
 void PrepareGameEffects(d3scene::FrameData& frame,const GameMainView* main_view) {
     prepareMatcens(frame);

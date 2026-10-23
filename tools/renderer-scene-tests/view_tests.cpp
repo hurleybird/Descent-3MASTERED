@@ -1074,6 +1074,18 @@ int runSceneViewTests() {
     d3scene::FrameData environment; environment.sequence = 4; environment.scene_lifetime = assets.lifetime();
     auto colored = triangle(0,10); colored.vertex_colors = {{1,0,0},{0,1,0},{0,0,1}};
     const auto original_mesh = assets.publishMesh(0,colored);
+    {
+        d3scene::SceneAssets fragments;
+        const auto piece = fragments.createMesh(colored);
+        const auto other = fragments.createMesh(colored);
+        check(piece->id() != other->id() && piece->geometry() == other->geometry(),
+            "Independent fragment allocations aliased a mutable topology identity");
+        const auto old_id = piece->id();
+        fragments.reset();
+        const auto recycled = fragments.createMesh(colored);
+        check(recycled->id().lifetime != old_id.lifetime && piece->geometry() == colored,
+            "Retiring a scene invalidated held fragment geometry or reused its identity");
+    }
     check(assets.publishMesh(0,colored) == original_mesh,"Unchanged generic mesh was republished");
     colored.vertex_colors[0].x = .5f;
     const auto changed_mesh = assets.publishMesh(0,colored);

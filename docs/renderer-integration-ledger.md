@@ -339,3 +339,29 @@ scene-transition qualification. A remaining upstream issue is conservative
 CallGameDLL invalidation of all room appearances, including read-only HUD events;
 do not claim the restored module path is performance-qualified or simply remove
 that invalidation without replacing the writable-room mutation contract.
+
+## Allocation-owned fragments (I12 producer integration)
+
+RT_SHARD and RT_SPLINTER now publish their live game producers' geometry. Local
+vertices/UVs become an allocation-owned immutable mesh once, keyed by full object
+handle and scene lifetime; subsequent publications carry pose and alpha only.
+SceneAssets::createMesh supports this ownership without a sparse global slot
+array. Dead allocations release source references while retained frames keep
+their own geometry. Tests cover distinct allocation identities and retention
+across scene retirement. Source splinter row-matrix rotation, single-sidedness,
+model-face material/UVs and lifetime fade are explicit; shards preserve two-sided
+handling, authored UVs and0.2+0.8*material-alpha policy.
+
+The private fixture calls BreakGlassFace and CreateSplintersFromBody, then stages
+and scales their outputs for inspection. It emits22shards and10splinters; exactly
+32asset births are logged, with32instances still using those assets at frame22.
+Engine and all three suites pass. GL-clean captures were inspected. The ordinary
+corridor capture remains byte-identical (SHA0C5AFFFD…A79FBB44).
+Evidence: integration-fragments{,-scaled,-normal}-20261023.
+
+The existing CreateSmolderingObject API also reaches an owned upright axis
+billboard using the authored fixed fourth frame, width20, max_size height and
+alpha0.4. No live gameplay caller has been established. Its fixture visibly
+produces a rectangular haze, so appearance is NOT signed off merely because the
+API executes. Evidence: integration-fragments-smolder-20261023. I12 remains open
+for natural destruction/portal/mirror/reuse qualification and this content review.

@@ -233,6 +233,9 @@ public:
     TerrainOcclusionRef terrainOcclusion() const { return terrain_occlusion_; }
     TerrainOcclusionRef publishTerrainOcclusion(const TerrainOcclusionData&);
     MeshAssetRef publishMesh(uint32_t,MeshGeometry);
+    // Allocation-owned topology (fragments, generated authored pieces). It is
+    // retained by its producer and published frames, not a scene-global slot.
+    MeshAssetRef createMesh(MeshGeometry);
     // Canonical topology belongs to the scene lifetime, not to each sprite or
     // text run. Slots 2, 9..12 and 258..384 are reserved for these primitives.
     MeshAssetRef quadMesh(uint32_t count = 1);

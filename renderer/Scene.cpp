@@ -591,6 +591,13 @@ MeshAssetRef SceneAssets::publishMesh(uint32_t slot,MeshGeometry geometry) {
     meshes_[slot] = replacement; ++revision_;
     return replacement;
 }
+MeshAssetRef SceneAssets::createMesh(MeshGeometry geometry) {
+    validateGeometry(geometry);
+    if (revision_ == std::numeric_limits<uint64_t>::max()) throw std::overflow_error("Scene revision exhausted");
+    MeshAssetRef replacement(new MeshAsset({lifetime_,revision_+1,UINT32_MAX},std::move(geometry)));
+    ++revision_;
+    return replacement;
+}
 SurfaceModulation modulatedSurface(const SurfaceBinding& surface,const SurfaceModulation& instance) {
     const auto multiply = [](Vec3 a,Vec3 b) { return Vec3{a.x*b.x,a.y*b.y,a.z*b.z}; };
     return {multiply(surface.ambient_color,instance.ambient),multiply(surface.color_modulation,instance.color),surface.alpha*instance.alpha};
