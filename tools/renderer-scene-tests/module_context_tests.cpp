@@ -101,5 +101,55 @@ int runModuleContextTests() {
     try { RenderModuleSceneView(nullptr,nullptr,-1,nullptr,1,false); }
     catch (const std::logic_error&) { rejected = true; }
     check(rejected,"Out-of-scope module ABI request attempted an implicit world draw");
+    {
+        ModuleSceneScope world_scope(first);
+        d3scene::FrameData output; output.sequence = 4; output.scene_lifetime = data.scene_lifetime;
+        std::vector<d3scene::ViewImageRequest> requests;
+        std::vector<d3scene::ViewImageInput> sources;
+        int32_t next_order = 0;
+        SceneTextStyle text_style; text_style.font = 0;
+        ModuleCanvasScope capture(output,70,next_order,{100,80,640,480},2000,requests,sources,true,0,text_style);
+        capture.setTextColor(0x00ff00); capture.setTextAlpha(128);
+        char text[] = "AB";
+        capture.text(1,2,text); text[0] = 'Z';
+        check(output.meshes.empty(),"Module Printf emitted text before its flush boundary");
+        capture.setTextColor(0x0000ff); capture.setTextAlpha(64);
+        capture.fill({0,0,80,20},0xff0000);
+        capture.flushText();
+        check(output.meshes.size() == 2 && output.meshes[0].surface.composition_order == 0 &&
+            output.meshes[1].surface.composition_order == 1 && output.meshes[1].surface.bitmap == 0 &&
+            output.meshes[1].surface.alpha == 128/255.f && output.meshes[1].surface.color_modulation.y == 1 &&
+            capture.textAlpha() == 255 && capture.textFont() == 0,
+            "Module text borrowed later bytes/style or lost flush/reset ordering");
+        check(capture.hudTextWidth("AB") == 12 && capture.hudTextHeight("AB") == 9,
+            "Module HUD metrics lost their virtual coordinate space");
+        capture.setFiltering(false);
+        capture.hudQuad(10,20,30,40,5,{0,0},{1,1},100,0);
+        check(output.meshes.back().vertices[0].x == 10 && output.meshes.back().vertices[0].y == 20 &&
+            output.meshes.back().surface.alpha == 100/255.f &&
+            output.meshes.back().surface.texture_filter == d3scene::TextureFilter::Nearest,
+            "Module HUD bitmap lost scale, alpha or captured filtering");
+        capture.startFrame({110,100,4,4});
+        capture.setTextColor(0xffffff); capture.text(-2,-1,"A"); capture.flushText();
+        const auto& clipped = output.meshes.back();
+        const auto& clipped_positions = clipped.vertices.empty() ? clipped.asset->geometry().vertices : clipped.vertices;
+        check(clipped_positions[0].x == 10 && clipped_positions[0].y == 20 &&
+            clipped_positions[2].x == 14 && clipped_positions[2].y == 24,
+            "Nested module text escaped its captured clipping rectangle");
+        capture.bitmap({-2,-1,8,8},5,{0,0},{1,1});
+        const auto& bitmap = output.meshes.back();
+        check(bitmap.vertices[0].x == 10 && bitmap.vertices[0].y == 20 &&
+            bitmap.texture_uvs[0].x == .25f && bitmap.texture_uvs[0].y == .125f &&
+            bitmap.texture_uvs[2].x == .75f && bitmap.texture_uvs[2].y == .625f,
+            "Nested module bitmap clipping failed to crop its texture coordinates");
+        capture.setFlatColor(0xffffff); capture.line(-10,2,10,2);
+        check(output.meshes.back().raster_stroke_width == 1 && output.meshes.back().surface.depth == d3scene::DepthMode::Disabled &&
+            !output.meshes.back().surface.medium_transport,"Module line reused a legacy GPU draw or world optics");
+        capture.endFrame(); capture.complete();
+        const auto count = output.meshes.size();
+        rejected = false;
+        try { capture.setAlphaType(99); } catch (const std::invalid_argument&) { rejected = true; }
+        check(rejected && output.meshes.size() == count,"Unsupported module alpha mode silently changed output");
+    }
     return checks;
 }

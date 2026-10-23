@@ -19,6 +19,8 @@ struct HUDCanvasLayout {
     uint16_t item_mask = 0;
     bool auxiliary = false;
     bool cockpit = false;
+    bool module = false;
+    int32_t module_order = 5;
     bool aim_on_target = false;
     float zoom_distance = 0;
 };
@@ -32,14 +34,21 @@ struct SceneTextStyle {
     bool additive = false;
     d3scene::TextureFilter texture_filter = d3scene::TextureFilter::Default;
     int tab_columns = 4;
+    d3scene::Rect clip; // logical canvas clip; zero extent means unclipped
 };
 struct SceneTextExtent { int width = 0, height = 0; };
 SceneTextExtent MeasureSceneText(const char*,const SceneTextStyle&);
 SceneTextStyle MakeHUDTextStyle(d3scene::Rect viewport);
 void PrepareHUDMessageCanvas(d3scene::FrameData&,uint64_t collection,d3scene::Rect viewport,bool auxiliary,bool advance);
 struct tHUDItem;
+struct ModuleCanvasOutputs {
+    std::vector<d3scene::ViewImageRequest>& images;
+    std::vector<d3scene::ViewImageInput>& inputs;
+};
 bool PrepareHUDItemCanvas(d3scene::FrameData&,uint64_t collection,d3scene::Rect viewport,
-    tHUDItem*,int count,uint16_t mask,int small_filter,bool advance,bool deferred_score = false);
+    tHUDItem*,int count,uint16_t mask,int small_filter,bool advance,bool deferred_score = false,ModuleCanvasOutputs* modules = nullptr);
+void PrepareHUDModuleCallback(d3scene::FrameData&,uint64_t collection,int32_t& order,d3scene::Rect viewport,
+    uint64_t identity,ModuleCanvasOutputs&,tHUDItem* item = nullptr);
 struct SceneQuadStyle {
     int bitmap = -1;
     float alpha = 1;

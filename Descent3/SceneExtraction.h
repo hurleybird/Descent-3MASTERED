@@ -63,7 +63,7 @@ constexpr float SceneCockpitZoom = .56f;
 void PrepareGameCockpitGauges(d3scene::FrameData&,const ModelTransforms&,const d3scene::Transform&,bool moving);
 void PrepareGameCockpit(d3scene::FrameData&, bool advance,const d3scene::FrameData* previous = nullptr,bool retain_materials = false);
 void PrepareGameReticle(d3scene::FrameData&,const HUDCanvasLayout&);
-void PrepareGameHUD(d3scene::FrameData&,const HUDCanvasLayout&,bool advance);
+void PrepareGameHUD(d3scene::FrameData&,const HUDCanvasLayout&,bool advance,std::vector<d3scene::ViewImageRequest>&);
 void RenderPreparedReticle(const d3scene::Presentation&);
 void RenderGameForegrounds(const d3scene::Presentation&,d3scene::ForegroundPhase,
     const d3scene::Presentation* overlays = nullptr);

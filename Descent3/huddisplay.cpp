@@ -34,6 +34,7 @@
 #include "gamefont.h"
 #include "SceneCanvas.h"
 #include "SceneExtraction.h"
+#include "gameloop.h"
 
 #include <stdio.h>
 #include <stdarg.h>
@@ -107,17 +108,27 @@ class SceneHUDLayout {
     float Hud_aspect_x, Hud_aspect_y;
     int item_type = 0, anchor_priority = 0, anchor_x = 0, anchor_y = 0;
     bool anchor_valid = false;
+    d3scene::Rect viewport_;
+    ModuleCanvasOutputs* modules_;
 public:
-    SceneHUDLayout(d3scene::FrameData& data,uint64_t layer,d3scene::Rect viewport,bool tick)
+    SceneHUDLayout(d3scene::FrameData& data,uint64_t layer,d3scene::Rect viewport,bool tick,ModuleCanvasOutputs* modules)
         : frame(data), collection(layer), advance(tick),
           Hud_aspect_x(float(viewport.width)/DEFAULT_HUD_WIDTH),
-          Hud_aspect_y(float(viewport.height)/DEFAULT_HUD_HEIGHT) {
+          Hud_aspect_y(float(viewport.height)/DEFAULT_HUD_HEIGHT),viewport_(viewport),modules_(modules) {
         font_scale = MakeHUDTextStyle(viewport).scale;
     }
-    void item(tHUDItem* value) {
+    void item(tHUDItem* value,int slot) {
         if (value->render_fn && value->render_fn != ::HudDisplayRouter &&
             value->render_fn != ::RenderHUDScore && value->render_fn != ::RenderHUDTimer)
-            Error("Custom HUD callbacks require the module canvas translator");
+        {
+            if (!advance) return;
+            if (!modules_) Error("Custom HUD callback has no source request collector");
+            const auto begin = frame.meshes.size();
+            PrepareHUDModuleCallback(frame,collection,order,viewport_,HUDItemCanvasIdentity(slot),*modules_,value);
+            if (AutomatedCapturePending()) AutomatedCaptureLog("scene custom HUD callback slot=%d collection=%llu meshes=%u",
+                slot,(unsigned long long)collection,unsigned(frame.meshes.size()-begin));
+            return;
+        }
         item_type = value->type; HudDisplayRouter(value);
     }
     int grtext_GetTextLineWidth(const char* value) const {
@@ -1103,8 +1114,8 @@ void RenderHUDScore(tHUDItem*) { Error("HUD score drawing was replaced by scene 
 void RenderHUDTimer(tHUDItem*) { Error("HUD timer drawing was replaced by scene publication"); }
 
 bool PrepareHUDItemCanvas(d3scene::FrameData& frame,uint64_t collection,d3scene::Rect viewport,
-    tHUDItem* items,int count,uint16_t mask,int small_filter,bool advance,bool deferred_score) {
-    SceneHUDLayout layout(frame,collection,viewport,advance);
+    tHUDItem* items,int count,uint16_t mask,int small_filter,bool advance,bool deferred_score,ModuleCanvasOutputs* modules) {
+    SceneHUDLayout layout(frame,collection,viewport,advance,modules);
     tHUDItem* score = nullptr;
     bool score_matches = false;
     for (int i = 0; i < count; ++i) {
@@ -1114,11 +1125,11 @@ bool PrepareHUDItemCanvas(d3scene::FrameData& frame,uint64_t collection,d3scene:
         const bool matches = !((small_filter == 0 && is_small_item) || (small_filter == 1 && !is_small_item));
         if (item.type == HUD_ITEM_SCORE) { score = &item; score_matches = matches; continue; }
         if (!matches) continue;
-        layout.item(&item);
+        layout.item(&item,i);
     }
     if (score) {
         const bool defer = small_filter == 0 && !layout.RenderHUDGetTopLeftTextAnchor(nullptr,nullptr);
-        if ((score_matches && !defer) || (small_filter == 1 && deferred_score)) layout.item(score);
+        if ((score_matches && !defer) || (small_filter == 1 && deferred_score)) layout.item(score,int(score-items));
         else if (score_matches && defer) return true;
     }
     return false;

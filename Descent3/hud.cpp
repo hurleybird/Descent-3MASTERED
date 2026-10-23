@@ -19,6 +19,7 @@
 #include "hud.h"
 #include "SceneCanvas.h"
 #include "SceneExtraction.h"
+#include "SceneModuleContext.h"
 #include "args.h"
 #include "gauges.h"
 #include "grdefs.h"
@@ -515,6 +516,22 @@ void SetHUDState(ushort hud_mask, ushort hud_gr_mask)
 
 
 //	initializes items based off their type (information, etc.)
+static std::array<uint64_t,MAX_HUD_ITEMS> HUD_canvas_identities{};
+static std::array<uint64_t,MAX_HUD_ITEMS> HUD_module_owners{};
+uint64_t HUDItemCanvasIdentity(int slot) {
+    if (slot < 0 || slot >= MAX_HUD_ITEMS || !HUD_canvas_identities[slot]) Error("HUD callback has no registration identity");
+    return HUD_canvas_identities[slot];
+}
+void SetHUDItemModuleOwner(int slot,uint64_t owner) {
+    if (slot < 0 || slot >= MAX_HUD_ITEMS) Error("Invalid module HUD registration slot");
+    HUD_module_owners[slot] = owner;
+}
+void RetireModuleHUDItems(uint64_t owner) {
+    if (!owner) return;
+    for (int i = 0; i < MAX_HUD_ITEMS; ++i) if (HUD_module_owners[i] == owner) {
+        FreeHUDItem(i); HUD_module_owners[i] = 0; HUD_canvas_identities[i] = 0;
+    }
+}
 void InitHUDItem(int new_item, tHUDItem* item)
 {
 	ASSERT(new_item < MAX_HUD_ITEMS);
@@ -619,6 +636,8 @@ void InitHUDItem(int new_item, tHUDItem* item)
 	HUD_array[new_item].render_fn = item->render_fn;
 	HUD_array[new_item].id = item->id;
 	HUD_array[new_item].dirty_rect.reset();
+	HUD_canvas_identities[new_item] = AllocateModuleCanvasIdentity();
+	HUD_module_owners[new_item] = 0;
 }
 
 //Returns the item number if there's a customtext2 item, else -1
@@ -775,6 +794,7 @@ bool LGSHudState(CFILE* fp)
 void FreeHUDItem(int item)
 {
 	ASSERT(item < MAX_HUD_ITEMS);
+	HUD_canvas_identities[item] = 0; HUD_module_owners[item] = 0;
 
 	HUD_array[item].stat = 0;
 	HUD_array[item].flags = 0;
@@ -2642,9 +2662,51 @@ HUDCanvasLayout CaptureGameHUDLayout()
     return CompileHUDCanvasLayout(request);
 }
 
-void PrepareGameHUD(d3scene::FrameData& frame,const HUDCanvasLayout& layout,bool advance)
+void PrepareHUDModuleCallback(d3scene::FrameData& frame,uint64_t collection,int32_t& order,d3scene::Rect viewport,
+    uint64_t identity,ModuleCanvasOutputs& output,tHUDItem* item) {
+    // Only the ABI's game-owned layout inputs are scoped. No renderer/g3
+    // state is installed, and execution never consults these globals.
+    struct LayoutScope {
+        int x = Game_window_x,y = Game_window_y,w = Game_window_w,h = Game_window_h;
+        float ax = Hud_aspect_x,ay = Hud_aspect_y;
+        object* viewer = Viewer_object;
+        explicit LayoutScope(d3scene::Rect r) {
+            Game_window_x = r.x; Game_window_y = r.y; Game_window_w = r.width; Game_window_h = r.height;
+            Hud_aspect_x = float(r.width)/DEFAULT_HUD_WIDTH; Hud_aspect_y = float(r.height)/DEFAULT_HUD_HEIGHT;
+        }
+        ~LayoutScope() {
+            Game_window_x = x; Game_window_y = y; Game_window_w = w; Game_window_h = h;
+            Hud_aspect_x = ax; Hud_aspect_y = ay;
+            Viewer_object = viewer;
+        }
+    } metadata(viewport);
+    ModuleCanvasScope capture(frame,collection,order,viewport,identity,output.images,output.inputs,
+        SceneGeometryInspection(),Render_preferred_state.msaa_samples,MakeHUDTextStyle(viewport));
+    if (item) item->render_fn(item); else CallGameDLL(EVT_CLIENT_HUD_INTERVAL,&DLLInfo);
+    capture.complete();
+}
+static void PrepareModuleHUDInterval(d3scene::FrameData& frame,const HUDCanvasLayout& layout,bool advance,
+    std::vector<d3scene::ViewImageRequest>& images) {
+    const auto identity = GameModuleCanvasIdentity();
+    if (!advance || !layout.module || !identity || IsCleanGameplayScreenshotActive()) return;
+    constexpr uint64_t collection = 0x4d4f444855440001ull;
+    const auto begin = frame.meshes.size();
+    int32_t order = 0; std::vector<d3scene::ViewImageInput> inputs;
+    ModuleCanvasOutputs output{images,inputs};
+    PrepareHUDModuleCallback(frame,collection,order,layout.primary,identity,output);
+    if (frame.meshes.size() == begin) return;
+    d3scene::PreparedForeground foreground; foreground.identity = collection; foreground.order = layout.module_order;
+    auto canvas = MakeSceneCanvasView(collection,layout.primary,d3scene::ViewTarget::Display,true);
+    canvas.image_inputs = std::move(inputs);
+    foreground.layer.display_views.push_back(std::move(canvas)); frame.foregrounds.push_back(std::move(foreground));
+    if (AutomatedCapturePending()) AutomatedCaptureLog("scene module HUD interval order=%d meshes=%u",layout.module_order,unsigned(frame.meshes.size()-begin));
+}
+void PrepareGameHUD(d3scene::FrameData& frame,const HUDCanvasLayout& layout,bool advance,
+    std::vector<d3scene::ViewImageRequest>& images)
 {
+    if (layout.module_order < 20) PrepareModuleHUDInterval(frame,layout,advance,images);
     if (!layout.item_mask) {
+        if (layout.module_order >= 20) PrepareModuleHUDInterval(frame,layout,advance,images);
         if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
             AutomatedCaptureLog("scene HUD items prepared mask=0 hidden=1");
         return;
@@ -2659,9 +2721,12 @@ void PrepareGameHUD(d3scene::FrameData& frame,const HUDCanvasLayout& layout,bool
     const auto mask = layout.item_mask;
     const auto viewport = layout.primary;
     const bool is_small_hud = layout.auxiliary;
-    const bool deferred_score = PrepareHUDItemCanvas(frame,SceneHUDItems,viewport,HUD_array,MAX_HUD_ITEMS,mask,is_small_hud ? 0 : -1,advance);
+    std::vector<d3scene::ViewImageInput> inputs;
+    ModuleCanvasOutputs module_output{images,inputs};
+    const bool deferred_score = PrepareHUDItemCanvas(frame,SceneHUDItems,viewport,HUD_array,MAX_HUD_ITEMS,mask,is_small_hud ? 0 : -1,advance,false,&module_output);
     d3scene::PreparedForeground foreground; foreground.identity = SceneHUDItems; foreground.order = 20;
     foreground.layer.display_views.push_back(MakeSceneCanvasView(SceneHUDItems,viewport,d3scene::ViewTarget::Display,true));
+    foreground.layer.display_views.back().image_inputs = std::move(inputs);
     if ((mask & STAT_MESSAGES) && !is_small_hud) {
         PrepareHUDMessageCanvas(frame,SceneHUDMessages,viewport,false,advance);
         foreground.layer.display_views.push_back(MakeSceneCanvasView(SceneHUDMessages,viewport,d3scene::ViewTarget::Display,true));
@@ -2669,15 +2734,18 @@ void PrepareGameHUD(d3scene::FrameData& frame,const HUDCanvasLayout& layout,bool
     frame.foregrounds.push_back(std::move(foreground));
     if (is_small_hud) {
         const auto full = layout.display;
-        PrepareHUDItemCanvas(frame,SceneHUDAuxiliary,full,HUD_array,MAX_HUD_ITEMS,mask,1,advance,deferred_score);
+        inputs.clear();
+        PrepareHUDItemCanvas(frame,SceneHUDAuxiliary,full,HUD_array,MAX_HUD_ITEMS,mask,1,advance,deferred_score,&module_output);
         d3scene::PreparedForeground auxiliary; auxiliary.identity = SceneHUDAuxiliary; auxiliary.order = 50;
         auxiliary.layer.display_views.push_back(MakeSceneCanvasView(SceneHUDAuxiliary,full,d3scene::ViewTarget::Display,true));
+        auxiliary.layer.display_views.back().image_inputs = std::move(inputs);
         if (mask & STAT_MESSAGES) {
             PrepareHUDMessageCanvas(frame,SceneHUDMessages,full,true,advance);
             auxiliary.layer.display_views.push_back(MakeSceneCanvasView(SceneHUDMessages,full,d3scene::ViewTarget::Display,true));
         }
         frame.foregrounds.push_back(std::move(auxiliary));
     }
+    if (layout.module_order >= 20) PrepareModuleHUDInterval(frame,layout,advance,images);
     if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
         AutomatedCaptureLog("scene HUD items prepared mask=%u mode=%u small=%d",unsigned(mask),unsigned(GetHUDMode()),is_small_hud);
 }

@@ -18,6 +18,7 @@
 
 #ifndef HUD_H
 #define HUD_H
+#include <cstdint>
 
 #include "pstypes.h"
 #include "grdefs.h"
@@ -265,6 +266,9 @@ struct tHUDItem
 
 	tDirtyRect dirty_rect;						// used in small version of hud to clear only 'dirty' area
 };
+uint64_t HUDItemCanvasIdentity(int slot);
+void SetHUDItemModuleOwner(int slot,uint64_t owner);
+void RetireModuleHUDItems(uint64_t owner);
 
 //	hud resources
 struct sHUDResources 

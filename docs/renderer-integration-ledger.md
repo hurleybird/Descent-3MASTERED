@@ -291,3 +291,51 @@ Restore EVT_CLIENT_HUD_INTERVAL in the game-owned post-observation preparation
 phase. Derive its display order from HUD/cockpit policy, not one guessed layer.
 Do not invoke callbacks from GPU execution, image production or thumbnail work.
 Then qualify loaded shipped DMFC consumers, not only the existing table fixture.
+
+## Implemented source module canvas and loaded consumers
+
+The actual GameAPI table now translates buffered/raw HUD text, metrics,
+font/color/alpha state, bitmap/chunked quads, fill/line and sampling state during
+a game-owned ModuleCanvasScope. The recorder has fixed text bytes/records and
+bounded command/preview/nesting budgets; text copies bytes/style at submission,
+emits at Flush, and preserves the old reset behavior. Nested glyph clipping
+crops positions and atlas UVs and participates in the geometry cache key.
+Unsupported 3D/LFB exports reject during capture, never fall through to world
+GPU callbacks. Outside capture the separately declared legacy UI boundary is
+unchanged. No module callback is installed in the GPU executor.
+
+Custom HUD items execute at their normal array position in the post-observation
+source overlay publication. HUD interval order derives from cockpit/view policy:
+before ordinary HUD without cockpit, above cockpit with cockpit, and after HUD
+for observer/letterbox. Hidden and clean-screenshot paths suppress it. The ABI's
+window/aspect/viewer variables are source-scoped and restored, including unwind.
+The public HUD struct layout is unchanged. Private registration identities and
+module owners retire callbacks before DLL unload and prevent slot-reuse aliasing.
+
+CPU contracts cover text byte/style ownership, Flush/reset, metrics, bitmap/HUD
+coordinates, nested glyph/bitmap clipping, line policy, bounded modes and the
+HUD module order. All three suites and the engine build pass. The ordinary003
+capture remains byte-identical (SHA0C5AFFFD…A79FBB44).
+
+Real shipped Anarchy and Co-op DLLs were loaded through the native loader in a
+private offline fixture. A synthetic remote player enters through the actual
+module event, and its real score callback draws name/score. F7 invokes the actual
+stats panel; Co-op emits its real309x309 MSAA4 player-view request. F6 draws the
+actual Anarchy menu. These were visually inspected; all captures are GL-clean.
+The fixture leaves Game_mode single-player, disables its packet-send exports and
+database persistence, and is NOT evidence for transport/two-process gameplay.
+
+The unload fixture freezes the Co-op panel, unloads code and frees its source
+bitmaps before executing that publication. Frame9 still draws panel/logo/view;
+frame10 has no module UI. Reload allocates a new owner/view identity, allocates
+its image once, then reuses it. Evidence under C:/tmp/D3RendererVerification:
+integration-module-live-{scores,stats}-20261022,
+integration-module-coop-stats-20261022, integration-module-menu-20261022,
+integration-module-{unload,reload}-20261022 and
+integration-module-canvas-normal-final-20261022.
+
+I21/I22/I28 remain pending broader ordinary multiplayer/observer/replay and
+scene-transition qualification. A remaining upstream issue is conservative
+CallGameDLL invalidation of all room appearances, including read-only HUD events;
+do not claim the restored module path is performance-qualified or simply remove
+that invalidation without replacing the writable-room mutation contract.

@@ -32,6 +32,10 @@ int runCanvasTests() {
     auto hud_layout = CompileHUDCanvasLayout(hud);
     check(hud_layout.primary.x == 160 && hud_layout.primary.width == 960 && !hud_layout.auxiliary &&
         hud_layout.aim == HUDAimMode::Ship && hud_layout.item_mask == 123 && hud_layout.cockpit,"Ship HUD did not compile its centered authored canvas");
+    check(hud_layout.module && hud_layout.module_order == 60,"Cockpit module interval is not above its cockpit composition");
+    hud.show_cockpit = false;
+    check(CompileHUDCanvasLayout(hud).module_order == 5,"Noncockpit module interval moved above normal HUD items");
+    hud.show_cockpit = true;
     hud.world = {256,144,768,432}; hud_layout = CompileHUDCanvasLayout(hud);
     check(hud_layout.primary.x == 352 && hud_layout.primary.width == 576 && hud_layout.auxiliary &&
         hud_layout.display.width == 1280,"Reduced HUD changed the auxiliary display extent");
@@ -42,12 +46,14 @@ int runCanvasTests() {
         check(!hud_layout.item_mask && !hud_layout.auxiliary && !hud_layout.cockpit,"Special view inherited normal HUD items/cockpit");
         const auto aim = mode == HUDViewMode::Guided ? HUDAimMode::Guided : mode == HUDViewMode::Zoom ? HUDAimMode::Zoom : HUDAimMode::Hidden;
         check(hud_layout.aim == aim,"Special aim mode incorrectly followed the ship reticle toggle");
+        check(hud_layout.module == (mode != HUDViewMode::Hidden),"Special view incorrectly suppressed or enabled module callbacks");
     }
     hud.centered_four_three = false;
     for (auto mode : {HUDViewMode::Letterbox,HUDViewMode::Observer}) {
         hud.mode = mode; hud_layout = CompileHUDCanvasLayout(hud);
         check(hud_layout.primary.x == 256 && hud_layout.primary.width == 768 && hud_layout.item_mask == 123 &&
             hud_layout.aim == HUDAimMode::Hidden && !hud_layout.cockpit,"Non-ship HUD inherited a ship aspect/reticle/cockpit");
+        check(hud_layout.module && hud_layout.module_order == 25,"Observer/letterbox module interval lost its foreground order");
     }
     bool invalid_hud = false; hud.mode = static_cast<HUDViewMode>(99);
     try { CompileHUDCanvasLayout(hud); } catch (const std::invalid_argument&) { invalid_hud = true; }

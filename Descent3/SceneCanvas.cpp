@@ -15,6 +15,8 @@ HUDCanvasLayout CompileHUDCanvasLayout(const HUDCanvasRequest& request) {
     HUDCanvasLayout layout; layout.primary = request.world; layout.display = request.display;
     if (!std::isfinite(request.zoom_distance)) throw std::invalid_argument("Invalid HUD range");
     layout.aim_on_target = request.aim_on_target; layout.zoom_distance = request.zoom_distance;
+    layout.module = request.mode != HUDViewMode::Hidden;
+    if (request.mode == HUDViewMode::Letterbox || request.mode == HUDViewMode::Observer) layout.module_order = 25;
     if (request.centered_four_three) {
         layout.primary.width = request.world.height*4/3;
         layout.primary.x += (request.world.width-layout.primary.width)/2;
@@ -25,6 +27,7 @@ HUDCanvasLayout CompileHUDCanvasLayout(const HUDCanvasRequest& request) {
     case HUDViewMode::Zoom: layout.aim = HUDAimMode::Zoom; return layout;
     case HUDViewMode::Ship:
         layout.cockpit = request.show_cockpit;
+        if (layout.cockpit) layout.module_order = 60;
         layout.aim = request.show_ship_reticle ? HUDAimMode::Ship : HUDAimMode::Hidden; break;
     case HUDViewMode::Letterbox: case HUDViewMode::Observer: break;
     default: throw std::invalid_argument("Unknown HUD view mode");
@@ -142,6 +145,8 @@ void PrepareSceneText(d3scene::FrameData& frame,uint64_t collection,int32_t& nex
     int x,int y,const char* text,const SceneTextStyle& style) {
     if (!text || style.font < 0 || !std::isfinite(style.scale) || style.scale <= 0 || style.tab_columns <= 0)
         throw std::invalid_argument("Invalid prepared text input");
+    if (style.clip.width < 0 || style.clip.height < 0 || bool(style.clip.width) != bool(style.clip.height))
+        throw std::invalid_argument("Invalid prepared text clip");
     // The source compiler owns a bounded cache. Execution sees ordinary mesh
     // assets, not a special text path. Font edits and scene resets invalidate
     // source keys; held presentations still own their old geometry/pixels.
@@ -150,6 +155,7 @@ void PrepareSceneText(d3scene::FrameData& frame,uint64_t collection,int32_t& nex
         int font = -1, x = 0, y = 0, tabs = 0;
         float scale = 0;
         d3scene::Vec3 color;
+        d3scene::Rect clip;
         uint64_t used = 0;
         std::vector<d3scene::PreparedMesh> runs;
     };
@@ -177,6 +183,8 @@ void PrepareSceneText(d3scene::FrameData& frame,uint64_t collection,int32_t& nex
         auto& entry = cache[i];
         if (entry.used && entry.font == style.font && entry.x == x && entry.y == y && entry.tabs == style.tab_columns &&
             entry.scale == style.scale && entry.color.x == style.color.x && entry.color.y == style.color.y &&
+            entry.clip.x == style.clip.x && entry.clip.y == style.clip.y &&
+            entry.clip.width == style.clip.width && entry.clip.height == style.clip.height &&
             entry.color.z == style.color.z && entry.text == text) {
             entry.used = ++clock; emit(entry.runs); return;
         }
@@ -207,7 +215,13 @@ void PrepareSceneText(d3scene::FrameData& frame,uint64_t collection,int32_t& nex
         run = {};
     };
     layoutSceneText(text,style,x,y,[&](const tFontGlyph& glyph,int x,int y,d3scene::Vec3 color) {
-            const int right = int(x+glyph.width*style.scale), bottom = int(y+glyph.height*style.scale);
+            int right = int(x+glyph.width*style.scale), bottom = int(y+glyph.height*style.scale);
+            const int left_source = x,top_source = y,right_source = right,bottom_source = bottom;
+            if (style.clip.width > 0 && style.clip.height > 0) {
+                x = (std::max)(x,style.clip.x); y = (std::max)(y,style.clip.y);
+                right = int((std::min)(int64_t(right),int64_t(style.clip.x)+style.clip.width));
+                bottom = int((std::min)(int64_t(bottom),int64_t(style.clip.y)+style.clip.height));
+            }
             if (right > x && bottom > y) {
                 const auto old = run.surface.color_modulation;
                 if (!run.vertices.empty() && (run.surface.bitmap != glyph.bitmap || run.vertices.size() == 128*4 ||
@@ -225,8 +239,11 @@ void PrepareSceneText(d3scene::FrameData& frame,uint64_t collection,int32_t& nex
                 }
                 run.vertices.insert(run.vertices.end(),{{float(x),float(y),.5f},{float(right),float(y),.5f},
                     {float(right),float(bottom),.5f},{float(x),float(bottom),.5f}});
-                run.texture_uvs.insert(run.texture_uvs.end(),{{glyph.u,glyph.v},{glyph.u+glyph.uv_width,glyph.v},
-                    {glyph.u+glyph.uv_width,glyph.v+glyph.uv_height},{glyph.u,glyph.v+glyph.uv_height}});
+                const float u0 = glyph.u+glyph.uv_width*float(x-left_source)/(right_source-left_source);
+                const float v0 = glyph.v+glyph.uv_height*float(y-top_source)/(bottom_source-top_source);
+                const float u1 = glyph.u+glyph.uv_width*float(right-left_source)/(right_source-left_source);
+                const float v1 = glyph.v+glyph.uv_height*float(bottom-top_source)/(bottom_source-top_source);
+                run.texture_uvs.insert(run.texture_uvs.end(),{{u0,v0},{u1,v0},{u1,v1},{u0,v1}});
             }
     });
     flush();
@@ -234,6 +251,7 @@ void PrepareSceneText(d3scene::FrameData& frame,uint64_t collection,int32_t& nex
         auto& entry = cache[replacement];
         entry.text = text; entry.font = style.font; entry.x = x; entry.y = y;
         entry.tabs = style.tab_columns; entry.scale = style.scale; entry.color = style.color;
+        entry.clip = style.clip;
         entry.runs = std::move(compiled); entry.used = ++clock;
         emit(entry.runs);
     }

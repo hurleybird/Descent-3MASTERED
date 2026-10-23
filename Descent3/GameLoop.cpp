@@ -3091,6 +3091,40 @@ void GameRenderFrame(void)
 
 		// Publish once. Every world view below sees this same owned scene, not
 		// a second traversal of mutable simulation state.
+		if (FindArg("-scene-module-live-probe") && (AutomatedCaptureFrameIndex() == 0 ||
+			(AutomatedCaptureFrameIndex() == 10 && FindArg("-scene-module-reload-probe")))) {
+			if (Game_mode & GM_MULTI) Error("The module UI fixture must not start a network game");
+			char module[16]; strcpy(module,FindArg("-scene-module-coop-probe") ? "coop" : "anarchy");
+			if (!LoadGameDLL(module,1)) Error("Could not load the shipped module for canvas qualification");
+			// Real module records/callbacks, but no multiplayer transport. A remote
+			// player avoids the local server's blocking wait-for-players screen.
+			const int peer = Player_num == 1 ? 2 : 1;
+			Players[peer].ship_index = Players[Player_num].ship_index;
+			strcpy(Players[peer].callsign,"Canvas peer");
+			NetPlayers[peer].flags = NPF_CONNECTED;
+			NetPlayers[peer].sequence = NETSEQ_PLAYING;
+			NetPlayers[peer].pilot_pic_id = 65535;
+			auto position = Player_object->pos+Player_object->orient.fvec*10;
+			const int object_index = AutomatedCaptureFrameIndex() == 0 ?
+				ObjCreate(OBJ_PLAYER,peer,Player_object->roomnum,&position,&Player_object->orient) : Players[peer].objnum;
+			if (object_index < 0) Error("Could not create the module UI fixture player");
+			Players[peer].objnum = object_index;
+			Objects[object_index].control_type = CT_NONE;
+			Objects[object_index].movement_type = MT_NONE;
+			dllinfo entry{}; entry.me_handle = Objects[object_index].handle; entry.it_handle = OBJECT_HANDLE_NONE;
+			CallGameDLL(EVT_CLIENT_GAMEPLAYERENTERSGAME,&entry);
+			dllinfo interval{}; interval.me_handle = interval.it_handle = OBJECT_HANDLE_NONE;
+			CallGameDLL(EVT_GAME_INTERVAL,&interval);
+			if (FindArg("-scene-module-stats-probe")) {
+				interval.input_key = KEY_F7;
+				CallGameDLL(EVT_CLIENT_KEYPRESS,&interval);
+			}
+			if (FindArg("-scene-module-menu-probe")) {
+				interval.input_key = KEY_F6;
+				CallGameDLL(EVT_CLIENT_KEYPRESS,&interval);
+			}
+			AutomatedCaptureLog("scene loaded module UI fixture name=%s identity=%llu network_mode_unchanged=1",module,(unsigned long long)GameModuleCanvasIdentity());
+		}
 		if (AutomatedCaptureFrameIndex() == 20 && FindArg("-scene-overlay-events-probe")) {
 			// Exercise the real queue and damage/energy/fusion producers in a
 			// private fixed-input capture, not a fabricated GPU-only quad.
@@ -3210,6 +3244,15 @@ void GameRenderFrame(void)
 		module_images.clear();
 		const auto overlay_presentation = FindArg("-scene-automap-probe") ? d3scene::PresentationRef{} :
 			PrepareGameOverlayPresentation(*presentation,hud_layout,true,module_images);
+		if (FindArg("-scene-module-live-probe") && FindArg("-scene-module-unload-probe") && AutomatedCaptureFrameIndex() == 9) {
+			const auto identity = GameModuleCanvasIdentity();
+			FreeGameDLL();
+			if (GameModuleCanvasIdentity()) Error("Module canvas owner survived unload");
+			// Execute this already-owned publication after callback code and its
+			// source bitmaps have gone away. The next frame must have no callbacks.
+			AutomatedCaptureLog("scene module fixture unloaded after overlay publication owner=%llu replay_sequence=%llu",
+				(unsigned long long)identity,(unsigned long long)overlay_presentation->data().sequence);
+		}
 		for (auto& image : module_images) {
 			auto plan = d3scene::planPlanarViews(*presentation,image.view,Render_preferred_state.msaa_samples);
 			image.view = plan.consumer.view();
