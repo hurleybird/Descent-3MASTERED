@@ -5,6 +5,7 @@
 #include "config.h"
 #include "../renderer/SceneTerrain.h"
 #include "../renderer/SceneGeometry.h"
+#include "../renderer/SceneMeshExposure.h"
 #include "terrain.h"
 #include "lightmap.h"
 #include "bitmap.h"
@@ -126,7 +127,7 @@ void PrepareGameTerrain(d3scene::FrameData& frame) {
         frame.terrain.materials.push_back(binding);
     }
 }
-void PrepareGameSky(d3scene::FrameData& frame) {
+void PrepareGameSky(d3scene::FrameData& frame,bool advance_history) {
     // Geometry belongs to the authored sky, not the presentation clock. Keep
     // its inputs alongside immutable assets; rotation/materials remain frame
     // data. Compare only geometry inputs (not mutable fog or rotation state).
@@ -134,6 +135,7 @@ void PrepareGameSky(d3scene::FrameData& frame) {
         uint64_t lifetime = 0;
         terrain_sky source{};
         d3scene::MeshAssetRef dome, horizon, stars, lightning_flash, lightning_segment;
+        d3scene::MeshExposureHistory star_exposure;
     };
     static SkyGeometry retained;
     if (retained.lifetime != frame.scene_lifetime) {
@@ -242,8 +244,14 @@ void PrepareGameSky(d3scene::FrameData& frame) {
         d3scene::PreparedMesh batch;
         batch.asset = retained.stars;
         batch.world = skyRotation(TF_ROTATE_STARS); batch.camera_translation = {1,1,1};
+        const auto exposure = retained.star_exposure.sample(batch.asset->id(),frame.sequence,frame.temporal_predecessor,batch.world,advance_history);
+        batch.previous_world = exposure.previous; batch.has_previous_world = exposure.valid;
+        batch.raster_trail = {9000,.75f,.6f,4}; batch.raster_trail.reference_length = 90000;
+        batch.raster_trail.camera_kinds = 1u<<uint32_t(d3scene::ViewKind::Main);
+        if (FindArg("-scene-star-trail-control")) batch.raster_trail.length = 0;
         batch.surface.layer = d3scene::RenderLayer::Background;
         batch.surface.unlit = true; batch.surface.two_sided = true;
+        batch.surface.medium_transport = false;
         batch.surface.blend = d3scene::BlendMode::Alpha;
         frame.meshes.push_back(std::move(batch));
     }

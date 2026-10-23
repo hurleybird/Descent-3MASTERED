@@ -44,7 +44,7 @@ void PrepareGameInspectionBanner(d3scene::FrameData&);
 void PrepareGameDisplayLabels(d3scene::FrameData&,d3scene::Rect display);
 void PrepareGameSceneLights(d3scene::FrameData&);
 void PrepareGameTerrain(d3scene::FrameData&);
-void PrepareGameSky(d3scene::FrameData&);
+void PrepareGameSky(d3scene::FrameData&,bool advance_history = true);
 void PrepareGameEffects(d3scene::FrameData&,const GameMainView* = nullptr);
 void PrepareGameObjectEffects(d3scene::FrameData&);
 void PrepareGameCameraEffects(d3scene::FrameData&,const GameMainView*);

@@ -861,3 +861,56 @@ also remain release gates. This implementation is not whole-renderer acceptance.
 coro-zero-pooled-20261023 is pixel-identical to the preceding ordinary003 frame
 (a view without admitted coronas). coro-mirror-policy-20261023 confirms an
 independent synthetic mirror camera does not inherit a stale main-view glow set.
+
+## Retained star streaks and per-camera exposure (I15 implementation)
+
+The600stars remain one retained2400-vertex marker asset, not rebuilt CPU trails.
+The game sky producer publishes current/previous sky placement with a qualified
+world predecessor; independent thumbnail publication cannot consume its exposure.
+Generic raster-trail metadata carries absolute displacement/reference length,
+tail fraction, alpha response and camera audience. The Descent source retains
+the old9000-unit threshold,90000-unit scale,.75tail and.6minimum head alpha.
+These are source parameters, not constants or star branches in the GPU executor.
+
+The vertex shader expands marker quads from current/previous view-space points,
+clips crossing tails at the near plane and fades head to tail. Prior camera
+placement includes the eye-following sky translation, so translation cannot be
+mistaken for angular sky motion. Source geometry/material changes, missing view
+history, cuts and resize suppress extension; paused views suppress it explicitly.
+The game star audience permits main only: auxiliary/mirror/thumbnail views remain
+points. Generic metadata also supports other declared audiences. No game RNG or
+draw-time last-star array is used. Ordinary materials skip the trail math.
+The draw UBO is384bytes (one additional vec4, with reference length packed into
+an unused component); the varying interface remains14smooth vec4 plus flat
+integer and clip-distance slots, unchanged. No extra interpolator was added.
+
+All3CPU suites and the engine pass. Tests cover displacement threshold/cap,
+pixel width, alpha, near crossing/behind-eye collapse, independent exposure holes,
+replay/conflict/reorder, asset/scene reset, camera predecessor and camera cut,
+audience/pause policy, eye-following prior placement and rejected invalid inputs.
+Inspected GL-clean native captures star-{turn,cut,resume}-{trail,point}-20261023
+show main streaks, point rear stars, an exactly pixel-identical point-only camera
+cut, and streaks returning the following frame. The earlier stars-* comparisons
+used nondeterministic level-generated star fields and are not parity evidence.
+The final fixture uses a local fixed PSRand stream, not gameplay RNG. Its black
+sky/forced star field/controlled turn are diagnostic setup, not production changes.
+
+star-export-fixed-20261023 invokes actual SaveGameState/thumbnail rendering
+between world publications: mesh and camera history stay valid on frames20–22.
+The resulting task-owned stars-owned-save-20261023 loads successfully through the
+real CLI loader in star-owned-reload-20261023; the new scene starts with invalid
+motion history as expected. This is save/export/reload evidence, not normal
+save-dialog or quicksave-key UI acceptance. star-zero-20261023 differs from the
+preceding ordinary003 image only by1/255 at3pixels (mean absolute RGB1.18e-6).
+
+Performance caution: 720p SSAA2/MSAA4 AO/bloom/modern blur is effectively stable
+in this local pair (whole3.46->3.31ms,GPU2.61->2.62ms), not a dependable speedup.
+Short120-frame4K+SSAA2/MSAA4 fog runs initially showed a repeatable apparent GPU
+increase. GPU split traces locate the difference in the unchanged bloom stage;
+main-world rendering is20.07/20.03ms. A matched600-frame pair without thread-cycle
+sampling gives whole30.14/30.13ms and GPU29.70/29.67ms on frames240–299; other
+windows still vary. A process-memory snapshot showed3589MiB dedicated and9MiB
+shared, not demonstrated VRAM exhaustion. Do not suppress the short-run result
+or assert a global performance win: benchmark stability and the full scaling gate
+remain open. Active-streak throughput and broader natural fast-turn appearance
+also require final qualification. Candidate/Previous Candidate remain untouched.

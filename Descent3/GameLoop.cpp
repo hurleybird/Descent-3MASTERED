@@ -3428,6 +3428,19 @@ void GameRenderFrame(void)
 				Error("Native microwave damage fixture did not set viewer deformation");
 		}
 		AdvanceGameRoomCoronaFixture();
+		if (FindArg("-scene-star-trail-probe") && AutomatedCaptureFrameIndex() == 0) {
+			Terrain_sky.flags |= TF_STARS; Terrain_sky.textured = false;
+			Terrain_sky.sky_color = Terrain_sky.horizon_color = GR_RGB(0,0,0);
+			// Level loading generates its stars before the capture RNG seed is
+			// applied. A local fixture stream makes point/trail pairs comparable.
+			PSRand stars(12345);
+			for (int i = 0; i < MAX_STARS; ++i) {
+				matrix facing; vm_AnglesToMatrix(&facing,angle(49152+stars()%16384),angle(stars()*2),0);
+				Terrain_sky.star_vectors[i] = facing.fvec*(Terrain_sky.radius*500);
+				const int tint = stars()%4;
+				Terrain_sky.star_color[i] = GR_RGB(255,tint == 1 ? 200 : 255,tint == 2 ? 200 : 255);
+			}
+		}
 		const auto main_view = CaptureGameMainView();
 		if (FindArg("-scene-view-deformation-probe") && AutomatedCapturePending()) {
 			const auto& effect = main_view.world.world_deformation;

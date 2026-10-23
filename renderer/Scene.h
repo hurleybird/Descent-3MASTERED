@@ -378,6 +378,13 @@ struct BillboardMotion {
     float bank = 0; // view-independent angular perturbation, radians
     float speed_stretch = 0,maximum_stretch = 0,proximity_range = 0;
 };
+// A retained raster marker may expand along its previous view-space exposure.
+// Displacement and reference length are in eye units. Zero length disables it.
+struct RasterTrail {
+    float minimum_delta = 0, length = 0, minimum_alpha = 1, alpha_falloff = 0;
+    float reference_length = 1;
+    uint32_t camera_kinds = UINT32_MAX;
+};
 // Author permits display-resolution sampling for low-frequency volume sprites.
 // The view scheduler must still establish safe depth and compositing semantics.
 enum class RasterDomain : uint8_t { Surface, SoftVolume };
@@ -402,6 +409,9 @@ struct PreparedMesh {
     // Geometry supplies signed transverse/longitudinal raster offsets. Facing
     // is compiled independently for each view; endpoints remain world-space.
     float raster_stroke_width = 0;
+    RasterTrail raster_trail;
+    Transform previous_world;
+    bool has_previous_world = false;
     bool light_influences_prepared = false;
     LightCandidateRange light_candidates;
     uint64_t collection = 0; // zero is the world; other collections are isolated view content

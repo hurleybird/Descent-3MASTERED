@@ -350,8 +350,8 @@ Vec3 unproject(const Camera& camera,float x,float y,float depth) {
     const float w = orthographic ? 1 : z;
     return transformPoint(camera.transform,{w*(x-p.x_offset)/p.x_scale,w*(y-p.y_offset)/p.y_scale,z});
 }
-Transform resolveMeshTransform(const PreparedMesh& instance,const Camera& camera,const Transform* attachment) {
-    auto world = instance.world;
+Transform resolveMeshTransform(const PreparedMesh& instance,const Camera& camera,const Transform* attachment,const Transform* placement) {
+    auto world = placement ? *placement : instance.world;
     if (attachment) world.position = transformPoint(*attachment,world.position);
     auto direction = camera.transform.forward;
     if (instance.eye_distance > 0 || instance.alignment == MeshAlignment::FacingEye) {

@@ -2,6 +2,8 @@ SET (RENDERER_SOURCES
 		renderer/Scene.h
 		renderer/Scene.cpp
 		renderer/SceneView.h
+		renderer/SceneMeshExposure.h
+		renderer/SceneRasterTrail.h
 		renderer/SceneView.cpp
 		renderer/SceneLighting.cpp
 		renderer/SceneGeometry.cpp

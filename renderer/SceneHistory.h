@@ -24,6 +24,7 @@ struct ViewHistorySample {
     uint64_t sequence = 0, lifetime = 0;
     View view;
     ViewMatrices current, previous;
+    Transform previous_camera;
     ViewDeformation previous_deformation;
     bool previous_valid = false;
 };
@@ -69,6 +70,7 @@ inline ImageMotion prepareImageMotion(const FrameData& frame,const ViewHistorySa
         prior.current.view_projection == camera.current.view_projection) {
         result.camera.previous = prior.previous;
         result.camera.previous_deformation = prior.previous_deformation;
+        result.camera.previous_camera = prior.previous_camera;
         result.camera.previous_valid = prior.previous_valid;
         result.delta_time = completed.delta_time;
         result.afterburner_factor = completed.afterburner_factor;
@@ -100,6 +102,7 @@ public:
         ViewHistorySample result;
         result.sequence = frame.sequence; result.lifetime = frame.scene_lifetime;
         result.view = view; result.current = viewMatrices(camera); result.previous = result.current;
+        result.previous_camera = camera.transform;
         result.previous_deformation = view.world_deformation;
         const auto found = completed_.find({view.kind,view.history_key});
         if (found == completed_.end()) return result;
@@ -111,10 +114,12 @@ public:
                 throw std::logic_error("A view history key was reused for a different camera in one presentation");
             result.previous = prior.previous; result.previous_valid = prior.previous_valid;
             result.previous_deformation = prior.previous_deformation;
+            result.previous_camera = prior.previous_camera;
         } else if (!view.camera_cut && prior.sequence < result.sequence &&
             prior.sequence == frame.temporal_predecessor && compatible(prior,result)) {
             result.previous = prior.current; result.previous_valid = true;
             result.previous_deformation = prior.view.world_deformation;
+            result.previous_camera = prior.view.camera;
         }
         return result;
     }

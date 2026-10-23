@@ -9,6 +9,7 @@
 #include "SceneFog.h"
 #include "SceneFogShaders.h"
 #include "SceneMotion.h"
+#include "SceneRasterTrail.h"
 #include "SceneDeformation.h"
 #include "gameloop.h"
 #include "args.h"
@@ -54,7 +55,7 @@ layout(std140) uniform SceneViewBlock { vec4 view_params[16]; uvec4 deformer_key
 #define lighting_per_pixel (view_options.x)
 #define fog_volume_count (view_options.y)
 #define fog_volume_offset (view_options.z)
-layout(std140) uniform SceneDrawBlock { vec4 draw_params[22]; uvec4 draw_identity; };
+layout(std140) uniform SceneDrawBlock { vec4 draw_params[23]; uvec4 draw_identity; };
 #define model_position (draw_params[0].xyz)
 #define effect_depth_offset (draw_params[0].w)
 #define model_right (draw_params[1].xyz)
@@ -110,6 +111,8 @@ layout(std140) uniform SceneDrawBlock { vec4 draw_params[22]; uvec4 draw_identit
 #define motion_valid (int(draw_identity.y))
 #define polygon_light_table (int(draw_identity.z))
 #define deformation_response (draw_params[21].xy)
+#define trail_reference_length (draw_params[21].z)
+#define raster_trail (draw_params[22])
 #define deformation_identity (draw_identity.w)
 uniform samplerBuffer scene_lights;
 uniform isamplerBuffer scene_influences;
@@ -142,7 +145,7 @@ vec3 sceneDynamicLighting(vec3 world_position,ivec2 influences) {
     return dynamic_color;
 }
 )GLSL";
-const std::string SceneVertexShader = std::string(SceneLightingShader) + R"GLSL(
+const std::string SceneVertexShader = std::string(SceneLightingShader) + d3scene::rasterTrailShader() + R"GLSL(
 layout(location=0) in vec3 position;
 layout(location=1) in vec2 uv;
 layout(location=2) in vec2 light_uv;
@@ -221,7 +224,20 @@ void main() {
     if (orthographic_depth_scale > 0.0)
         gl_Position = vec4(dot(relative,camera_right)*projection.x+projection.z,
             dot(relative,camera_up)*projection.y+projection.w,(z-near_distance)*orthographic_depth_scale-1.0,1.0);
-    vec2 pixel_offset = raster_offset;
+    vec3 previous_world = previous_position+previous_right*previous_prepared.x+
+        previous_up*previous_prepared.y+previous_forward*previous_prepared.z;
+    previous_world = deformWorldPoint(previous_world,previous_deformation,deformer_keys.y);
+    previous_clip = previous_view_projection*vec4(previous_world,1);
+    float trail_alpha = 1.0;
+    vec4 trail_clip;
+    bool extended = false;
+    if (raster_trail.y > 0.0) {
+        vec3 prior_view = vec3((previous_clip.xy-previous_clip.w*projection.zw)/projection.xy,previous_clip.w);
+        extended = rasterTrailVertex(vec3(dot(relative,camera_right),dot(relative,camera_up),z),prior_view,
+            raster_trail,trail_reference_length,raster_offset,projection,near_distance,raster_pixel_scale,trail_clip,trail_alpha);
+    }
+    vec2 pixel_offset = extended ? vec2(0) : raster_offset;
+    if (extended) gl_Position = trail_clip;
     if (raster_stroke_width > 0.0)
         pixel_offset = (raster_stroke_side*raster_offset.x+
             vec2(-raster_stroke_side.y,raster_stroke_side.x)*raster_offset.y)*raster_stroke_width;
@@ -230,11 +246,7 @@ void main() {
         gl_Position.z = orthographic_depth_scale > 0.0 ? (z+effect_depth_offset-near_distance)*orthographic_depth_scale-1.0 :
             (1.0-2.0*near_distance/max(near_distance,z+effect_depth_offset))*gl_Position.w;
     current_clip = gl_Position;
-    vec3 previous_world = previous_position+previous_right*previous_prepared.x+
-        previous_up*previous_prepared.y+previous_forward*previous_prepared.z;
-    previous_world = deformWorldPoint(previous_world,previous_deformation,deformer_keys.y);
-    previous_clip = previous_view_projection*vec4(previous_world,1);
-    texture_coordinates = vec4(uv,light_uv); normal_alpha.w = alpha;
+    texture_coordinates = vec4(uv,light_uv); normal_alpha.w = alpha*trail_alpha;
     if (use_instance_uvs != 0) texture_coordinates.zw = texelFetch(instance_uvs,gl_VertexID+instance_uv_offset).rg;
     if (use_texture_uvs != 0) texture_coordinates.xy = texelFetch(instance_uvs,gl_VertexID+texture_uv_offset).rg;
     vec3 world_normal = model_right*normal.x + model_up*normal.y + model_forward*normal.z;
@@ -1831,7 +1843,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     if (!scene_draw_record_bytes) {
         GLint alignment = 16;
         glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT,&alignment);
-        scene_draw_record_bytes = ((23*16+size_t(alignment)-1)/size_t(alignment))*size_t(alignment);
+        scene_draw_record_bytes = ((24*16+size_t(alignment)-1)/size_t(alignment))*size_t(alignment);
     }
     const size_t record_bytes = scene_draw_record_bytes;
     auto& records = scene_draw_records; records.assign(visibility.surfaces.size()*(record_bytes/sizeof(float)),0);
@@ -1909,7 +1921,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
             if (part.light_influences_prepared) {
                 influences = ElementRange();
                 const uint32_t table = view.dynamic_lighting && !surface.unlit ? scene_part_ranges[part.compiled_index].light_table : 0;
-                std::memcpy(record+90,&table,sizeof(table));
+                std::memcpy(record+94,&table,sizeof(table));
             }
         }
         record[62] = float(influences.offset);
@@ -1938,15 +1950,28 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
             motion.previous = prepared.previous_world; motion.identity = prepared.motion_identity;
             motion.valid = history.previous_valid && prepared.motion_valid;
         }
+        if (item.mesh) {
+            const auto& instance = presentation.data().meshes[item.mesh_index];
+            const auto& trail = instance.raster_trail;
+            if (d3scene::rasterTrailActive(instance,view,history.previous_valid,presentation.data().paused)) {
+                auto previous_camera = visibility.camera; previous_camera.transform = history.previous_camera;
+                motion.previous = d3scene::resolveMeshTransform(instance,previous_camera,nullptr,&instance.previous_world);
+                record[88] = trail.minimum_delta; record[89] = trail.length;
+                record[90] = trail.minimum_alpha; record[91] = trail.alpha_falloff;
+                record[86] = trail.reference_length;
+            }
+            if (trail.length > 0 && AutomatedCapturePending()) AutomatedCaptureLog("scene raster trail kind=%u mesh_history=%d camera_history=%d active=%d marker_vertices=%u",
+                unsigned(view.kind),instance.has_previous_world,history.previous_valid,record[89] > 0,unsigned(instance.asset->geometry().vertices.size()));
+        }
         { const auto value = motion.previous.position; record[16] = value.x; record[17] = value.y; record[18] = value.z; } { const auto value = motion.previous.right; record[20] = value.x; record[21] = value.y; record[22] = value.z; }
         { const auto value = motion.previous.up; record[24] = value.x; record[25] = value.y; record[26] = value.z; } { const auto value = motion.previous.forward; record[28] = value.x; record[29] = value.y; record[30] = value.z; }
         const auto deformation = d3scene::deformationForGeometry(presentation.data(),item,surface.layer);
         if (!resolved_part && history.previous_valid && d3scene::hasDeformationMotion(view.world_deformation,history.previous_deformation,deformation.response))
             motion.valid = true;
-        { const uint32_t value = uint32_t(motion.identity); std::memcpy(record+88,&value,sizeof(value)); }
-        { const uint32_t value = uint32_t(motion.valid); std::memcpy(record+89,&value,sizeof(value)); }
+        { const uint32_t value = uint32_t(motion.identity); std::memcpy(record+92,&value,sizeof(value)); }
+        { const uint32_t value = uint32_t(motion.valid); std::memcpy(record+93,&value,sizeof(value)); }
         record[84] = deformation.response.vertices; record[85] = deformation.response.translation;
-        std::memcpy(record+91,&deformation.identity,sizeof(deformation.identity));
+        std::memcpy(record+95,&deformation.identity,sizeof(deformation.identity));
         { const auto value = surface.base_color; record[40] = value.x; record[41] = value.y; record[42] = value.z; }
         { const auto value = modulation.color; record[44] = value.x; record[45] = value.y; record[46] = value.z; }
         { const auto value = modulation.ambient; record[32] = value.x; record[33] = value.y; record[34] = value.z; } { const auto value = surface.ambient_direction; record[36] = value.x; record[37] = value.y; record[38] = value.z; }
@@ -2305,7 +2330,7 @@ void main() {
                   (ib.terrain || ib.model_material_group || (ib.mesh && !y.two_sided)) &&
               !x.view_image_slot && !y.view_image_slot && !a.policy.planar_slot && !b.policy.planar_slot &&
               std::memcmp(records.data()+first*(record_bytes/sizeof(float)),
-                  records.data()+next*(record_bytes/sizeof(float)),92*sizeof(float)) == 0;
+                  records.data()+next*(record_bytes/sizeof(float)),96*sizeof(float)) == 0;
       };
       static thread_local std::vector<GLint> draw_starts;
       static thread_local std::vector<GLsizei> draw_counts;
@@ -2352,7 +2377,7 @@ void main() {
         bind_image(surface.baked_image,1,surface.lightmap_wrap,true);
         bind_image(surface.specular_image,8,surface.texture_wrap,false);
         scene_shader.Use();
-        glBindBufferRange(GL_UNIFORM_BUFFER,7,scene_draw_buffer,item_index*record_bytes,23*16);
+        glBindBufferRange(GL_UNIFORM_BUFFER,7,scene_draw_buffer,item_index*record_bytes,24*16);
         const bool cull = item.terrain || item.model_material_group || (item.mesh && !surface.two_sided);
         // Authored polymodel fronts use clockwise winding, unlike the
         // terrain batches. CPU face-normal culling previously hid this

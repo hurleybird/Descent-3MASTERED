@@ -679,7 +679,7 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance,const GameMainView
     }
     }
     { PERF_MARKER_SCOPE("Scene.PrepareTerrain"); PrepareGameTerrain(data); }
-    { PERF_MARKER_SCOPE("Scene.PrepareSky"); PrepareGameSky(data); }
+    { PERF_MARKER_SCOPE("Scene.PrepareSky"); PrepareGameSky(data,advance); }
     { PERF_MARKER_SCOPE("Scene.PrepareEffects"); PrepareGameEffects(data,main_view); }
     { PERF_MARKER_SCOPE("Scene.PrepareModels"); PrepareGameModelInstances(data, previous_models.get(),retain_rooms); }
     { PERF_MARKER_SCOPE("Scene.PrepareObjectEffects"); PrepareGameObjectEffects(data); }
@@ -1061,6 +1061,14 @@ void RenderGameSceneView(const d3scene::Presentation& frame, d3scene::View view,
     // Diagnostic views do not mark rooms explored or tell AI it was observed.
     // The gameplay feedback compiler barrier remains until the normal executor
     // and its visibility policy have been migrated.
+    if (FindArg("-scene-star-trail-probe") && view.kind == d3scene::ViewKind::Main && AutomatedCaptureFrameIndex() >= 20) {
+        const int index = AutomatedCaptureFrameIndex();
+        const float angle = (index-19)*.16f,c = std::cos(angle),s = std::sin(angle);
+        const auto right = view.camera.right,forward = view.camera.forward;
+        view.camera.right = {right.x*c-forward.x*s,right.y*c-forward.y*s,right.z*c-forward.z*s};
+        view.camera.forward = {forward.x*c+right.x*s,forward.y*c+right.y*s,forward.z*c+right.z*s};
+        view.camera_cut = index == 24;
+    }
     auto planar = [&] { PERF_MARKER_SCOPE("Scene.PrepareView");
         return d3scene::planPlanarViews(frame,view,Render_preferred_state.msaa_samples); }();
     view = planar.consumer.view();

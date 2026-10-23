@@ -1014,6 +1014,16 @@ PresentationRef Presentation::complete(FrameData data) {
         require(mesh.asset->geometry().raster_offsets.empty() || mesh.surface.layer == RenderLayer::Background || mesh.raster_stroke_width > 0,
             "Raster markers require a background layer");
         require(finite(mesh.world) && finite(mesh.camera_translation),"Invalid generic mesh transform");
+        require(!mesh.has_previous_world || finite(mesh.previous_world),"Invalid previous mesh placement");
+        const auto& trail = mesh.raster_trail;
+        require(std::isfinite(trail.minimum_delta) && trail.minimum_delta >= 0 &&
+            std::isfinite(trail.length) && trail.length >= 0 && trail.length <= 1 &&
+            std::isfinite(trail.minimum_alpha) && trail.minimum_alpha >= 0 && trail.minimum_alpha <= 1 &&
+            std::isfinite(trail.alpha_falloff) && trail.alpha_falloff >= 0 &&
+            std::isfinite(trail.reference_length) && trail.reference_length > 0,"Invalid raster trail");
+        require(trail.length == 0 || (!mesh.asset->geometry().raster_offsets.empty() &&
+            mesh.raster_stroke_width == 0 && mesh.surface.unlit && !mesh.surface.medium_transport &&
+            mesh.alignment == MeshAlignment::World && !mesh.model_instance),"Raster trail requires unlit retained raster markers");
         require(std::isfinite(mesh.eye_distance) && mesh.eye_distance >= 0,"Invalid view-relative mesh distance");
         require(std::isfinite(mesh.maximum_depth) && mesh.maximum_depth >= 0,"Invalid mesh detail depth");
         if (mesh.maximum_depth > 0) {

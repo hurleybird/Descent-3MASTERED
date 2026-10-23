@@ -63,7 +63,7 @@ struct PlanarViewPlan;
 // Child cameras include the camera rig, exclude their own film and render other
 // mirrors as opaque authored films. No simulation or shared material mutation.
 PlanarViewPlan planPlanarViews(const Presentation&,const View&,uint32_t samples = 0);
-Transform resolveMeshTransform(const PreparedMesh&,const Camera&,const Transform* attachment = nullptr);
+Transform resolveMeshTransform(const PreparedMesh&,const Camera&,const Transform* attachment = nullptr,const Transform* placement = nullptr);
 ClipPosition project(const Camera& camera, Vec3 world);
 // Unit transverse direction in logical pixel space. Clips the centerline at
 // the near plane before division; degenerate/behind-eye segments collapse.

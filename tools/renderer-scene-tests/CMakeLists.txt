@@ -26,6 +26,7 @@ add_executable(renderer_scene_tests
     view_deformation_tests.cpp
     auxiliary_view_tests.cpp
     room_corona_tests.cpp
+    raster_trail_tests.cpp
     automap_tests.cpp
     ../../Descent3/SceneCanvas.cpp
     ../../Descent3/SceneModuleContext.cpp
