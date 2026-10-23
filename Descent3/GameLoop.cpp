@@ -34,6 +34,7 @@
 #include "SceneModuleContext.h"
 #include "SceneFeedback.h"
 #include "GameVisualEffects.h"
+#include "GameElectricalWeapons.h"
 #include "../renderer/SceneLighting.h"
 #include "../renderer/SceneAnimation.h"
 #include "game.h"
@@ -3895,7 +3896,8 @@ void GameFrame(void)
 	RTP_GETCLOCK(curr_time);
 #endif
 
-	if ((!Game_paused) || (Demo_do_one_frame))
+	const bool advance_simulation = !Game_paused || Demo_do_one_frame;
+	if (advance_simulation)
 	{
 		//if we are recording a demo, all moved objects will be written
 		if (!Skip_render_game_frame)
@@ -4022,6 +4024,31 @@ void GameFrame(void)
 	RTP_tSTARTTIME(multiframe_time, curr_time);
 	MultiDoFrame();
 	RTP_tENDTIME(multiframe_time, curr_time);
+	if (advance_simulation) {
+		if (AutomatedCaptureFrameIndex() >= 0 && FindArg("-scene-electrical-probe") && Player_object) {
+			const int omega = FindWeaponName("Omega");
+			if (omega < 0 || FireWeaponFromObject(Player_object,omega,0,true,false) < 0)
+				Error("Native electrical firing fixture failed");
+			if (FindArg("-scene-electrical-world-probe")) {
+				static int emitter = OBJECT_HANDLE_NONE;
+				if (AutomatedCaptureFrameIndex() == 0) {
+					auto position = Player_object->pos+Player_object->orient.fvec*15+Player_object->orient.rvec*5;
+					const int index = ObjCreate(OBJ_ROBOT,GENOBJ_GUIDEBOT,Player_object->roomnum,&position,&Player_object->orient);
+					if (index < 0) Error("Native electrical remote source fixture failed");
+					auto& source = Objects[index]; source.control_type = CT_NONE; source.movement_type = MT_NONE;
+					emitter = source.handle;
+				}
+				auto* source = ObjGet(emitter);
+				if (!source || FireWeaponFromObject(source,omega,0,true,false) < 0)
+					Error("Native remote electrical firing failed");
+			}
+		}
+		const auto pulses = AdvanceGameElectricalWeapons(d3scene::assets().lifetime(),uint64_t(FrameCount),false);
+		if (pulses && AutomatedCapturePending()) AutomatedCaptureLog("game resolved electrical pulses=%u",pulses);
+		if (FindArg("-scene-emitter-replay-probe") &&
+			AdvanceGameElectricalWeapons(d3scene::assets().lifetime(),uint64_t(FrameCount),false))
+			Error("Electrical pulse advanced twice in one logical frame");
+	}
 
 	//Do Gamespy stuff
 	gspy_DoFrame();

@@ -374,8 +374,18 @@ struct BillboardMotion {
 // Author permits display-resolution sampling for low-frequency volume sprites.
 // The view scheduler must still establish safe depth and compositing semantics.
 enum class RasterDomain : uint8_t { Surface, SoftVolume };
+enum class CameraMatch : uint8_t { Any, Only, Except };
+struct MeshViewStyle {
+    uint32_t camera_owner = 0;
+    CameraMatch match = CameraMatch::Any;
+    bool forward_only = false;
+    // Nonzero unit axis gives abs(dot(camera.forward,axis)) opacity in other
+    // cameras; the attached source camera remains fully visible.
+    Vec3 directional_opacity;
+};
 struct PreparedMesh {
     MeshAssetRef asset;
+    MeshViewStyle view_style;
     BillboardMotion billboard_motion;
     RasterDomain raster_domain = RasterDomain::Surface;
     // Pixel-width extrusion around the segment world.position +/- world.up.
@@ -828,6 +838,7 @@ struct View {
     uint32_t camera_owner = 0;
     uint32_t camera_variant = 0; // discontinuous source mode, e.g. forward/rear
     bool attached_camera = false;
+    bool camera_effects_resolved = false; // resolution state must not erase camera attachment identity
     int32_t room = -1;
     bool exclude_camera_rig = false;
     std::vector<uint32_t> excluded_objects;

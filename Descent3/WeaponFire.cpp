@@ -17,6 +17,8 @@
 */
 
 #include "weapon.h"
+#include "GameElectricalWeapons.h"
+#include "../renderer/Scene.h"
 #include "descent.h"
 #include "polymodel.h"
 #include "room.h"
@@ -190,42 +192,6 @@ bool ObjectsAreRelated(int o1, int o2)
 
 bool Enable_omega_collions = false;
 
-struct ElectricalSparkClock
-{
-	int parent_handle;
-	int last_tick;
-};
-
-static ElectricalSparkClock Electrical_spark_clocks[MAX_OBJECTS][MAX_WB_GUNPOINTS] = {};
-
-static int GetElectricalSpark60HzTicks(const object* weapon_obj,
-	const object* parent_obj)
-{
-	if (!weapon_obj || !parent_obj)
-		return 1;
-
-	const int parent_num = OBJNUM(parent_obj);
-	const int gun_num = weapon_obj->ctype.laser_info.src_gun_num;
-	if (parent_num < 0 || parent_num >= MAX_OBJECTS ||
-		gun_num < 0 || gun_num >= MAX_WB_GUNPOINTS)
-		return 1;
-
-	ElectricalSparkClock& clock = Electrical_spark_clocks[parent_num][gun_num];
-	const int tick = Get60HzVisualTick();
-	if (clock.parent_handle != parent_obj->handle || tick < clock.last_tick)
-	{
-		clock.parent_handle = parent_obj->handle;
-		clock.last_tick = tick - 1;
-	}
-
-	int elapsed_ticks = tick - clock.last_tick;
-	if (elapsed_ticks <= 0)
-		return 0;
-	if (elapsed_ticks > 8)
-		elapsed_ticks = 8;
-	clock.last_tick = tick;
-	return elapsed_ticks;
-}
 
 // Picks out a target for an elecrical weapon to fire on
 void AquireElectricalTarget(object* obj)
@@ -1675,90 +1641,20 @@ static bool DrawOmegaBatched(int num_segments, int circle_pieces, g3Point* arc_p
 // Draws a lighting like chain of electricity
 void DrawElectricalWeapon(object* obj)
 {
-	int i, t;
-	vector center_vecs[20];
-	vector arc_vec;
+	const auto* pulse = FindGameElectricalPulse(d3scene::assets().lifetime(),obj->handle);
+	if (!pulse) return;
+	auto* parent_obj = ObjGet(pulse->source_owner);
+	if (!parent_obj) return;
+	int i,t;
+	vector center_vecs[20],arc_vec,line_norm;
 	g3Point arc_points[100];
-	vector dest_vector, src_vector, line_norm;
-	float line_mag;
-	vector dir;
-	object* parent_obj = ObjGet(obj->parent_handle);
-	float view_dp = 0;
-	static int omega_id = -2;
-
-	if (!parent_obj)
-		return;
-	if (omega_id == -2)
-		omega_id = FindWeaponName("Omega");
-	const bool omega_weapon = omega_id >= 0 && obj->id == omega_id;
-	const bool cockpit_omega = omega_weapon &&
-		parent_obj == Player_object && Viewer_object == Player_object &&
+	float line_mag,view_dp = 0;
+	const bool omega_weapon = pulse->omega;
+	const bool cockpit_omega = omega_weapon && parent_obj == Player_object && Viewer_object == Player_object &&
 		Rendering_main_view && !(Players[Player_num].flags & PLAYER_FLAGS_REARVIEW);
-
-	if (parent_obj->type == OBJ_PLAYER)
-	{
-		if (Players[parent_obj->id].flags & (PLAYER_FLAGS_DYING | PLAYER_FLAGS_DEAD))
-			return;
-	}
-	else
-	{
-		if (parent_obj->flags & OF_DYING)
-			return;
-	}
-
-	int bm_handle = GetWeaponFireImage(obj->id, 0);
-	ASSERT(bm_handle >= 0);
-
-	WeaponCalcGun(&src_vector, &dir, parent_obj, obj->ctype.laser_info.src_gun_num);
-
-	if (obj->ctype.laser_info.track_handle == OBJECT_HANDLE_NONE || ObjGet(obj->ctype.laser_info.track_handle) == NULL)
-	{
-		dest_vector = src_vector + (obj->orient.fvec * 50);
-	}
-	else
-	{
-		object* obj_to_track = ObjGet(obj->ctype.laser_info.track_handle);
-		dest_vector = obj_to_track->pos;
-		if (obj_to_track == Player_object)
-		{
-			vector subvec = src_vector - dest_vector;
-			float mag = vm_GetMagnitudeFast(&subvec);
-
-			if (mag < .5)
-			{
-				obj->lifeleft = 0;
-				return;
-			}
-
-			subvec /= mag;
-
-			dest_vector += subvec;	// This prevents rendering errors
-		}
-	}
-
-
-	//Find out if it is o.k. to create a weapon here.
-	fvi_query	fq;
-	fvi_info		hit_data;
-	int			fate;
-
-	fq.p0 = &src_vector;
-	fq.startroom = obj->roomnum;
-	fq.p1 = &dest_vector;
-	fq.rad = 0;
-	fq.thisobjnum = -1;
-	fq.ignore_obj_list = NULL;
-	fq.flags = 0;					//what about trans walls???
-
-	fate = fvi_FindIntersection(&fq, &hit_data);
-
-	if (fate == HIT_WALL || fate == HIT_TERRAIN)
-	{
-		dest_vector = hit_data.hit_pnt;
-		const int spark_ticks = GetElectricalSpark60HzTicks(obj, parent_obj);
-		for (int tick = 0; tick < spark_ticks; tick++)
-			CreateRandomSparks((ps_rand() % 4), &dest_vector, obj->roomnum, COOL_SPARK_INDEX);
-	}
+	const int bm_handle = GetWeaponFireImage(obj->id,0);
+	const auto src_vector = pulse->source;
+	const auto dest_vector = pulse->target;
 
 	vector render_src_vector = src_vector;
 	if (cockpit_omega)
@@ -1769,7 +1665,6 @@ void DrawElectricalWeapon(object* obj)
 
 	if (line_mag < .5)
 	{
-		obj->lifeleft = 0;
 		return;
 	}
 
@@ -1853,8 +1748,6 @@ void DrawElectricalWeapon(object* obj)
 	rend_SetAOSuppression(0.0f);
 	rend_SetZBufferWriteMask(1);
 
-	// Kill it!
-	obj->lifeleft = 0;
 
 }
 

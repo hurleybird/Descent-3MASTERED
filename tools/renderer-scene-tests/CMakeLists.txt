@@ -16,6 +16,7 @@ add_executable(renderer_scene_tests
     event_tests.cpp
     effect_tests.cpp
     game_visual_tests.cpp
+    electrical_tests.cpp
     canvas_tests.cpp
     module_context_tests.cpp
     automap_tests.cpp
@@ -38,6 +39,7 @@ add_executable(renderer_scene_tests
 target_sources(renderer_scene_tests PRIVATE ../../Descent3/SceneObservations.cpp)
 target_sources(renderer_scene_tests PRIVATE ../../Descent3/SceneFrame.cpp)
 target_sources(renderer_scene_tests PRIVATE ../../Descent3/GameVisualEffects.cpp)
+target_sources(renderer_scene_tests PRIVATE ../../Descent3/GameElectricalWeapons.cpp)
 target_sources(renderer_scene_tests PRIVATE ../../Descent3/gameevent.cpp)
 target_compile_features(renderer_scene_tests PRIVATE cxx_std_17)
 target_include_directories(renderer_scene_tests PRIVATE ../../lib ../../Descent3)

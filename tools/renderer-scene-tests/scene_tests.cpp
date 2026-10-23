@@ -647,6 +647,7 @@ int runModuleContextTests();
 int runAutomapTests();
 int runEffectTests();
 int runGameVisualTests();
+int runElectricalTests();
 int main() {
     try {
         {
@@ -696,6 +697,7 @@ int main() {
         Checks += runAutomapTests();
         Checks += runEffectTests();
         Checks += runGameVisualTests();
+        Checks += runElectricalTests();
         std::printf("PASS: %d renderer scene checks\n", Checks);
         return 0;
     } catch (const std::exception& error) {

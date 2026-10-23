@@ -923,7 +923,8 @@ void CreateRandomLineSparks(int num_sparks, vector* pos, int roomnum, ushort col
 
 
 // Creates a some sparks that go in random directions
-void CreateRandomSparks(int num_sparks, vector* pos, int roomnum, int which_index, float force_scalar)
+template<class Random>
+static void CreateRandomSparksFrom(Random& random,int num_sparks,vector* pos,int roomnum,int which_index,float force_scalar)
 {
 	// Make more sparks if Katmai
 	if (Katmai)
@@ -936,7 +937,7 @@ void CreateRandomSparks(int num_sparks, vector* pos, int roomnum, int which_inde
 		int sparknum;
 		int index;
 
-		if (ps_rand() % 2)
+		if (random() % 2)
 			index = HOT_SPARK_INDEX;
 		else
 			index = COOL_SPARK_INDEX;
@@ -956,20 +957,31 @@ void CreateRandomSparks(int num_sparks, vector* pos, int roomnum, int which_inde
 
 			vis->phys_flags |= PF_GRAVITY | PF_NO_COLLIDE;
 
-			vis->velocity.x = (ps_rand() % 100) - 50;
-			vis->velocity.y = (ps_rand() % 100);
-			vis->velocity.z = (ps_rand() % 100) - 50;
+			vis->velocity.x = (random() % 100) - 50;
+			vis->velocity.y = (random() % 100);
+			vis->velocity.z = (random() % 100) - 50;
 
 			vm_NormalizeVectorFast(&vis->velocity);
-			vis->velocity *= 10 + (ps_rand() % 10);
+			vis->velocity *= 10 + (random() % 10);
 			vis->velocity *= force_scalar;
-			vis->size = .2 + ((ps_rand() % 10) * .01);
+			vis->size = .2 + ((random() % 10) * .01);
 			vis->flags |= VF_USES_LIFELEFT;
-			float lifetime = 1 + ((ps_rand() % 10) * .15);
+			float lifetime = 1 + ((random() % 10) * .15);
 			vis->lifeleft = lifetime;
 			vis->lifetime = lifetime;
 		}
 	}
+}
+
+void CreateRandomSparks(int num_sparks,vector* pos,int roomnum,int which_index,float force_scalar)
+{
+	auto random = [] { return ps_rand(); };
+	CreateRandomSparksFrom(random,num_sparks,pos,roomnum,which_index,force_scalar);
+}
+
+void CreateRandomSparksWithRandom(PSRand& random,int num_sparks,vector* pos,int roomnum,int which_index,float force_scalar)
+{
+	CreateRandomSparksFrom(random,num_sparks,pos,roomnum,which_index,force_scalar);
 }
 
 // Creates a some particles that go in random directions

@@ -16,6 +16,7 @@
 #include "args.h"
 #include "weapon.h"
 #include "SceneWeaponVisuals.h"
+#include "GameElectricalWeapons.h"
 #include "matcen.h"
 #include "weather.h"
 #include "polymodel.h"
@@ -42,25 +43,34 @@ struct FragmentAsset {
 };
 std::array<FragmentAsset,MAX_OBJECTS> FragmentAssets{};
 uint64_t FragmentLifetime = 0;
-enum class EffectTopology { BlastRing, GravityDisk, WeaponRingEven, WeaponRingOdd, MassDriverTube, Count };
+enum class EffectTopology { BlastRing, GravityDisk, WeaponRingEven, WeaponRingOdd, MassDriverTube,
+    ElectricalTube, ElectricalTip, ElectricalDisk, Count };
 d3scene::MeshAssetRef effectTopology(EffectTopology kind) {
     static uint64_t lifetime = 0;
     static std::array<d3scene::MeshAssetRef,size_t(EffectTopology::Count)> assets{};
     if (lifetime != d3scene::assets().lifetime()) { assets.fill({}); lifetime = d3scene::assets().lifetime(); }
     auto& asset = assets[size_t(kind)];
     if (!asset) {
-        if (kind == EffectTopology::MassDriverTube) {
+        if (kind == EffectTopology::ElectricalDisk) {
+            asset = d3scene::assets().createMesh(d3scene::billboardRing(0,255,0,8));
+            return asset;
+        }
+        if (kind == EffectTopology::MassDriverTube || kind == EffectTopology::ElectricalTube || kind == EffectTopology::ElectricalTip) {
+            const bool electrical = kind != EffectTopology::MassDriverTube;
+            const uint32_t sides = electrical ? 5 : 16;
             d3scene::MeshGeometry geometry;
-            for (int end = 0; end < 2; ++end) for (int i = 0; i < 16; ++i) {
-                const auto angle = static_cast<::angle>(i*(65536/16));
-                geometry.vertices.push_back({-FixCos(angle),FixSin(angle),float(end)});
+            for (int end = 0; end < 2; ++end) for (uint32_t i = 0; i < sides; ++i) {
+                const auto angle = static_cast<::angle>(i*(65536/sides));
+                const float radius = end && kind == EffectTopology::ElectricalTip ? 0.f : 1.f;
+                geometry.vertices.push_back({-FixCos(angle)*radius,FixSin(angle)*radius,float(end)});
             }
-            for (uint32_t i = 0; i < 16; ++i) {
-                const uint32_t next = (i+1)%16;
+            for (uint32_t i = 0; i < sides; ++i) {
+                const uint32_t next = (i+1)%sides;
                 d3scene::MeshPolygon polygon;
-                const auto angle = static_cast<::angle>((i+.5f)*(65536/16));
+                const auto angle = static_cast<::angle>((i+.5f)*(65536/sides));
                 polygon.normal = {-FixCos(angle),FixSin(angle),0};
-                polygon.corners = {{i+16,0,0},{i,0,1},{next,1,1},{next+16,1,0}};
+                polygon.corners = electrical ? std::vector<d3scene::MeshCorner>{{i+sides,0,1},{i,0,0},{next,1,1},{next+sides,1,0}} :
+                    std::vector<d3scene::MeshCorner>{{i+sides,0,0},{i,0,1},{next,1,1},{next+sides,1,0}};
                 geometry.polygons.push_back(std::move(polygon));
             }
             asset = d3scene::assets().createMesh(std::move(geometry));
@@ -549,6 +559,70 @@ bool prepareEnhancedSnow(d3scene::FrameData& frame,const enhanced_snow_particle&
     frame.meshes.push_back(std::move(snow));
     return true;
 }
+void prepareElectricalWeapon(d3scene::FrameData& frame,const d3scene::ObjectState& owner,const object& source) {
+    const auto* pulse = FindGameElectricalPulse(frame.scene_lifetime,owner.handle);
+    if (!pulse) return;
+    const auto* parent = ObjGet(pulse->source_owner);
+    if (!parent) return;
+    const auto& definition = Weapons[source.id];
+    if (definition.flags & WF_IMAGE_VCLIP) {
+        const int clip = definition.fire_image_handle;
+        if (clip < 0 || clip >= MAX_VCLIPS || !GameVClips[clip].used) return;
+        PageInVClip(clip);
+    }
+    const int bitmap = GetWeaponFireImageAtTime(source.id,0,float(frame.simulation_time));
+    if (bitmap <= BAD_BITMAP_HANDLE || bitmap >= MAX_BITMAPS || !GameBitmaps[bitmap].used) return;
+    const bool saturate = !FindArg("-nosatomega");
+    const int segments = Detail_settings.Weapon_coronas_enabled ? 20 : 10;
+    // Shared immutable segment/tip/disk topology. Only affine placements change
+    // per pulse; there are no per-segment vertex vectors or geometry assets.
+    const int variants = pulse->omega && parent->type == OBJ_PLAYER ? 2 : 1;
+    for (int variant = 0; variant < variants; ++variant) {
+        const auto origin = variant ? pulse->source-parent->orient.fvec*1.5f : pulse->source;
+        auto direction = pulse->target-origin;
+        const float length = vm_NormalizeVector(&direction);
+        if (!(length >= .5f)) continue;
+        matrix plane; vm_VectorToMatrix(&plane,&direction,nullptr,nullptr);
+        vector centers[20]; centers[0] = origin; centers[segments-1] = pulse->target;
+        auto from = origin;
+        int phase = d3scene::visualAngle(frame.simulation_time,5000);
+        for (int i = 1; i < segments-1; ++i,from += direction*(length/segments),phase += 8000)
+            centers[i] = from+plane.uvec*(FixSin(phase%65536)*.4f)+plane.rvec*(FixCos(phase%65536)*.4f);
+        d3scene::MeshViewStyle style; style.camera_owner = pulse->source_owner;
+        if (variants == 2) {
+            style.forward_only = true;
+            style.match = variant ? d3scene::CameraMatch::Only : d3scene::CameraMatch::Except;
+        }
+        for (int i = segments-1; i >= 1; --i) {
+            d3scene::PreparedMesh tube;
+            tube.asset = effectTopology(i == segments-1 ? EffectTopology::ElectricalTip : EffectTopology::ElectricalTube);
+            tube.owner = owner.handle; tube.has_owner = true; tube.room = owner.room; tube.view_style = style;
+            tube.world.position = value(centers[i-1]);
+            tube.world.right = value(source.orient.rvec*.3f); tube.world.up = value(source.orient.uvec*.3f);
+            tube.world.forward = value(centers[i]-centers[i-1]);
+            tube.surface.bitmap = bitmap; tube.surface.texture_alpha = saturate;
+            tube.surface.unlit = tube.surface.two_sided = true;
+            tube.surface.blend = saturate ? d3scene::BlendMode::Additive : d3scene::BlendMode::Alpha;
+            tube.surface.depth = d3scene::DepthMode::ReadOnly; tube.surface.alpha = .2f;
+            frame.meshes.push_back(std::move(tube));
+            if (i == segments-1) continue;
+            const float travel = float(int(frame.simulation_time*300)%100)/100.f;
+            d3scene::PreparedMesh disk;
+            disk.asset = effectTopology(EffectTopology::ElectricalDisk);
+            disk.owner = owner.handle; disk.has_owner = true; disk.room = owner.room; disk.view_style = style;
+            disk.view_style.directional_opacity = value(direction);
+            disk.alignment = d3scene::MeshAlignment::Camera;
+            disk.world.position = value(centers[i]+(centers[i+1]-centers[i])*travel);
+            disk.world.right = {1.2f,0,0}; disk.world.up = {0,1.2f,0};
+            disk.surface.unlit = disk.surface.two_sided = true;
+            disk.surface.blend = saturate ? d3scene::BlendMode::Additive : d3scene::BlendMode::Alpha;
+            disk.surface.depth = d3scene::DepthMode::ReadOnly; disk.surface.alpha = .6f;
+            disk.surface.base_color = {.2f,.5f,1};
+            frame.meshes.push_back(std::move(disk));
+        }
+    }
+    if (AutomatedCapturePending()) AutomatedCaptureLog("scene electrical body owner=%u camera_variants=%d segments=%d",owner.handle,variants,segments);
+}
 void prepareWeaponContributions(d3scene::FrameData& frame,const d3scene::ObjectState& owner,
     const object& source,const d3scene::MeshAssetRef& quad) {
     const auto& weapon = Weapons[source.id];
@@ -664,6 +738,10 @@ void PrepareGameObjectEffects(d3scene::FrameData& frame) {
         }
         if (source->render_type == RT_WEAPON && source->type == OBJ_WEAPON) {
             const auto& weapon = Weapons[source->id];
+            if (CompileWeaponVisuals(weapon.flags).body == WeaponBodyVisual::Electrical) {
+                prepareElectricalWeapon(frame,owner,*source);
+                continue;
+            }
             if (CompileWeaponVisuals(weapon.flags).body != WeaponBodyVisual::Sprite || WeaponIsCloseScreenEffectObject(source)) continue;
             if (weapon.flags & WF_IMAGE_VCLIP) {
                 const int clip = weapon.fire_image_handle;

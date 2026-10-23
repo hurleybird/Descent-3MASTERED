@@ -94,6 +94,9 @@ void VisEffectUploadPrewarmedAtlases();
 
 // Creates a some sparks that go in random directions
 void CreateRandomSparks (int num_sparks,vector *pos,int roomnum,int which_index=-1,float force_scalar=1);
+class PSRand;
+// Explicit visual stream; does not consume or reseed the gameplay RNG.
+void CreateRandomSparksWithRandom(PSRand&,int num_sparks,vector *pos,int roomnum,int which_index=-1,float force_scalar=1);
 
 // Creates a some line sparks that go in random directions
 void CreateRandomLineSparks (int num_sparks,vector *pos,int roomnum,ushort color=0,float force_scalar=1);

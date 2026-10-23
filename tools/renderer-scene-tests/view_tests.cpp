@@ -48,6 +48,58 @@ void appendRoom(d3scene::SceneAssets& assets,d3scene::FrameData& data,d3scene::M
 int runSceneViewTests() {
     {
         using namespace d3scene;
+        auto camera = view(); camera.attached_camera = true; camera.camera_owner = 42;
+        MeshViewStyle style; style.camera_owner = 42; style.match = CameraMatch::Only; style.forward_only = true;
+        check(meshViewOpacity(style,camera) == 1,"Attached forward mesh selection failed");
+        camera.camera_variant = 1;
+        check(meshViewOpacity(style,camera) == 0,"Rear camera inherited forward-only content");
+        style.match = CameraMatch::Except;
+        check(meshViewOpacity(style,camera) == 1,"Rear camera lost world variant");
+        camera.camera_variant = 0; camera.kind = ViewKind::Mirror;
+        check(meshViewOpacity(style,camera) == 1,"Mirror inherited camera-local variant");
+        style.match = CameraMatch::Any; style.directional_opacity = {1,0,0};
+        check(meshViewOpacity(style,camera) == 0,"World directional opacity ignored the camera");
+        camera.kind = ViewKind::Main;
+        check(meshViewOpacity(style,camera) == 1,"Source camera was attenuated by world-facing fade");
+        camera.camera_owner = 43; camera.camera.forward = {.6f,0,.8f};
+        check(near(meshViewOpacity(style,camera),.6),"View-facing opacity wrong");
+        check(style.directional_opacity.x == 1,"View compilation mutated captured mesh style");
+        SceneAssets assets; FrameData data; data.sequence = 1; data.scene_lifetime = assets.lifetime();
+        ObjectState source; source.handle = 42; data.objects.push_back(source);
+        PreparedMesh mesh; mesh.asset = assets.createMesh(triangle(0,4));
+        mesh.surface.unlit = mesh.surface.two_sided = true;
+        mesh.surface.blend = BlendMode::Additive; mesh.surface.depth = DepthMode::ReadOnly;
+        mesh.view_style.camera_owner = 42; mesh.view_style.match = CameraMatch::Only; mesh.view_style.forward_only = true;
+        data.meshes.push_back(mesh);
+        const auto frozen = Presentation::freeze(data);
+        camera = view(); camera.attached_camera = true; camera.camera_owner = 42; camera.portal_visibility = false;
+        auto selected = queryView(*frozen,camera);
+        check(selected.surfaces.size() == 1 && selected.surfaces[0].view_alpha == 255,"Captured camera selection was not compiled");
+        const auto resolved_camera = resolveView(*frozen,camera);
+        check(resolved_camera.attached_camera && resolved_camera.camera_effects_resolved &&
+            queryView(*frozen,resolved_camera).surfaces.size() == 1,"Resolution erased camera attachment identity");
+        camera.camera_variant = 1;
+        check(queryView(*frozen,camera).surfaces.empty(),"Captured forward geometry leaked into rear view");
+        camera.camera_variant = 0; camera.kind = ViewKind::Mirror;
+        check(queryView(*frozen,camera).surfaces.empty(),"Captured camera-local geometry leaked into mirror");
+        data.sequence = 2; data.meshes[0].view_style.match = CameraMatch::Any;
+        data.meshes[0].view_style.directional_opacity = {.6f,0,.8f};
+        const auto world_frame = Presentation::freeze(data);
+        selected = queryView(*world_frame,camera);
+        check(selected.surfaces.size() == 1 && selected.surfaces[0].view_alpha == 204 &&
+            visibleSurfacePolicy(*world_frame,selected.surfaces[0]).blend == BlendMode::Additive,
+            "Captured view opacity or material policy was not compiled");
+        check(world_frame->data().meshes[0].surface.alpha == 1,"View opacity mutated frozen material");
+        const auto rejects_style = [&] {
+            bool rejected = false;
+            try { Presentation::freeze(data); } catch (const std::invalid_argument&) { rejected = true; }
+            check(rejected,"Invalid view-dependent mesh style accepted");
+        };
+        data.meshes[0].view_style.camera_owner = 43; rejects_style();
+        data.meshes[0].view_style.camera_owner = 42; data.meshes[0].view_style.directional_opacity = {2,0,0}; rejects_style();
+    }
+    {
+        using namespace d3scene;
         auto main_source = view();
         main_source.viewport = {-20,-15,840,630}; main_source.projection_anchor = {20,15,800,600};
         main_source.attached_camera = true; main_source.camera_owner = 42;
@@ -1067,7 +1119,7 @@ int runSceneViewTests() {
     check(attached.camera.forward.z == 1,"Camera preparation mutated input");
     check(d3scene::queryView(*shake_frame,attached).camera.transform.forward.x == 1,"Visibility ignored prepared camera");
     const auto prepared_shake = d3scene::prepareView(*shake_frame,attached);
-    check(!prepared_shake.view().attached_camera && prepared_shake.view().camera.forward.x == 1 &&
+    check(prepared_shake.view().attached_camera && prepared_shake.view().camera_effects_resolved && prepared_shake.view().camera.forward.x == 1 &&
         prepared_shake.visibility().camera.transform.forward.x == 1,
         "Executable preparation applied camera shake twice or queried another camera");
     attached.camera_owner = 43;

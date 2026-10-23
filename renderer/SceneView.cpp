@@ -454,6 +454,13 @@ bool sphereIntersects(const Camera& camera, Vec3 center, float radius) {
         if (distance(plane,center) < -radius-tolerance(plane,center)) return false;
     return true;
 }
+float meshViewOpacity(const MeshViewStyle& style,const View& view) {
+    const bool source = view.attached_camera && view.kind != ViewKind::Mirror && view.camera_owner == style.camera_owner;
+    const bool selected = source && (!style.forward_only || view.camera_variant == 0);
+    if ((style.match == CameraMatch::Only && !selected) || (style.match == CameraMatch::Except && selected)) return 0;
+    return source || dot(style.directional_opacity,style.directional_opacity) == 0 ? 1.f :
+        float((std::min)(1.0,std::abs(dot(view.camera.forward,style.directional_opacity))));
+}
 View resolveView(const Presentation& frame, View view) {
     validateView(view);
     validateViewImageInputs(frame.data(),view);
@@ -481,13 +488,13 @@ View resolveView(const Presentation& frame, View view) {
     }
     std::sort(view.excluded_objects.begin(),view.excluded_objects.end());
     view.excluded_objects.erase(std::unique(view.excluded_objects.begin(),view.excluded_objects.end()),view.excluded_objects.end());
-    if (view.attached_camera) for (const auto& effect : frame.data().camera_perturbations) {
+    if (view.attached_camera && !view.camera_effects_resolved) for (const auto& effect : frame.data().camera_perturbations) {
         if (effect.owner != view.camera_owner) continue;
         view.camera.right = transformDirection(effect.rotation,view.camera.right);
         view.camera.up = transformDirection(effect.rotation,view.camera.up);
         view.camera.forward = transformDirection(effect.rotation,view.camera.forward);
     }
-    view.attached_camera = false; // resolved views cannot apply an effect twice
+    view.camera_effects_resolved = true;
     return view;
 }
 bool excludesObject(const View& view,uint32_t handle) {
@@ -808,6 +815,8 @@ static ViewVisibility queryResolvedView(const Presentation& frame,const View& vi
     for (const auto index : collection.meshes) {
         const auto& instance = frame.data().meshes[index];
         if (instance.collection != view.collection) continue;
+        const float view_alpha = meshViewOpacity(instance.view_style,view);
+        if (view_alpha <= 0) continue;
         if (instance.receiver_polygon >= 0 && !std::binary_search(visible_receivers.begin(),visible_receivers.end(),
             (uint64_t(room_indices.at(instance.room))<<32)|uint32_t(instance.receiver_polygon))) continue;
         if (instance.has_owner && (excludesObject(view,instance.owner) ||
@@ -825,6 +834,7 @@ static ViewVisibility queryResolvedView(const Presentation& frame,const View& vi
             if (!window.visible) continue;
         }
         VisibleSurface item; item.mesh = true; item.mesh_index = static_cast<uint32_t>(index);
+        item.view_alpha = uint8_t(std::lround(view_alpha*255.f));
         Transform attachment;
         if (instance.model_part >= 0) {
             const auto index = instance.compiled_model;
@@ -854,8 +864,9 @@ static ViewVisibility queryResolvedView(const Presentation& frame,const View& vi
         if (result.placements.size() >= UINT32_MAX) throw std::length_error("Too many view placements");
         item.placement = uint32_t(result.placements.size()); result.placements.push_back(world);
         item.layer = instance.surface.material.layer;
-        item.blended = instance.surface.material.blended();
-        item.late = instance.surface.material.requiresLatePass();
+        const auto policy = modulatedMaterialPolicy(instance.surface,item.view_alpha/255.f);
+        item.blended = policy.blended();
+        item.late = policy.requiresLatePass();
         item.depth = static_cast<float>(dot(view.camera.forward,subtract(world.position,view.camera.position)));
         result.geometry.meshes.push_back(uint32_t(index));
         result.surfaces.push_back(item);
@@ -909,7 +920,7 @@ const SurfaceBinding& visibleSurfaceBinding(const Presentation& frame,const Visi
 }
 MaterialPolicy visibleSurfacePolicy(const Presentation& frame,const VisibleSurface& item) {
     return modulatedMaterialPolicy(visibleSurfaceBinding(frame,item),item.model ?
-        frame.data().modelsFor(item.model_instance_index)[item.model_variant].modulation.alpha : 1);
+        frame.data().modelsFor(item.model_instance_index)[item.model_variant].modulation.alpha*(item.view_alpha/255.f) : item.view_alpha/255.f);
 }
 std::vector<ViewPass> buildViewPasses(const Presentation& frame,const ViewVisibility& view,ViewProducts products) {
     if (view.ordering == ViewOrdering::Compositing) {

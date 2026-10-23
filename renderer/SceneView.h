@@ -50,6 +50,7 @@ View reflectedView(const Presentation&,View parent,Plane mirror,uint64_t history
 View cameraOverlayView(View main,uint64_t collection,Rect display_viewport);
 bool reversesWinding(const Transform& camera);
 bool excludesObject(const View&,uint32_t handle);
+float meshViewOpacity(const MeshViewStyle&,const View&);
 bool excludesSurface(const View&,RoomSurfaceId);
 uint64_t viewImageSource(const View&,uint64_t slot);
 const ViewImageInput& viewImageInput(const View&,uint64_t slot);
@@ -84,6 +85,7 @@ struct VisibleSurface {
     bool late = false; // pass membership is independent of color blending
     bool model = false, terrain = false, mesh = false;
     bool model_material_group = false; // polygon_index identifies the group's representative face
+    uint8_t view_alpha = 255; // packed alongside flags; do not inflate per-polygon records
 };
 struct ViewQueryStats {
     uint32_t rooms_considered = 0, surfaces_considered = 0;

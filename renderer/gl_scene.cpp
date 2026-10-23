@@ -1846,7 +1846,8 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         const auto& surface = *binding;
 
         const auto& gpu = *mesh;
-        const auto instance_modulation = resolved_model ? resolved_model->modulation : d3scene::SurfaceModulation{};
+        auto instance_modulation = resolved_model ? resolved_model->modulation : d3scene::SurfaceModulation{};
+        instance_modulation.alpha *= item.view_alpha/255.f;
         const auto modulation = d3scene::modulatedSurface(surface,instance_modulation);
         const auto policy = d3scene::modulatedMaterialPolicy(surface,instance_modulation.alpha);
         const bool planar_image = policy.planar_slot && view.reflections == d3scene::ReflectionPolicy::Images;

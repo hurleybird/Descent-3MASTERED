@@ -976,6 +976,13 @@ PresentationRef Presentation::complete(FrameData data) {
         require(mesh.raster_domain == RasterDomain::Surface || mesh.raster_domain == RasterDomain::SoftVolume,
             "Invalid prepared mesh raster domain");
         require(mesh.asset && mesh.asset->id().lifetime == data.scene_lifetime,"Stale generic mesh");
+        const auto& style = mesh.view_style;
+        require(style.match == CameraMatch::Any || style.match == CameraMatch::Only || style.match == CameraMatch::Except,
+            "Invalid mesh camera selection");
+        const float opacity_length = style.directional_opacity.x*style.directional_opacity.x+
+            style.directional_opacity.y*style.directional_opacity.y+style.directional_opacity.z*style.directional_opacity.z;
+        require(finite(style.directional_opacity) && (opacity_length == 0 || std::abs(opacity_length-1) < .001f),
+            "Invalid mesh view opacity axis");
         data.lightCandidates(mesh.light_candidates);
         require(mesh.vertices.empty() || mesh.vertices.size() == mesh.asset->geometry().vertices.size(),
             "Incomplete prepared mesh positions");
@@ -1206,6 +1213,9 @@ PresentationRef Presentation::complete(FrameData data) {
     for (const auto& dependency : image_requirements.values()) validateDependency(dependency);
     for (auto& mesh : data.meshes) {
         mesh.compiled_owner = ownerIndex(mesh.has_owner,mesh.owner,mesh.compiled_owner);
+        if (mesh.view_style.match != CameraMatch::Any || mesh.view_style.directional_opacity.x != 0 ||
+            mesh.view_style.directional_opacity.y != 0 || mesh.view_style.directional_opacity.z != 0)
+            ownerIndex(true,mesh.view_style.camera_owner,size_t(-1));
         const auto* attachment = mesh.model_instance ? model_instances.find(mesh.model_instance) : nullptr;
         mesh.compiled_model = attachment ? attachment->second : size_t(-1);
         require(mesh.model_variant >= -1 && (mesh.model_instance == 0 ? mesh.model_variant == -1 :

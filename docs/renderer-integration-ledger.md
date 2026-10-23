@@ -508,3 +508,40 @@ to world effects at x378..964/y178..410). Evidence: integration-object-emissions
 normal-20261023. These short GL-audited runs are not performance or full natural
 combat/destruction qualification, and do not close the remaining I13/viewer-wide
 deformation and other release gates.
+
+## Electrical pulses and camera-owned presentation (I10 implementation)
+
+Electrical weapons no longer depend on DrawElectricalWeapon to trace their
+visual endpoint, emit wall-contact sparks or expire the pulse. The game-frame
+owner resolves these once after simulation/multiplayer updates. The bounded
+source/gun cadence uses scene/allocation identity and an explicit local RNG;
+the common spark initializer also retains its existing gameplay-RNG entry point
+for unchanged callers. The retained diagnostic draw consumes the same resolved
+pulse without simulation writes. Target-player contact correction no longer
+depends on whichever global viewer happened to draw it.
+
+Source compilation publishes shared immutable five-sided tube/tip and eight-sided
+gradient-disk assets, affine segment placements, captured camera selection and
+directional opacity. No per-segment geometry vectors/assets are allocated, and no
+game/weapon branch or extra varying was added to GPU execution. Directional
+opacity fits existing visibility-record padding (48bytes unchanged). Material
+policy, scheduling and GPU modulation consume the same view-local opacity.
+Frame validation reuses the compiled object lookup for full camera-owner identity.
+
+An integrated CPU query caught an upstream camera-contract issue: resolveView
+previously erased attached_camera to prevent duplicate shake. Attachment is now
+preserved, with camera_effects_resolved separately tracking that preparation.
+Tests cover idempotent shake, immutable materials, forward/rear/mirror selection,
+directional fade, stale owners and malformed axes, along with actual pulse
+resolution, collision cadence, replay, pause, expiry and recycled/foreign identities.
+Engine and all three CPU suites pass.
+
+GL-clean, inspected captures: integration-electrical-native-final-20261023
+(native FireWeaponFromObject for player and robot source, real rear monitor),
+integration-electrical-mirror-final-20261023 (mirror room plus rear monitor), and
+integration-electrical-player-input-20261023. The last uses normal SelectWeapon
+and held primary input, with no electrical producer probe: the real Omega bank
+emits two gun pulses. The normal003 no-firing image is unchanged, SHA
+24543B04…96EFA1F, integration-electrical-normal-final-20261023. These do not
+qualify full weapon/target/death/reload gameplay, close-screen I11 routing or
+performance under sustained combat; all release gates remain open.
