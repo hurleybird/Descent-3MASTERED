@@ -108,9 +108,11 @@ class SceneHUDLayout {
     float Hud_aspect_x, Hud_aspect_y;
     int item_type = 0, anchor_priority = 0, anchor_x = 0, anchor_y = 0;
     bool anchor_valid = false;
+    int top_left_bottom_ = -1;
     d3scene::Rect viewport_;
     ModuleCanvasOutputs* modules_;
 public:
+    int topLeftBottom() const { return top_left_bottom_; }
     SceneHUDLayout(d3scene::FrameData& data,uint64_t layer,d3scene::Rect viewport,bool tick,ModuleCanvasOutputs* modules)
         : frame(data), collection(layer), advance(tick),
           Hud_aspect_x(float(viewport.width)/DEFAULT_HUD_WIDTH),
@@ -160,6 +162,10 @@ public:
         SceneTextStyle style; style.font = HUD_FONT; style.scale = font_scale;
         style.alpha = alpha/255.f; style.additive = saturation != 0;
         style.color = {GR_COLOR_RED(color)/255.f,GR_COLOR_GREEN(color)/255.f,GR_COLOR_BLUE(color)/255.f};
+        if (align == HUD_TEXT_LEFT && x <= DEFAULT_HUD_WIDTH/2 && y <= DEFAULT_HUD_HEIGHT/2 &&
+            (item_type == HUD_ITEM_PRIMARY || item_type == HUD_ITEM_INVENTORY ||
+             item_type == HUD_ITEM_SECONDARY || item_type == HUD_ITEM_CNTRMEASURE))
+            top_left_bottom_ = (std::max)(top_left_bottom_,draw_y+MeasureSceneText(value,style).height);
         for (int pass = 0; pass <= saturation; ++pass)
             PrepareSceneText(frame,collection,order,(std::max)(0,draw_x),draw_y,value,style);
     }
@@ -1114,7 +1120,7 @@ void RenderHUDScore(tHUDItem*) { Error("HUD score drawing was replaced by scene 
 void RenderHUDTimer(tHUDItem*) { Error("HUD timer drawing was replaced by scene publication"); }
 
 bool PrepareHUDItemCanvas(d3scene::FrameData& frame,uint64_t collection,d3scene::Rect viewport,
-    tHUDItem* items,int count,uint16_t mask,int small_filter,bool advance,bool deferred_score,ModuleCanvasOutputs* modules) {
+    tHUDItem* items,int count,uint16_t mask,int small_filter,bool advance,bool deferred_score,ModuleCanvasOutputs* modules,int* top_left_bottom) {
     SceneHUDLayout layout(frame,collection,viewport,advance,modules);
     tHUDItem* score = nullptr;
     bool score_matches = false;
@@ -1127,12 +1133,14 @@ bool PrepareHUDItemCanvas(d3scene::FrameData& frame,uint64_t collection,d3scene:
         if (!matches) continue;
         layout.item(&item,i);
     }
+    bool deferred = false;
     if (score) {
         const bool defer = small_filter == 0 && !layout.RenderHUDGetTopLeftTextAnchor(nullptr,nullptr);
         if ((score_matches && !defer) || (small_filter == 1 && deferred_score)) layout.item(score,int(score-items));
-        else if (score_matches && defer) return true;
+        else if (score_matches && defer) deferred = true;
     }
-    return false;
+    if (top_left_bottom) *top_left_bottom = layout.topLeftBottom();
+    return deferred;
 }
 
 void tDirtyRect::fill(ddgr_color col)

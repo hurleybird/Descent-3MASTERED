@@ -54,6 +54,7 @@ constexpr uint64_t SceneCockpitSecondaryView = 0x434f434b50495408ull;
 constexpr uint64_t SceneReticle = 0x4855445245540001ull;
 constexpr uint64_t SceneHUDItems = 0x4855444954450001ull;
 constexpr uint64_t SceneHUDMessages = 0x4855444d53470001ull;
+constexpr uint64_t SceneHUDStatus = 0x4855445354410001ull;
 constexpr uint64_t SceneHUDAuxiliary = 0x4855444155580001ull;
 constexpr uint64_t SceneViewImageProbe = 0x56494557494d4701ull;
 constexpr uint64_t SceneInspectionBanner = 0x5445535442414e01ull;

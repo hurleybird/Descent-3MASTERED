@@ -20,6 +20,7 @@ struct HUDCanvasLayout {
     bool auxiliary = false;
     bool cockpit = false;
     bool module = false;
+    bool status = false; // gameplay/recorder status, independent of item mask
     int32_t module_order = 5;
     bool aim_on_target = false;
     float zoom_distance = 0;
@@ -46,7 +47,8 @@ struct ModuleCanvasOutputs {
     std::vector<d3scene::ViewImageInput>& inputs;
 };
 bool PrepareHUDItemCanvas(d3scene::FrameData&,uint64_t collection,d3scene::Rect viewport,
-    tHUDItem*,int count,uint16_t mask,int small_filter,bool advance,bool deferred_score = false,ModuleCanvasOutputs* modules = nullptr);
+    tHUDItem*,int count,uint16_t mask,int small_filter,bool advance,bool deferred_score = false,ModuleCanvasOutputs* modules = nullptr,
+    int* top_left_bottom = nullptr);
 void PrepareHUDModuleCallback(d3scene::FrameData&,uint64_t collection,int32_t& order,d3scene::Rect viewport,
     uint64_t identity,ModuleCanvasOutputs&,tHUDItem* item = nullptr);
 struct SceneQuadStyle {

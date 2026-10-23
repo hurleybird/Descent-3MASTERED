@@ -32,6 +32,7 @@ HUDCanvasLayout CompileHUDCanvasLayout(const HUDCanvasRequest& request) {
     case HUDViewMode::Letterbox: case HUDViewMode::Observer: break;
     default: throw std::invalid_argument("Unknown HUD view mode");
     }
+    layout.status = true;
     layout.item_mask = request.item_mask;
     layout.auxiliary = float(request.world.height)/request.display.height <= .8f;
     return layout;

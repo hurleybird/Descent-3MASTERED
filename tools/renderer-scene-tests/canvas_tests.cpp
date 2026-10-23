@@ -33,6 +33,10 @@ int runCanvasTests() {
     check(hud_layout.primary.x == 160 && hud_layout.primary.width == 960 && !hud_layout.auxiliary &&
         hud_layout.aim == HUDAimMode::Ship && hud_layout.item_mask == 123 && hud_layout.cockpit,"Ship HUD did not compile its centered authored canvas");
     check(hud_layout.module && hud_layout.module_order == 60,"Cockpit module interval is not above its cockpit composition");
+    check(hud_layout.status,"Ship view lost its independent game-status domain");
+    hud.item_mask = 0;
+    check(CompileHUDCanvasLayout(hud).status,"An empty HUD item mask suppressed independent recorder status");
+    hud.item_mask = 123;
     hud.show_cockpit = false;
     check(CompileHUDCanvasLayout(hud).module_order == 5,"Noncockpit module interval moved above normal HUD items");
     hud.show_cockpit = true;
@@ -47,6 +51,7 @@ int runCanvasTests() {
         const auto aim = mode == HUDViewMode::Guided ? HUDAimMode::Guided : mode == HUDViewMode::Zoom ? HUDAimMode::Zoom : HUDAimMode::Hidden;
         check(hud_layout.aim == aim,"Special aim mode incorrectly followed the ship reticle toggle");
         check(hud_layout.module == (mode != HUDViewMode::Hidden),"Special view incorrectly suppressed or enabled module callbacks");
+        check(!hud_layout.status,"Special camera mode inherited ordinary HUD status");
     }
     hud.centered_four_three = false;
     for (auto mode : {HUDViewMode::Letterbox,HUDViewMode::Observer}) {

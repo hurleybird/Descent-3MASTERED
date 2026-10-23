@@ -446,3 +446,31 @@ The ordinary003 capture remains byte-identical to the prior weapon/mass checkpoi
 (SHA A0E0C7E7…55641834), integration-enhanced-snow-normal-20261023. These are not
 formal performance or settled-collision/transition signoff. Sky lightning/star
 history and the broader I11 close-screen routing still remain open.
+
+## Non-array training/demo status (I20 partial)
+
+The training-control/demo-status policy is shared between the retained UI path
+and source canvases, not duplicated or routed through GPU callbacks. It captures
+binding-query scratch before later queries can overwrite it, uses bounded text
+formatting and emits owned glyph geometry. Source item layout reports its own
+top-left text footprint; training placement never reads a legacy text-pass global.
+HUDCanvasLayout admits gameplay status independently of the HUD item mask, while
+special camera modes retain their explicit suppression policy. CPU layout tests
+cover this distinction; engine and all three suites pass.
+
+Status is an explicit display-overlay role above cockpit/auxiliary HUD (order55).
+The first recording fixture was occluded by the cockpit in the world-HUD layer;
+the corrected composition makes its bottom-center label readable without an
+angle/position-specific offset. Normal003 remains byte-identical, SHA
+A0E0C7E7…55641834. Training/record/paused source-input fixtures are GL-clean and
+visually inspected: integration-hud-status-{training,record,paused,record-layer,
+normal}-20261023. These override only layout inputs, not the live demo recorder.
+
+The actual training.mn3 mission was then started normally and captured at frame360
+with no status probe. Its real mission script enabled Forward (controls=1); the
+owned status canvas shows that binding alongside the script's move-forward
+instruction. Evidence: integration-training-mission-20261023. This does not yet
+qualify actual demo recording/playback files or the omitted diagnostics/player
+labels. A separate visual concern in this scene is bright floor bands appearing
+through the monitor areas; investigate I18 opacity/depth/composition before
+promotion, without assuming this is new or altering cancelled cockpit geometry.

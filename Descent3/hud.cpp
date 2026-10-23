@@ -1413,28 +1413,6 @@ char* GetKeyBindingText(int fidkey)
 	return key_bind_txt;
 }
 
-void DoEnabledControlsLine(char* controlp, char* keyp, char* label, int y, char* axis = NULL)
-{
-	char control_text[200] = "";
-
-	strcpy(control_text, label);
-	strcat(control_text, " : ");
-	if (keyp)
-		strcat(control_text, keyp);
-	if (keyp && (controlp || axis))
-		strcat(control_text, " / ");
-	if (controlp)
-		strcat(control_text, controlp);
-	if (controlp && axis)
-		strcat(control_text, " / ");
-	if (axis)
-		strcat(control_text, axis);
-
-	if (keyp || controlp || axis)
-		RenderHUDTextFlags(0, GR_GREEN, HUD_ALPHA, 0, 30, y, control_text);
-
-}
-
 static void RenderHUDItem(tHUDItem* item)
 {
 	RenderHUDSetTextPassItemType(item->type);
@@ -1871,7 +1849,7 @@ static void HUDRenderVrrStatus()
 #define HUD_KEYS_NEXT_LINE	hudconty += HUDEnabledControlsLineAdvance()
 
 //	iterate through entire hud item list to draw.
-void RenderHUDItems(tStatMask stat_mask)
+static void RenderHUDItemsBeforeStatus(tStatMask stat_mask)
 {
 	static double last_avg_fps = 0.0;
 	static double previous_framerate_time = 0.0;
@@ -1995,6 +1973,57 @@ void RenderHUDItems(tStatMask stat_mask)
 
 	//	render hud array list.
 	RenderHUDItemList(stat_mask, Small_hud_flag ? 0 : -1);
+}
+
+struct HUDStatusInputs {
+    int demo = 0;
+    bool paused = false,movie = false,show_controls = false;
+    uint32_t controls = 0xffffffff;
+};
+static HUDStatusInputs CaptureHUDStatusInputs() {
+    HUDStatusInputs input; input.demo = Demo_flags; input.paused = Demo_paused;
+    input.movie = Demo_make_movie; input.show_controls = Hud_show_controls;
+    input.controls = Players[Player_num].controller_bitflags;
+    return input;
+}
+struct LegacyHUDStatusSink {
+    int textHeight(const char* text) const { return grtext_GetHeight(text); }
+    int lineAdvance() const { return HUDEnabledControlsLineAdvance(); }
+    int sectionGap() const { return HUDEnabledControlsSectionGap(); }
+    int startY() const { return HUDEnabledControlsStartY(); }
+    int windowY() const { return Game_window_y; }
+    int windowHeight() const { return Game_window_h; }
+    void text(int flags,ddgr_color color,ubyte alpha,int x,int y,const char* value) const {
+        RenderHUDTextFlags(flags,color,alpha,0,x,y,"%s",value);
+    }
+};
+template<class Sink> static void LayoutHUDStatus(const HUDStatusInputs& input,Sink& sink) {
+    const auto RenderHUDTextFlags = [&](int flags,ddgr_color color,ubyte alpha,int,int x,int y,const char* value) {
+        sink.text(flags,color,alpha,x,y,value);
+    };
+    const auto grtext_GetHeight = [&](const char* value) { return sink.textHeight(value); };
+    const auto HUDEnabledControlsLineAdvance = [&] { return sink.lineAdvance(); };
+    const auto HUDEnabledControlsSectionGap = [&] { return sink.sectionGap(); };
+    const auto HUDEnabledControlsStartY = [&] { return sink.startY(); };
+    // Config binding queries return reusable scratch. Own every result until
+    // this layout ends, so querying a button cannot overwrite an axis label.
+    char bindings[48][128]; size_t binding_count = 0;
+    const auto copy_binding = [&](const char* value) -> char* {
+        if (!value) return nullptr;
+        if (binding_count == 48) Error("HUD control binding capture exceeded its bound");
+        auto* result = bindings[binding_count++]; snprintf(result,128,"%s",value); return result;
+    };
+    const auto GetKeyBindingText = [&](int control) { return copy_binding(::GetKeyBindingText(control)); };
+    const auto GetControllerBindingText = [&](int control) { return copy_binding(::GetControllerBindingText(control)); };
+    const auto DoEnabledControlsLine = [&](const char* button,const char* key,const char* label,int y,const char* axis = nullptr) {
+        char text[640];
+        snprintf(text,sizeof(text),"%s : %s%s%s%s%s",label,key ? key : "",key && (button || axis) ? " / " : "",
+            button ? button : "",button && axis ? " / " : "",axis ? axis : "");
+        if (key || button || axis) sink.text(0,GR_GREEN,HUD_ALPHA,30,y,text);
+    };
+    const int Demo_flags = input.demo;
+    const bool Demo_paused = input.paused,Demo_make_movie = input.movie,Hud_show_controls = input.show_controls;
+    const int Game_window_y = sink.windowY(),Game_window_h = sink.windowHeight();
 	if (Demo_flags == DF_RECORDING)
 	{
 		const int recording_text_height = grtext_GetHeight(TXT_RECORDINGDEMO);
@@ -2014,12 +2043,13 @@ void RenderHUDItems(tStatMask stat_mask)
 	}
 
 	//This is a big pain in the butt. It's for the training mission.
-	if (Hud_show_controls && (Players[Player_num].controller_bitflags != 0xffffffff))
+	if (Hud_show_controls && (input.controls != 0xffffffff))
 	{
 		char* controlp = NULL;
 		char* keyp = NULL;
 		char* axis = NULL;
-		player* pp = &Players[Player_num];
+		struct ControlMask { uint32_t controller_bitflags; } captured{input.controls};
+		const auto* pp = &captured;
 		int fidkey = -1, fidcont = -1;
 		int hudconty = HUDEnabledControlsStartY();
 
@@ -2210,6 +2240,13 @@ void RenderHUDItems(tStatMask stat_mask)
 		}
 	}
 
+}
+
+void RenderHUDItems(tStatMask stat_mask) {
+    RenderHUDItemsBeforeStatus(stat_mask);
+    if (IsCleanGameplayScreenshotActive()) return;
+    LegacyHUDStatusSink status;
+    LayoutHUDStatus(CaptureHUDStatusInputs(),status);
 	//	render hud messages. if in a small hud, don't do it now but inside RenderAuxHUDFrame
 	if ((stat_mask & STAT_MESSAGES) && !Small_hud_flag)
 		RenderHUDMessages();
@@ -2701,11 +2738,64 @@ static void PrepareModuleHUDInterval(d3scene::FrameData& frame,const HUDCanvasLa
     foreground.layer.display_views.push_back(std::move(canvas)); frame.foregrounds.push_back(std::move(foreground));
     if (AutomatedCapturePending()) AutomatedCaptureLog("scene module HUD interval order=%d meshes=%u",layout.module_order,unsigned(frame.meshes.size()-begin));
 }
+struct SourceHUDStatusSink {
+    d3scene::FrameData& frame;
+    d3scene::Rect viewport;
+    SceneTextStyle style;
+    int display_height,top_left_bottom;
+    int32_t order = 0;
+    int textHeight(const char* text) const { return MeasureSceneText(text,style).height; }
+    int lineAdvance() const {
+        const float extra = display_height > D3M_FONT_SCALE_THRESHOLD ? float(display_height)/D3M_FONT_SCALE_THRESHOLD : 1;
+        return (std::max)(14,textHeight("X")+int(extra*2+.5f));
+    }
+    int sectionGap() const { return display_height > D3M_FONT_SCALE_THRESHOLD ? int((float(display_height)/D3M_FONT_SCALE_THRESHOLD-1)*8+.5f) : 0; }
+    int startY() const { return (std::max)(130,top_left_bottom < 0 ? 130 : top_left_bottom+lineAdvance()+sectionGap()); }
+    int windowY() const { return 0; }
+    int windowHeight() const { return viewport.height; }
+    void text(int flags,ddgr_color color,ubyte alpha,int x,int y,const char* value) {
+        auto text_style = style; text_style.alpha = alpha/255.f;
+        text_style.color = {GR_COLOR_RED(color)/255.f,GR_COLOR_GREEN(color)/255.f,GR_COLOR_BLUE(color)/255.f};
+        if (flags & HUDTEXT_CENTERED) x = (viewport.width-MeasureSceneText(value,text_style).width)/2;
+        PrepareSceneText(frame,SceneHUDStatus,order,x,y,value,text_style);
+    }
+};
+static void PrepareHUDStatusCanvas(d3scene::FrameData& frame,const HUDCanvasLayout& layout,int top_left_bottom) {
+    if (IsCleanGameplayScreenshotActive()) return;
+    auto input = CaptureHUDStatusInputs();
+    const int probe = FindArg("-scene-hud-status-probe");
+    if (probe) {
+        // Override only this source layout input, never the live demo recorder
+        // or gameplay input restrictions. Their normal callers use captured state.
+        const char* mode = GetArg(probe+1);
+        if (!mode) Error("HUD status fixture requires a mode");
+        input.movie = false;
+        if (!stricmp(mode,"record")) input.demo = DF_RECORDING;
+        else if (!stricmp(mode,"playback") || !stricmp(mode,"paused")) { input.demo = DF_PLAYBACK; input.paused = !stricmp(mode,"paused"); }
+        else if (!stricmp(mode,"training")) {
+            input.show_controls = true;
+            input.controls = PCBF_FORWARD | PCBF_PITCHUP | PCBF_PITCHDOWN | PCBF_PRIMARY | PCBF_AFTERBURNER;
+        } else Error("Unknown HUD status fixture mode");
+    }
+    if (input.demo != DF_RECORDING && (input.demo != DF_PLAYBACK || input.movie) &&
+        (!input.show_controls || input.controls == 0xffffffff)) return;
+    const auto before = frame.meshes.size();
+    SourceHUDStatusSink sink{frame,layout.primary,MakeHUDTextStyle(layout.primary),layout.display.height,top_left_bottom};
+    LayoutHUDStatus(input,sink);
+    if (AutomatedCapturePending()) AutomatedCaptureLog("scene HUD status demo=%d controls=%u meshes=%u",input.demo,input.controls,unsigned(frame.meshes.size()-before));
+    if (frame.meshes.size() == before) return;
+    // Status describes the running game/recorder, not a surface under the
+    // cockpit. Keep it above cockpit geometry and the full-display auxiliary HUD.
+    d3scene::PreparedForeground status; status.identity = SceneHUDStatus; status.order = 55;
+    status.layer.display_views.push_back(MakeSceneCanvasView(SceneHUDStatus,layout.primary,d3scene::ViewTarget::Display,true));
+    frame.foregrounds.push_back(std::move(status));
+}
 void PrepareGameHUD(d3scene::FrameData& frame,const HUDCanvasLayout& layout,bool advance,
     std::vector<d3scene::ViewImageRequest>& images)
 {
     if (layout.module_order < 20) PrepareModuleHUDInterval(frame,layout,advance,images);
     if (!layout.item_mask) {
+        if (layout.status) PrepareHUDStatusCanvas(frame,layout,-1);
         if (layout.module_order >= 20) PrepareModuleHUDInterval(frame,layout,advance,images);
         if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
             AutomatedCaptureLog("scene HUD items prepared mask=0 hidden=1");
@@ -2723,10 +2813,12 @@ void PrepareGameHUD(d3scene::FrameData& frame,const HUDCanvasLayout& layout,bool
     const bool is_small_hud = layout.auxiliary;
     std::vector<d3scene::ViewImageInput> inputs;
     ModuleCanvasOutputs module_output{images,inputs};
-    const bool deferred_score = PrepareHUDItemCanvas(frame,SceneHUDItems,viewport,HUD_array,MAX_HUD_ITEMS,mask,is_small_hud ? 0 : -1,advance,false,&module_output);
+    int top_left_bottom = -1;
+    const bool deferred_score = PrepareHUDItemCanvas(frame,SceneHUDItems,viewport,HUD_array,MAX_HUD_ITEMS,mask,is_small_hud ? 0 : -1,advance,false,&module_output,&top_left_bottom);
     d3scene::PreparedForeground foreground; foreground.identity = SceneHUDItems; foreground.order = 20;
     foreground.layer.display_views.push_back(MakeSceneCanvasView(SceneHUDItems,viewport,d3scene::ViewTarget::Display,true));
     foreground.layer.display_views.back().image_inputs = std::move(inputs);
+    if (layout.status) PrepareHUDStatusCanvas(frame,layout,top_left_bottom);
     if ((mask & STAT_MESSAGES) && !is_small_hud) {
         PrepareHUDMessageCanvas(frame,SceneHUDMessages,viewport,false,advance);
         foreground.layer.display_views.push_back(MakeSceneCanvasView(SceneHUDMessages,viewport,d3scene::ViewTarget::Display,true));
