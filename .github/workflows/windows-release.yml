@@ -26,3 +26,15 @@ jobs:
             out/release/*.zip
             out/release/*.sha256
           if-no-files-found: error
+
+      - name: Upload exact-package contract evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-renderer-contracts-${{ github.sha }}
+          path: |
+            out/release-work/x64/renderer-contract-identity.json
+            out/release-work/x64/CMakeCache.txt
+            out/release-work/x64/CMakeFiles/**/CMakeCXXCompiler.cmake
+            out/release-work/x64/Testing/Temporary/*.log
+          if-no-files-found: warn

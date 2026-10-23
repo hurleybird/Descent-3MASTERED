@@ -1,0 +1,83 @@
+name: Renderer contracts and game integration
+
+on:
+  pull_request:
+  push:
+    branches:
+      - "**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        configuration: [Debug, Release]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure independent CPU contracts
+        run: cmake -S tools/renderer-scene-tests -B out/contracts -G "Visual Studio 17 2022" -A x64
+      - name: Build contracts
+        run: cmake --build out/contracts --config ${{ matrix.configuration }} --parallel 4
+      - name: Run contracts
+        run: ctest --test-dir out/contracts -C ${{ matrix.configuration }} --output-on-failure --output-junit "${{ github.workspace }}/out/contracts/results.xml"
+      - name: Record source and toolchain identity
+        if: always()
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force out/contracts | Out-Null
+          @{
+            source = (git rev-parse HEAD)
+            configuration = '${{ matrix.configuration }}'
+            target = 'renderer_scene_tests;renderer_args_tests;renderer_args_gnu_tests'
+            cmake = (cmake --version | Select-Object -First 1)
+            runner = '${{ runner.os }} / windows-2022 / x64'
+          } | ConvertTo-Json | Set-Content out/contracts/identity.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: renderer-contracts-${{ matrix.configuration }}-${{ github.sha }}
+          path: |
+            out/contracts/identity.json
+            out/contracts/results.xml
+            out/contracts/CMakeCache.txt
+            out/contracts/CMakeFiles/**/CMakeCXXCompiler.cmake
+            out/contracts/Testing/Temporary/*.log
+          if-no-files-found: error
+
+  game-integration:
+    runs-on: windows-2022
+    needs: contracts
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure the normal game with contracts
+        run: cmake -S . -B out/integration -G "Visual Studio 17 2022" -A x64 -DBUILD_TESTING=ON -DD3_GAMEDIR=./
+      - name: Compile and link game producers, modules and contracts, then test
+        run: cmake --build out/integration --config Release --target renderer_integration_check --parallel 4
+      - name: Record integration build identity
+        if: always()
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force out/integration | Out-Null
+          $binary = Get-ChildItem out/integration -Recurse -Filter 'Descent 3MASTERED.exe' | Select-Object -First 1
+          @{
+            source = (git rev-parse HEAD)
+            configuration = 'Release'
+            target = 'renderer_integration_check'
+            executableSha256 = $(if ($binary) { (Get-FileHash -LiteralPath $binary.FullName).Hash } else { $null })
+            cmake = (cmake --version | Select-Object -First 1)
+          } | ConvertTo-Json | Set-Content out/integration/identity.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: renderer-game-integration-${{ github.sha }}
+          path: |
+            out/integration/identity.json
+            out/integration/CMakeCache.txt
+            out/integration/CMakeFiles/**/CMakeCXXCompiler.cmake
+            out/integration/Testing/Temporary/*.log
+          if-no-files-found: error

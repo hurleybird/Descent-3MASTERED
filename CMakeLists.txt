@@ -9,6 +9,7 @@ MARK_AS_ADVANCED(CMAKE_BACKWARDS_COMPATIBILITY)
 SET( CMAKE_ALLOW_LOOSE_LOOP_CONSTRUCTS TRUE )
 
 PROJECT(Descent3Mastered VERSION 0.9.1)
+include(CTest)
 
 # Optimize across the engine's static-library boundaries in Windows Release
 # builds. Keep Debug iteration unchanged and honor an explicit CMake override.
@@ -279,6 +280,20 @@ ENDIF()
 
 add_executable(Descent3Mastered ${DESCENT3_SOURCES})
 set_target_properties(Descent3Mastered PROPERTIES OUTPUT_NAME "Descent 3MASTERED")
+
+if(BUILD_TESTING)
+	set(D3_RENDERER_CONTRACT_TARGETS renderer_scene_tests renderer_args_tests)
+	if(TARGET renderer_args_gnu_tests)
+		list(APPEND D3_RENDERER_CONTRACT_TARGETS renderer_args_gnu_tests)
+	endif()
+	# Type/link-check the real game producers and shipped module ABI alongside
+	# the lightweight CPU fixtures. This is not a proprietary-content GPU test.
+	add_custom_target(renderer_integration_check
+		COMMAND ${CMAKE_CTEST_COMMAND} -C $<CONFIG> --output-on-failure
+		DEPENDS Descent3Mastered ${D3_RENDERER_CONTRACT_TARGETS}
+		WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+		USES_TERMINAL VERBATIM)
+endif()
 
 if(WIN32)
 	set(BUILTIN_CONNECTOR_RC "${CMAKE_CURRENT_BINARY_DIR}/builtin_connectors.rc")

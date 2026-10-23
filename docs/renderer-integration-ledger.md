@@ -914,3 +914,39 @@ shared, not demonstrated VRAM exhaustion. Do not suppress the short-run result
 or assert a global performance win: benchmark stability and the full scaling gate
 remain open. Active-streak throughput and broader natural fast-turn appearance
 also require final qualification. Candidate/Previous Candidate remain untouched.
+
+## Root/CI/release contract gate (I29 testing integration)
+
+Root CMake now includes CTest and adds the independent contract project when
+BUILD_TESTING is enabled (the normal default). renderer_integration_check depends
+on the real Descent3Mastered target and all CPU suites, then runs root CTest.
+Thus the full game-facing source set and shipped module dependencies compile/link
+alongside the focused fixtures. This is not a GPU or proprietary-content CI test.
+The standalone tools/renderer-scene-tests project remains independently usable.
+Its CMake3.15 minimum also applies to root builds with testing enabled.
+
+The renderer-contracts workflow runs standalone Debug/Release on pull requests,
+branch pushes and manual dispatch, then a Release root integration build. It
+retains source/configuration/target identity, compiler/cache metadata, JUnit and
+CTest logs, plus the real game executable hash for the integration build.
+The normal Windows packager forces x64 BUILD_TESTING=ON and runs Release CTest
+before install/staging/archive creation. Its x86 bridge-only build disables the
+unused suites. Release workflow artifacts retain the exact package binary hash,
+source/dirty-tree state and contract logs. A passing pure suite does not bypass
+the ordinary-gameplay acceptance gate.
+
+Locally verified: root Ninja Release renderer_integration_check builds and all3
+tests pass; the workflow's Visual Studio17/x64 generator also builds and passes
+all3suites in both Debug and Release (MSVC19.42.34436). Debug initially exposed
+the zero-allocation test's assumption about MSVC checked-iterator proxies. Debug
+keeps checked iterators and verifies capacity reuse; Release retains the strict
+tracked-operator-new zero-allocation assertion. No production allocation check
+was relaxed. JUnit output and the packaging script's PowerShell syntax pass.
+The packager itself was not executed locally and no cleanup/deletion was run.
+Hosted CI execution is not claimed by these local results. Runtime scenario
+registry, interactive lifecycle and full deployment/performance gates remain.
+
+Normal root entry point (from an MSVC developer environment):
+
+    cmake -S . -B out/build/renderer -DBUILD_TESTING=ON
+    cmake --build out/build/renderer --target renderer_integration_check --config Release --parallel 4

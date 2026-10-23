@@ -145,14 +145,22 @@ $quotedStage = '"' + $stageRoot + '"'
 
 Invoke-VsCommand x64 (
     "cmake -S $quotedRoot -B $quotedX64 -G Ninja " +
-    "-DCMAKE_BUILD_TYPE=Release -DD3_GAMEDIR=./"
+    "-DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DD3_GAMEDIR=./"
 )
 Invoke-VsCommand x64 "cmake --build $quotedX64 --config Release --parallel"
+Invoke-VsCommand x64 "cd /d $quotedX64 && ctest -C Release --output-on-failure"
+[ordered]@{
+    source = (git -C $root rev-parse HEAD)
+    sourceDirty = [bool](git -C $root status --porcelain --untracked-files=no)
+    configuration = "Release"
+    executableSha256 = (Get-FileHash -LiteralPath (Join-Path $x64Build "Descent 3MASTERED.exe")).Hash
+    cmake = (cmake --version | Select-Object -First 1)
+} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $x64Build "renderer-contract-identity.json")
 Invoke-VsCommand x64 "cmake --install $quotedX64 --config Release --prefix $quotedStage"
 
 Invoke-VsCommand x86 (
     "cmake -S $quotedRoot -B $quotedX86 -G Ninja " +
-    "-DCMAKE_BUILD_TYPE=Release -DD3_GAMEDIR=./"
+    "-DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF -DD3_GAMEDIR=./"
 )
 Invoke-VsCommand x86 (
     "cmake --build $quotedX86 --target OsirisHost32 --config Release --parallel"
