@@ -20,6 +20,7 @@
 #include "SceneCanvas.h"
 #include "SceneExtraction.h"
 #include "SceneModuleContext.h"
+#include "GameDisplayLabels.h"
 #include "args.h"
 #include "gauges.h"
 #include "grdefs.h"
@@ -130,24 +131,7 @@ extern bool RenderHUDGetTopLeftTextBottom(int* bottom);
 bool Hud_show_controls = false;
 static bool HUD_score_pending_aux = false;
 
-constexpr int MAX_POST_PROCESS_HUD_TEXT = 64;
-constexpr int MAX_POST_PROCESS_HUD_TEXT_LENGTH = 255;
-
-struct post_process_hud_text
-{
-	char text[MAX_POST_PROCESS_HUD_TEXT_LENGTH + 1];
-	int x;
-	int y;
-	int font;
-	float font_scale;
-	ddgr_color color;
-	ubyte alpha;
-	int flags;
-	bool centered;
-};
-
-static post_process_hud_text Post_process_hud_text[MAX_POST_PROCESS_HUD_TEXT];
-static int Num_post_process_hud_text = 0;
+static GameDisplayLabelQueue Post_process_hud_text;
 
 //////////////////////////////////////////////////////////////////////////////
 
@@ -155,40 +139,25 @@ static void RenderHUDItemList(tStatMask stat_mask, int small_filter);
 
 void ResetPostProcessHUDText()
 {
-	Num_post_process_hud_text = 0;
+	Post_process_hud_text.clear();
 }
 
 bool HasPostProcessHUDText()
 {
-	return Num_post_process_hud_text > 0;
+	return Post_process_hud_text.size() > 0;
 }
 
 void QueuePostProcessHUDText(const char* text, int x, int y, bool centered,
 	int font, float font_scale, ddgr_color color, ubyte alpha, int flags)
 {
-	if (!text || !text[0] ||
-		Num_post_process_hud_text >= MAX_POST_PROCESS_HUD_TEXT)
-		return;
-
-	post_process_hud_text& item =
-		Post_process_hud_text[Num_post_process_hud_text++];
-	strncpy(item.text, text, MAX_POST_PROCESS_HUD_TEXT_LENGTH);
-	item.text[MAX_POST_PROCESS_HUD_TEXT_LENGTH] = '\0';
-	item.x = x;
-	item.y = y;
-	item.font = font;
-	item.font_scale = font_scale;
-	item.color = color;
-	item.alpha = alpha;
-	item.flags = flags;
-	item.centered = centered;
+	Post_process_hud_text.append(text,x,y,centered,font,font_scale,uint32_t(color),alpha,flags);
 }
 
 void RenderPostProcessHUDText()
 {
-	for (int i = 0; i < Num_post_process_hud_text; ++i)
+	for (unsigned i = 0; i < Post_process_hud_text.size(); ++i)
 	{
-		const post_process_hud_text& item = Post_process_hud_text[i];
+		const auto& item = Post_process_hud_text[i];
 		grtext_SetFont(item.font);
 		grtext_SetFontScale(item.font_scale);
 		grtext_SetColor(item.color);
@@ -200,6 +169,30 @@ void RenderPostProcessHUDText()
 	}
 	grtext_Flush();
 	ResetPostProcessHUDText();
+}
+
+void PrepareGameDisplayLabels(d3scene::FrameData& frame,d3scene::Rect display) {
+    if (IsCleanGameplayScreenshotActive() || !Post_process_hud_text.size()) return;
+    int32_t order = 0;
+    for (unsigned i = 0; i < Post_process_hud_text.size(); ++i) {
+        const auto& label = Post_process_hud_text[i];
+        SceneTextStyle style; style.font = label.font; style.scale = label.font_scale;
+        style.color = {GR_COLOR_RED(label.color)/255.f,GR_COLOR_GREEN(label.color)/255.f,GR_COLOR_BLUE(label.color)/255.f};
+        style.alpha = label.alpha/255.f; style.additive = (label.flags & GRTEXTFLAG_SATURATE) != 0;
+        style.clip = {0,0,display.width,display.height};
+        const int x = label.x-display.x-(label.centered ? MeasureSceneText(label.text,style).width/2 : 0);
+        const int y = label.y-display.y;
+        if (label.flags & GRTEXTFLAG_SHADOW) {
+            auto shadow = style; shadow.color = {};
+            PrepareSceneText(frame,SceneDisplayLabels,order,x+1,y+1,label.text,shadow);
+        }
+        PrepareSceneText(frame,SceneDisplayLabels,order,x,y,label.text,style);
+    }
+    d3scene::PreparedForeground labels; labels.identity = SceneDisplayLabels; labels.order = 80;
+    labels.phase = d3scene::ForegroundPhase::FinalOverlay;
+    labels.layer.display_views.push_back(MakeSceneCanvasView(SceneDisplayLabels,display,d3scene::ViewTarget::Display,SceneGeometryInspection()));
+    frame.foregrounds.push_back(std::move(labels));
+    if (AutomatedCapturePending()) AutomatedCaptureLog("scene display labels count=%u",Post_process_hud_text.size());
 }
 
 //	initializes hud.

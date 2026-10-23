@@ -667,3 +667,37 @@ sky-normal003-20261023 is pixel-identical to the prior no-producer-probe003
 capture. The first outdoor attempt rejected an incorrect raster-stroke alignment;
 that was fixed before these successful captures. Star-streak history and broad
 weather/lifecycle qualification remain open; I15 is not fully signed off.
+
+## Owned display labels and executable-camera receipt (I19 implementation)
+
+Auxiliary labels and multiplayer callsigns now compile into their own crisp,
+display-resolution final-overlay collection. The bounded game scratch queue owns
+text/style values, supports centering/shadow/additive text, and admits no borrowed
+strings or callbacks. Legacy small-view queue calls are translated at this source
+edge; execution receives ordinary immutable text geometry and image resources.
+Clean gameplay screenshots suppress the label layer. The queue is reset by the
+game frame owner, not consumed by a GPU draw/replay.
+
+The observation transaction retains the exact executable main camera, viewport,
+room, cut and exclusions, using pooled storage. Labels reuse this receipt instead
+of resolving/copying another View or re-traversing portals. Conflicting cameras
+with the same history identity now reject even when their observed object sets
+happen to match. Source callbacks/rays decide module color and semantic sight
+before overlay publication; full allocation lookup, cloak, local-player exclusion,
+connection state, view cone and clipping are retained. An inherited sight bug
+accepted only polygon hits on the target; ordinary object hits on that same target
+are now also accepted, without accepting intervening objects/walls. The unused
+global-g3-projection player-name implementation was removed.
+
+All three CPU suites pass, covering queue ownership/capacity/invalid styles,
+near/behind/cone/crop/rear projection, target-versus-occluder hit policy and exact
+camera receipt/replay/conflict. Engine builds. Inspected GL-clean native captures:
+labels-visible-distance-20261023 has a real Anarchy-colored callsign and rear label;
+labels-blocked-distance-20261023 uses an intervening native robot and omits the
+callsign; labels-cloaked-qualified-20261023 omits the cloaked player's name.
+These use actual module events/ObjCreate and no network transport. Early blocked
+fixtures overlapped the target sphere and therefore were not occlusion evidence;
+the qualified distance-separated fixture hits the intervening robot instead.
+labels-normal-final-20261023 is pixel-identical to sky-normal003-20261023.
+Real two-process gameplay, all auxiliary modes and broader foreground composition
+remain in the end-to-end gate; I19 is not by itself a deployment signoff.

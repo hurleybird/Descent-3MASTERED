@@ -806,6 +806,7 @@ d3scene::PresentationRef PrepareGameOverlayPresentation(const d3scene::Presentat
     data.paused = world.data().paused;
     PrepareGameReticle(data,layout);
     PrepareGameHUD(data,layout,advance,world_images);
+    PrepareGameDisplayLabels(data,layout.display);
     PrepareCinematicCanvas(data);
     PrepareGameInspectionBanner(data);
     if (FindArg("-scene-module-view-probe")) {

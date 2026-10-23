@@ -36,6 +36,7 @@
 #include "GameVisualEffects.h"
 #include "GameElectricalWeapons.h"
 #include "GameSkyWeather.h"
+#include "GameDisplayLabels.h"
 #include "../renderer/SceneLighting.h"
 #include "../renderer/SceneAnimation.h"
 #include "game.h"
@@ -709,7 +710,8 @@ static void BeginAutomatedCaptureFrame()
 		AutomatedCaptureLog("capture headlight enabled");
 	}
 	if (Automated_capture.gameplay_frame == 0 && FindArg("-capture-rear-smallview") && Player_object)
-		CreateSmallView(SVW_LEFT,Player_object->handle,SVF_REARVIEW,0.0f,D3_DEFAULT_ZOOM,-1,nullptr);
+		CreateSmallView(SVW_LEFT,Player_object->handle,SVF_REARVIEW,0.0f,D3_DEFAULT_ZOOM,-1,
+			FindArg("-scene-display-label-probe") ? TXT_VIEW_REAR : nullptr);
 	if (Automated_capture.gameplay_frame == 0 && FindArg("-capture-main-rear") && Player_object)
 		Players[Player_num].flags |= PLAYER_FLAGS_REARVIEW;
 	PlaceAutomatedCaptureScorch();
@@ -3237,12 +3239,28 @@ void GameRenderFrame(void)
 			NetPlayers[peer].sequence = NETSEQ_PLAYING;
 			NetPlayers[peer].pilot_pic_id = 65535;
 			auto position = Player_object->pos+Player_object->orient.fvec*10;
+			if (FindArg("-scene-player-label-probe")) position = Player_object->pos+Player_object->orient.fvec*40;
 			const int object_index = AutomatedCaptureFrameIndex() == 0 ?
 				ObjCreate(OBJ_PLAYER,peer,Player_object->roomnum,&position,&Player_object->orient) : Players[peer].objnum;
 			if (object_index < 0) Error("Could not create the module UI fixture player");
 			Players[peer].objnum = object_index;
+			if (FindArg("-scene-player-label-probe")) HudNameTan = .5f;
 			Objects[object_index].control_type = CT_NONE;
 			Objects[object_index].movement_type = MT_NONE;
+			const int label_probe = FindArg("-scene-player-label-probe");
+			const char* label_mode = label_probe ? GetArg(label_probe+1) : nullptr;
+			if (label_probe) AutomatedCaptureLog("scene player label fixture mode=%s argument=%d",label_mode ? label_mode : "none",label_probe);
+			if (label_mode && !stricmp(label_mode,"cloaked")) {
+				if (!Objects[object_index].effect_info) Error("Player label fixture has no native effect state");
+				Objects[object_index].effect_info->type_flags |= EF_CLOAKED;
+				Objects[object_index].effect_info->cloak_time = 100;
+			}
+			if (label_mode && !stricmp(label_mode,"blocked")) {
+				auto blocker_position = Player_object->pos+Player_object->orient.fvec*20;
+				const int blocker = ObjCreate(OBJ_ROBOT,GENOBJ_GUIDEBOT,Player_object->roomnum,&blocker_position,&Player_object->orient);
+				if (blocker < 0) Error("Player label occlusion fixture failed");
+				Objects[blocker].control_type = CT_NONE; Objects[blocker].movement_type = MT_NONE;
+			}
 			dllinfo entry{}; entry.me_handle = Objects[object_index].handle; entry.it_handle = OBJECT_HANDLE_NONE;
 			CallGameDLL(EVT_CLIENT_GAMEPLAYERENTERSGAME,&entry);
 			dllinfo interval{}; interval.me_handle = interval.it_handle = OBJECT_HANDLE_NONE;
@@ -3391,6 +3409,7 @@ void GameRenderFrame(void)
 		rend_PerfGpuSceneMark(RENDERER_GPU_SCENE_AFTER_SMALL_VIEWS);
 		static std::vector<d3scene::ViewImageRequest> module_images;
 		module_images.clear();
+		if (!FindArg("-scene-automap-probe")) QueueGamePlayerLabels(*presentation,observations);
 		const auto overlay_presentation = FindArg("-scene-automap-probe") ? d3scene::PresentationRef{} :
 			PrepareGameOverlayPresentation(*presentation,hud_layout,true,module_images);
 		if (FindArg("-scene-module-live-probe") && FindArg("-scene-module-unload-probe") && AutomatedCaptureFrameIndex() == 9) {

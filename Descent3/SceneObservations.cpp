@@ -156,17 +156,34 @@ bool SceneFeedbackTransaction::observe(const d3scene::PreparedView& prepared) {
     if (!view.exterior_origin && prepared.frame().roomIndices().find(view.room) == prepared.frame().roomIndices().end())
         return false; // isolated model/diagnostic collections have no gameplay spatial root
     auto& result = storage_.result;
+    const auto same_vector = [](Vec3 a,Vec3 b) { return a.x == b.x && a.y == b.y && a.z == b.z; };
+    const auto& camera = prepared.visibility().camera;
+    const auto& prior = result.main_camera;
+    const auto& p = camera.projection; const auto& q = prior.projection;
+    const bool same_camera = same_vector(camera.transform.position,prior.transform.position) &&
+        same_vector(camera.transform.right,prior.transform.right) && same_vector(camera.transform.up,prior.transform.up) &&
+        same_vector(camera.transform.forward,prior.transform.forward) && same_vector(camera.velocity,prior.velocity) &&
+        p.x_scale == q.x_scale && p.y_scale == q.y_scale && p.x_offset == q.x_offset && p.y_offset == q.y_offset &&
+        p.near_distance == q.near_distance && p.orthographic_depth_scale == q.orthographic_depth_scale;
+    const auto a = view.viewport, b = result.main_viewport;
     if (main && result.main_view_present &&
         (result.main_view_key != view.history_key || result.main_camera_owner != view.camera_owner ||
          result.main_camera_variant != view.camera_variant ||
+         !same_camera || a.x != b.x || a.y != b.y || a.width != b.width || a.height != b.height ||
+         result.main_camera_room != view.room || result.main_camera_cut != view.camera_cut ||
+         result.main_excluded_objects != view.excluded_objects ||
          result.main_exterior_visible != prepared.visibility().exterior_visible))
-        throw std::invalid_argument("One game frame cannot have conflicting main weather observers");
+        throw std::invalid_argument("One game frame cannot have conflicting main camera receipts");
+    if (main) result.main_excluded_objects.reserve(view.excluded_objects.size());
     const uint8_t domains = ObjectVisibility | EffectEligibility | (mirror ? 0 : Automap);
     add(InspectSceneObservations(prepared,domains).report);
     if (main) {
         result.main_view_present = true; result.main_view_key = view.history_key;
         result.main_camera_owner = view.camera_owner; result.main_camera_variant = view.camera_variant;
         result.main_exterior_visible = prepared.visibility().exterior_visible;
+        result.main_camera = camera; result.main_viewport = view.viewport;
+        result.main_camera_room = view.room; result.main_camera_cut = view.camera_cut;
+        result.main_excluded_objects.assign(view.excluded_objects.begin(),view.excluded_objects.end());
     }
     return true;
 }

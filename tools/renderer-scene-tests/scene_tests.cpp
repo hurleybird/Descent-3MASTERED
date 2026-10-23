@@ -646,6 +646,7 @@ int runCanvasTests();
 int runModuleContextTests();
 int runModuleMutationTests();
 int runSkyWeatherTests();
+int runDisplayLabelTests();
 int runAutomapTests();
 int runEffectTests();
 int runGameVisualTests();
@@ -698,6 +699,7 @@ int main() {
         Checks += runModuleContextTests();
         Checks += runModuleMutationTests();
         Checks += runSkyWeatherTests();
+        Checks += runDisplayLabelTests();
         Checks += runAutomapTests();
         Checks += runEffectTests();
         Checks += runGameVisualTests();

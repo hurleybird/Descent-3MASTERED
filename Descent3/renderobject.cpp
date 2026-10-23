@@ -423,8 +423,6 @@ void DrawPowerupGlowDisk(object* obj);
 void DrawPlayerDamageDisk(object* obj);
 void DrawPlayerInvulSphere(object* obj);
 void DrawPlayerSightVector(object* obj);
-// Draws this players name on the hud
-void DrawPlayerNameOnHud(object* obj);
 // Draws a rotating ball around the player
 void DrawPlayerRotatingBall(object* obj);
 
@@ -2524,91 +2522,6 @@ void DrawPlayerTypingIndicator(object* obj)
 		rend_SetColorModel(CM_MONO);
 		rend_SetTextureType(TT_LINEAR);
 		g3_DrawPoly(4, pntlist, bm_handle, 0, &cc);
-	}
-}
-
-// Draws the player name on the hud
-void DrawPlayerNameOnHud(object* obj)
-{
-	if (!(Game_mode & GM_MULTI))
-		return;
-	int slot = obj->id;
-	int color;
-	if (slot == Player_num)
-		return;
-	if (NetPlayers[slot].sequence != NETSEQ_PLAYING)
-		return;
-	if (HudNameTan <= 0)
-		return;
-	if (obj->effect_info && obj->effect_info->type_flags & EF_CLOAKED)
-		return;
-
-	// Get color to draw this name in
-	DLLInfo.me_handle = obj->handle;
-	CallGameDLL(EVT_CLIENT_GETCOLOREDNAME, &DLLInfo);
-	color = DLLInfo.iRet;
-	if (color < 0)
-		return;
-
-	// See if its in our viewcone
-	vector subvec = obj->pos - Player_object->pos;
-	vm_NormalizeVectorFast(&subvec);
-	if ((vm_DotProduct(&subvec, &Player_object->orient.fvec)) < HudNameTan)
-		return;
-	//Find out if it is o.k. to draw here.
-	fvi_query	fq;
-	fvi_info		hit_data;
-	int			fate;
-	fq.p0 = &Player_object->pos;
-	fq.startroom = Player_object->roomnum;
-	fq.p1 = &obj->pos;
-	fq.rad = 0;
-	// The visibility ray originates inside the local player's collision model.
-	// Ignore it so a small angle or distance change cannot block the ray before
-	// it reaches the remote player.
-	fq.thisobjnum = OBJNUM(Player_object);
-	fq.ignore_obj_list = NULL;
-	fq.flags = FQ_CHECK_OBJS | FQ_IGNORE_POWERUPS | FQ_IGNORE_WEAPONS;
-	fate = fvi_FindIntersection(&fq, &hit_data);
-	if (fate == HIT_NONE || (fate == HIT_SPHERE_2_POLY_OBJECT && hit_data.hit_object[0] == (obj - Objects)))
-	{
-		// Draw this name on the hud
-		g3Point pnt;
-		g3_RotatePoint(&pnt, fq.p1);
-		g3_ProjectPoint(&pnt);
-		float projection_center_x;
-		float projection_center_y;
-		g3_GetProjectionCenter(&projection_center_x, &projection_center_y);
-		const int hud_x = Game_window_x + Game_window_w / 2 +
-			(int)(pnt.p3_sx - projection_center_x);
-		const int hud_y = Game_window_y + Game_window_h / 2 +
-			(int)(pnt.p3_sy - projection_center_y);
-		float font_scale;
-		const float font_aspect_x = (float)Game_window_w / Max_window_w;
-		if (font_aspect_x <= 0.60f)
-			font_scale = 0.60f;
-		else if (font_aspect_x <= 0.80f)
-			font_scale = 0.80f;
-		else
-			font_scale = 1.0f;
-		font_scale *= ConfigNormalizeHudTextScale(Hud_text_scale);
-		QueuePostProcessHUDText(Players[slot].callsign,
-			hud_x,
-			hud_y,
-			true, HUD_FONT, font_scale, color, 255, 0);
-	}
-}
-
-void QueueMultiplayerPlayerNamesOnHud()
-{
-	if (!(Game_mode & GM_MULTI))
-		return;
-
-	for (int objnum = 0; objnum <= Highest_object_index; ++objnum)
-	{
-		object* obj = &Objects[objnum];
-		if (obj->type == OBJ_PLAYER)
-			DrawPlayerNameOnHud(obj);
 	}
 }
 

@@ -130,6 +130,10 @@ int runFeedbackTests() {
         SceneFeedbackTransaction live(*observed_frame);
         check(live.observe(prepared_observation));
         check(live.observe(prepared_observation)); // exact replay is observation-only
+        auto shifted_main = view; shifted_main.camera.position.x += .01f;
+        rejects([&] { live.observe(prepareView(*observed_frame,shifted_main)); });
+        auto cropped_main = view; cropped_main.viewport.x += 1;
+        rejects([&] { live.observe(prepareView(*observed_frame,cropped_main)); });
         auto auxiliary = view; auxiliary.kind = ViewKind::Auxiliary; auxiliary.history_key = 2;
         auxiliary.exterior_origin = true; auxiliary.room = -2;
         check(live.observe(prepareView(*observed_frame,auxiliary)));
@@ -139,6 +143,11 @@ int runFeedbackTests() {
         check(!live.observe(prepareView(*observed_frame,independent)));
         const auto& accepted = live.seal();
         check(accepted.main_view_present && !accepted.main_exterior_visible && accepted.terrain);
+        check(accepted.main_viewport.x == view.viewport.x && accepted.main_viewport.width == view.viewport.width &&
+            accepted.main_camera_room == view.room &&
+            accepted.main_camera.projection.x_scale == prepared_observation.visibility().camera.projection.x_scale &&
+            accepted.main_camera.transform.position.x == prepared_observation.visibility().camera.transform.position.x &&
+            accepted.main_excluded_objects == prepared_observation.view().excluded_objects);
         check(accepted.automap_rooms == std::vector<int32_t>{7});
         check(accepted.objects == std::vector<uint32_t>({200,100}));
     }
