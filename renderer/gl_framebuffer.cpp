@@ -1052,6 +1052,38 @@ void SceneSurfaceResources::MarkDirty()
 	object_id_resolve_valid = false;
 }
 
+void SceneSurfaceResources::WriteStationaryRectangle(d3scene::Rect rectangle)
+{
+    if (!velocity_texture || rectangle.width <= 0 || rectangle.height <= 0) return;
+    // Metadata may live at logical resolution while scene color is supersampled
+    // and multisampled. Write its own images, never assume color's attachments.
+    GLint framebuffer, scissor_box[4]; GLboolean mask[4];
+    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING,&framebuffer);
+    glGetIntegerv(GL_SCISSOR_BOX,scissor_box);
+    glGetBooleani_v(GL_COLOR_WRITEMASK,0,mask);
+    const auto scissor = glIsEnabled(GL_SCISSOR_TEST);
+    if (!surface_framebuffer) {
+        glGenFramebuffers(1,&surface_framebuffer);
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER,surface_framebuffer);
+        const GLenum type = samples >= 2 ? GL_TEXTURE_2D_MULTISAMPLE : GL_TEXTURE_2D;
+        glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER,GL_COLOR_ATTACHMENT1,type,velocity_texture,0);
+        glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER,GL_COLOR_ATTACHMENT4,type,object_id_texture,0);
+    } else glBindFramebuffer(GL_DRAW_FRAMEBUFFER,surface_framebuffer);
+    glEnable(GL_SCISSOR_TEST);
+    glScissor(rectangle.x,rectangle.y,rectangle.width,rectangle.height);
+    glColorMaski(0,GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);
+    GLenum attachment = GL_COLOR_ATTACHMENT1; glDrawBuffers(1,&attachment);
+    const GLfloat stationary[4] = {0,0,1,0}; glClearBufferfv(GL_COLOR,0,stationary);
+    attachment = GL_COLOR_ATTACHMENT4; glDrawBuffers(1,&attachment);
+    const GLuint identity[4] = {}; glClearBufferuiv(GL_COLOR,0,identity);
+    glDrawBuffer(GL_NONE);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER,framebuffer);
+    glColorMaski(0,mask[0],mask[1],mask[2],mask[3]);
+    glScissor(scissor_box[0],scissor_box[1],scissor_box[2],scissor_box[3]);
+    if (!scissor) glDisable(GL_SCISSOR_TEST);
+    MarkDirty();
+}
+
 void SceneSurfaceResources::Resolve(GLuint source_framebuffer, GLuint output_depth)
 {
     if (!NeedsResolve() || !velocity_texture || (velocity_resolve_valid && object_id_resolve_valid)) return;
@@ -1187,6 +1219,13 @@ void main() {
     if (fabsf(resolved_depth-.2f) > .00001f || velocity[0] != 1 || velocity[1] != 11 || velocity[2] != 1 ||
         int(velocity[3]*255+.5f) != 3 || identity != 101)
         Error("Scene sample resolve mixed surfaces: depth=%g velocity=%g,%g identity=%u",resolved_depth,velocity[0],velocity[1],identity);
+    motion.WriteStationaryRectangle({0,0,1,1});
+    motion.Resolve(target.Handle());
+    glBindFramebuffer(GL_READ_FRAMEBUFFER,motion.resolve_framebuffer);
+    glReadBuffer(GL_COLOR_ATTACHMENT0); glReadPixels(0,0,1,1,GL_RGBA,GL_FLOAT,velocity);
+    glReadBuffer(GL_COLOR_ATTACHMENT1); glReadPixels(0,0,1,1,GL_RED_INTEGER,GL_UNSIGNED_INT,&identity);
+    if (velocity[0] != 0 || velocity[1] != 0 || velocity[2] != 1 || identity != 0)
+        Error("Multisample stationary layer lost explicit velocity validity");
     // The AO prepass has an independent logical-resolution target, not an
     // attachment borrowed from the supersampled color framebuffer.
     SceneSurfaceResources logical;
@@ -1204,6 +1243,14 @@ void main() {
     glReadPixels(0,0,1,1,GL_DEPTH_COMPONENT,GL_FLOAT,&resolved_depth);
     if (fabsf(resolved_depth-.8f) > .00001f || velocity[1] != 10 || identity != 100 || logical.ReadWidth() != 2)
         Error("Logical surface prepass lost its owned depth/motion/identity");
+    logical.WriteStationaryRectangle({1,0,1,1});
+    glBindFramebuffer(GL_READ_FRAMEBUFFER,logical.surface_framebuffer);
+    glReadBuffer(GL_COLOR_ATTACHMENT1); glReadPixels(1,0,1,1,GL_RGBA,GL_FLOAT,velocity);
+    glReadBuffer(GL_COLOR_ATTACHMENT4); glReadPixels(1,0,1,1,GL_RED_INTEGER,GL_UNSIGNED_INT,&identity);
+    if (velocity[0] != 0 || velocity[1] != 0 || velocity[2] != 1 || identity != 0)
+        Error("Logical stationary layer lost explicit velocity validity");
+    glReadBuffer(GL_COLOR_ATTACHMENT1); glReadPixels(0,0,1,1,GL_RGBA,GL_FLOAT,velocity);
+    if (velocity[1] != 10) Error("Stationary layer changed motion outside its rectangle");
     logical.Destroy(); logical_depth.Destroy();
     shader.Destroy(); motion.Destroy(); target.Destroy();
     Framebuffer storage_a,storage_b;
@@ -1232,6 +1279,7 @@ void main() {
     AutomatedCaptureLog("scene sample resolve verified: nearest sample=1 depth=0.2 velocity=1,11 validity=1 class=3 identity=101");
     AutomatedCaptureLog("scene radiance resolve verified: unclipped RGB=2,0.5,0.125");
     AutomatedCaptureLog("scene logical surface prepass verified: owned depth, motion and identity");
+    AutomatedCaptureLog("scene stationary layers verified: multisample and independent logical metadata, bounded rectangle, no fake identity");
     AutomatedCaptureLog("scene compositor storage verified: identity, extent, radiance and independent destruction");
 }
 

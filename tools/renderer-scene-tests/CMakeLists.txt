@@ -23,6 +23,7 @@ add_executable(renderer_scene_tests
     sky_weather_tests.cpp
     display_label_tests.cpp
     view_deformation_tests.cpp
+    auxiliary_view_tests.cpp
     automap_tests.cpp
     ../../Descent3/SceneCanvas.cpp
     ../../Descent3/SceneModuleContext.cpp

@@ -3368,6 +3368,54 @@ void GameRenderFrame(void)
 			char text[] = "Renderer integration|Cinematic presentation";
 			if (!Cinematic_Start(&info,text)) Error("Integration cinematic did not start");
 		}
+		if (FindArg("-scene-auxiliary-lifecycle-probe") && Player_object && AutomatedCaptureFrameIndex() >= 0) {
+			static int owner = OBJECT_HANDLE_NONE;
+			const int index = AutomatedCaptureFrameIndex();
+			if (index == 0) {
+				CreateSmallView(SVW_LEFT,Player_object->handle,SVF_REARVIEW,0,D3_DEFAULT_ZOOM,-1,"Rear");
+				CreateSmallView(SVW_RIGHT,Player_object->handle,SVF_REARVIEW,0,D3_DEFAULT_ZOOM,-1,"Rear");
+				auto position = Player_object->pos+Player_object->orient.fvec*8;
+				const int object_index = ObjCreate(OBJ_ROBOT,GENOBJ_GUIDEBOT,Player_object->roomnum,&position,&Player_object->orient);
+				if (object_index < 0) Error("Auxiliary lifecycle fixture could not create its camera");
+				Objects[object_index].control_type = CT_NONE; Objects[object_index].movement_type = MT_NONE;
+				owner = Objects[object_index].handle;
+				if (CreateSmallView(SVW_LEFT,owner,SVF_POPUP|SVF_BIGGER|SVF_CROSSHAIRS,0,0,-1,"Popup") < 0)
+					Error("Auxiliary lifecycle fixture could not open its popup");
+			}
+			if (index == 8) {
+				auto* camera = ObjGet(owner); if (!camera) Error("Auxiliary camera retired before its lifecycle fixture");
+				ObjDelete(OBJNUM(camera));
+				AutomatedCaptureLog("scene auxiliary source deleted owner=%d",owner);
+			}
+			if (index == 9) {
+				auto position = Player_object->pos+Player_object->orient.fvec*8;
+				const int object_index = ObjCreate(OBJ_ROBOT,GENOBJ_GUIDEBOT,Player_object->roomnum,&position,&Player_object->orient);
+				if (object_index < 0) Error("Auxiliary generation fixture could not create a replacement");
+				Objects[object_index].control_type = CT_NONE; Objects[object_index].movement_type = MT_NONE;
+				AutomatedCaptureLog("scene auxiliary source replacement old=%d new=%d same_slot=%d",owner,Objects[object_index].handle,
+					(owner&HANDLE_OBJNUM_MASK) == object_index);
+			}
+			if (index == 27 && GetSmallViewer(SVW_LEFT) != Player_object->handle)
+				Error("Auxiliary static popup did not restore the saved rear view");
+		}
+		if (const int argument = FindArg("-scene-auxiliary-mode-probe")) {
+			if (AutomatedCaptureFrameIndex() == 0 && Player_object) {
+				const char* mode = GetArg(argument+1);
+				if (!mode) Error("Auxiliary mode fixture needs a mode");
+				if (!stricmp(mode,"fullscreen") || !stricmp(mode,"reduced")) {
+					SetHUDMode(HUD_FULLSCREEN); QuickCloseCockpit();
+					if (!stricmp(mode,"reduced")) {
+						Game_window_w = Max_window_w*3/4; Game_window_h = Max_window_h*3/4;
+						Game_window_x = (Max_window_w-Game_window_w)/2; Game_window_y = (Max_window_h-Game_window_h)/2;
+					}
+				} else if (!stricmp(mode,"letterbox")) SetHUDMode(HUD_LETTERBOX);
+				else if (!stricmp(mode,"animating")) CloseCockpit();
+				else if (stricmp(mode,"gun") && stricmp(mode,"timed")) Error("Unknown auxiliary mode fixture");
+				CreateSmallView(SVW_LEFT,Player_object->handle,SVF_REARVIEW|SVF_CROSSHAIRS,0,0,-1,"Rear");
+				CreateSmallView(SVW_RIGHT,Player_object->handle,SVF_CROSSHAIRS,
+					!stricmp(mode,"timed") ? .1f : 0,D3_DEFAULT_ZOOM,!stricmp(mode,"gun") ? 0 : -1,"Camera");
+			}
+		}
 		AdvanceCinematicPresentation(d3scene::assets().lifetime(),uint64_t(FrameCount));
 		if (FindArg("-scene-view-deformation-probe") && AutomatedCaptureFrameIndex() == 20 && Player_object) {
 			int microwave = -1;
@@ -3390,6 +3438,7 @@ void GameRenderFrame(void)
 				main_view.world.camera_owner,effect.displacement.x,effect.displacement.y,effect.displacement.z,effect.seed);
 		}
 		const auto hud_layout = CaptureGameHUDLayout();
+		const auto auxiliary_source = CaptureGameAuxiliaryViews(main_view);
 		if (FindArg("-scene-history-export-probe") && AutomatedCaptureFrameIndex() == 20) {
 			const int save_arg = FindArg("-capture-save-output");
 			const char* path = save_arg ? GetArg(save_arg+1) : nullptr;
@@ -3400,6 +3449,10 @@ void GameRenderFrame(void)
 		const auto presentation = SceneGeometryInspection() && FindArg("-scene-automap-probe") ?
 			PrepareAutomapInspection() : PrepareGamePresentation(true,&main_view,&screen_overlays,&hud_layout);
 		const ModuleSceneScope module_scene(presentation);
+		const auto auxiliary_schedule = PrepareGameAuxiliarySchedule(auxiliary_source,*presentation);
+		CommitGameAuxiliaryTimers(auxiliary_schedule);
+		if (FindArg("-scene-auxiliary-replay-probe") && CommitGameAuxiliaryTimers(auxiliary_schedule))
+			Error("Auxiliary display timers advanced twice in one frame");
 		SceneFeedbackTransaction feedback(*presentation);
 
 		// Draw the big 3d view
@@ -3412,7 +3465,7 @@ void GameRenderFrame(void)
 		//Do the small views.  These should be before GameDrawHUD() for the small windows
 		{
 			PERF_MARKER_SCOPE("DrawSmallViews");
-			DrawSmallViews(*presentation,feedback);
+			DrawSmallViews(*presentation,feedback,auxiliary_schedule);
 		}
 		// One observation boundary after world views, before foreground canvases.
 		// Observation commit is game-owned. Draw replay cannot update AI, map,
@@ -3430,7 +3483,7 @@ void GameRenderFrame(void)
 		module_images.clear();
 		if (!FindArg("-scene-automap-probe")) QueueGamePlayerLabels(*presentation,observations);
 		const auto overlay_presentation = FindArg("-scene-automap-probe") ? d3scene::PresentationRef{} :
-			PrepareGameOverlayPresentation(*presentation,hud_layout,true,module_images);
+			PrepareGameOverlayPresentation(*presentation,hud_layout,true,module_images,&auxiliary_schedule);
 		if (FindArg("-scene-module-live-probe") && FindArg("-scene-module-unload-probe") && AutomatedCaptureFrameIndex() == 9) {
 			const auto identity = GameModuleCanvasIdentity();
 			FreeGameDLL();
@@ -3446,6 +3499,7 @@ void GameRenderFrame(void)
 			plan.images.push_back(image);
 			d3scene::renderViewImages(*presentation,plan.images);
 		}
+		RenderGameForegrounds(*presentation,d3scene::ForegroundPhase::AfterWorldViews,overlay_presentation.get());
 		if (SceneGeometryInspection() && FindArg("-scene-layer-probe"))
 		{
 			// Exercise the canvas composition boundary without invoking any

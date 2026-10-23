@@ -6,6 +6,7 @@
 struct object;
 struct ModelTransforms;
 struct HUDCanvasLayout;
+struct GameAuxiliarySchedule;
 class SceneFeedbackTransaction;
 struct FrameScreenBlend;
 // Identity allocation only; independent UI/export publications cannot advance
@@ -82,7 +83,7 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance = true,const GameM
 // A game-owned post-observation publication. It owns HUD/module descriptions,
 // never extracts another world or advances the world's temporal predecessor.
 d3scene::PresentationRef PrepareGameOverlayPresentation(const d3scene::Presentation& world,
-    const HUDCanvasLayout&,bool advance,std::vector<d3scene::ViewImageRequest>& world_images);
+    const HUDCanvasLayout&,bool advance,std::vector<d3scene::ViewImageRequest>& world_images,const GameAuxiliarySchedule* auxiliary = nullptr);
 void RenderGameSceneView(const d3scene::Presentation&, d3scene::View,
     SceneFeedbackTransaction* game_observations = nullptr);
 bool SceneGeometryInspection();

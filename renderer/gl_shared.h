@@ -299,6 +299,7 @@ struct SceneSurfaceResources
 	void AttachToFramebuffer(GLuint framebuffer);
 	void ClearAttached(GLuint framebuffer);
 	void PrepareSurfaceTarget(GLuint depth_texture);
+	void WriteStationaryRectangle(d3scene::Rect rectangle);
 	void MarkDirty();
 	void Resolve(GLuint source_framebuffer, GLuint output_depth = 0);
 	GLuint TextureForRead(GLuint source_framebuffer);

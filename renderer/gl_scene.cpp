@@ -2470,6 +2470,37 @@ void main() {
           glScissor(inherited_scissor_box[0],inherited_scissor_box[1],inherited_scissor_box[2],inherited_scissor_box[3]);
       }
     }
+    if (view.motion_composition == d3scene::View::MotionComposition::Stationary &&
+        target.role == SceneOutputRole::SceneLayer && SceneSurfaceTargetEnabled()) {
+        // A declared independent scene layer owns this rectangle's temporal
+        // interpretation. Do not masquerade it as a dynamic gameplay object.
+        const auto map_x = [&](int x) { return int(int64_t(x)*surface_records.width/output.Width()); };
+        const auto map_y = [&](int y) { return int(int64_t(y)*surface_records.height/output.Height()); };
+        const int left = map_x(raster.x), bottom = map_y(raster.y);
+        surface_records.WriteStationaryRectangle({left,bottom,map_x(raster.x+raster.width)-left,map_y(raster.y+raster.height)-bottom});
+        motion_vectors_dirty = true;
+        check_scene_error("stationary layer motion");
+        if (AutomatedCapturePending() && FindArg("-scene-auxiliary-replay-probe")) {
+            const auto velocity_texture = surface_records.TextureForRead(output.Handle());
+            const auto identity_texture = surface_records.ObjectIdTextureForRead(output.Handle());
+            const size_t width = surface_records.ReadWidth(), height = surface_records.ReadHeight();
+            std::vector<float> velocities(width*height*4); std::vector<GLuint> identities(width*height);
+            GLint active,binding; glGetIntegerv(GL_ACTIVE_TEXTURE,&active); glActiveTexture(GL_TEXTURE0);
+            glGetIntegerv(GL_TEXTURE_BINDING_2D,&binding);
+            glBindTexture(GL_TEXTURE_2D,velocity_texture); glGetTexImage(GL_TEXTURE_2D,0,GL_RGBA,GL_FLOAT,velocities.data());
+            glBindTexture(GL_TEXTURE_2D,identity_texture); glGetTexImage(GL_TEXTURE_2D,0,GL_RED_INTEGER,GL_UNSIGNED_INT,identities.data());
+            glBindTexture(GL_TEXTURE_2D,binding); glActiveTexture(active);
+            const size_t x = size_t((raster.x+raster.width/2)*double(width)/output.Width());
+            const size_t y = size_t((raster.y+raster.height/2)*double(height)/output.Height());
+            if (x >= width || y >= height) Error("Stationary layer audit is outside its product");
+            const size_t pixel = y*width+x;
+            if (velocities[pixel*4] != 0 || velocities[pixel*4+1] != 0 || velocities[pixel*4+2] != 1 || identities[pixel] != 0)
+                Error("Independent layer did not publish stationary motion without an object identity");
+            AutomatedCaptureLog("scene stationary layer key=%llu sample=%u,%u valid=1 identity=0",
+                static_cast<unsigned long long>(view.history_key),unsigned(x),unsigned(y));
+            check_scene_error("stationary layer readback");
+        }
+    }
     if (measure_passes) {
         glQueryCounter(pass_queries.back(),GL_TIMESTAMP);
         if (field_queries[0]) {

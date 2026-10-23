@@ -19,19 +19,13 @@
 #pragma once
 
 #include "descent.h"
+#include "GameAuxiliaryViews.h"
 
 //Values for the small view windows
-#define SVW_LEFT		0
-#define SVW_CENTER		1
-#define SVW_RIGHT		2
 
 //Small view flags
-#define SVF_POPUP		1		//This is a temporary window
-#define SVF_BIGGER		2		//This window is drawn a little bigger than the normal window
-#define SVF_REARVIEW	4		//Draw looking backward from the viewer
-#define SVF_TIMED		8		//This window is timer-based. DO NOT USE THIS FLAG WHEN CALLING CreateSmallView().
-#define SVF_CROSSHAIRS	16		//This window has crosshairs
-#define SVF_STATIC		32		//Window is showing static.  The object handle is unused
+// Flags and value-owned request/schedule types are in GameAuxiliaryViews.h.
+// SVF_TIMED and SVF_STATIC are internal lifecycle states, not creation flags.
 
 // if guided missile smallview is up, this will be true.
 extern bool Guided_missile_smallview;
@@ -53,7 +47,12 @@ void ResetSmallViews();
 //Draw all the active small views
 namespace d3scene { class Presentation; }
 class SceneFeedbackTransaction;
-void DrawSmallViews(const d3scene::Presentation& presentation, SceneFeedbackTransaction& feedback);
+struct GameMainView;
+GameAuxiliaryFrame CaptureGameAuxiliaryViews(const GameMainView&);
+GameAuxiliarySchedule PrepareGameAuxiliarySchedule(const GameAuxiliaryFrame&,const d3scene::Presentation&);
+bool CommitGameAuxiliaryTimers(const GameAuxiliarySchedule&);
+void PrepareGameAuxiliaryCanvas(d3scene::FrameData&,const GameAuxiliarySchedule&);
+void DrawSmallViews(const d3scene::Presentation&, SceneFeedbackTransaction&,const GameAuxiliarySchedule&);
 
 //Returns the viewer object for the specified small view.  
 //If the view isn't active, returns OBJECT_HANDLE_NONE.

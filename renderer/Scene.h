@@ -842,6 +842,10 @@ struct View {
     ViewProjection projection = ViewProjection::Perspective;
     Vec2 orthographic_size{1,1}, orthographic_depth{0,1};
     bool clear_depth = false; // scoped to this view's raster viewport
+    // Independent scene-layer images do not inherit the main camera's blur.
+    // Stationary publishes explicit zero velocity, not a fabricated object ID.
+    enum class MotionComposition : uint8_t { Preserve, Stationary };
+    MotionComposition motion_composition = MotionComposition::Preserve;
     uint64_t collection = 0; // selects content, independently of camera/history/target
     uint64_t history_key = 0;
     Transform camera;
@@ -940,7 +944,7 @@ void renderForeground(const Presentation& frame, const ForegroundLayer& layer);
 
 // Game layout publishes camera, placement and ordering alongside geometry.
 // Execution selects a named layer; it never consults live window/HUD state.
-enum class ForegroundPhase { AfterMainWorld, WorldOverlay, PostHUD, FinalOverlay };
+enum class ForegroundPhase { AfterMainWorld, AfterWorldViews, WorldOverlay, PostHUD, FinalOverlay };
 struct PreparedForeground {
     uint64_t identity = 0;
     ForegroundLayer layer;

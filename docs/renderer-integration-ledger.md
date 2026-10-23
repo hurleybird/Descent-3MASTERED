@@ -754,3 +754,50 @@ warp-perf-current-20261023 averages3.31ms actual frame-start intervals (median3.
 The extra velocity validity read and active deformation cost still require the
 broader equal-workload scaling/performance gate. No overall speedup claim follows
 from this slice; I16 implementation is not whole-renderer deployment signoff.
+
+## Owned auxiliary lifecycle and explicit scene composition (I23 implementation)
+
+The game captures left/right full-generation camera owners, gun pose, static
+bitmap frame, labels and layout inputs before world publication. It resolves
+embedded monitor regions against that publication and commits admitted popup
+timers once, before drawing. Hidden/animating views freeze their display clocks;
+replay cannot tick them again. A dead source becomes a bounded static interval,
+then restores the saved base view. An explicit non-popup replacement cancels a
+stale saved popup base. Zero zoom now honors the documented default-zoom API.
+
+SmallViews no longer owns immediate UI drawing, StartFrame/EndFrame, global
+camera/visibility changes or timer advancement during GPU execution. Static,
+scanlines, borders and crosshairs are owned canvas geometry; labels use the
+existing owned display queue. AfterWorldViews is an explicit pre-resolve phase,
+before cockpit/HUD display composition, not a numeric ordering workaround.
+When the main camera hides the cockpit, auxiliary views use floating rectangles
+instead of silently waiting for unpublished embedded monitor regions. Moving
+cockpit regions still retain their original skip/frozen-clock policy.
+
+Independent world views explicitly clear depth only in their own rectangles.
+Their temporal policy publishes zero velocity with validity one and object ID
+zero; there is no fake gameplay handle. Metadata writes target the metadata
+resource's actual extent and sample count, including the separate logical AO
+prepass rather than assuming attachments exist on the supersampled color FBO.
+Native GPU self-tests cover single-sample logical and multisample metadata,
+categorical resolve and bounded writes. No diagnostic readback runs normally.
+
+All three CPU suites and the engine build pass. Native GL-clean, visually
+inspected captures aux-{rear,static,restored,mainrear,reduced,gun,timed}-depth-
+20261023 exercise SSAA2/MSAA4, AO/bloom/modern blur, both monitors, native object
+deletion and same-slot generation replacement, static animation, popup restore,
+rear reversal under a rear main camera, gun pose and timed closure. The
+aux-{animating,letterbox}-owned-20261023 captures exercise skipped admission.
+Actual GPU records at monitor centers have zero velocity, validity one, ID zero.
+
+Failed preliminary captures are not signoff: the initial canvas ran after
+display resolve; an initial mask assumed color-FBO attachments; and visual
+inspection caught monitor geometry testing against main-view depth after the
+implicit legacy StartFrame clear was removed. The explicit phase, metadata
+resource write and per-view depth-clear contracts above replace those mistakes.
+Earlier *-owned and *-phase rear/static captures predate the depth fix.
+Guided missile small/full switching, interactive pause/restore, standard versus
+alternate cockpit and broader settings/lifecycle scenarios remain release gates.
+aux-zero-final-20261023 is pixel-identical to warp-zero-final-20261023 with no
+auxiliary requests. aux-noao-depth-20261023 also passes the real stationary-mask
+audit with SSAA/MSAA and modern blur but without AO's independent prepass.

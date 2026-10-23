@@ -887,6 +887,7 @@ PresentationRef Presentation::complete(FrameData data) {
         require(foreground.identity,"Invalid or duplicate foreground identity");
         foreground_ids.push_back(foreground.identity);
         require(foreground.phase == ForegroundPhase::AfterMainWorld ||
+            foreground.phase == ForegroundPhase::AfterWorldViews ||
             foreground.phase == ForegroundPhase::WorldOverlay || foreground.phase == ForegroundPhase::PostHUD ||
             foreground.phase == ForegroundPhase::FinalOverlay,
             "Unknown foreground phase");
@@ -1434,6 +1435,11 @@ void validateViewImageInputs(const FrameData& frame,const View& view) {
             "External image requires an earlier publication in the same scene lifetime");
 }
 void validateView(const View& view) {
+    require(view.motion_composition == View::MotionComposition::Preserve || view.motion_composition == View::MotionComposition::Stationary,
+        "Invalid view motion composition");
+    require(view.motion_composition != View::MotionComposition::Stationary ||
+        (view.target == ViewTarget::Scene && (view.kind != ViewKind::Main || view.collection)),
+        "Stationary motion requires an independent in-scene layer");
     require(uint32_t(view.kind) <= uint32_t(ViewKind::Preview),"Invalid camera kind");
     require(view.reflections == ReflectionPolicy::Images || view.reflections == ReflectionPolicy::SurfaceFilm,
         "Invalid planar reflection policy");

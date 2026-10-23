@@ -12,7 +12,7 @@ inline bool retainViewImageStorage(uint64_t cached,const FrameData& frame) {
     return !frame.temporal_predecessor || cached >= frame.sequence || cached == frame.temporal_predecessor;
 }
 inline bool sameSurfaceSelection(const View& a,const View& b) {
-    return a.reflections == b.reflections && a.excluded_surfaces == b.excluded_surfaces &&
+    return a.motion_composition == b.motion_composition && a.reflections == b.reflections && a.excluded_surfaces == b.excluded_surfaces &&
         a.excluded_objects == b.excluded_objects && a.image_inputs == b.image_inputs;
 }
 inline bool sameClipVolume(const View& a,const View& b) {

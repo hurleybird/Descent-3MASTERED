@@ -9,6 +9,9 @@ inline void validateForeground(const ForegroundLayer& layer) {
         throw std::invalid_argument("Empty foreground layer");
     if (layer.composition != ForegroundComposition::Isolated && layer.composition != ForegroundComposition::InScene)
         throw std::invalid_argument("Unknown foreground composition");
+    if (layer.composition == ForegroundComposition::Isolated)
+        for (const auto& view : layer.scene_views) if (view.motion_composition == View::MotionComposition::Stationary)
+            throw std::invalid_argument("Stationary scene motion cannot target an isolated foreground");
     if (layer.composition == ForegroundComposition::InScene) {
         if (!layer.display_views.empty()) throw std::invalid_argument("In-scene canvas cannot complete display presentation");
         for (const auto& view : layer.scene_views) if (view.ordering != ViewOrdering::Compositing || view.clear_depth)

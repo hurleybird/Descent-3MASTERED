@@ -19,490 +19,266 @@
 #include "SmallViews.h"
 #include "SceneExtraction.h"
 #include "SceneFeedback.h"
-
-#include "descent.h"
-#include "pserror.h"
-
+#include "SceneCanvas.h"
 #include "game.h"
 #include "object.h"
 #include "terrain.h"
-#include "render.h"
 #include "gameloop.h"
 #include "weapon.h"
 #include "findintersection.h"
 #include "config.h"
-#include "terrain.h"
 #include "gauges.h"
 #include "cockpit.h"
 #include "player.h"
-#include "renderer.h"
-#include "grtext.h"
-#include "stringtable.h"
-#include "gamefont.h"
-#include "3d.h"
-#include "hud.h"
-
-//How many small views
-#define NUM_SMALL_VIEWS		3
-
-//How many chars to allow for the window label
-#define LABEL_LEN		19
-
-//Struct to keep data for small views
-struct small_view
-{
-	int	objhandle;		//the object we're viewing from, or OBJECT_HANDLE_NONE if view not active
-	int	flags;			//various flags
-	float	timer;		//how much longer time window stays alive, if SVF_TIMED flag is set
-	float	zoom;		//the zoom for this window
-	int	gun_num;		//which gun to view from, or -1 if none
-	char	label[LABEL_LEN + 1];	//the label for the window
-};
-
-//The array of small views
-small_view Small_views[NUM_SMALL_VIEWS];
-
-//Saved copies of small views for while a pop-up is active
-small_view Small_views_save[NUM_SMALL_VIEWS];
-
-// guided missile in small view? if so, then true.
-bool Guided_missile_smallview = false;
-static int Guided_missile_objhandle = OBJECT_HANDLE_NONE;
-
-//Returns the viewer object for the specified small view.  
-//If the view isn't active, returns OBJECT_HANDLE_NONE.
-int GetSmallViewer(int window)
-{
-	ASSERT((window >= 0) && (window < NUM_SMALL_VIEWS));
-
-	return Small_views[window].objhandle;
-}
-
-//Create a new small view.  If there is already a view in the given window, the old view gets blown away.
-//Parameters:	window - which window to open.  See constants in SmallViews.h
-//					objhandle - handle for the object to view from
-//					flags - various view attributes.  See defines in header file.
-//					time - how long to keep the window up.  If 0, keep up indefinitely
-//					zoom - the zoom for this window.  If 0, use the default zoom
-//					gun_num - which gun to view from. if -1, use viewer's center and orientation.
-//					label - the label for the window
-//Returns:		which window was opened, or -1 if window couldn't be created
-int CreateSmallView(int window, int objhandle, int flags, float time, float zoom, int gun_num, char* label)
-{
-	small_view* svp;
-
-	//Check for valid window
-	if ((window < 0) || (window >= NUM_SMALL_VIEWS))
-	{
-		Int3();
-		window = SVW_LEFT;
-	}
-
-	//Make sure the object exists
-	if (!ObjGet(objhandle))
-		return -1;
-
-	svp = &Small_views[window];
-
-	//If this is a pop-up, and there was a non-popup active, save previous view
-	if ((flags & SVF_POPUP) && (svp->objhandle != OBJECT_HANDLE_NONE) && !(svp->flags & SVF_POPUP))
-		Small_views_save[window] = *svp;
-
-	//Set vars for new view
-	svp->objhandle = objhandle;
-	svp->zoom = zoom;
-	svp->gun_num = gun_num;
-	svp->flags = flags;
-	svp->timer = time;
-	if (time != 0.0)
-		svp->flags |= SVF_TIMED;
-
-	strncpy(svp->label, label ? label : "", LABEL_LEN);
-	svp->label[LABEL_LEN] = 0;		//strncpy won't terminate if at max len
-
-	if (window == SVW_LEFT)
-		Disable_primary_monitor = 1;
-	else if (window == SVW_RIGHT)
-		Disable_secondary_monitor = 1;
-
-	// if guided view, set flag to true
-	if (ObjGet(objhandle) == Players[Player_num].guided_obj)
-	{
-		Guided_missile_smallview = true;
-		Guided_missile_objhandle = objhandle;
-	}
-
-	return window;
-}
-
-
-//Called to get rid of all the small views & init system
-void ResetSmallViews()
-{
-	for (int v = 0; v < NUM_SMALL_VIEWS; v++)
-	{
-		Small_views[v].objhandle = OBJECT_HANDLE_NONE;
-		Small_views_save[v].objhandle = OBJECT_HANDLE_NONE;
-	}
-
-	Disable_primary_monitor = 0;
-	Disable_secondary_monitor = 0;
-	Guided_missile_smallview = false;
-	Guided_missile_objhandle = OBJECT_HANDLE_NONE;
-}
-
+#include "gametexture.h"
 #include "vclip.h"
+#include "hud.h"
+#include "gamefont.h"
+#include "grdefs.h"
+#include "pserror.h"
+#include <algorithm>
+#include <cstring>
 
-//How long the static is visbile
-#define STATIC_TIME 0.25f
-constexpr int SMALL_VIEW_MOTION_OBJECT_HANDLE = 0x20000001;
-
-static void DrawSmallViewScanlineOverlay(int width, int height, bool cockpit_embedded)
-{
-	if (!cockpit_embedded || !Cockpit_alt_mode || width <= 0 || height <= 0)
-		return;
-
-	renderer_cockpit_backing_effect effect = {};
-	effect.enabled = 1;
-	effect.alpha = 0.20f;
-	effect.darkness = 0.0f;
-	effect.scanlines_enabled = 1;
-	effect.scanline_strength = 0.70f;
-	effect.scanline_spacing = 3.0f *
-		(float)ConfigNormalizeSupersamplingFactor(Render_preferred_state.supersampling_factor);
-	effect.scanline_thickness = 0.50f;
-	effect.scanline_phase = Gametime * 14.0f;
-
-	g3Point pnts[4];
-	g3Point* pntlist[4];
-	for (int i = 0; i < 4; i++)
-	{
-		pnts[i].p3_z = 1.0f;
-		pnts[i].p3_flags = PF_PROJECTED | PF_RGBA;
-		pnts[i].p3_r = 0.0f;
-		pnts[i].p3_g = 0.0f;
-		pnts[i].p3_b = 0.0f;
-		pntlist[i] = &pnts[i];
-	}
-	pnts[0].p3_sx = 0;
-	pnts[0].p3_sy = 0;
-	pnts[1].p3_sx = width - 1;
-	pnts[1].p3_sy = 0;
-	pnts[2].p3_sx = width - 1;
-	pnts[2].p3_sy = height - 1;
-	pnts[3].p3_sx = 0;
-	pnts[3].p3_sy = height - 1;
-
-	rend_SetZBufferState(0);
-	rend_SetLighting(LS_GOURAUD);
-	rend_SetTextureType(TT_FLAT);
-	rend_SetColorModel(CM_RGB);
-	rend_SetAlphaType(AT_CONSTANT);
-	rend_SetAlphaValue((ubyte)(effect.alpha * effect.darkness * 255.0f + 0.5f));
-	rend_SetOverlayType(OT_NONE);
-
-	rend_SetCockpitBackingEffect(&effect);
-	rend_DrawPolygon2D(0, pntlist, 4);
-	rend_SetCockpitBackingEffect(NULL);
+namespace {
+constexpr unsigned Count = 3;
+std::array<GameAuxiliarySlot,Count> Small_views, Saved_views;
+std::array<uint64_t,Count> Revisions{}, AdmittedRevisions{};
+AuxiliaryFrameReceipt CaptureClock, ScheduleClock, TimerClock;
+GameAuxiliaryFrame Captured;
+GameAuxiliarySchedule Scheduled;
+uint64_t SchedulePublication = 0;
+int Guided_owner = OBJECT_HANDLE_NONE;
+constexpr uint64_t DecorationCollection = 0x4155584445434f01ull;
+void revise(unsigned slot) { if (!++Revisions[slot]) ++Revisions[slot]; }
+int StaticBitmap(float timer,uint64_t scene) {
+    static uint64_t lifetime = 0;
+    static int texture = -1;
+    if (lifetime != scene) { lifetime = scene; texture = -1; }
+    if (texture < 0) texture = FindTextureName("Static");
+    if (texture < 0 || texture >= MAX_TEXTURES || !GameTextures[texture].used) {
+        Error("Auxiliary static texture is unavailable"); return -1;
+    }
+    const int clip = GameTextures[texture].bm_handle;
+    if (clip < 0 || clip >= MAX_VCLIPS || !GameVClips[clip].used) {
+        Error("Auxiliary static clip is invalid"); return -1;
+    }
+    PageInVClip(clip);
+    const auto& source = GameVClips[clip];
+    if (!source.frames || source.num_frames <= 0) { Error("Auxiliary static clip has no frames"); return -1; }
+    const int frame = std::max(0,std::min(int(source.num_frames)-1,int(source.num_frames*(SmallViewStaticTime-timer)/SmallViewStaticTime)));
+    return source.frames[frame];
+}
+int GunRoom(object& source,vector& point) {
+    fvi_query query{}; fvi_info hit{};
+    query.p0 = &source.pos; query.p1 = &point; query.startroom = source.roomnum;
+    query.thisobjnum = OBJNUM(&source);
+    fvi_FindIntersection(&query,&hit);
+    return hit.hit_room == -1 ? source.roomnum : hit.hit_room;
+}
 }
 
-//Render into one of the small windows
-void RenderSmallWindow(const d3scene::Presentation& presentation, SceneFeedbackTransaction& feedback, int view_slot, int left, int top, int right, int bot, object* viewer, vector* viewer_eye, int viewer_roomnum, matrix* viewer_orient, int flags, float zoom, ddgr_color outline_color, char* label, float timer, bool cockpit_embedded)
-{
-	int width = right - left, height = bot - top;
+bool Guided_missile_smallview = false;
 
-	//Set up for rendering
-	StartFrame(left, top, right, bot);
-
-	//	scale font according to screen size
-	float font_aspect_x = (float)Game_window_w / Max_window_w;
-	float small_view_font_scale;
-
-	if (font_aspect_x <= 0.60f)
-		small_view_font_scale = 0.60f;
-	else if (font_aspect_x <= 0.80f)
-		small_view_font_scale = 0.80f;
-	else
-		small_view_font_scale = 1.0f;
-
-	//Draw either static or 3D
-	if (flags & SVF_STATIC)
-	{
-		//draw static
-		static int handle = -1;
-		if (handle == -1)
-			handle = FindTextureName("Static");
-
-		ASSERT(handle != -1);	//DAJ -1FIX
-
-		PageInVClip(GameTextures[handle].bm_handle);
-		vclip* vc = &GameVClips[GameTextures[handle].bm_handle];
-
-		int frame = vc->num_frames * (STATIC_TIME - timer) / STATIC_TIME;
-		if (frame == vc->num_frames)
-			frame--;
-		int bm_handle = vc->frames[frame];
-
-		rend_SetAlphaType(AT_CONSTANT_TEXTURE);
-		rend_SetAlphaValue(255);
-		rend_SetLighting(LS_NONE);
-		rend_SetColorModel(CM_MONO);
-		rend_SetOverlayType(OT_NONE);
-		rend_SetWrapType(WT_CLAMP);
-		rend_SetFiltering(0);
-
-		rend_DrawScaledBitmap(0, 0, width - 1, height - 1, bm_handle, 0.0, 0.0, 1.0, 1.0);
-	}
-	else
-	{
-		//draw 3D view
-		ASSERT(viewer != NULL);
-		ASSERT(viewer_eye != NULL);
-		bool rear_view = ((flags & SVF_REARVIEW) != 0);
-		const auto view = MakeGameSceneView(d3scene::ViewKind::Auxiliary,
-			static_cast<uint64_t>(view_slot) + 2, viewer, *viewer_eye, viewer_roomnum,
-			*viewer_orient, zoom, rear_view, {left, top, width, height}, {0, 0, width, height});
-		RenderGameSceneView(presentation, view,&feedback);
-	}
-
-	DrawSmallViewScanlineOverlay(width, height, cockpit_embedded);
-
-	//Draw window outline
-	if (outline_color != -1)
-	{
-		rend_SetFlatColor(outline_color);
-		rend_DrawLine(0, 0, width - 1, 0);
-		rend_DrawLine(width - 1, 0, width - 1, height - 1);
-		rend_DrawLine(width - 1, height - 1, 0, height - 1);
-		rend_DrawLine(0, height - 1, 0, 0);
-	}
-
-	//Draw the label
-	if (label[0])
-	{
-		QueuePostProcessHUDText(label, left + width / 2, top + 2, true,
-			HUD_FONT, small_view_font_scale, HUD_COLOR, 255, 0);
-	}
-
-	//Draw the crosshairs
-	if (flags & SVF_CROSSHAIRS)
-	{
-		int cx = width / 2, cy = height / 2;
-		int line_w = width / 50, line_h = height / 50;
-		rend_SetZBufferState(0);
-		rend_SetFlatColor(GR_GREEN);
-		rend_DrawLine(cx - line_w, cy, cx + line_w, cy);
-		rend_DrawLine(cx, cy - line_h, cx, cy + line_h);
-		rend_SetZBufferState(1);
-	}
-
-	//Done rendering
-	rend_FillMotionVectorRegion(SMALL_VIEW_MOTION_OBJECT_HANDLE);
-	EndFrame();
+int GetSmallViewer(int window) {
+    return window >= 0 && window < int(Count) ? Small_views[window].objhandle : OBJECT_HANDLE_NONE;
 }
 
-//Find the room number of a gun point
-int GetGunRoom(vector* p0, int roomnum, int objnum, vector* p1)
-{
-	fvi_query	fq;
-	fvi_info		hit_data;
-	int			fate;
-
-	fq.p0 = p0;
-	fq.startroom = roomnum;
-	fq.p1 = p1;
-	fq.rad = 0;
-	fq.thisobjnum = objnum;
-	fq.ignore_obj_list = NULL;
-	fq.flags = 0;
-
-	fate = fvi_FindIntersection(&fq, &hit_data);
-	if (fate != HIT_NONE)
-		Int3();
-
-	return hit_data.hit_room;
+int CreateSmallView(int window,int owner,int flags,float time,float zoom,int gun,char* label) {
+    if (window < 0 || window >= int(Count) || window == SVW_CENTER || !ObjGet(owner) ||
+        !ValidAuxiliaryRequest(flags,time,zoom,gun)) return -1;
+    GameAuxiliarySlot next;
+    next.objhandle = owner; next.flags = flags | (time != 0 ? SVF_TIMED : 0);
+    next.timer = time; next.zoom = zoom == 0 ? D3_DEFAULT_ZOOM : zoom; next.gun_num = gun;
+    std::strncpy(next.label,label ? label : "",sizeof(next.label)-1);
+    OpenAuxiliarySlot(Small_views[window],Saved_views[window],next); revise(window);
+    if (window == SVW_LEFT) Disable_primary_monitor = 1;
+    if (window == SVW_RIGHT) Disable_secondary_monitor = 1;
+    if (ObjGet(owner) == Players[Player_num].guided_obj) {
+        Guided_missile_smallview = true; Guided_owner = owner;
+    }
+    return window;
 }
 
-#define SMALL_WINDOW_W	120
-#define SMALL_WINDOW_H	120
-#define SPACE_BETWEEN_WINDOWS		((640 - 3 * SMALL_WINDOW_W) / 3)
-
-extern int Point_visible_last_frame;
-
-//Draw all the active small views
-void DrawSmallViews(const d3scene::Presentation& presentation, SceneFeedbackTransaction& feedback)
-{
-	int v;
-	small_view* svp;
-	int left, top, right, bot;
-	ddgr_color outline_color;
-	vector* viewer_eye, gun_pos;
-	matrix* viewer_orient, gun_orient;
-	int viewer_roomnum;
-
-	//if letterbox, don't draw the small views
-	if (GetHUDMode() == HUD_LETTERBOX)
-		return;
-
-	for (v = 0, svp = Small_views; v < NUM_SMALL_VIEWS; v++, svp++)
-	{
-		if (svp->objhandle == OBJECT_HANDLE_NONE)
-			continue;
-
-		object* viewer = ObjGet(svp->objhandle);
-		bool kill_viewer = false;
-
-		//Bail if object not around any more, or if its gone too high
-		if (!viewer || (viewer->type == OBJ_DUMMY))
-			kill_viewer = true;
-
-		if (viewer && OBJECT_OUTSIDE(viewer) && viewer->pos.y >= MAX_TERRAIN_HEIGHT)
-			kill_viewer = true;
-
-		//If not view & not already static, switch to static
-		if (kill_viewer && !(svp->flags & SVF_STATIC))
-		{
-			//Viewer is dead, so switch to static
-			svp->flags |= SVF_STATIC | SVF_TIMED;
-			svp->timer = STATIC_TIME;
-			svp->gun_num = -1;
-		}
-
-		if (v == SVW_CENTER)		//no center window for now
-			Int3();
-
-		if (CockpitState() == COCKPIT_STATE_QUASI)
-			continue;
-
-		bool cockpit_embedded = false;
-		if (CockpitState() == COCKPIT_STATE_FUNCTIONAL)
-		{
-			cockpit_embedded = true;
-			//draw on the cockpit
-			const auto identity = v == SVW_LEFT ? SceneCockpitPrimaryView : SceneCockpitSecondaryView;
-			const d3scene::Rect* region = nullptr;
-			for (const auto& candidate : presentation.data().view_regions)
-				if (candidate.identity == identity) { region = &candidate.rectangle; break; }
-			if (!region) continue;
-			left = region->x; top = region->y;
-			right = left+region->width; bot = top+region->height;
-
-			outline_color = -1;
-		}
-		else
-		{
-			//draw windows on HUD based on the screen size
-			ASSERT(CockpitState() == COCKPIT_STATE_DORMANT);
-
-			//Compute size of window
-			int x, y, w, h, spacing;
-			w = Game_window_h / 4;
-			spacing = ((Game_window_w - (NUM_SMALL_VIEWS)*w) / 3);
-			x = ((spacing + w) / 2) + (v * (spacing + w)) + Game_window_x;
-			h = w;
-			y = Game_window_y + (Game_window_h - h / 2 - Game_window_h / 24);
-
-			//If bigger window, increase size
-			if (svp->flags & SVF_BIGGER)
-			{
-				w += w / 4;
-				h += h / 4;
-			}
-
-			left = x - (w / 2);
-			top = y - (h / 2);
-			right = x + (w / 2);
-			bot = y + (h / 2);
-
-			//Set window color
-			outline_color = (svp->flags & SVF_POPUP) ? GR_RGB(255, 0, 0) : GR_RGB(0, 0, 255);
-		}
-
-		//Get view info from the gun or from the object itself
-		if (svp->gun_num != -1)
-		{
-			//using a gun
-			vector gun_vector;
-			WeaponCalcGun(&gun_pos, &gun_vector, viewer, svp->gun_num);
-			vm_VectorToMatrix(&gun_orient, &gun_vector, NULL, NULL);
-			viewer_eye = &gun_pos;
-			viewer_orient = &gun_orient;
-			viewer_roomnum = GetGunRoom(&viewer->pos, viewer->roomnum, OBJNUM(viewer), &gun_pos);
-		}
-		else if (viewer)
-		{
-			//no gun, so just use the object
-			viewer_eye = &viewer->pos;
-			viewer_orient = &viewer->orient;
-			viewer_roomnum = viewer->roomnum;
-		}
-		else
-		{
-			ASSERT(svp->flags & SVF_STATIC);
-			viewer_eye = NULL;
-			viewer_orient = NULL;
-			viewer_roomnum = -1;
-		}
-
-		//Determine whether to draw rear view.  If view has rear view set and the viewer is
-		//a player and the player has rear view on, then draw forward view
-		int flags = svp->flags;
-		if ((flags & SVF_REARVIEW) && (viewer == Viewer_object) && (viewer->type == OBJ_PLAYER) && (Players[viewer->id].flags & PLAYER_FLAGS_REARVIEW))
-			flags &= ~SVF_REARVIEW;
-
-		//Let's render
-		Point_visible_last_frame = -1;
-		RenderSmallWindow(presentation, feedback, v, left, top, right, bot, viewer, viewer_eye, viewer_roomnum, viewer_orient, flags, svp->zoom, outline_color, svp->label, svp->timer, cockpit_embedded);
-		Point_visible_last_frame = -1;
-
-		//Update time for this view
-		if (svp->flags & SVF_TIMED)
-		{
-			svp->timer -= Frametime;
-			if (svp->timer < 0.0)
-			{
-				CloseSmallView(v);
-			}
-		}
-	}
-
+void CloseSmallView(int window) {
+    if (window < 0 || window >= int(Count)) return;
+    if (Small_views[window].objhandle == Guided_owner) {
+        Guided_owner = OBJECT_HANDLE_NONE; Guided_missile_smallview = false;
+    }
+    const bool restored = CloseAuxiliarySlot(Small_views[window],Saved_views[window]);
+    revise(window);
+    if (!restored) {
+        Clear_screen = 4;
+        if (window == SVW_LEFT) Disable_primary_monitor = 0;
+        if (window == SVW_RIGHT) Disable_secondary_monitor = 0;
+    }
 }
 
-//Parameters:	window - the window to get rid of
-void CloseSmallView(int window)
-{
-	//Mark the window as inactive
-	if (Small_views[window].objhandle == Guided_missile_objhandle)
-	{
-		// mark guided missile small view as inactive.
-		Guided_missile_objhandle = OBJECT_HANDLE_NONE;
-		Guided_missile_smallview = false;
-	}
-
-	Small_views[window].objhandle = OBJECT_HANDLE_NONE;
-
-	//Restore old view if there was one
-	if (Small_views_save[window].objhandle != OBJECT_HANDLE_NONE)
-	{
-		Small_views[window] = Small_views_save[window];
-		Small_views_save[window].objhandle = OBJECT_HANDLE_NONE;
-	}
-	else
-	{
-		Clear_screen = 4;	//force background redraw
-
-		if (window == SVW_LEFT)
-			Disable_primary_monitor = 0;
-		else if (window == SVW_RIGHT)
-			Disable_secondary_monitor = 0;
-
-	}
+void ClosePopupView(int window) {
+    if (window >= 0 && window < int(Count) && (Small_views[window].flags & SVF_POPUP)) CloseSmallView(window);
 }
 
-//Get rid of a small view if it's a popup window
-//Parameters:	window - the window to get rid of
-void ClosePopupView(int window)
-{
-	if (Small_views[window].flags & SVF_POPUP)
-		CloseSmallView(window);
+void ResetSmallViews() {
+    for (unsigned i = 0; i < Count; ++i) { Small_views[i] = {}; Saved_views[i] = {}; revise(i); }
+    Disable_primary_monitor = Disable_secondary_monitor = 0;
+    Guided_missile_smallview = false; Guided_owner = OBJECT_HANDLE_NONE;
+    AdmittedRevisions.fill(0);
+    CaptureClock.reset(); ScheduleClock.reset(); TimerClock.reset();
+    Captured = {}; Scheduled = {}; SchedulePublication = 0;
+}
+
+GameAuxiliaryFrame CaptureGameAuxiliaryViews(const GameMainView& main) {
+    if (!std::isfinite(Frametime) || Frametime < 0 || !std::isfinite(Gametime))
+        throw std::invalid_argument("Invalid auxiliary presentation clock");
+    const uint64_t scene = d3scene::assets().lifetime(), frame = uint64_t(FrameCount);
+    if (!CaptureClock.begin(scene,frame)) return Captured;
+    GameAuxiliaryFrame result;
+    result.scene = scene; result.frame = frame; result.delta = Frametime; result.time = Gametime;
+    result.window = {Game_window_x,Game_window_y,Game_window_w,Game_window_h};
+    result.cockpit_state = CockpitState(); result.alternative_cockpit = Cockpit_alt_mode;
+    result.cockpit_visible = main.player_first_person;
+    result.supersampling = ConfigNormalizeSupersamplingFactor(Render_preferred_state.supersampling_factor);
+    result.hidden = GetHUDMode() == HUD_LETTERBOX;
+    const float aspect = Max_window_w > 0 ? float(Game_window_w)/Max_window_w : 1;
+    if (!result.hidden) for (unsigned i = 0; i < Count; ++i) {
+        auto& slot = Small_views[i];
+        if (slot.objhandle == OBJECT_HANDLE_NONE || i == SVW_CENTER) continue;
+        auto* source = ObjGet(slot.objhandle);
+        const bool alive = source && source->type != OBJ_DUMMY && !(source->flags & OF_DEAD) &&
+            (!OBJECT_OUTSIDE(source) || source->pos.y < MAX_TERRAIN_HEIGHT);
+        ObserveAuxiliarySource(slot,alive);
+        if (result.cockpit_state == COCKPIT_STATE_QUASI) continue;
+        GameAuxiliaryView captured; captured.slot = int(i); captured.revision = Revisions[i];
+        captured.owner = uint32_t(slot.objhandle);
+        captured.font_scale = aspect <= .6f ? .6f : aspect <= .8f ? .8f : 1;
+        std::memcpy(captured.label,slot.label,sizeof(captured.label));
+        if (!(slot.flags & SVF_STATIC)) {
+            vector eye = source->pos; matrix orientation = source->orient; int room = source->roomnum;
+            if (slot.gun_num != -1) {
+                vector direction;
+                if (!WeaponCalcGun(&eye,&direction,source,slot.gun_num)) ObserveAuxiliarySource(slot,false);
+                else { vm_VectorToMatrix(&orientation,&direction,nullptr,nullptr); room = GunRoom(*source,eye); }
+            }
+            if (!(slot.flags & SVF_STATIC)) {
+                const bool rear = (slot.flags & SVF_REARVIEW) && !(main.world.camera_owner == uint32_t(source->handle) &&
+                    source->type == OBJ_PLAYER && main.world.camera_variant == 1);
+                captured.world = MakeGameSceneView(d3scene::ViewKind::Auxiliary,i+2,source,eye,room,orientation,
+                    slot.zoom,rear,{0,0,1,1},{0,0,1,1});
+                captured.world.motion_composition = d3scene::View::MotionComposition::Stationary;
+                captured.world.clear_depth = true; // independent world, scoped to its owned rectangle
+            }
+        }
+        captured.flags = slot.flags; captured.timer = slot.timer;
+        if (slot.flags & SVF_STATIC) captured.bitmap = StaticBitmap(slot.timer,scene);
+        result.views[result.count++] = std::move(captured);
+    }
+    Captured = std::move(result);
+    return Captured;
+}
+
+GameAuxiliarySchedule PrepareGameAuxiliarySchedule(const GameAuxiliaryFrame& input,const d3scene::Presentation& world) {
+    if (input.scene != world.data().scene_lifetime || input.scene != d3scene::assets().lifetime() || input.frame != uint64_t(FrameCount))
+        throw std::invalid_argument("Auxiliary requests belong to another game frame");
+    if (!ScheduleClock.begin(input.scene,input.frame)) {
+        if (SchedulePublication != world.data().sequence) throw std::logic_error("Auxiliary schedule changed publication");
+        return Scheduled;
+    }
+    GameAuxiliarySchedule result;
+    result.world_sequence = world.data().sequence;
+    result.scene = input.scene; result.frame = input.frame; result.delta = input.delta; result.time = input.time;
+    result.alternative_cockpit = input.alternative_cockpit; result.supersampling = input.supersampling;
+    for (unsigned i = 0; i < input.count; ++i) {
+        auto view = input.views[i];
+        view.embedded = input.cockpit_visible && input.cockpit_state == COCKPIT_STATE_FUNCTIONAL;
+        if (view.embedded) {
+            const uint64_t region = view.slot == SVW_LEFT ? SceneCockpitPrimaryView : SceneCockpitSecondaryView;
+            const auto found = std::find_if(world.data().view_regions.begin(),world.data().view_regions.end(),
+                [&](const d3scene::ViewRegion& candidate) { return candidate.identity == region; });
+            if (found == world.data().view_regions.end()) continue;
+            view.rectangle = found->rectangle;
+        } else {
+            view.rectangle = AuxiliaryWindowRectangle(input.window,view.slot,(view.flags & SVF_BIGGER) != 0);
+            view.outlined = true; view.outline = (view.flags & SVF_POPUP) ? GR_RGB(255,0,0) : GR_RGB(0,0,255);
+        }
+        const auto rectangle = view.rectangle;
+        if (rectangle.width <= 0 || rectangle.height <= 0) continue;
+        if (!(view.flags & SVF_STATIC)) {
+            view.world.viewport = rectangle; view.world.projection_anchor = {0,0,rectangle.width,rectangle.height};
+            view.world.camera_cut = AdmittedRevisions[view.slot] != view.revision;
+            AdmittedRevisions[view.slot] = view.revision;
+        }
+        if (view.label[0]) QueuePostProcessHUDText(view.label,rectangle.x+rectangle.width/2,rectangle.y+2,true,
+            HUD_FONT,view.font_scale,HUD_COLOR,255,0);
+        result.admitted |= 1u<<view.slot;
+        result.views[result.count++] = std::move(view);
+    }
+    Scheduled = std::move(result); SchedulePublication = world.data().sequence;
+    return Scheduled;
+}
+
+bool CommitGameAuxiliaryTimers(const GameAuxiliarySchedule& schedule) {
+    if (schedule.scene != d3scene::assets().lifetime() || schedule.frame != uint64_t(FrameCount) ||
+        !std::isfinite(schedule.delta) || schedule.delta < 0)
+        throw std::invalid_argument("Auxiliary timer commit belongs to another game frame");
+    if (!TimerClock.begin(schedule.scene,schedule.frame)) return false;
+    for (unsigned i = 0; i < schedule.count; ++i) {
+        const auto& view = schedule.views[i];
+        if (view.slot < 0 || view.slot >= int(Count) || Revisions[view.slot] != view.revision) continue;
+        if (AdvanceAuxiliaryTimer(Small_views[view.slot],true,schedule.delta)) CloseSmallView(view.slot);
+    }
+    return true;
+}
+
+void DrawSmallViews(const d3scene::Presentation& world,SceneFeedbackTransaction& feedback,const GameAuxiliarySchedule& schedule) {
+    if (schedule.scene != world.data().scene_lifetime || schedule.world_sequence != world.data().sequence)
+        throw std::invalid_argument("Auxiliary schedule belongs to another publication");
+    for (unsigned i = 0; i < schedule.count; ++i)
+        if (!(schedule.views[i].flags & SVF_STATIC)) RenderGameSceneView(world,schedule.views[i].world,&feedback);
+}
+
+void PrepareGameAuxiliaryCanvas(d3scene::FrameData& frame,const GameAuxiliarySchedule& schedule) {
+    if (schedule.scene != frame.scene_lifetime) throw std::invalid_argument("Foreign auxiliary canvas");
+    d3scene::PreparedForeground foreground;
+    foreground.identity = DecorationCollection; foreground.order = 34;
+    foreground.phase = d3scene::ForegroundPhase::AfterWorldViews;
+    foreground.layer.composition = d3scene::ForegroundComposition::InScene;
+    for (unsigned i = 0; i < schedule.count; ++i) {
+        const auto& view = schedule.views[i];
+        const bool stripes = view.embedded && schedule.alternative_cockpit;
+        if (!(view.flags & (SVF_STATIC|SVF_CROSSHAIRS)) && !view.outlined && !stripes) continue;
+        const uint64_t collection = DecorationCollection+uint64_t(view.slot)+1;
+        const int width = view.rectangle.width,height = view.rectangle.height;
+        int32_t order = 0;
+        const auto quad = [&](d3scene::Rect rectangle,d3scene::Vec3 color) {
+            SceneQuadStyle style; style.color = color; PrepareSceneQuad(frame,collection,order,rectangle,style);
+        };
+        if (view.flags & SVF_STATIC) {
+            SceneQuadStyle film; film.bitmap = view.bitmap; film.texture_filter = d3scene::TextureFilter::Nearest;
+            PrepareSceneQuad(frame,collection,order,{0,0,width,height},film);
+        }
+        if (stripes) {
+            SceneQuadStyle black; black.color = {}; black.alpha = .2f*.7f;
+            PrepareSceneQuad(frame,collection,order,{0,0,width,height},black);
+            frame.meshes.back().surface.raster_stripe = {3.f*schedule.supersampling,schedule.time*14,.5f};
+        }
+        if (view.outlined) {
+            const d3scene::Vec3 color{GR_COLOR_RED(view.outline)/255.f,GR_COLOR_GREEN(view.outline)/255.f,GR_COLOR_BLUE(view.outline)/255.f};
+            quad({0,0,width,1},color); quad({0,height-1,width,1},color);
+            quad({0,0,1,height},color); quad({width-1,0,1,height},color);
+        }
+        if (view.flags & SVF_CROSSHAIRS) {
+            quad({width/2-width/50,height/2,width/50*2+1,1},{0,1,0});
+            quad({width/2,height/2-height/50,1,height/50*2+1},{0,1,0});
+        }
+        auto canvas = MakeSceneCanvasView(collection,view.rectangle,d3scene::ViewTarget::Scene,SceneGeometryInspection());
+        canvas.motion_composition = d3scene::View::MotionComposition::Stationary;
+        foreground.layer.scene_views.push_back(std::move(canvas));
+    }
+    if (!foreground.layer.scene_views.empty()) frame.foregrounds.push_back(std::move(foreground));
+    if (AutomatedCapturePending()) AutomatedCaptureLog("scene auxiliary snapshot frame=%llu views=%u admitted=%u",
+        static_cast<unsigned long long>(schedule.frame),schedule.count,schedule.admitted);
+    if (AutomatedCapturePending()) for (unsigned i = 0; i < schedule.count; ++i) {
+        const auto& view = schedule.views[i]; const auto r = view.rectangle;
+        AutomatedCaptureLog("scene auxiliary value slot=%d owner=%u static=%d rear=%u rectangle=%d,%d,%d,%d timer=%.6g cut=%d",
+            view.slot,view.owner,(view.flags&SVF_STATIC) != 0,view.world.camera_variant,r.x,r.y,r.width,r.height,view.timer,view.world.camera_cut);
+    }
 }
