@@ -24,6 +24,7 @@ so if wanted to have OSIRIS scripts in this mod, We can use
 OSIRIS functions to control them.
 */
 #include "osiris_share.h"
+#include "scene_mutation_api.h"
 #include "d3events.h"
 
 /*
@@ -70,6 +71,7 @@ extern "C"
 	DLLEXPORT void DLLFUNCCALL DLLGameCall (int eventnum,dllinfo *data);
 	DLLEXPORT void DLLFUNCCALL DLLGameClose ();
 	DLLEXPORT void DLLFUNCCALL DLLGetGameInfo (tDLLOptions *options);
+	DLLEXPORT int DLLFUNCCALL DLLBindSceneMutationAPI(const GameSceneMutationAPI* api);
 	DLLEXPORT int DLLFUNCCALL GetGOScriptID(char *name,ubyte isdoor);
 	DLLEXPORT void DLLFUNCCALLPTR CreateInstance(int id);
 	DLLEXPORT void DLLFUNCCALL DestroyInstance(int id,void *ptr);

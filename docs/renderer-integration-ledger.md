@@ -605,3 +605,35 @@ in both argument suites, including zero-allocation parsing. Windows, SDL and
 Linux startup callers check failure before application creation. The public
 module table remains unchanged; this does not introduce long-argument support.
 Final native-module captures use a short, task-owned directory alias instead.
+
+## Negotiated module room mutations (I08/I21 implementation)
+
+Shipped modules explicitly declare tracked room writes; legacy/unknown modules
+retain conservative invalidation. Entropy additionally requires successful
+binding of a versioned, owner-tagged room mutation extension. Neither the old
+function table nor public room/HUD layouts change. Invalid/stale owners, room
+indices and change masks reject. Engine goal-room painting and Entropy share
+one authored face policy, preserving replication flags while invalidating only
+when material values actually change. Auditing the shipped modules found direct
+material writes in Entropy; other goal painters use the tracked engine API.
+
+The real Entropy HUD exposed a signed-byte depth-setter ABI mismatch in the new
+canvas adapter. Its signature now matches the native function; ten setter bridge
+signatures are compile-time checked. All nine module targets, engine and all
+three CPU suites build/pass. Tests cover binding negotiation, descriptor layout,
+invalid descriptors, authored goal/alpha/emission exclusions and no-op paint.
+
+Inspected GL-clean native captures use the final bounded-parser path:
+modroom-entropy-final-20261023 paints room152 through the real level-start event,
+then repeats the event without changing appearance revision57989. Its real HUD
+also leaves that revision unchanged. modroom-reload-final-20261023 unloads and
+reloads Anarchy with distinct full owners and unchanged HUD appearance revision.
+Old-module fallback captures retain invalidation; tracked and conservative
+Anarchy controls produce exactly identical pixels.
+
+Same executable/module, equal argument counts, pinned render thread, 480frames:
+the two conservative controls average3.054/3.169ms actual frame-start intervals;
+tracked controls average3.030/2.839ms, using frames240–479. GPU averages remain
+0.270–0.274ms. This low-resolution CPU-sensitive case is noisy, supports only a
+modest local improvement, and does not qualify whole-renderer performance or
+two-process multiplayer. All broader release gates remain open.

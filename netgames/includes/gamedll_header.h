@@ -42,6 +42,7 @@
 #include "terrain.h"
 #include "gametexture.h"
 #include "args.h"
+#include "scene_mutation_api.h"
 #include "bitmap.h"
 #include "Inventory.h"
 

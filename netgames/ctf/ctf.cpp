@@ -241,7 +241,7 @@ void SaveStatsToFile(char *filename);
 // This function gets called by the game when it wants to learn some info about the game
 void DLLFUNCCALL DLLGetGameInfo (tDLLOptions *options)
 {	
-	options->flags		= DOF_MAXTEAMS|DOF_MINTEAMS;
+	options->flags		= DOF_MAXTEAMS|DOF_MINTEAMS|DOF_TRACKED_ROOM_WRITES;
 	options->max_teams	= 4;
 	options->min_teams	= 2;
 	strcpy(options->game_name,"Capture The Flag");

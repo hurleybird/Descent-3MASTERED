@@ -17,6 +17,7 @@
 */
 #ifndef __ENTROPY_AUX_H__
 #define __ENTROPY_AUX_H__
+void NotifyEntropyRoomAppearance(int room);
 
 /*
 =====================================================================

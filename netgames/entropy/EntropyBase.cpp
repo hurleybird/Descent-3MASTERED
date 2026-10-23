@@ -103,6 +103,20 @@
 #include "Entropystr.h"		//our string table for Entropy
 #include "EntropyAux.h"
 
+static GameSceneMutationAPI Scene_mutations{};
+int DLLFUNCCALL DLLBindSceneMutationAPI(const GameSceneMutationAPI* api)
+{
+	Scene_mutations = {};
+	if (!ValidGameSceneMutationAPI(api)) return 0;
+	Scene_mutations = *api;
+	return 1;
+}
+void NotifyEntropyRoomAppearance(int room)
+{
+	if (ValidGameSceneMutationAPI(&Scene_mutations))
+		Scene_mutations.notify_room(Scene_mutations.owner,room,GameSceneAppearanceChanged);
+}
+
 // the DMFC object, used throughout, and required by all mods
 IDMFC *DMFCBase = NULL;
 // our DmfcStats object, used for the F7 screen
@@ -226,7 +240,7 @@ char *GetStringFromTable(int d){if( (d<0) || (d>=StringTableSize) ) return _Erro
 // This function gets called by the game when it wants to learn some info about the game
 void DLLFUNCCALL DLLGetGameInfo (tDLLOptions *options)
 {
-	options->flags		= DOF_MAXTEAMS|DOF_MINTEAMS;
+	options->flags		= DOF_MAXTEAMS|DOF_MINTEAMS|DOF_TRACKED_ROOM_WRITES|DOF_ROOM_WRITE_BIND_REQUIRED;
 	options->max_teams	= NUM_TEAMS;
 	options->min_teams	= NUM_TEAMS;
 	strcpy(options->game_name,"Entropy");
@@ -440,6 +454,7 @@ void DLLFUNCCALL DLLGameClose ()
 		DMFCBase->DestroyPointer();
 		DMFCBase = NULL;
 	}
+	Scene_mutations = {};
 }
 
 // The server has just started, so clear out all the stats and game info

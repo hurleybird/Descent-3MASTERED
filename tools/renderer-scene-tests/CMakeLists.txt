@@ -19,6 +19,7 @@ add_executable(renderer_scene_tests
     electrical_tests.cpp
     canvas_tests.cpp
     module_context_tests.cpp
+    module_mutation_tests.cpp
     automap_tests.cpp
     ../../Descent3/SceneCanvas.cpp
     ../../Descent3/SceneModuleContext.cpp

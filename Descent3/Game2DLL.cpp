@@ -19,12 +19,14 @@
 #include "pstypes.h"
 #include "SceneExtraction.h"
 #include "SceneModuleContext.h"
+#include "../netgames/includes/scene_mutation_api.h"
 #include <limits>
 #include <stdexcept>
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
 #include <algorithm>
+#include <type_traits>
 #include "grtext.h"
 #include "pserror.h"
 #include "game.h"
@@ -83,6 +85,16 @@ void Osiris_CreateModuleInitStruct(tOSIRISModuleInit* mi);
 module GameDLLHandle = { NULL };
 static bool GameDLL_initialized = false;
 static uint64_t GameDLL_canvas_identity = 0;
+static bool GameDLL_tracks_room_writes = false;
+static int NotifyGameModuleRoomMutation(uint64_t owner,int32_t room,uint32_t changes) {
+    if (!GameDLLHandle.handle || !owner || owner != GameDLL_canvas_identity || room < 0 || room >= MAX_ROOMS ||
+        !Rooms[room].used || !changes || (changes & ~(GameSceneAppearanceChanged|GameSceneGeometryChanged))) return 0;
+    if (changes & GameSceneGeometryChanged) InvalidateGameSceneGeometry();
+    else InvalidateGameSceneAppearance();
+    if (AutomatedCapturePending()) AutomatedCaptureLog("scene module tracked room mutation owner=%llu room=%d changes=%u",
+        static_cast<unsigned long long>(owner),room,changes);
+    return 1;
+}
 uint64_t GameModuleCanvasIdentity() { return GameDLL_initialized ? GameDLL_canvas_identity : 0; }
 static int Multi_game_library_handle = 0;
 extern ddgr_color Player_colors[];
@@ -329,13 +341,26 @@ static void ModuleResetFacings() {
     // game's legacy traversal marks while the source callback is recording.
     if (!ModuleCanvasCapture()) ResetFacings();
 }
-static void ModuleDepthState(int state) {
+static void ModuleDepthState(sbyte state) {
     // Canvas geometry is depth-independent; recorded world images own depth.
     // This compatibility setter cannot change GPU state during source capture.
     if (ModuleCanvasCapture()) {
         if (state != 0 && state != 1) throw std::invalid_argument("Invalid module depth state");
     } else rend_SetZBufferState(state);
 }
+
+#define MODULE_SETTER_ABI(bridge,native) static_assert(std::is_same<decltype(&bridge),decltype(&native)>::value,"Module setter ABI changed")
+MODULE_SETTER_ABI(ModuleDepthState,rend_SetZBufferState);
+MODULE_SETTER_ABI(ModuleAlphaType,rend_SetAlphaType);
+MODULE_SETTER_ABI(ModuleAlphaValue,rend_SetAlphaValue);
+MODULE_SETTER_ABI(ModuleLighting,rend_SetLighting);
+MODULE_SETTER_ABI(ModuleFiltering,rend_SetFiltering);
+MODULE_SETTER_ABI(ModuleWrap,rend_SetWrapType);
+MODULE_SETTER_ABI(ModuleFlatColor,rend_SetFlatColor);
+MODULE_SETTER_ABI(ModuleTextureType,rend_SetTextureType);
+MODULE_SETTER_ABI(ModuleColorModel,rend_SetColorModel);
+MODULE_SETTER_ABI(ModuleOverlayType,rend_SetOverlayType);
+#undef MODULE_SETTER_ABI
 
 void GetGameAPI(game_api* api)
 {
@@ -823,7 +848,10 @@ bool InitGameModule(char* name, module* mod)
 	char tmp_dll_name[_MAX_PATH * 2];
 	Multi_game_dll_name[0] = '\0';
 	//Make the hog filename
-	ddio_MakePath(lib_name, Base_directory, ENGINE_NETGAMES_DIRECTORY, name, NULL);
+	const int probe_directory = FindArg("-scene-module-directory-probe");
+	if (FindArg("-scene-module-live-probe") && probe_directory && GetArg(probe_directory+1))
+		ddio_MakePath(lib_name,GetArg(probe_directory+1),name,NULL);
+	else ddio_MakePath(lib_name, Base_directory, ENGINE_NETGAMES_DIRECTORY, name, NULL);
 	strcat(lib_name, ".d3m");
 	//Make the dll filename
 #if defined (WIN32)
@@ -836,8 +864,7 @@ bool InitGameModule(char* name, module* mod)
 	const int library_handle = cf_OpenLibrary(lib_name);
 	if (!library_handle)
 	{
-		ddio_MakePath(tmp_dll_name, Base_directory, ENGINE_NETGAMES_DIRECTORY, name, NULL);
-		strcat(tmp_dll_name, ".d3m");
+		strcpy(tmp_dll_name,lib_name);
 		Multi_game_dll_name[0] = NULL;
 		goto loaddll;
 	}
@@ -882,9 +909,11 @@ void FreeGameDLL()
 		return;
 	if (GameDLL_initialized && DLLGameClose)
 		DLLGameClose();
+	if (!GameDLL_tracks_room_writes) InvalidateGameSceneAppearance();
 	RetireModuleHUDItems(GameDLL_canvas_identity);
 	GameDLL_canvas_identity = 0;
 	GameDLL_initialized = false;
+	GameDLL_tracks_room_writes = false;
 	Osiris_UnloadMissionModule();
 	CloseGameModule(&GameDLLHandle);
 	DLLGameCall = NULL;
@@ -979,7 +1008,24 @@ int LoadGameDLL(char* name, int num_teams_to_use)
 	api_fp = (void*)GetGameAPI;
 
 	GameDLL_canvas_identity = AllocateModuleCanvasIdentity();
+	tDLLOptions options{}; DLLGetGameInfo(&options);
+	using BindSceneMutationAPI = int(DLLFUNCCALL*)(const GameSceneMutationAPI*);
+	const auto bind_scene = reinterpret_cast<BindSceneMutationAPI>(mod_GetSymbol(&GameDLLHandle,"DLLBindSceneMutationAPI",4));
+	mod_GetLastError(); // optional export absence is not a module load failure
+	bool binding_accepted = false;
+	if ((options.flags & DOF_TRACKED_ROOM_WRITES) && bind_scene) {
+		const GameSceneMutationAPI api{sizeof(GameSceneMutationAPI),GameSceneMutationVersion,GameDLL_canvas_identity,NotifyGameModuleRoomMutation};
+		binding_accepted = bind_scene(&api) == 1;
+	}
+	GameDLL_tracks_room_writes = GameModuleTracksRoomWrites(options.flags,bind_scene != nullptr,binding_accepted);
+	const int conservative_probe = FindArg("-scene-module-conservative-room-probe");
+	if (FindArg("-scene-module-live-probe") && conservative_probe &&
+		(!GetArg(conservative_probe+1) || strcmp(GetArg(conservative_probe+1),"0")))
+		GameDLL_tracks_room_writes = false; // same-binary, equal-argument-count qualification control
+	if (AutomatedCaptureFrameIndex() >= 0) AutomatedCaptureLog("scene module room contract owner=%llu tracked=%d binding=%d",
+		static_cast<unsigned long long>(GameDLL_canvas_identity),GameDLL_tracks_room_writes ? 1 : 0,bind_scene ? 1 : 0);
 	DLLGameInit((int*)api_fp, &ok, num_teams_to_use);
+	if (!GameDLL_tracks_room_writes) InvalidateGameSceneAppearance();
 	if (!ok) 
 	{
 		//The DLL said no to the load
@@ -1010,11 +1056,16 @@ void CallGameDLL(int eventnum, dllinfo* data)
 	if (GameDLLHandle.handle && DLLGameCall)
 	{
 		data->iRet = 0;
+		const auto appearance_before = GameSceneAppearanceRevision();
 		DLLGameCall(eventnum, data);
-        // The legacy multiplayer ABI exposes writable Rooms (Entropy paints
-        // faces directly). Treat return from that foreign writer as a mutation
-        // boundary; do not assume it used the engine's tracked setters.
-        InvalidateGameSceneAppearance();
+        // Opaque legacy modules retain conservative invalidation. Shipped
+        // audited modules negotiate tracked writes instead of treating every
+        // HUD/status callback as a mutation of every room in the level.
+        if (!GameDLL_tracks_room_writes) InvalidateGameSceneAppearance();
+		if (FindArg("-scene-module-live-probe") && AutomatedCapturePending())
+			AutomatedCaptureLog("scene module appearance event=%d tracked=%d before=%llu after=%llu",eventnum,
+				GameDLL_tracks_room_writes ? 1 : 0,static_cast<unsigned long long>(appearance_before),
+				static_cast<unsigned long long>(GameSceneAppearanceRevision()));
 	}
 }
 // Call this function right after a player connects to the game to see if a player is banned

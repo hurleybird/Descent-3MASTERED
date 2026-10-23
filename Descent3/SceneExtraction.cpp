@@ -104,6 +104,7 @@ void InvalidateGameSceneAppearance() {
     if (++AppearanceEpoch == 0) throw std::overflow_error("Room appearance epoch exhausted");
 }
 uint64_t GameSceneGeometryRevision() { return GeometryEpoch; }
+uint64_t GameSceneAppearanceRevision() { return AppearanceEpoch; }
 uint64_t AllocateGamePresentationSequence() {
     if (Sequence == std::numeric_limits<uint64_t>::max())
         throw std::overflow_error("Presentation sequence exhausted");

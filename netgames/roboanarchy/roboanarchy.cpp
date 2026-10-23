@@ -112,7 +112,7 @@ void SwitchAnarchyScores(int i)
 // This function gets called by the game when it wants to learn some info about the game
 void DLLFUNCCALL DLLGetGameInfo (tDLLOptions *options)
 {
-	options->flags		= DOF_MAXTEAMS;
+	options->flags		= DOF_MAXTEAMS|DOF_TRACKED_ROOM_WRITES;
 	options->max_teams	= 1;
 	strcpy(options->game_name,"Robo-Anarchy");
 	strcpy(options->requirements,"COOP");

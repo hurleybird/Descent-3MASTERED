@@ -22,6 +22,7 @@
 #include "player.h"
 #include "game.h"
 #include "multi.h"
+#include "../netgames/includes/room_material_ops.h"
 #include "multi_client.h"
 #include "multi_server.h"
 #include "ddio.h"
@@ -5786,55 +5787,16 @@ void MultiPaintGoalRooms (int *texcolors)
 
 	char *tnames[]={"RedBase","BlueBase","GreenBase","YellowBase"};
 
+	bool changed = false;
 	for (i=0;i<MAX_TEAMS;i++)
 	{
-		int roomnum=GetGoalRoomForTeam(i);
-		if (roomnum!=-1)
-		{	
-			Rooms[roomnum].room_change_flags |= RCF_TEXTURE;
-
-			int tex;
-			if (texcolors==NULL)
-			{
-				tex=FindTextureName(IGNORE_TABLE(tnames[i]));
-				if (tex==-1)
-					tex=0;
-			}
-			else
-			{
-				tex=texcolors[i];
-				if (tex==-1)
-					continue;
-			}
-
-			int goalfaces=0;
-			int t;
-			
-			for (t=0;t<Rooms[roomnum].num_faces && !goalfaces;t++)
-			{
-				if (Rooms[roomnum].faces[t].flags & FF_GOALFACE)
-				{
-					goalfaces=1;
-				}
-			}
-
-			for (t=0;t<Rooms[roomnum].num_faces;t++)
-			{
-				texture *texp=&GameTextures[Rooms[roomnum].faces[t].tmap];
-				if ((!(texp->flags & TF_ALPHA)) && texp->r<.01 && texp->g<.01 && texp->b<.01)
-				{
-					if (!goalfaces || (goalfaces && Rooms[roomnum].faces[t].flags & FF_GOALFACE))
-					{
-						Rooms[roomnum].faces[t].tmap=tex;
-                        InvalidateGameSceneAppearance();
-						Rooms[roomnum].faces[t].flags |= FF_TEXTURE_CHANGED;
-
-					}
-
-				}
-			}
-		}
+		const int roomnum = GetGoalRoomForTeam(i);
+		if (roomnum < 0) continue;
+		int texture = texcolors ? texcolors[i] : FindTextureName(IGNORE_TABLE(tnames[i]));
+		if (texture < 0) { if (texcolors) continue; texture = 0; }
+		changed = PaintGoalRoomMaterials(Rooms[roomnum],GameTextures,texture) || changed;
 	}
+	if (changed) InvalidateGameSceneAppearance();
 }
 
 void MultiSendKillObject (object *hit_obj,object *killer,float damage,int death_flags,float delay,short seed)

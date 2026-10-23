@@ -3224,8 +3224,9 @@ void GameRenderFrame(void)
 		if (FindArg("-scene-module-live-probe") && (AutomatedCaptureFrameIndex() == 0 ||
 			(AutomatedCaptureFrameIndex() == 10 && FindArg("-scene-module-reload-probe")))) {
 			if (Game_mode & GM_MULTI) Error("The module UI fixture must not start a network game");
-			char module[16]; strcpy(module,FindArg("-scene-module-coop-probe") ? "coop" : "anarchy");
-			if (!LoadGameDLL(module,1)) Error("Could not load the shipped module for canvas qualification");
+			const bool entropy_probe = FindArg("-scene-module-entropy-probe") != 0;
+			char module[16]; strcpy(module,entropy_probe ? "entropy" : FindArg("-scene-module-coop-probe") ? "coop" : "anarchy");
+			if (!LoadGameDLL(module,entropy_probe ? 2 : 1)) Error("Could not load the shipped module for canvas qualification");
 			// Real module records/callbacks, but no multiplayer transport. A remote
 			// player avoids the local server's blocking wait-for-players screen.
 			const int peer = Player_num == 1 ? 2 : 1;
@@ -3245,6 +3246,16 @@ void GameRenderFrame(void)
 			CallGameDLL(EVT_CLIENT_GAMEPLAYERENTERSGAME,&entry);
 			dllinfo interval{}; interval.me_handle = interval.it_handle = OBJECT_HANDLE_NONE;
 			CallGameDLL(EVT_GAME_INTERVAL,&interval);
+			if (entropy_probe) {
+				if (ROOMNUM_OUTSIDE(Player_object->roomnum) || FindTextureName("RedLab") < 0)
+					Error("Entropy paint qualification needs an indoor room and authored RedLab texture");
+				Rooms[Player_object->roomnum].flags |= RF_SPECIAL1;
+				const auto before = GameSceneAppearanceRevision();
+				CallGameDLL(EVT_CLIENT_GAMELEVELSTART,&interval);
+				if (GameSceneAppearanceRevision() <= before) Error("Native Entropy level start did not notify room painting");
+				AutomatedCaptureLog("scene native Entropy painted room=%d before=%llu after=%llu",Player_object->roomnum,
+					static_cast<unsigned long long>(before),static_cast<unsigned long long>(GameSceneAppearanceRevision()));
+			}
 			if (FindArg("-scene-module-stats-probe")) {
 				interval.input_key = KEY_F7;
 				CallGameDLL(EVT_CLIENT_KEYPRESS,&interval);
@@ -3254,6 +3265,13 @@ void GameRenderFrame(void)
 				CallGameDLL(EVT_CLIENT_KEYPRESS,&interval);
 			}
 			AutomatedCaptureLog("scene loaded module UI fixture name=%s identity=%llu network_mode_unchanged=1",module,(unsigned long long)GameModuleCanvasIdentity());
+		}
+		if (AutomatedCaptureFrameIndex() == 10 && FindArg("-scene-module-entropy-probe")) {
+			dllinfo level{}; level.me_handle = level.it_handle = OBJECT_HANDLE_NONE;
+			const auto before = GameSceneAppearanceRevision();
+			CallGameDLL(EVT_CLIENT_GAMELEVELSTART,&level);
+			if (GameSceneAppearanceRevision() != before) Error("Unchanged Entropy repaint invalidated room appearance");
+			AutomatedCaptureLog("scene native Entropy unchanged repaint appearance=%llu",static_cast<unsigned long long>(before));
 		}
 		if (AutomatedCaptureFrameIndex() == 20 && FindArg("-scene-overlay-events-probe")) {
 			// Exercise the real queue and damage/energy/fusion producers in a

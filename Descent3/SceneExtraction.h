@@ -31,6 +31,7 @@ void ResetGamePresentationScene();
 void InvalidateGameSceneGeometry();
 void InvalidateGameSceneAppearance();
 uint64_t GameSceneGeometryRevision();
+uint64_t GameSceneAppearanceRevision();
 void PrepareGameModelInstances(d3scene::FrameData&, const d3scene::Presentation* previous,bool retain_materials = false);
 d3scene::ModelAssetRef PrepareGameModelAsset(int number,bool audit_geometry = false);
 void AuditGameModelPoses(const d3scene::Presentation&);

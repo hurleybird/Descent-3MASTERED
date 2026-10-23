@@ -46,6 +46,7 @@
 
 
 #include "gamedll_header.h"
+#include "room_material_ops.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -78,32 +79,9 @@ bool PaintRoomWithTexture(int text,int roomnum)
 	if(dRooms[roomnum].flags&RF_EXTERNAL)
 		return false;
 
-	bool has_goalfaces=false;
-	int t;
-	for (t=0;t<dRooms[roomnum].num_faces;t++)
-	{
-		if (dRooms[roomnum].faces[t].flags & FF_GOALFACE)
-		{
-			has_goalfaces=true;
-			break;
-		}
-	}
-
-	texture *GameTextures = DMFCBase->GetGameTextures();
-	dRooms[roomnum].room_change_flags |= RCF_TEXTURE;
-
-	for (t=0;t<dRooms[roomnum].num_faces;t++)
-	{
-		texture *texp=&GameTextures[dRooms[roomnum].faces[t].tmap];
-		if ((!(texp->flags & TF_ALPHA)) && texp->r<.01 && texp->g<.01 && texp->b<.01)
-		{
-			if (!has_goalfaces || (dRooms[roomnum].faces[t].flags & FF_GOALFACE))
-			{
-				dRooms[roomnum].faces[t].tmap=text;
-				dRooms[roomnum].faces[t].flags |= FF_TEXTURE_CHANGED;
-			}
-		}
-	}
+	if (text < 0 || text >= MAX_TEXTURES) return false;
+	if (PaintGoalRoomMaterials(dRooms[roomnum],DMFCBase->GetGameTextures(),text))
+		NotifyEntropyRoomAppearance(roomnum);
 	return true;
 }
 
