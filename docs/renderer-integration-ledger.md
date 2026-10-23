@@ -992,3 +992,79 @@ from a fresh build directory and fixed by quoting it in b704c8f. A full hosted
 integration pass is still pending, not implied by the local passes. All ordinary
 interactive save/reload, mission transitions, context teardown and promotion
 gates remain open. Candidate/Previous Candidate are unchanged.
+
+## Declared UI compatibility consumers (I25 decision and deletion boundary)
+
+Keep the small immediate UI/preview backend supported, not a second gameplay
+world backend. No arbitrary UI/game callback may be dispatched by the scene
+executor. UI animation may advance at its own caller cadence; it is not world
+observation or simulation advancement. Converted world/foreground/map/module
+presentations remain immutable and use the owned scene executor.
+
+| Live caller | Retained dependency and composition contract |
+| --- | --- |
+| newui_core.cpp BeginGameplayModalUIFrame/DoUI | Immediate 2D into the dedicated modal UI framebuffer, composed over the resolved display. Preserve aspect, scaling, input mapping and close/resume. |
+| TelCom.cpp TelcomRender/TCSSSCallback | Immediate shell and bounded ship-selection model preview. Its automap viewport is the scene-owned map producer, not legacy world rendering. |
+| pilot.cpp UI3DWindow::OnDraw | Bounded immediate ship/custom-logo preview with native material/custom texture and UI-time rotation. Unavailable model returns before starting a G3 frame. |
+| movie/d3movie.cpp CallbackShowFrame | Decoded mutable bitmap upload and immediate 2D scaling. bm_MarkChanged publishes each decoded frame's source revision. No world history/observations. |
+| GameLoop.cpp GameDrawPostPresentFrame | Message consoles only, after resolved world/owned foregrounds. No old cockpit snapshot or late-effect replay. |
+| multi_dll_mgr.cpp exported drawing API | Live shipped module canvases capture typed scene-owned drawing/view requests during publication; outside that interval the declared UI compatibility API remains callable. Preserve ABI. |
+
+Therefore keep the required rend_*, G3 model/2D/text and mutable-bitmap support
+until these live consumers are migrated or their support is explicitly removed.
+Do not remove them solely because world submissions no longer call them. This
+inventory authorizes no automatic world fallback, pending-bit clearance or
+old world-code re-entry. Old world-only traversal/render paths still await the
+ordinary acceptance gate and a reference/call-site audit before deletion.
+The decision is made; full interactive consumer qualification remains pending.
+
+## Native save round-trip audit and versioned runtime scenarios (I26/I29)
+
+The tracked corpus runner now reads renderer-integration-scenarios.json rather
+than leaving new qualification cases in private scripts. Named, revisioned cases
+cover ordinary publication, double retirement, independent native saves, saves
+after settings changes, and actual auxiliary popup/deletion/replacement/restoring.
+Manifests identify exact executable/HOG/pilot/harness/registry hashes, arguments,
+copied save/count inputs, expected log assertions, raw whole-frame timing output,
+result images and export evidence. Output directories cannot be reused. Mutable
+pilot/save destinations reject reparse-point traversal; evidence stays outside
+runtime/seed directories. The runner checks the shipped 64x100 argument budget.
+
+Explicit -scene-save-image-audit adds no normal render-loop work. Each real save
+keeps its own temporary audit data, decodes the embedded bitmap through the real
+GetGameStateInfo/LGSSnapshot reader and compares every 1555 pixel with the writer's
+160x120 result, including full opacity. Distinct per-save evidence prefixes retain
+both pre-world and post-composition exports, source PNGs and before/after target
+readbacks. The thumbnail renderer is checked against simulation RNG, time, delta
+and FrameCount changes. No fake thumbnail or mocked serializer is involved.
+
+The new audit exposed an earlier fixture bug: 'Renderer interleaved publication
+check' exceeded the save format's31-byte description field. Release's old strcpy
+overflowed the stack after a debug-only assertion. The API now bounded-validates
+and zero-pads the disk field before any file/audit side effects, rejects invalid
+paths/descriptions, and the fixture uses 'Renderer export check'. CPU tests cover
+null/overlength/max-length/empty input, unchanged failure output, canaries and
+padding. This is a real input-contract fix, not an image-comparison exception.
+
+qual-save-v2-20261023 passes003/006 with two actual saves each, zero decoded-pixel
+mismatches/transparent pixels, unchanged target PNG bytes and valid main history
+20–22. Source/decoded mirror images were visually inspected: upright, world-only,
+with the authored mirror present. qual-save-settings-20261023 passes002 after all
+SSAA/MSAA transitions; qual-aux-20261023 passes the registered lifecycle case.
+The first qual-save-20261023 run is FAILED evidence of the long-description bug,
+not qualified output. These runs do not accept save-dialog/quicksave UI, an
+autosave caller (none found in the current native call-site inventory), or demos.
+
+Important open export defect found by inspecting evidence: a pre-world screenshot
+readback uses the active cleared render target instead of the previous completed
+display image. Its before/after equality proves target immutability, not correct
+completed-output selection. Post-composition readbacks and native thumbnails are
+correct in these runs. Fix the display-output publication/readback contract before
+accepting pre-render demo/movie exports or calling final-output qualification done.
+
+Hosted CI39972233564 at467aa64 passes standalone Debug/Release and the full game/
+module build plus all3root contracts. The preceding metadata-step failure was
+reproduced: piping native cmake --version to Select-Object -First1 produced exit1
+in99/100 Windows PowerShell trials; draining output first gives0/100 failures.
+467aa64 fixes both CI identity and package metadata capture without masking native
+errors. This does not replace GPU/interactive qualification or promote Candidate.

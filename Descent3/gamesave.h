@@ -36,6 +36,18 @@
 #define GAMESAVE_SLOTS		8					// maximum number of savegames
 #define GAMESAVE_DESCLEN	31					// gamesave description maximum length.
 
+// Disk field, not an unbounded C string. Reject before opening/replacing any
+// files, leave the output untouched on failure, and never serialize stack
+// padding after a shorter description's terminator.
+inline bool EncodeGameSaveDescription(char (&output)[GAMESAVE_DESCLEN+1],const char* input) {
+    if (!input) return false;
+    int length = 0;
+    while (length <= GAMESAVE_DESCLEN && input[length]) ++length;
+    if (length > GAMESAVE_DESCLEN) return false;
+    for (int i = 0; i <= GAMESAVE_DESCLEN; ++i) output[i] = i < length ? input[i] : 0;
+    return true;
+}
+
 struct gs_tables 
 {
 	short model_handles[MAX_POLY_MODELS];

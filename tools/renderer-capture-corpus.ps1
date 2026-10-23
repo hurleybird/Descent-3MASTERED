@@ -43,12 +43,29 @@ param(
     [switch]$ResourceProbe,
     [ValidateSet(-1,0,1,2)][int]$LodProbeTier = -1,
     [switch]$HistoryProbe,
-    [switch]$DeformationProbe
+    [switch]$DeformationProbe,
+    [ValidateSet('ordinary','retirement','save-export','save-settings','auxiliary-lifecycle')][string]$Scenario = 'ordinary'
 )
 
 # Run only copied installations and copied pilot/save data. Never point Runtime
 # at Candidate or the normal installation: the game may write local cache files.
 $ErrorActionPreference = 'Stop'
+$scenarioFile = Join-Path $PSScriptRoot 'renderer-integration-scenarios.json'
+$registry = Get-Content -LiteralPath $scenarioFile -Raw | ConvertFrom-Json
+if ($registry.schemaVersion -ne 1) { throw 'Unsupported runtime scenario registry' }
+$scenarioSpec = $registry.scenarios.PSObject.Properties[$Scenario].Value
+if (!$scenarioSpec -or $Frame -lt $scenarioSpec.minimumFrame) { throw 'Scenario requires a later capture frame' }
+if ($TimeoutSeconds -lt 1) { throw 'Capture timeout must be positive' }
+foreach ($save in $Saves) { if ($save -notmatch '^saveg\d{3}$') { throw "Invalid save name: $save" } }
+foreach ($pattern in $scenarioSpec.requiredLog) { [void][regex]::new($pattern) }
+if ($scenarioSpec.inspectionRequired -and !$SceneInspection) { throw 'Scenario requires explicit scene inspection' }
+if ($Scenario -ne 'ordinary') {
+    foreach ($name in $PSBoundParameters.Keys) {
+        if (($name -like '*Probe*' -or $name -eq 'ReticleReference') -and $PSBoundParameters[$name]) {
+            throw 'Named integration scenarios cannot mix additional geometry/camera/history fixtures'
+        }
+    }
+}
 if ($AutomapTerrainProbe) { $AutomapProbe = $true }
 if ($AutomapTelcomProbe -and (-not $SceneInspection -or $AutomapProbe)) { throw 'TelCom fixture requires scene inspection and the normal world presentation.' }
 if ($AutomapProbe -and (-not $SceneInspection -or $HudProbe -or $CockpitProbe -or $ReticleProbe -or $TerrainProbe -or $SkyProbe -or $HistoryProbe -or $MirrorSurfaceProbe -or $MirrorCameraProbe -or $ModelEffectsProbe -or $ObservationProbe -or $ViewImageProbe)) {
@@ -108,6 +125,25 @@ $outputPath = [IO.Path]::GetFullPath($Output)
 if ($runtimePath -notmatch '^C:\\tmp\\D3RendererVerification\\[^\\]+$') {
     throw 'Runtime must be a dedicated installation under C:\tmp\D3RendererVerification.'
 }
+# Seeds are read-only. Every destination we copy into must be a real local
+# directory/file, never a junction into a protected installation or seed set.
+foreach ($destination in @($runtimePath,$outputPath,(Join-Path $runtimePath 'savegame'),(Join-Path $runtimePath 'Jeff.plt'))) {
+    $ancestor = $destination
+    while ($ancestor) {
+        if (Test-Path -LiteralPath $ancestor) {
+            if ((Get-Item -LiteralPath $ancestor -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) {
+                throw "Mutable capture destination traverses a reparse point: $ancestor"
+            }
+        }
+        $ancestor = Split-Path -Parent $ancestor
+    }
+}
+foreach ($readOnlyRoot in @($seedPath,$runtimePath)) {
+    if ($outputPath.TrimEnd('\') -ieq $readOnlyRoot.TrimEnd('\') -or
+        $outputPath.StartsWith($readOnlyRoot.TrimEnd('\')+'\',[StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Immutable capture evidence must be outside runtime and seed directories'
+    }
+}
 if (Test-Path -LiteralPath $outputPath) { throw 'Output already exists; captures are immutable.' }
 New-Item -ItemType Directory -Path $outputPath | Out-Null
 $exe = Join-Path $runtimePath 'Descent 3MASTERED.exe'
@@ -123,6 +159,11 @@ $sampleScale = if ($Supersampling -gt 0) { $Supersampling } elseif ($Profile -eq
 $msaaCount = if ($MsaaSamples -ge 0) { $MsaaSamples } elseif ($Profile -eq 'clean') { 0 } else { 4 }
 $settings | Set-Content -LiteralPath (Join-Path $outputPath 'settings.json') -Encoding UTF8
 $manifest = [ordered]@{
+    schema_version = 2
+    scenario = $Scenario; scenario_revision = $scenarioSpec.revision
+    scenario_registry_hash = (Get-FileHash -LiteralPath $scenarioFile).Hash
+    harness_hash = (Get-FileHash -LiteralPath $PSCommandPath).Hash
+    scenario_required_log = $scenarioSpec.requiredLog
     runtime = $runtimePath; profile = $Profile; frame = $Frame; seed = $Seed; scene_inspection = [bool]$SceneInspection
     supersampling = $sampleScale
     inspection_banner_revision = $(if ($SceneInspection) { 2 } else { 0 })
@@ -174,6 +215,8 @@ $manifest = [ordered]@{
     results = @()
 }
 $oldLog = $env:DESCENT3MASTERED_CAPTURE_LOG
+$oldPerfLog = $env:DESCENT3MASTERED_FRAME_PERF_LOG
+$manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $outputPath 'manifest.json') -Encoding UTF8
 try {
     foreach ($save in $Saves) {
         if ($save -notmatch '^saveg\d{3}$') { throw "Invalid save name: $save" }
@@ -181,12 +224,19 @@ try {
         Copy-Item -LiteralPath (Join-Path $seedPath 'Jeff.plt') -Destination (Join-Path $runtimePath 'Jeff.plt')
         # Loading increments a sibling .cnt file. Never load directly from seeds.
         $savePath = Join-Path $runtimePath "savegame\$save"
+        foreach ($destination in @($savePath,"$savePath.cnt")) {
+            if ((Test-Path -LiteralPath $destination) -and
+                ((Get-Item -LiteralPath $destination -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+                throw "Mutable save destination is a reparse point: $destination"
+            }
+        }
         New-Item -ItemType Directory -Force -Path (Split-Path -Parent $savePath) | Out-Null
         Copy-Item -LiteralPath (Join-Path $seedPath "savegame\$save") -Destination $savePath
         Copy-Item -LiteralPath (Join-Path $seedPath "savegame\$save.cnt") -Destination "$savePath.cnt"
         $png = Join-Path $outputPath "$save.png"
         $log = Join-Path $outputPath "$save.log"
         $env:DESCENT3MASTERED_CAPTURE_LOG = $log
+        $env:DESCENT3MASTERED_FRAME_PERF_LOG = Join-Path $outputPath "$save.frames.tsv"
         $arguments = @('-background','-windowed','-nosound','-nomusic','-setdir',
             ('"{0}"' -f $runtimePath),'-pilot','Jeff','-loadgame',('"{0}"' -f $savePath),
             '-capture-frame',"$Frame",'-capture-dt','0.016666667','-capture-seed',"$Seed",'-capture-headlight',
@@ -232,6 +282,21 @@ try {
         if ($ResourceProbe) { $arguments += '-scene-resource-probe' }
         if ($LodProbeTier -ge 0) { $arguments += @('-scene-lod-probe',"$LodProbeTier") }
         if ($DeformationProbe) { $arguments += '-scene-deformation-probe' }
+        $nativeSave = Join-Path $outputPath "$save.native"
+        foreach ($argument in $scenarioSpec.arguments) {
+            $value = $argument.Replace('{save-output}',$nativeSave)
+            if ($value -match '\s') { $value = '"'+$value+'"' }
+            $arguments += $value
+        }
+        if ($arguments.Count -gt 63 -or @($arguments | Where-Object {[Text.Encoding]::UTF8.GetByteCount($_.Trim('"')) -gt 99}).Count) {
+            throw 'Capture arguments exceed the shipped 64x100 module ABI'
+        }
+        [ordered]@{scenario=$Scenario; revision=$scenarioSpec.revision
+            executable=(Get-FileHash -LiteralPath $exe).Hash
+            save_hash=(Get-FileHash -LiteralPath $savePath).Hash
+            count_hash=(Get-FileHash -LiteralPath "$savePath.cnt").Hash
+            arguments=$arguments; started_utc=[DateTime]::UtcNow.ToString('o')
+        } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $outputPath "$save.launch.json") -Encoding UTF8
         $started = Get-Date
         $process = Start-Process -FilePath $exe -ArgumentList $arguments -WorkingDirectory $runtimePath -WindowStyle Hidden -PassThru
         $timedOut = $false
@@ -248,6 +313,33 @@ try {
         $process.WaitForExit()
         $logText = if (Test-Path -LiteralPath $log) { Get-Content -LiteralPath $log -Raw } else { '' }
         $resourceValidated = $true
+        $scenarioValidated = $true
+        foreach ($pattern in $scenarioSpec.requiredLog) {
+            $scenarioValidated = $scenarioValidated -and ($logText -match $pattern)
+        }
+        $exports = @()
+        if ($Scenario -in @('save-export','save-settings')) {
+            $pairs = @(Get-ChildItem -LiteralPath $outputPath -Filter "$save.native.audit*.live-before.png")
+            $minimumPairs = if ($Scenario -eq 'save-export') { 2 } else { 1 }
+            $scenarioValidated = $scenarioValidated -and $pairs.Count -ge $minimumPairs -and (Test-Path -LiteralPath $nativeSave)
+            foreach ($before in $pairs) {
+                $after = $before.FullName.Replace('.live-before.png','.live-after.png')
+                $thumbnail = $before.FullName.Replace('.live-before.png','.thumbnail.png')
+                $world = $before.FullName.Replace('.live-before.png','.world.png')
+                $missing = @(@($after,$thumbnail,$world) | Where-Object {!(Test-Path -LiteralPath $_)})
+                if ($missing.Count) {
+                    $scenarioValidated = $false
+                    $exports += [ordered]@{before=$before.Name; missing=$missing}
+                    continue
+                }
+                $beforeHash = (Get-FileHash -LiteralPath $before.FullName).Hash
+                $afterHash = (Get-FileHash -LiteralPath $after).Hash
+                $scenarioValidated = $scenarioValidated -and $beforeHash -eq $afterHash
+                $exports += [ordered]@{before=$before.Name; before_hash=$beforeHash; after_hash=$afterHash
+                    thumbnail_hash=(Get-FileHash -LiteralPath $thumbnail).Hash
+                    world_hash=(Get-FileHash -LiteralPath $world).Hash}
+            }
+        }
         if ($AutomapProbe) { $resourceValidated = $logText.Contains('scene automap prepared rooms=') }
         if ($AutomapTelcomProbe) { $resourceValidated = $resourceValidated -and $logText.Contains('scene automap TelCom composed') }
         if ($DepthPolicyProbe) { $resourceValidated = $logText.Contains('scene depth fixture columns=write,read,disabled,read_occluded') }
@@ -275,7 +367,7 @@ try {
             }
         }
         # HandledWinMain returns 1 after a normal run, not conventional exit 0.
-        $ok = -not $timedOut -and $resourceValidated -and (-not $MirrorCameraProbe -or $logText.Contains('scene mirror camera room=')) -and
+        $ok = -not $timedOut -and $resourceValidated -and $scenarioValidated -and (-not $MirrorCameraProbe -or $logText.Contains('scene mirror camera room=')) -and
             (-not $HudProbe -or $logText.Contains('scene HUD items prepared')) -and
             (-not $HudMessageProbe -or $logText.Contains('scene HUD messages prepared')) -and
             ($HudViewProbe -eq 'none' -or $logText.IndexOf("scene HUD view policy mode=$HudViewProbe",[StringComparison]::OrdinalIgnoreCase) -ge 0) -and
@@ -289,6 +381,7 @@ try {
             save=$save; save_hash=(Get-FileHash -LiteralPath $savePath).Hash
             success=$ok; exit_code=$process.ExitCode; timeout=$timedOut
             resource_transitions_validated=$resourceValidated
+            scenario_validated=$scenarioValidated; exports=$exports
             seconds=((Get-Date)-$started).TotalSeconds; arguments=$arguments
             image_hash=$(if (Test-Path -LiteralPath $png) { (Get-FileHash -LiteralPath $png).Hash } else { $null })
         }
@@ -299,4 +392,5 @@ try {
     if ((Read-Settings) -cne $settings) { throw 'Global settings changed during capture; comparison invalid.' }
 } finally {
     $env:DESCENT3MASTERED_CAPTURE_LOG = $oldLog
+    $env:DESCENT3MASTERED_FRAME_PERF_LOG = $oldPerfLog
 }

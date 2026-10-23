@@ -3694,6 +3694,8 @@ void TCSSButtonCallback(int efxnum)
 
 void TCSSSCallback(void)
 {
+	// Supported bounded UI preview. Keep its immediate model dependency out of
+	// world-scene execution; TelCom's actual map uses its scene-owned producer.
 	if (TCShipSelect.ship_model == -1)
 	{
 		//no ship selected yet

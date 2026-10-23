@@ -49,6 +49,9 @@
 #include "aistruct.h"
 #include "psrand.h"
 #include "savegame_compat.h"
+#include <memory>
+#include <string>
+#include <vector>
 
 // Save selected by LoadGameDialog() or the -loadgame startup option.
 static char LGS_Path[PSPATHNAME_LEN];
@@ -62,7 +65,36 @@ static char LGS_Path[PSPATHNAME_LEN];
 
 // function prototypes.
 
-void SGSSnapshot(CFILE* fp);
+// Qualification data is local to an explicitly requested save, never retained
+// by normal frame publication or by the renderer.
+struct SnapshotAudit {
+    std::string prefix;
+    std::vector<ushort> pixels;
+};
+void SGSSnapshot(CFILE* fp,SnapshotAudit* audit);
+
+static void ValidateSavedSnapshot(const char* pathname,const SnapshotAudit& audit) {
+    char description[GAMESAVE_DESCLEN+1]{};
+    int decoded = -1;
+    if (!GetGameStateInfo(pathname,description,&decoded) || decoded <= BAD_BITMAP_HANDLE)
+        Error("Saved thumbnail could not be decoded from the native save file");
+    const bool extent = bm_w(decoded,0) == 160 && bm_h(decoded,0) == 120 && bm_format(decoded) == BITMAP_FORMAT_1555;
+    unsigned mismatches = 0, transparent = 0;
+    uint64_t checksum = 14695981039346656037ull;
+    if (extent && audit.pixels.size() == 160*120) {
+        const auto* pixels = bm_data(decoded,0);
+        for (size_t i = 0; i < audit.pixels.size(); ++i) {
+            mismatches += pixels[i] != audit.pixels[i];
+            transparent += !(pixels[i]&OPAQUE_FLAG);
+            checksum = (checksum^pixels[i])*1099511628211ull;
+        }
+    } else mismatches = 160*120;
+    const bool png = bm_SaveBitmapPNG((audit.prefix+".thumbnail.png").c_str(),decoded) != 0;
+    bm_FreeBitmap(decoded);
+    if (!extent || mismatches || transparent || !png) Error("Native save thumbnail failed round-trip qualification");
+    AutomatedCaptureLog("scene save thumbnail decoded width=160 height=120 mismatches=%u transparent=%u checksum=%llu",
+        mismatches,transparent,checksum);
+}
 
 
 #define SAVE_HOTSPOT_ID		0x1000
@@ -594,8 +626,18 @@ bool LoadCurrentSaveGame()
 //	give a description and slot number (0 to GAMESAVE_SLOTS-1)
 bool SaveGameState(const char* pathname, const char* description)
 {
+	char buf[GAMESAVE_DESCLEN+1];
+	if (!pathname || !*pathname || strlen(pathname) > _MAX_PATH*2-32 || !EncodeGameSaveDescription(buf,description))
+		return false;
+	std::unique_ptr<SnapshotAudit> snapshot_audit;
+	if (FindArg("-scene-save-image-audit")) {
+		static uint64_t audit_sequence = 0;
+		snapshot_audit.reset(new SnapshotAudit);
+		snapshot_audit->prefix = std::string(pathname)+".audit"+std::to_string(++audit_sequence);
+		if (!rend_SaveScreenshotPNG((snapshot_audit->prefix+".live-before.png").c_str()))
+			Error("Cannot capture live frame before save qualification");
+	}
 	CFILE* fp;
-	char buf[GAMESAVE_DESCLEN + 1];
 	short pending_music_region;
 	char lockpath[_MAX_PATH * 2];
 	char temporary_path[_MAX_PATH * 2];
@@ -635,12 +677,16 @@ bool SaveGameState(const char* pathname, const char* description)
 
 	//	save out header
 	START_VERIFY_SAVEFILE(fp);
-	ASSERT(strlen(description) < sizeof(buf));
-	strcpy(buf, description);
 	cf_WriteBytes((ubyte*)buf, sizeof(buf), fp);
 	cf_WriteShort(fp, GAMESAVE_VERSION);
 
-	SGSSnapshot(fp);											//Save snapshot? MUST KEEP THIS HERE.
+	const auto snapshot_rng = ps_rand_get_state();
+	const auto snapshot_time = Gametime, snapshot_delta = Frametime;
+	const auto snapshot_frame = FrameCount;
+	SGSSnapshot(fp,snapshot_audit.get()); // Save snapshot? MUST KEEP THIS HERE.
+	if (snapshot_audit && (ps_rand_get_state() != snapshot_rng || Gametime != snapshot_time ||
+		Frametime != snapshot_delta || FrameCount != snapshot_frame))
+		Error("Save thumbnail advanced simulation state");
 
 	//	write out translation tables
 	SGSXlateTables(fp);
@@ -742,6 +788,12 @@ bool SaveGameState(const char* pathname, const char* description)
 			ddio_DeleteFile(count_temporary_path);
 	}
 
+	if (snapshot_audit) {
+		ValidateSavedSnapshot(pathname,*snapshot_audit);
+		if (!rend_SaveScreenshotPNG((snapshot_audit->prefix+".live-after.png").c_str()))
+			Error("Cannot capture live frame after save qualification");
+		AutomatedCaptureLog("scene save thumbnail simulation state unchanged frame=%d evidence=%s",snapshot_frame,snapshot_audit->prefix.c_str());
+	}
 	return true;
 }
 
@@ -1291,7 +1343,7 @@ static void MakeSnapshotOpaque(int bm_handle)
 		data[i] |= OPAQUE_FLAG;
 }
 
-void SGSSnapshot(CFILE* fp)
+void SGSSnapshot(CFILE* fp,SnapshotAudit* audit)
 {
 	const int SGSSNAP_WIDTH = 160,
 		SGSSNAP_HEIGHT = 120;
@@ -1328,8 +1380,20 @@ void SGSSnapshot(CFILE* fp)
 			const auto* rgba = pixels.pixels.data()+(size_t(y)*pixels.width+x)*4;
 			destination[(pixels.height-1-y)*pixels.width+x] = GR_RGB16(rgba[0],rgba[1],rgba[2]);
 		}
+		if (audit) {
+			// Readback is GL bottom-up; export a separate opaque top-down source
+			// without changing the bitmap which the native save writer resizes.
+			std::vector<ubyte> reference(pixels.pixels.size());
+			const size_t row_bytes = size_t(pixels.width)*4;
+			for (uint32_t y = 0; y < pixels.height; ++y)
+				memcpy(reference.data()+size_t(y)*row_bytes,pixels.pixels.data()+size_t(pixels.height-1-y)*row_bytes,row_bytes);
+			for (size_t i = 3; i < reference.size(); i += 4) reference[i] = 255;
+			if (!bm_SaveRawRGBA32PNG((audit->prefix+".world.png").c_str(),pixels.width,pixels.height,reference.data()))
+				Error("Cannot export save thumbnail source image");
+		}
 		bm_ChangeSize(bm_handle, SGSSNAP_WIDTH, SGSSNAP_HEIGHT);
 		MakeSnapshotOpaque(bm_handle);
+		if (audit) audit->pixels.assign(bm_data(bm_handle,0),bm_data(bm_handle,0)+SGSSNAP_WIDTH*SGSSNAP_HEIGHT);
 
 		try
 		{

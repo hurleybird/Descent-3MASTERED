@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "scenarios": {
+    "ordinary": {
+      "revision": 1,
+      "minimumFrame": 1,
+      "inspectionRequired": false,
+      "arguments": [],
+      "requiredLog": [],
+      "purpose": "Unmodified native save, normal main/foreground producers. Inspection remains required by the current executable acceptance gate."
+    },
+    "retirement": {
+      "revision": 1,
+      "minimumFrame": 22,
+      "inspectionRequired": true,
+      "arguments": ["-scene-retirement-probe", "-scene-gl-audit", "-capture-rear-smallview"],
+      "requiredLog": ["scene retirement live reset frame=20", "scene motion frame=20 camera_history=0", "scene motion frame=21 camera_history=1", "scene retirement game lifetime=\\d+ producers=\\d+ remaining=0"],
+      "purpose": "Double retire/rebuild of world, auxiliary, image and history resources, then actual level-exit retirement."
+    },
+    "save-export": {
+      "revision": 1,
+      "minimumFrame": 22,
+      "inspectionRequired": true,
+      "arguments": ["-scene-gl-audit", "-scene-save-image-audit", "-scene-history-export-probe", "-capture-save-output", "{save-output}"],
+      "requiredLog": ["scene interleaved save exported before world", "scene motion frame=20 camera_history=1", "scene motion frame=21 camera_history=1", "scene save thumbnail decoded width=160 height=120 mismatches=0 transparent=0", "scene save thumbnail simulation state unchanged", "save saved output="],
+      "purpose": "Actual native saves before world and after display composition; decode embedded thumbnails, check live image immutability and independent history."
+    },
+    "save-settings": {
+      "revision": 1,
+      "minimumFrame": 55,
+      "inspectionRequired": true,
+      "arguments": ["-scene-gl-audit", "-scene-save-image-audit", "-scene-resource-probe", "-capture-save-output", "{save-output}"],
+      "requiredLog": ["scene resource transition frame=10", "scene resource transition frame=20", "scene resource transition frame=30", "scene resource transition frame=40", "scene resource transition frame=50", "scene save thumbnail decoded width=160 height=120 mismatches=0 transparent=0", "save saved output="],
+      "purpose": "Actual post-composition save after SSAA/MSAA transitions. Resource changes intentionally invalidate history, unlike independent export."
+    },
+    "auxiliary-lifecycle": {
+      "revision": 1,
+      "minimumFrame": 30,
+      "inspectionRequired": true,
+      "arguments": ["-scene-gl-audit", "-scene-auxiliary-lifecycle-probe", "-scene-auxiliary-replay-probe"],
+      "requiredLog": ["scene auxiliary source deleted owner=", "scene auxiliary source replacement old=.+same_slot=1", "scene stationary layer key=.+valid=1 identity=0"],
+      "purpose": "Real guidebot popup/deletion/same-slot replacement, static interval and base-view restoration, with duplicate-timer and GPU-mask assertions."
+    }
+  }
+}

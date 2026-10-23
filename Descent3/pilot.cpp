@@ -3851,6 +3851,13 @@ void ShipSelectDeleteTaunt(pilot* Pilot, tCustomListInfo* cust_snds, newuiComboB
 void UI3DWindow::OnDraw()
 {
 	AudioStream::Frame();
+	// Supported UI-only model consumer, not a gameplay-world fallback. Its
+	// rotation/custom-logo state belongs to this menu window's OnDraw cadence.
+	if (ship_model == -1)
+	{
+		mprintf((0, "Shipmodel is -1\n"));
+		return;
+	}
 
 	static polymodel_effect pefx;
 
@@ -3862,12 +3869,6 @@ void UI3DWindow::OnDraw()
 		//@@@@@StartFrame(m_X,m_Y,m_X+m_W-1,m_Y+m_H-1);
 	g3_StartFrame(&viewer_eye, &viewer_orient, D3_DEFAULT_ZOOM);
 	rend_SetFlatColor(0);
-
-	if (ship_model == -1)
-	{
-		mprintf((0, "Shipmodel is -1\n"));
-		return;
-	}
 
 	float normalized_time[MAX_SUBOBJECTS];
 	float light_scalar, size;

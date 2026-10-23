@@ -3460,7 +3460,7 @@ void GameRenderFrame(void)
 		if (FindArg("-scene-history-export-probe") && AutomatedCaptureFrameIndex() == 20) {
 			const int save_arg = FindArg("-capture-save-output");
 			const char* path = save_arg ? GetArg(save_arg+1) : nullptr;
-			if (!path || !*path || !SaveGameState(path,"Renderer interleaved publication check"))
+			if (!path || !*path || !SaveGameState(path,"Renderer export check"))
 				Error("Interleaved save/export qualification failed");
 			AutomatedCaptureLog("scene interleaved save exported before world frame=%d",FrameCount);
 		}
