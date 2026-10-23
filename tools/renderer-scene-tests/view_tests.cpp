@@ -1551,6 +1551,13 @@ int runSceneViewTests() {
         "Uncommitted alternative views damaged main-view history");
     // Independent publication holes preserve the explicit world predecessor.
     tick.sequence = 40;
+    check(d3scene::retainViewImageStorage(2,tick) && d3scene::retainViewImageStorage(40,tick) &&
+        d3scene::retainViewImageStorage(41,tick) &&
+        !d3scene::retainViewImageStorage(1,tick) && !d3scene::retainViewImageStorage(39,tick),
+        "View-image storage aging inferred world advancement from publication-ID gaps");
+    auto export_tick = tick; export_tick.temporal_predecessor = 0;
+    check(d3scene::retainViewImageStorage(2,export_tick),
+        "Independent export retired the world's preceding view-image storage");
     const auto after_thumbnail = histories.prepare(tick,main_view,d3scene::prepareCamera(main_view));
     check(after_thumbnail.previous_valid && after_thumbnail.previous.view_projection == second.current.view_projection,
         "Independent UI/thumbnail publication reset world history");

@@ -398,6 +398,19 @@ void frameTests() {
     rejects([&] { assets.publishReflection(7,reflection); },"Nonfinite reflection normal accepted");
     data.rooms[0].surfaces[0].reflection = original_reflection;
     const auto reflected = d3scene::Presentation::freeze(data);
+    check(!reflected->data().has_reflection_fields,"Zero-strength surface requested reflection field residency");
+    data.rooms[0].surfaces[0].specular_strength = 1;
+    const auto lit_reflection = d3scene::Presentation::freeze(data);
+    check(lit_reflection->data().has_reflection_fields,
+        "Lit reflection surface omitted its compiled field demand");
+    check(d3scene::Presentation::freeze(lit_reflection->data())->data().has_reflection_fields,
+        "Retained sealed room table omitted its reflection field demand");
+    data.rooms[0].surfaces[0].specular_strength = 0;
+    auto empty_canvas = d3scene::FrameData{};
+    empty_canvas.sequence = data.sequence; empty_canvas.scene_lifetime = data.scene_lifetime;
+    empty_canvas.has_reflection_fields = true;
+    check(!d3scene::Presentation::freeze(std::move(empty_canvas))->data().has_reflection_fields,
+        "Caller supplied a stale reflection demand for field-free publication");
     reflection = changed_reflection->data(); reflection.corner_normals.pop_back();
     data.rooms[0].surfaces[0].reflection = assets.publishReflection(7,reflection);
     rejects([&] { d3scene::Presentation::freeze(data); },"Incomplete reflection normals accepted");

@@ -921,6 +921,7 @@ struct ResolvedModel {
 struct FrameData {
     uint32_t compiled_surface_count = 0, compiled_part_count = 0;
     bool has_planar_surfaces = false; // compiled from published room mirror groups
+    bool has_reflection_fields = false; // compiled dependency demand, not a caller policy
     uint64_t sequence = 0, scene_lifetime = 0;
     // Explicit predecessor in this producer's exposure stream. Publication IDs
     // are globally unique, not consecutive: thumbnails/UI may publish between

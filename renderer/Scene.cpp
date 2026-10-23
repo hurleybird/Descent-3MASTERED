@@ -943,7 +943,9 @@ PresentationRef Presentation::complete(FrameData data) {
         require(index < data.lights.size(),"Candidate table references missing emitter");
     for (float value : data.model_pose_inputs)
         require(std::isfinite(value) && value >= 0 && value <= 1,"Invalid animation input");
+    data.has_reflection_fields = false;
     const auto validateIndices = [&](const SurfaceBinding& surface) {
+        data.has_reflection_fields = data.has_reflection_fields || (surface.reflection && surface.specular_strength > 0);
         require(!surface.reflection || surface.reflection->id().lifetime == data.scene_lifetime,"Stale reflection asset in frame");
         for (auto index : surface.light_indices) require(index < data.lights.size(), "Surface references missing emitter");
         for (auto image : {surface.color_image,surface.baked_image,surface.specular_image}) validateImage(image);
@@ -1040,6 +1042,8 @@ PresentationRef Presentation::complete(FrameData data) {
             // Explicit authored emitter indices still belong to this frame.
             require(room.surfaces.requiredLightCount() <= data.lights.size(),"Surface references missing emitter");
             image_requirements.add(room.surfaces.imageDependencies());
+            const auto& reflections = room.surfaces.reflectionDependencies();
+            data.has_reflection_fields = data.has_reflection_fields || (reflections && !reflections->empty());
         }
         data.lightCandidates(room.light_candidates);
         require(finite(room.fog_color) && std::isfinite(room.fog_depth), "Invalid room fog");
@@ -1148,6 +1152,7 @@ PresentationRef Presentation::complete(FrameData data) {
                 require(summary.required_light_count <= data.lights.size(),"Model references missing emitter");
                 require(summary.required_candidate_count <= data.light_candidate_indices.size(),"Model references missing candidate range");
                 image_requirements.add(summary.images);
+                data.has_reflection_fields = data.has_reflection_fields || (summary.reflections && !summary.reflections->empty());
                 continue;
             }
             for (size_t i = 0; i < model.parts.size(); ++i) {

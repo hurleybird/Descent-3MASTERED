@@ -5,6 +5,12 @@
 #include <stdexcept>
 
 namespace d3scene {
+// Independent UI/export work cannot age the world's image cache. A world
+// exposure retains its own products and the preceding exposure's storage;
+// product readability still requires an exact publication ID match.
+inline bool retainViewImageStorage(uint64_t cached,const FrameData& frame) {
+    return !frame.temporal_predecessor || cached >= frame.sequence || cached == frame.temporal_predecessor;
+}
 inline bool sameSurfaceSelection(const View& a,const View& b) {
     return a.reflections == b.reflections && a.excluded_surfaces == b.excluded_surfaces &&
         a.excluded_objects == b.excluded_objects && a.image_inputs == b.image_inputs;

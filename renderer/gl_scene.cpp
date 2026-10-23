@@ -859,6 +859,11 @@ void GL4Renderer::PrepareSceneViewTables(const d3scene::PreparedView& prepared) 
         bool rebuild_reflections = false;
         if (new_frame) {
         scene_meshes.releaseExpired([&](SceneMeshGpu& mesh) { ReleaseSceneMesh(mesh); });
+        }
+        // A publication with no field dependencies must not replace the
+        // resident immutable field table with an empty one. This applies to
+        // any field-free content, not a HUD/camera-kind exception.
+        if (new_frame && frame.data().has_reflection_fields) {
         scene_reflection_dependencies.begin();
         scene_reflection_dependencies.addValue(0); // initialize the empty GPU buffer once
         for (const auto& room : frame.data().rooms) collectTable(room.surfaces);
@@ -1216,7 +1221,7 @@ void GL4Renderer::RenderViewImage(const d3scene::PreparedViewImage& product) {
     EnsureSceneLifetime(presentation);
     const auto sequence = presentation.data().sequence;
     for (auto it = scene_view_images.begin(); it != scene_view_images.end();) {
-        if (it->second.sequence < sequence && sequence-it->second.sequence > 1) {
+        if (!d3scene::retainViewImageStorage(it->second.sequence,presentation.data())) {
             it->second.buffer.Destroy(); it->second.depth.Destroy(); it = scene_view_images.erase(it);
         } else ++it;
     }
@@ -1231,9 +1236,10 @@ void GL4Renderer::RenderViewImage(const d3scene::PreparedViewImage& product) {
         glViewport(viewport[0],viewport[1],viewport[2],viewport[3]);
     };
     try {
-        if (image.buffer.Width() != uint32_t(view.viewport.width)*product.scale() ||
+        const bool reallocated = image.buffer.Width() != uint32_t(view.viewport.width)*product.scale() ||
             image.buffer.Height() != uint32_t(view.viewport.height)*product.scale() ||
-            image.buffer.RequestedSamples() != product.samples()) image.history.clear();
+            image.buffer.RequestedSamples() != product.samples();
+        if (reallocated) image.history.clear();
         image.buffer.Update(view.viewport.width*product.scale(),view.viewport.height*product.scale(),product.samples());
         image.buffer.ClearAll();
         const auto raster = d3scene::rasterViewport(view.viewport,image.buffer.Height(),product.scale());
@@ -1243,9 +1249,9 @@ void GL4Renderer::RenderViewImage(const d3scene::PreparedViewImage& product) {
         image.matrices = d3scene::viewMatrices(prepared.visibility().camera);
         image.sequence = sequence;
         if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
-            AutomatedCaptureLog("scene view image key=%llu size=%ux%u samples=%u sequence=%llu coverage=%d,%d,%d,%d",
+            AutomatedCaptureLog("scene view image key=%llu size=%ux%u samples=%u sequence=%llu coverage=%d,%d,%d,%d reallocated=%d",
                 static_cast<unsigned long long>(product.image()),image.buffer.Width(),image.buffer.Height(),image.buffer.Samples(),
-                static_cast<unsigned long long>(sequence),view.coverage.x,view.coverage.y,view.coverage.width,view.coverage.height);
+                static_cast<unsigned long long>(sequence),view.coverage.x,view.coverage.y,view.coverage.width,view.coverage.height,reallocated);
     } catch (...) { restore(); throw; }
     restore();
 }

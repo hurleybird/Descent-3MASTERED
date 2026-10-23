@@ -161,3 +161,28 @@ visible model pixels have valid motion records. The export and backup are
 nonempty; final imagery was visually inspected and no GL errors were logged.
 This does not yet qualify reloading the exported save, scene retirement or
 the forthcoming real module/UI publication stream.
+
+## Post-observation game overlay publication
+
+HUD/reticle/cinematic/banner descriptions now publish after the game's visibility
+commit, separately from world/cockpit extraction. The game captures HUD layout
+once; both publications consume it. An allocation-free merge preserves layer
+order (including HUD before late cockpit and auxiliary HUD afterward). Overlay
+publication allocates an independent ID, has no world predecessor and performs
+no second world extraction. This establishes the source-owned callback phase;
+it does not yet restore shipped module callbacks or their graphics API.
+
+View-image storage retirement now follows the explicit world predecessor.
+Independent publications cannot age that storage; exact publication checks
+still reject stale image reads. An actual mirror with an interleaved save keeps
+its MSAA storage on frames20–22 (reallocated=0), with camera_history=1. Evidence:
+integration-overlay-mirror-20261022, visually inspected.
+
+The compiler also derives reflection-field demand, including sealed room/model
+tables. Field-free publications cannot evict the resident immutable field table;
+there is no HUD/view-kind exception. CPU tests cover compiled demand, independent
+image-storage aging and retained/replayed requests. Engine and all three suites
+pass. Normal-overlay output is byte-identical to bf50d11's prior capture, including
+after cache qualification; cinematic text/letterbox composition was inspected.
+Evidence: integration-overlay-{publication,cinematic,cache-qualified}-20261022.
+No GL errors were logged. Full module, lifecycle and deployment gates remain.

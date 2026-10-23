@@ -564,7 +564,7 @@ void PrepareGameInspectionBanner(d3scene::FrameData& data) {
 }
 
 d3scene::PresentationRef PrepareGamePresentation(bool advance,const GameMainView* main_view,
-    const std::vector<FrameScreenBlend>* overlays) {
+    const std::vector<FrameScreenBlend>* overlays,const HUDCanvasLayout* hud_layout) {
     PERF_MARKER_SCOPE("Scene.PreparePresentation");
     static d3scene::PresentationRef previous_models;
     const bool retain_rooms = [&] { PERF_MARKER_SCOPE("Scene.MaterialInputs"); return roomMaterialInputsUnchanged(); }();
@@ -684,18 +684,14 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance,const GameMainView
     { PERF_MARKER_SCOPE("Scene.PrepareScorches"); PrepareGameScorches(data); }
     if (overlays && main_view)
         PrepareFrameBlendCanvas(data,SceneFrameScreenBlend,main_view->world.viewport,*overlays,SceneGeometryInspection());
-    if (main_view) PrepareCinematicCanvas(data);
     if (main_view) {
-        const auto layout = CaptureGameHUDLayout();
+        const auto layout = hud_layout ? *hud_layout : CaptureGameHUDLayout();
         if (layout.cockpit && main_view->player_first_person) {
             PERF_MARKER_SCOPE("Scene.PrepareCockpit");
             PrepareGameCockpit(data,advance,previous_models ? &previous_models->data() : nullptr,retain_rooms);
             PrepareCockpitComposition(data,{Game_window_x,Game_window_y,Game_window_w,Game_window_h},SceneCockpitZoom);
         }
-        PrepareGameReticle(data,layout);
-        PrepareGameHUD(data,layout,advance);
     }
-    PrepareGameInspectionBanner(data);
     if (SceneGeometryInspection() && FindArg("-scene-view-image-probe")) {
         int order = 0; SceneQuadStyle style; style.uv_min = {0,1}; style.uv_max = {1,0};
         PrepareSceneQuad(data,SceneViewImageProbe,order,{16,72,320,180},style);
@@ -794,6 +790,23 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance,const GameMainView
         Error("Presentation preparation consumed simulation randomness");
     if (advance) previous_models = prepared;
     return prepared;
+}
+
+d3scene::PresentationRef PrepareGameOverlayPresentation(const d3scene::Presentation& world,
+    const HUDCanvasLayout& layout,bool advance) {
+    PERF_MARKER_SCOPE("Scene.PrepareGameOverlays");
+    auto data = d3scene::acquireFrameData();
+    data.sequence = AllocateGamePresentationSequence();
+    data.scene_lifetime = world.data().scene_lifetime;
+    data.simulation_time = world.data().simulation_time;
+    data.delta_time = world.data().delta_time;
+    data.paused = world.data().paused;
+    PrepareGameReticle(data,layout);
+    PrepareGameHUD(data,layout,advance);
+    PrepareCinematicCanvas(data);
+    PrepareGameInspectionBanner(data);
+    PrepareGameSceneResources(data);
+    return d3scene::Presentation::publish(std::move(data));
 }
 
 void RenderGameSceneView(const d3scene::Presentation& frame, d3scene::View view,
@@ -1090,13 +1103,31 @@ void RenderGameSceneView(const d3scene::Presentation& frame, d3scene::View view,
     }
 }
 
-void RenderGameForegrounds(const d3scene::Presentation& frame,d3scene::ForegroundPhase phase) {
+void RenderGameForegrounds(const d3scene::Presentation& frame,d3scene::ForegroundPhase phase,
+    const d3scene::Presentation* overlays) {
     if (!SceneGeometryInspection()) Error("Foreground migration has not passed gameplay acceptance");
-    for (const auto& foreground : frame.data().foregrounds) if (foreground.phase == phase) {
+    if (overlays && overlays->data().scene_lifetime != frame.data().scene_lifetime)
+        Error("Foreground publications belong to different scene lifetimes");
+    const auto execute = [&](const d3scene::Presentation& owner,const d3scene::PreparedForeground& foreground) {
         // The retained comparison oracle is diagnostic-only, not a fallback.
         if (foreground.identity == SceneReticle && FindArg("-scene-reticle-reference"))
-            RenderPreparedReticle(frame);
-        else d3scene::renderForeground(frame,foreground.layer);
+            RenderPreparedReticle(owner);
+        else d3scene::renderForeground(owner,foreground.layer);
+    };
+    // Both publications are already sorted. Merge their explicit layer order
+    // without copying descriptions or moving HUD policy back into execution.
+    const auto& primary = frame.data().foregrounds;
+    size_t a = 0,b = 0;
+    while (a < primary.size() || (overlays && b < overlays->data().foregrounds.size())) {
+        if (a < primary.size() && primary[a].phase != phase) { ++a; continue; }
+        if (overlays && b < overlays->data().foregrounds.size() && overlays->data().foregrounds[b].phase != phase) { ++b; continue; }
+        const auto* secondary = overlays && b < overlays->data().foregrounds.size() ? &overlays->data().foregrounds[b] : nullptr;
+        if (a == primary.size()) { execute(*overlays,*secondary); ++b; }
+        else if (!secondary || primary[a].order < secondary->order) { execute(frame,primary[a++]); }
+        else {
+            if (primary[a].order == secondary->order) Error("Foreground publications have ambiguous layer order");
+            execute(*overlays,*secondary); ++b;
+        }
     }
 }
 void PrepareCockpitComposition(d3scene::FrameData& frame,d3scene::Rect viewport,float zoom) {

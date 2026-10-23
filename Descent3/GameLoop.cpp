@@ -28,6 +28,7 @@
 #include <vector>
 #include "gameloop.h"
 #include "SceneExtraction.h"
+#include "SceneCanvas.h"
 #include "SceneAutomap.h"
 #include "TelCom.h"
 #include "SceneModuleContext.h"
@@ -3168,6 +3169,7 @@ void GameRenderFrame(void)
 		}
 		AdvanceCinematicPresentation(d3scene::assets().lifetime(),uint64_t(FrameCount));
 		const auto main_view = CaptureGameMainView();
+		const auto hud_layout = CaptureGameHUDLayout();
 		if (FindArg("-scene-history-export-probe") && AutomatedCaptureFrameIndex() == 20) {
 			const int save_arg = FindArg("-capture-save-output");
 			const char* path = save_arg ? GetArg(save_arg+1) : nullptr;
@@ -3176,7 +3178,7 @@ void GameRenderFrame(void)
 			AutomatedCaptureLog("scene interleaved save exported before world frame=%d",FrameCount);
 		}
 		const auto presentation = SceneGeometryInspection() && FindArg("-scene-automap-probe") ?
-			PrepareAutomapInspection() : PrepareGamePresentation(true,&main_view,&screen_overlays);
+			PrepareAutomapInspection() : PrepareGamePresentation(true,&main_view,&screen_overlays,&hud_layout);
 		const ModuleSceneScope module_scene(presentation);
 		SceneFeedbackTransaction feedback(*presentation);
 
@@ -3204,6 +3206,8 @@ void GameRenderFrame(void)
 				(unsigned)observations.objects.size(),AI_NumRendered,observations.terrain,
 				observations.main_view_present,observations.main_exterior_visible,observations.main_camera_owner);
 		rend_PerfGpuSceneMark(RENDERER_GPU_SCENE_AFTER_SMALL_VIEWS);
+		const auto overlay_presentation = FindArg("-scene-automap-probe") ? d3scene::PresentationRef{} :
+			PrepareGameOverlayPresentation(*presentation,hud_layout,true);
 		if (SceneGeometryInspection() && FindArg("-scene-layer-probe"))
 		{
 			// Exercise the canvas composition boundary without invoking any
@@ -3227,7 +3231,7 @@ void GameRenderFrame(void)
 				AutomatedCaptureLog("scene layer fixture composed");
 		}
 
-		if (SceneGeometryInspection()) RenderGameForegrounds(*presentation,d3scene::ForegroundPhase::WorldOverlay);
+		if (SceneGeometryInspection()) RenderGameForegrounds(*presentation,d3scene::ForegroundPhase::WorldOverlay,overlay_presentation.get());
 
 		// Do Cockpit/Hud
 		// Cinematics own their immutable final canvas below.
@@ -3242,7 +3246,7 @@ void GameRenderFrame(void)
 		// Render Ingame Cinematics
 		{
 			PERF_MARKER_SCOPE("Scene.CinematicPresentation");
-			RenderGameForegrounds(*presentation,d3scene::ForegroundPhase::PostHUD);
+			RenderGameForegrounds(*presentation,d3scene::ForegroundPhase::PostHUD,overlay_presentation.get());
 			CommitCinematicFrame(d3scene::assets().lifetime(),uint64_t(FrameCount));
 			if (FindArg("-scene-integration-cinematic-probe"))
 				CommitCinematicFrame(d3scene::assets().lifetime(),uint64_t(FrameCount)); // deliberate cadence replay
@@ -3283,7 +3287,7 @@ void GameRenderFrame(void)
 		}
 		if (SceneGeometryInspection())
 		{
-			RenderGameForegrounds(*presentation,d3scene::ForegroundPhase::FinalOverlay);
+			RenderGameForegrounds(*presentation,d3scene::ForegroundPhase::FinalOverlay,overlay_presentation.get());
 		}
 		rend_FlushTextLayer();
 		rend_PerfGpuSceneMark(RENDERER_GPU_SCENE_AFTER_DEBUG);

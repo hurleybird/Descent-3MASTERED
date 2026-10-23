@@ -65,12 +65,17 @@ void PrepareGameCockpit(d3scene::FrameData&, bool advance,const d3scene::FrameDa
 void PrepareGameReticle(d3scene::FrameData&,const HUDCanvasLayout&);
 void PrepareGameHUD(d3scene::FrameData&,const HUDCanvasLayout&,bool advance);
 void RenderPreparedReticle(const d3scene::Presentation&);
-void RenderGameForegrounds(const d3scene::Presentation&,d3scene::ForegroundPhase);
+void RenderGameForegrounds(const d3scene::Presentation&,d3scene::ForegroundPhase,
+    const d3scene::Presentation* overlays = nullptr);
 void PrepareCockpitComposition(d3scene::FrameData&,d3scene::Rect viewport,float zoom);
 // Independent captures publish their own scene without advancing cockpit/HUD
 // animation or replacing the gameplay presentation's motion-history source.
 d3scene::PresentationRef PrepareGamePresentation(bool advance = true,const GameMainView* = nullptr,
-    const std::vector<FrameScreenBlend>* overlays = nullptr);
+    const std::vector<FrameScreenBlend>* overlays = nullptr,const HUDCanvasLayout* hud_layout = nullptr);
+// A game-owned post-observation publication. It owns HUD/module descriptions,
+// never extracts another world or advances the world's temporal predecessor.
+d3scene::PresentationRef PrepareGameOverlayPresentation(const d3scene::Presentation& world,
+    const HUDCanvasLayout&,bool advance);
 void RenderGameSceneView(const d3scene::Presentation&, d3scene::View,
     SceneFeedbackTransaction* game_observations = nullptr);
 bool SceneGeometryInspection();
