@@ -696,7 +696,9 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance,const GameMainView
         int order = 0; SceneQuadStyle style; style.uv_min = {0,1}; style.uv_max = {1,0};
         PrepareSceneQuad(data,SceneViewImageProbe,order,{16,72,320,180},style);
         data.meshes.back().surface.view_image_slot = 1;
+        if (FindArg("-scene-cross-publication-image-probe")) data.meshes.back().surface.texture_alpha = false;
         d3scene::PreparedForeground foreground; foreground.identity = SceneViewImageProbe; foreground.order = 30;
+        if (FindArg("-scene-cross-publication-image-probe")) foreground.phase = d3scene::ForegroundPhase::FinalOverlay;
         foreground.layer.display_views.push_back(MakeSceneCanvasView(SceneViewImageProbe,{0,0,Max_window_w,Max_window_h},
             d3scene::ViewTarget::Display,true));
         foreground.layer.display_views.back().image_inputs.push_back({1,SceneViewImageProbe+1});
@@ -805,6 +807,22 @@ d3scene::PresentationRef PrepareGameOverlayPresentation(const d3scene::Presentat
     PrepareGameHUD(data,layout,advance);
     PrepareCinematicCanvas(data);
     PrepareGameInspectionBanner(data);
+    if (FindArg("-scene-cross-publication-image-probe")) {
+        if (!FindArg("-scene-view-image-probe")) Error("Cross-publication image fixture requires its world image producer");
+        const auto collection = SceneViewImageProbe+2;
+        int32_t order = 0; SceneQuadStyle style; style.uv_min = {0,1}; style.uv_max = {1,0};
+        PrepareSceneQuad(data,collection,order,{352,72,320,180},style);
+        data.meshes.back().surface.view_image_slot = 1;
+        // A world preview replaces its rectangle. Its scene color alpha is
+        // not canvas coverage (ordinary image effects can still opt into it).
+        data.meshes.back().surface.texture_alpha = false;
+        d3scene::PreparedForeground foreground; foreground.identity = collection; foreground.order = 31;
+        foreground.phase = d3scene::ForegroundPhase::FinalOverlay;
+        auto canvas = MakeSceneCanvasView(collection,layout.display,d3scene::ViewTarget::Display,true);
+        canvas.image_inputs.push_back({1,SceneViewImageProbe+1,world.shared_from_this()});
+        foreground.layer.display_views.push_back(std::move(canvas));
+        data.foregrounds.push_back(std::move(foreground));
+    }
     PrepareGameSceneResources(data);
     return d3scene::Presentation::publish(std::move(data));
 }

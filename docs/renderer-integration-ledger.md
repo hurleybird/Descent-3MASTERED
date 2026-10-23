@@ -186,3 +186,33 @@ pass. Normal-overlay output is byte-identical to bf50d11's prior capture, includ
 after cache qualification; cinematic text/letterbox composition was inspected.
 Evidence: integration-overlay-{publication,cinematic,cache-qualified}-20261022.
 No GL errors were logged. Full module, lifecycle and deployment gates remain.
+
+## Explicit cross-publication image consumers
+
+View-image inputs may retain an exact earlier immutable producer publication.
+Empty producer ownership still means a local dependency in the existing image
+graph. Publication/preparation rejects cross-lifetime or non-earlier producers;
+the image graph rejects local producers that would overwrite external inputs.
+GPU sampling checks the exact producer sequence, never a latest-image fallback.
+This is the resource boundary needed to place module world previews among canvas
+commands without recursively extracting worlds or invoking callbacks on the GPU.
+It does not yet restore the real module canvas API or repair/qualify its ABI.
+
+Engine and three CPU suites pass. The live fixture renders a world image and a
+dependent canvas image, then consumes that same product from world ID45 and HUD
+ID46. At1280x720,SSAA2,MSAA4,AO+bloom, the two320x180 final-overlay rectangles
+match exactly:0of57,600pixels differ. Their image storage is reused. No GL errors;
+both the image and final composition were visually inspected. Evidence:
+integration-external-image-final-20261022. The initial comparison before cockpit
+composition was not a valid pixel-parity oracle: subsequent cockpit coverage
+affected the two screen locations differently. Isolating the canvases and then
+placing them in FinalOverlay established exact agreement.
+
+Canvas/gauge/cockpit materials also explicitly opt out of world medium transport;
+the material compiler owns that policy, without camera-kind exceptions. World
+materials retain transport by default. Preview replacement quads ignore texture
+alpha explicitly; general effect canvases retain continuous-alpha support.
+Neither policy change caused the initial comparison discrepancy. Real fog-roof
+captures before/after the policy change are byte-identical and were inspected:
+integration-canvas-transport-roof-{before,after}-20261022. These checks do not
+claim a new fog appearance fix or complete lifecycle/export/module qualification.

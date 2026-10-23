@@ -272,6 +272,7 @@ struct MaterialPolicy {
     BlendMode blend = BlendMode::Solid;
     DepthMode depth = DepthMode::ReadWrite; // fully resolved; never Automatic
     TextureAlpha texture_alpha = TextureAlpha::Ignore;
+    bool medium_transport = true;
     float alpha_cutoff = .01f;
     bool blended() const { return blend != BlendMode::Solid; }
     bool testsDepth() const { return depth != DepthMode::Disabled; }
@@ -300,6 +301,9 @@ struct SurfaceBinding {
     float authored_alpha = 1; // pre-texture alpha, retained for format-policy changes
     RenderLayer layer = RenderLayer::World;
     bool unlit = false, two_sided = false;
+    // Canvas/foreground radiance is already composed. It does not travel
+    // through the published world's participating medium a second time.
+    bool medium_transport = true;
     BlendMode blend = BlendMode::Solid; // non-solid modes explicitly request compositing
     DepthMode depth = DepthMode::Automatic;
     int32_t composition_order = 0; // only consulted by explicit compositing views
@@ -778,8 +782,15 @@ struct Rect { int32_t x = 0, y = 0, width = 0, height = 0; };
 // Logical screen regions published with the geometry that determines their pose.
 struct ViewRegion { uint64_t identity = 0; Rect rectangle; };
 enum Feedback : uint8_t { NoFeedback = 0, Automap = 1, ObjectVisibility = 2, EffectEligibility = 4 };
-struct ViewImageInput { uint64_t slot = 0, image = 0; };
-inline bool operator==(const ViewImageInput& a,const ViewImageInput& b) { return a.slot == b.slot && a.image == b.image; }
+struct ViewImageInput {
+    uint64_t slot = 0, image = 0;
+    // Empty means a producer in this publication. Cross-publication consumers
+    // retain the exact immutable producer; they never request "latest image".
+    PresentationRef producer;
+};
+inline bool operator==(const ViewImageInput& a,const ViewImageInput& b) {
+    return a.slot == b.slot && a.image == b.image && a.producer == b.producer;
+}
 // A room number alone can silently select replacement topology. Selections are
 // qualified by the immutable asset revision and validated against the frame.
 struct RoomSurfaceId { AssetId room; uint32_t polygon = 0; };
@@ -1087,4 +1098,5 @@ private:
     std::shared_ptr<FrameCompilationStorage> storage_;
 };
 
+void validateViewImageInputs(const FrameData&,const View&);
 } // namespace d3scene

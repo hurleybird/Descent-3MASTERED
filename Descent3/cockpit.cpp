@@ -936,6 +936,7 @@ void PrepareGameCockpit(d3scene::FrameData& frame, bool advance,const d3scene::F
             for (size_t material = 0; material < surfaces; ++material) {
                 const size_t face = part.material_palette ? geometry.surface_polygons[material] : material;
                 d3scene::SurfaceBinding surface;
+                surface.medium_transport = false;
                 surface.depth = layer < 2 ? d3scene::DepthMode::ReadWrite : d3scene::DepthMode::Disabled;
                 surface.directional_ambient = true;
                 const int slot = geometry.polygon_materials[face];

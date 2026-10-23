@@ -73,6 +73,16 @@ int runCanvasTests() {
         data.meshes[0].asset->geometry().polygons[0].corners[2].v == .2f,
         "Retained text still requires transient positions/UVs");
     const auto held = d3scene::Presentation::freeze(data);
+    check(!held->data().meshes[0].surface.medium_transport && !held->data().meshes[0].surface.material.medium_transport,
+        "Canvas text inherited world medium transport");
+    {
+        d3scene::SurfaceBinding world_surface;
+        check(d3scene::compileMaterialPolicy(world_surface,{}).medium_transport,
+            "World material lost its default medium transport");
+        world_surface.medium_transport = false;
+        check(!d3scene::compileMaterialPolicy(world_surface,{}).medium_transport,
+            "Explicit material transport policy was ignored");
+    }
     {
         const auto asset = data.meshes[0].asset;
         const int glyph_calls = GlyphCalls;

@@ -606,6 +606,7 @@ namespace {
 MaterialPolicy materialPolicy(const SurfaceBinding& surface, bool vertex_alpha) {
     MaterialPolicy result;
     result.layer = surface.layer;
+    result.medium_transport = surface.medium_transport && surface.layer == RenderLayer::World;
     if (surface.texture_alpha || surface.blend == BlendMode::Additive || surface.blend == BlendMode::Multiply) {
         result.texture_alpha = surface.view_image_slot || (surface.color_image && surface.color_format != ImageFormat::ARGB1555) ?
             TextureAlpha::Continuous : TextureAlpha::Cutout;
@@ -882,6 +883,8 @@ PresentationRef Presentation::complete(FrameData data) {
             "Unknown foreground phase");
         foreground_order.emplace_back(foreground.phase,foreground.order);
         validateForeground(foreground.layer);
+        for (const auto& view : foreground.layer.scene_views) validateViewImageInputs(data,view);
+        for (const auto& view : foreground.layer.display_views) validateViewImageInputs(data,view);
     }
     unique(foreground_ids,"Invalid or duplicate foreground identity");
     unique(foreground_order,"Ambiguous foreground order");
@@ -1357,6 +1360,12 @@ PresentationRef Presentation::complete(FrameData data) {
 void Presentation::requireExecutable() const {
     if (data_.pending_domains != 0)
         throw std::logic_error("Renderer migration incomplete: presentation contains unprepared domains");
+}
+void validateViewImageInputs(const FrameData& frame,const View& view) {
+    for (const auto& input : view.image_inputs) if (input.producer)
+        require(input.producer->data().scene_lifetime == frame.scene_lifetime &&
+            input.producer->data().sequence < frame.sequence,
+            "External image requires an earlier publication in the same scene lifetime");
 }
 void validateView(const View& view) {
     require(view.reflections == ReflectionPolicy::Images || view.reflections == ReflectionPolicy::SurfaceFilm,

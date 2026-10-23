@@ -51,6 +51,7 @@ bool reversesWinding(const Transform& camera);
 bool excludesObject(const View&,uint32_t handle);
 bool excludesSurface(const View&,RoomSurfaceId);
 uint64_t viewImageSource(const View&,uint64_t slot);
+const ViewImageInput& viewImageInput(const View&,uint64_t slot);
 std::vector<size_t> orderViewImages(const std::vector<ViewImageRequest>&);
 void orderViewImages(const std::vector<ViewImageRequest>&,std::vector<size_t>& order);
 struct PlanarViewPlan;

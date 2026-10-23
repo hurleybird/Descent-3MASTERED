@@ -178,6 +178,7 @@ void PrepareGameCockpitGauges(d3scene::FrameData& frame,const ModelTransforms& t
         surface.composition_order = order++;
         surface.bitmap = bitmap < 0 ? BAD_BITMAP_HANDLE : bitmap;
         surface.unlit = true; surface.two_sided = true; surface.depth = d3scene::DepthMode::Disabled;
+        surface.medium_transport = false;
         surface.blend = additive ? d3scene::BlendMode::Additive : d3scene::BlendMode::Alpha;
         surface.alpha = alpha; surface.texture_alpha = texture_alpha;
         surface.texture_wrap = false;

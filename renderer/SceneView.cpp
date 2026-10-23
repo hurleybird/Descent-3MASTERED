@@ -438,6 +438,7 @@ bool sphereIntersects(const Camera& camera, Vec3 center, float radius) {
 }
 View resolveView(const Presentation& frame, View view) {
     validateView(view);
+    validateViewImageInputs(frame.data(),view);
     std::sort(view.image_inputs.begin(),view.image_inputs.end(),[](const ViewImageInput& a,const ViewImageInput& b) { return a.slot < b.slot; });
     for (const auto& selection : view.excluded_surfaces) {
         const auto room = std::find_if(frame.data().rooms.begin(),frame.data().rooms.end(),
@@ -477,10 +478,11 @@ bool excludesObject(const View& view,uint32_t handle) {
 bool excludesSurface(const View& view,RoomSurfaceId surface) {
     return std::find(view.excluded_surfaces.begin(),view.excluded_surfaces.end(),surface) != view.excluded_surfaces.end();
 }
-uint64_t viewImageSource(const View& view,uint64_t slot) {
-    for (const auto& input : view.image_inputs) if (input.slot == slot) return input.image;
+const ViewImageInput& viewImageInput(const View& view,uint64_t slot) {
+    for (const auto& input : view.image_inputs) if (input.slot == slot) return input;
     throw std::invalid_argument("View has no source for its surface image slot");
 }
+uint64_t viewImageSource(const View& view,uint64_t slot) { return viewImageInput(view,slot).image; }
 std::vector<size_t> orderViewImages(const std::vector<ViewImageRequest>& images) {
     std::vector<size_t> order;
     orderViewImages(images,order);
@@ -505,6 +507,11 @@ void orderViewImages(const std::vector<ViewImageRequest>& images,std::vector<siz
     for (size_t i = 0; i < images.size(); ++i) {
         for (const auto& input : images[i].view.image_inputs) {
             const auto source = std::lower_bound(producers.begin(),producers.end(),std::pair<uint64_t,size_t>{input.image,0});
+            if (input.producer) {
+                if (source != producers.end() && source->first == input.image)
+                    throw std::invalid_argument("External image aliases a local image producer");
+                continue;
+            }
             if (source == producers.end() || source->first != input.image)
                 throw std::invalid_argument("View image graph has a missing producer");
             edges.emplace_back(source->second,i);

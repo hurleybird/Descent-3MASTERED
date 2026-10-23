@@ -1877,7 +1877,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         record[68] = float(surface.unlit);
         record[66] = float(static_cast<unsigned>(surface.occlusion_class));
         record[67] = float(policy.layer == d3scene::RenderLayer::World ? surface.soft_depth_range : 0);
-        record[69] = float(policy.layer == d3scene::RenderLayer::World);
+        record[69] = float(policy.medium_transport);
         record[70] = float(policy.blend == d3scene::BlendMode::Additive);
         record[71] = float(policy.blend == d3scene::BlendMode::Multiply);
         const bool exterior = item.terrain || (item.model ? exteriorRoom(presentation.data().model_instances[item.model_instance_index].room) :
@@ -2264,13 +2264,20 @@ void main() {
         const auto& surface = *binding;
         const auto range = packet.range;
         const auto& policy = packet.policy;
+        if (surface.view_image_slot && FindArg("-scene-cross-publication-image-probe") && AutomatedCapturePending())
+            AutomatedCaptureLog("scene image material publication=%llu collection=%llu slot=%llu alpha=%.6g modulation=%.6g light=%.6g texture_alpha=%d medium=%d unlit=%d",
+                (unsigned long long)presentation.data().sequence,(unsigned long long)view.collection,
+                (unsigned long long)surface.view_image_slot,surface.alpha,surface.color_modulation.x,
+                surface.lighting_modulation,int(policy.texture_alpha),policy.medium_transport,surface.unlit);
         if ((surface.bitmap >= 0 && !surface.color_image) || (surface.lightmap_bitmap >= 0 && !surface.baked_image) ||
             (surface.specular_bitmap >= 0 && !surface.specular_image))
             Error("Scene surface reached execution without prepared image assets");
         bind_image(surface.color_image,0,surface.texture_wrap,false);
         const auto bind_view_image = [&](uint64_t slot,int unit) -> const SceneViewImageGpu& {
-            const auto found = scene_view_images.find(d3scene::viewImageSource(view,slot));
-            if (found == scene_view_images.end() || found->second.sequence != presentation.data().sequence)
+            const auto& input = d3scene::viewImageInput(view,slot);
+            const auto sequence = input.producer ? input.producer->data().sequence : presentation.data().sequence;
+            const auto found = scene_view_images.find(input.image);
+            if (found == scene_view_images.end() || found->second.sequence != sequence)
                 throw std::logic_error("Surface requested a missing, stale or in-flight view image");
             if (found->second.buffer.Handle() == output.Handle())
                 throw std::logic_error("View image cannot sample its own render target");

@@ -64,6 +64,7 @@ void PrepareSceneQuad(d3scene::FrameData& frame,uint64_t collection,int32_t& nex
     surface.composition_order = next_order++; surface.bitmap = style.bitmap;
     surface.texture_alpha = true; surface.texture_wrap = false;
     surface.unlit = true; surface.two_sided = true; surface.depth = d3scene::DepthMode::Disabled;
+    surface.medium_transport = false;
     surface.blend = style.additive ? d3scene::BlendMode::Additive : d3scene::BlendMode::Alpha;
     surface.alpha = style.alpha; surface.color_modulation = style.color;
     frame.meshes.push_back(std::move(quad));
@@ -85,6 +86,7 @@ void PrepareFrameBlendCanvas(d3scene::FrameData& frame,uint64_t collection,d3sce
         quad.world.up = {0,-viewport.height*.5f,0};
         quad.surface.composition_order = order++;
         quad.surface.unlit = quad.surface.two_sided = true;
+        quad.surface.medium_transport = false;
         quad.surface.depth = d3scene::DepthMode::Disabled;
         quad.surface.blend = d3scene::BlendMode::Alpha;
         quad.surface.alpha = blend.alpha;
@@ -214,6 +216,7 @@ void PrepareSceneText(d3scene::FrameData& frame,uint64_t collection,int32_t& nex
                     if (!cacheable) surface.composition_order = next_order++;
                     surface.bitmap = glyph.bitmap; surface.texture_alpha = true; surface.texture_wrap = false;
                     surface.unlit = true; surface.two_sided = true; surface.depth = d3scene::DepthMode::Disabled;
+                    surface.medium_transport = false;
                     surface.blend = style.additive ? d3scene::BlendMode::Additive : d3scene::BlendMode::Alpha;
                     surface.alpha = style.alpha; surface.color_modulation = color;
                 }

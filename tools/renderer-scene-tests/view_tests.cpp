@@ -507,6 +507,35 @@ int runSceneViewTests() {
             const auto copied = compiled;
             check(copied.images()[0].producer().visibility().surfaces.size() == 1,
                 "Copied image plan lost independently owned query results");
+            auto external = requests[0];
+            external.view.image_inputs = {{1,17,copied.images()[0].producer().frame().shared_from_this()}};
+            check(orderViewImages({external}) == std::vector<size_t>{0},
+                "Explicit external image incorrectly required a second local world producer");
+            const auto external_plan = prepareViewImages(*later_frame,{external});
+            check(viewImageInput(external_plan.images()[0].producer().view(),1).producer->data().sequence == 8,
+                "External image consumer lost its immutable producer owner");
+            bool alias = false;
+            try { orderViewImages({external,requests[1]}); } catch (const std::invalid_argument&) { alias = true; }
+            check(alias,"External image was silently overwritten by a local producer");
+            auto invalid_external = external;
+            invalid_external.view.image_inputs[0].producer = later_frame;
+            bool same_publication = false;
+            try { prepareViewImages(*later_frame,{invalid_external}); } catch (const std::invalid_argument&) { same_publication = true; }
+            check(same_publication,"Same-publication image bypassed the local dependency graph");
+            SceneAssets unrelated_assets;
+            FrameData unrelated_data; unrelated_data.sequence = 1; unrelated_data.scene_lifetime = unrelated_assets.lifetime();
+            invalid_external.view.image_inputs[0].producer = Presentation::freeze(unrelated_data);
+            bool stale_lifetime = false;
+            try { prepareViewImages(*later_frame,{invalid_external}); } catch (const std::invalid_argument&) { stale_lifetime = true; }
+            check(stale_lifetime,"External image consumer accepted a different scene lifetime");
+            auto invalid_overlay = image_data;
+            PreparedForeground external_layer; external_layer.identity = 1;
+            external_layer.layer.display_views.push_back(invalid_external.view);
+            external_layer.layer.display_views.back().target = ViewTarget::Display;
+            invalid_overlay.foregrounds.push_back(external_layer);
+            bool rejected_publication = false;
+            try { Presentation::freeze(invalid_overlay); } catch (const std::invalid_argument&) { rejected_publication = true; }
+            check(rejected_publication,"Overlay publication retained invalid external image provenance");
             auto invalid_requests = requests; invalid_requests[0].view.image_inputs[0].image = 999;
             bool invalid_plan = false;
             try { prepareViewImages(*later_frame,invalid_requests); } catch (const std::invalid_argument&) { invalid_plan = true; }
