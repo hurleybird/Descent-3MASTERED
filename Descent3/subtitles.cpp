@@ -17,6 +17,9 @@
 */
 
 #include "subtitles.h"
+#include "../movie/SubtitlePresentation.h"
+#include "gamefont.h"
+#include "gameloop.h"
 //#include "gamefont.h"
 //#include "grtext.h"
 //#include "renderer.h"
@@ -45,14 +48,12 @@ struct subtitle
 
 static subtitle Subtitles[MAX_SUBTITLES];
 int Num_subtitles;
-int Movie_subtitle_init;
+static d3movie::SubtitleTimeline Subtitle_playback;
 
 //Prints out a subtitle on the screen, centered, at y pos y, with color color.
 void PrintSubTitle(int y, ddgr_color color, char* msg);
 //Parses a subtitle file
 void SubtParseSubtitles(CFILE* file);
-//clears the area where subtitle text is display (call once a frame)
-void ClearSubTitleArea(void);
 //Resets the subtitle information
 void SubtResetSubTitles(void);
 
@@ -151,7 +152,7 @@ void SubtParseSubtitles(CFILE* file)
 
 	while (!parse_token(buf, "#End"))
 	{
-		ASSERT(Num_subtitles < MAX_SUBTITLES);
+		if (Num_subtitles >= MAX_SUBTITLES) goto subt_parse_error;
 
 		// starting frame number
 		p = parse_int(p, &first_frame);
@@ -169,6 +170,8 @@ void SubtParseSubtitles(CFILE* file)
 		}
 
 		p = parse_whitespace(p);
+		if (first_frame < 0 || last_frame < first_frame ||
+			(Num_subtitles && first_frame < Subtitles[Num_subtitles-1].first_frame)) goto subt_parse_error;
 
 		Subtitles[Num_subtitles].first_frame = first_frame;
 		Subtitles[Num_subtitles].last_frame = last_frame;
@@ -197,15 +200,14 @@ void SubtResetSubTitles(void)
 		Subtitles[i].msg = NULL;
 	}
 	Num_subtitles = 0;
-	Movie_subtitle_init = 1;
+	Subtitle_playback.reset();
 }
 
 //Initializes the subtitles for a given movie file
 void SubtInitSubtitles(const char* filename)
 {
 	//Load the subtitles
-	Num_subtitles = 0;
-	Movie_subtitle_init = 0;
+	SubtResetSubTitles();
 
 	char subtitle_file[_MAX_FNAME], subtitle_path[_MAX_PATH], * p;
 
@@ -234,7 +236,10 @@ void SubtInitSubtitles(const char* filename)
 
 	mprintf((0, "Looking for the subtitle file %s\n", subtitle_path));
 
-	CFILE* ifile = cfopen(subtitle_path, "rt");
+	const int capture_arg = FindArg("-capture-subtitle-input");
+	const char* capture_file = capture_arg ? GetArg(capture_arg+1) : nullptr;
+	if (capture_arg && (!capture_file || !*capture_file)) Error("Missing capture subtitle input");
+	CFILE* ifile = cfopen(capture_file ? capture_file : subtitle_path, "rt");
 	if (!ifile)
 	{
 		mprintf((0, "Movie: Couldn't find subtitle file %s\n", subtitle_path));
@@ -252,80 +257,27 @@ void SubtCloseSubtitles()
 	SubtResetSubTitles();
 }
 
-#define MAX_ACTIVE_SUBTITLES 3
-
 //draw the subtitles for this frame
 void SubtDrawSubtitles(int frame_num)
 {
-	static int active_subtitles[MAX_ACTIVE_SUBTITLES];
-	static int num_active_subtitles, next_subtitle, line_spacing;
-	int t, y, fh;
-	int must_erase = 0;
-
-	if (Movie_subtitle_init)
-	{
-		num_active_subtitles = 0;
-		next_subtitle = 0;
-		fh = 12;
-		line_spacing = fh + (fh >> 2);
-		Movie_subtitle_init = 0;
+	try { Subtitle_playback.advance(frame_num,Subtitles,Num_subtitles); }
+	catch (const std::exception& error) { Error("Invalid subtitle playback: %s",error.what()); }
+	if (!Subtitle_playback.size()) return;
+	rendering_state display; rend_GetRenderState(&display);
+	const auto layout = d3movie::subtitleLayout(display.screen_width,display.screen_height,
+		grfont_GetHeight(BRIEFING_FONT),int(d3movie::SubtitleTimeline::capacity));
+	int y = layout.first_y;
+	for (size_t i = 0; i < Subtitle_playback.size(); ++i) {
+		PrintSubTitle(y,GR_RGB(255,255,255),Subtitles[Subtitle_playback.active()[i]].msg);
+		y += layout.line_pitch;
 	}
-
-	//get rid of any subtitles that have expired
-	for (t = 0; t < num_active_subtitles;)
-	{
-		if (frame_num > Subtitles[active_subtitles[t]].last_frame)
-		{
-			int t2;
-			for (t2 = t; t2 < num_active_subtitles - 1; t2++)
-				active_subtitles[t2] = active_subtitles[t2 + 1];
-			num_active_subtitles--;
-			must_erase = 1;
-		}
-		else
-			t++;
-	}
-
-	//get any subtitles new for this frame
-	while ((next_subtitle < Num_subtitles) && (frame_num >= Subtitles[next_subtitle].first_frame))
-	{
-		if (num_active_subtitles >= MAX_ACTIVE_SUBTITLES)
-			Error("Too many active subtitles!");
-		active_subtitles[num_active_subtitles++] = next_subtitle;
-		next_subtitle++;
-	}
-
-	ClearSubTitleArea();
-
-	//find y coordinate for first line of subtitles
-	y = 480 - ((line_spacing + 1) * MAX_ACTIVE_SUBTITLES + 2);
-	int first, last;
-
-	for (t = 0; t < num_active_subtitles; t++)
-	{
-		if (active_subtitles[t] != -1)
-		{
-			first = Subtitles[active_subtitles[t]].first_frame;
-			last = Subtitles[active_subtitles[t]].last_frame;
-			PrintSubTitle(y, ((first <= frame_num) && (last >= frame_num)) ? GR_RGB(255, 255, 255) : GR_RGB(128, 128, 128),
-				Subtitles[active_subtitles[t]].msg);
-			y += line_spacing + 1;
-		}
-	}
+	if (FindArg("-capture-decoded-movie-output"))
+		AutomatedCaptureLog("scene movie subtitle frame=%d lines=%u width=%d height=%d first_y=%d scale=%.6f",
+			frame_num,unsigned(Subtitle_playback.size()),display.screen_width,display.screen_height,layout.first_y,layout.font_scale);
 }
 
 //Prints out a subtitle on the screen, centered, at y pos y, with color color.
 void PrintSubTitle(int y, ddgr_color color, char* msg)
 {
 	mve_Puts(-1, y, color, msg);
-}
-
-//clears the area where subtitle text is display (call once a frame)
-void ClearSubTitleArea(void)
-{
-	int	fh = 12;
-	int	line_spacing = fh + (fh >> 2);
-	int y = 475 - ((line_spacing + 1) * MAX_ACTIVE_SUBTITLES + 2);
-
-	mve_ClearRect(0, y, 639, 479);
 }

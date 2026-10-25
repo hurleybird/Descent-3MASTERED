@@ -1217,3 +1217,42 @@ qual-ui-regress-{before,after}-20261024 compares all eight ordinary saves at30
 against the frozen executable preceding the UI completion change: all eight are
 pixel-identical, full-frame/full-opacity. This is not a pre-rewrite performance
 comparison. Root Release contracts pass; hosted CI40163618373 at1a2d734 is green.
+
+## Subtitle timeline/layout and explicit text completion (I25)
+
+Subtitle admission is now an allocation-free per-playback timeline, reset at
+track open/close even for a missing/disabled track. The old manual initialization
+flag and draw-function static cursor are removed. Duplicate frames are stable,
+rewind rebuilds admission, forward skips discard expired cues, and three active
+lines are bounded transactionally. Parsing bounds the native500-cue array and
+rejects reversed/unsorted ranges before writing. Layout/font scale use the actual
+decoded canvas height rather than a fixed480-line target or inherited HUD style.
+Movie subtitle strings are rendered literally, not as printf format strings.
+The ineffective old subtitle clear-rectangle call is removed: each decoded frame
+owns a fresh complete display canvas. The public compatibility API is retained.
+
+The first real subtitle export failed usefully: all3lines were admitted, but the
+readback matched the decoded source with zero text pixels. grtext_Flush queues
+glyphs; it does not submit the backend font batch. The movie producer now finishes
+that batch before its completed-image export. Late message consoles and UI export
+completion do likewise. Display readback rejects unfinished text targeting its
+owned display/overlay, while allowing unrelated in-flight scratch-target work.
+Readback does not quietly draw pending geometry or infer a different image source.
+
+qual-subtitle-short-v2-20261024 passes actual MV8 decode at640x360 plus the real
+subtitle parser/callback and3simultaneous authored test lines. The inspected PNG
+shows all three, including literal '100% decoded color'. Full opacity is checked;
+every source pixel outside the declared bottom caption band is unchanged, with
+2478intentional changed pixels inside it. Caption shape/words were inspected, not
+claimed pixel-identical to an uncaptioned source. The first failed run remains
+failed evidence of missing glyph submission, not qualified output.
+The fixture input is copied into immutable evidence, never into the movies
+junction/protected data. Game RNG/time/delta/FrameCount remain unchanged across
+native movie playback, including its screen-state transitions.
+
+qual-subtitle-none-20261024 passes the uncaptioned paletted clip with exact source
+pixels. qual-subtitle-save-20261024 passes independent native save/history; qual-
+subtitle-dialog-20261024 passes the real deferred save preview after the stricter
+completion check. Root Release and standalone Debug pass all3contracts, including
+timeline reset/replay/skips/overflow and240/360/480/1080-line layout. Hosted
+CI40164486113 atf4d6ed2 is green. Full release qualification remains open.

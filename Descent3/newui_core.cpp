@@ -578,6 +578,7 @@ static bool UI_deferred_modal_frame = false;
 static void PublishUIFrameForReadback()
 {
 	if (UI_deferred_modal_frame) Error("UI export requested before deferred painting completed");
+	rend_FlushTextLayer();
 	if (!rend_IsPostPresentFramePending() && !rend_BeginPostPresentFrame())
 		Error("UI export has no composed display image");
 }

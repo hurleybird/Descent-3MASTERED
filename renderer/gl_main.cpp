@@ -3759,6 +3759,12 @@ void GL4Renderer::DLLGetRenderState(DLLrendering_state* rstate)
 d3scene::ImageMip GL4Renderer::ReadDisplayImage()
 {
 	if (!display_image.readable() || modal_ui_frame_active) return {};
+	if (FontBatchHasVertices()) {
+		GLint target; glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING,&target);
+		if (GLuint(target) == post_present_framebuffer.Handle() ||
+			(display_image.hasOverlay() && GLuint(target) == modal_ui_framebuffer.Handle()))
+			Error("Display readback requires completed immediate text submission");
+	}
 	auto pixels = GL_ReadColorImage(post_present_framebuffer);
 	if (display_image.hasOverlay()) {
 		const auto overlay = GL_ReadColorImage(modal_ui_framebuffer);

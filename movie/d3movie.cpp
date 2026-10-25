@@ -51,6 +51,7 @@
 #include "game.h"
 #include "gameloop.h"
 #include "args.h"
+#include "SubtitlePresentation.h"
 
 #include "../mve/libmve.h"
 #include "llsopenal.h"
@@ -385,6 +386,9 @@ void CallbackShowFrame( unsigned char* buf, unsigned int bufw, unsigned int bufh
 	}
 	++Movie_current_framenum;
 
+	// The decoder owns completion of its image, including subtitle glyphs.
+	// grtext_Flush queues font geometry; submit it before publishing/readback.
+	rend_FlushTextLayer();
 	EndFrame();
 	if (Movie_capture_output && (Movie_current_framenum == Movie_capture_frame-1 ||
 		Movie_current_framenum == Movie_capture_frame)) {
@@ -530,11 +534,16 @@ bool mve_SequenceClose( unsigned int hMovie, int hFile )
 
 void mve_Puts( short x, short y, ddgr_color col, const char *txt )
 {
+	rendering_state display; rend_GetRenderState(&display);
+	const auto layout = d3movie::subtitleLayout(display.screen_width,display.screen_height,
+		grfont_GetHeight(BRIEFING_FONT),int(d3movie::SubtitleTimeline::capacity));
+	grtext_SetParameters(0,0,display.screen_width,display.screen_height);
 	grtext_SetFont( BRIEFING_FONT );
+	grtext_SetFontScale(layout.font_scale);
 	grtext_SetColor( col );
 	grtext_SetAlpha( 255 );
 	grtext_SetFlags( GRTEXTFLAG_SHADOW );
-	grtext_CenteredPrintf( 0, y, txt );
+	grtext_CenteredPrintf( 0, y, "%s", txt );
 	grtext_Flush();
 }
 

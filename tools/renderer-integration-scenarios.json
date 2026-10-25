@@ -79,6 +79,16 @@
       "requiredLog": ["scene decoded movie exported frame=15", "scene decoded movie exported frame=16", "scene decoded movie returned frame=20"],
       "purpose": "Actual windowed mission movie entry, decoded mutable bitmap into explicit display color at native video dimensions, exact source-pixel check and distinct consecutive frames, then restoration/resumed gameplay. This clip has no subtitles."
     },
+    "decoded-movie-subtitles": {
+      "revision": 1, "minimumFrame": 30, "inspectionRequired": true,
+      "movieInput": "dolby1.mv8", "movieCaptureFrame": 60,
+      "sourceUpload1555": true, "subtitleOverlay": true,
+      "subtitleAsset": "renderer_subtitles.msb",
+      "arguments": ["-capture-decoded-movie-name", "dolby1.mv8", "-capture-decoded-movie-frame", "60", "-capture-decoded-movie-output", "{ui-output}", "-subtitles", "-capture-subtitle-input", "{subtitle-input}", "-scene-gl-audit"],
+      "uiExport": true,
+      "requiredLog": ["scene decoded movie exported frame=59", "scene decoded movie exported frame=60", "scene decoded movie returned frame=20", "scene decoded movie simulation unchanged", "scene movie subtitle frame=59 lines=3 width=640 height=360 first_y="],
+      "purpose": "Real subtitle parser/timeline/callback over a 360-line movie, three simultaneous lines including literal percent text. Require unchanged source outside the declared caption region and visible changes inside; inspect the actual words."
+    },
     "decoded-movie-paletted": {
       "revision": 1, "minimumFrame": 30, "inspectionRequired": true,
       "movieInput": "dolby1.mv8",

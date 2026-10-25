@@ -3024,6 +3024,7 @@ static void GameDrawPostPresentFrame(bool force_backbuffer_frame)
 	{
 		RenderHUDMessageConsoles();
 	}
+	rend_FlushTextLayer();
 	rend_EndFrame();
 }
 
@@ -3928,7 +3929,13 @@ void GameFrame(void)
 		const char* movie = movie_arg ? GetArg(movie_arg+1) : nullptr;
 		if (!movie || !*movie) Error("Decoded movie fixture requires a native movie name");
 		movie_capture_started = true;
+		const unsigned random = ps_rand_get_state();
+		const float time = Gametime, delta = Frametime;
+		const int frame = FrameCount;
 		DoMissionMovie(const_cast<char*>(movie));
+		if (random != ps_rand_get_state() || time != Gametime || delta != Frametime || frame != FrameCount)
+			Error("Decoded movie presentation advanced gameplay simulation");
+		AutomatedCaptureLog("scene decoded movie simulation unchanged");
 		AutomatedCaptureLog("scene decoded movie returned frame=20 screen=%d",GetScreenMode());
 	}
 	static bool quicksave_capture_started = false;

@@ -45,7 +45,7 @@ param(
     [switch]$HistoryProbe,
     [switch]$DeformationProbe,
     [string]$DemoFile = '',
-    [ValidateSet('ordinary','retirement','save-export','save-settings','auxiliary-lifecycle','modal-ui','save-dialog','quicksave','decoded-movie','decoded-movie-paletted','screenshot-normal','screenshot-clean','screenshot-double','screenshot-tga','demo-movie')][string]$Scenario = 'ordinary'
+    [ValidateSet('ordinary','retirement','save-export','save-settings','auxiliary-lifecycle','modal-ui','save-dialog','quicksave','decoded-movie','decoded-movie-paletted','decoded-movie-subtitles','screenshot-normal','screenshot-clean','screenshot-double','screenshot-tga','demo-movie')][string]$Scenario = 'ordinary'
 )
 
 # Run only copied installations and copied pilot/save data. Never point Runtime
@@ -68,6 +68,7 @@ if ($TimeoutSeconds -lt 1) { throw 'Capture timeout must be positive' }
 foreach ($save in $Saves) { if ($save -notmatch '^saveg\d{3}$') { throw "Invalid save name: $save" } }
 if ($scenarioSpec.quickSaveSlot -ne $null -and ($Saves.Count -ne 1 -or $Saves[0] -ne ('saveg{0:D3}' -f [int]$scenarioSpec.quickSaveSlot))) { throw 'Quicksave scenario must load its explicitly copied target slot' }
 foreach ($pattern in $scenarioSpec.requiredLog) { [void][regex]::new($pattern) }
+if ($scenarioSpec.subtitleAsset -and $scenarioSpec.subtitleAsset -notmatch '^[a-zA-Z0-9_-]+\.msb$') { throw 'Invalid subtitle fixture asset' }
 if ($scenarioSpec.inspectionRequired -and !$SceneInspection) { throw 'Scenario requires explicit scene inspection' }
 if ($Scenario -ne 'ordinary') {
     foreach ($name in $PSBoundParameters.Keys) {
@@ -177,6 +178,7 @@ $manifest = [ordered]@{
     input_kind = $(if ($inputIsDemo) {'demo'} else {'save'})
     preview_input_hash = $(if ($scenarioSpec.previewInput) { (Get-FileHash -LiteralPath (Join-Path $seedPath ('savegame/'+$scenarioSpec.previewInput))).Hash } else { $null })
     movie_input_hash = $(if ($scenarioSpec.movieInput) { (Get-FileHash -LiteralPath (Join-Path $runtimePath ('movies/'+$scenarioSpec.movieInput))).Hash } else { $null })
+    subtitle_input_hash = $(if ($scenarioSpec.subtitleAsset) { (Get-FileHash -LiteralPath (Join-Path $PSScriptRoot ('renderer-scene-tests/assets/'+$scenarioSpec.subtitleAsset))).Hash } else { $null })
     scenario_required_log = $scenarioSpec.requiredLog
     runtime = $runtimePath; profile = $Profile; frame = $Frame; seed = $(if ($inputIsDemo) {$null} else {$Seed}); scene_inspection = [bool]$SceneInspection
     rng_policy = $(if ($inputIsDemo) {'Native demo playback, including recorded event seeds; no capture-seed override'} else {'Fixed seed after native save load'})
@@ -314,8 +316,12 @@ try {
         if ($DeformationProbe) { $arguments += '-scene-deformation-probe' }
         $nativeSave = Join-Path $outputPath "$save.native"
         $uiImage = Join-Path $outputPath "$save.ui.png"
+        $subtitleInput = Join-Path $outputPath "$save.captions.msb"
+        if ($scenarioSpec.subtitleAsset) {
+            Copy-Item -LiteralPath (Join-Path $PSScriptRoot ('renderer-scene-tests/assets/'+$scenarioSpec.subtitleAsset)) -Destination $subtitleInput
+        }
         foreach ($argument in $scenarioSpec.arguments) {
-            $value = $argument.Replace('{save-output}',$nativeSave).Replace('{ui-output}',$uiImage).Replace('{movie-until}',[string]($Frame-1))
+            $value = $argument.Replace('{save-output}',$nativeSave).Replace('{ui-output}',$uiImage).Replace('{movie-until}',[string]($Frame-1)).Replace('{subtitle-input}',$subtitleInput)
             if ($value -match '\s') { $value = '"'+$value+'"' }
             $arguments += $value
         }
@@ -398,10 +404,17 @@ try {
                 }
                 if ($scenarioValidated) {
                     . (Join-Path $PSScriptRoot 'renderer-export-images.ps1')
-                    $comparison = Test-RendererExportImage -Reference ($uiImage+'.source.png') -Export $uiImage -Upload1555 ([bool]$scenarioSpec.sourceUpload1555)
+                    $subtitleTop = -1
+                    if ($scenarioSpec.subtitleOverlay) {
+                        $caption = [regex]::Match($logText,('scene movie subtitle frame='+($scenarioSpec.movieCaptureFrame-1)+' lines=3 width=\d+ height=\d+ first_y=(\d+)'))
+                        if (!$caption.Success) { throw 'Missing native subtitle layout receipt' }
+                        $subtitleTop = [int]$caption.Groups[1].Value-2
+                    }
+                    $comparison = Test-RendererExportImage -Reference ($uiImage+'.source.png') -Export $uiImage -Upload1555 ([bool]$scenarioSpec.sourceUpload1555) -SubtitleTop $subtitleTop
                     $changed = (Get-FileHash -LiteralPath $uiImage).Hash -ne (Get-FileHash -LiteralPath ($uiImage+'.previous.png')).Hash
                     $scenarioValidated = $comparison.mismatches -eq 0 -and $comparison.transparent -eq 0 -and $changed
-                    $exports += [ordered]@{decoded_source_comparison=$comparison; consecutive_frames_changed=$changed}
+                    if ($scenarioSpec.subtitleOverlay) { $scenarioValidated = $scenarioValidated -and $comparison.intentional_subtitle_changes -gt 0 }
+                    $exports += [ordered]@{decoded_source_comparison=$comparison; consecutive_frames_changed=$changed; intentional_subtitle_top=$subtitleTop}
                 }
             }
         }

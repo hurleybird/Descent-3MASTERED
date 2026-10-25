@@ -29,6 +29,7 @@ add_executable(renderer_scene_tests
     raster_trail_tests.cpp
     save_contract_tests.cpp
     display_output_tests.cpp
+    subtitle_tests.cpp
     automap_tests.cpp
     ../../Descent3/SceneCanvas.cpp
     ../../Descent3/SceneModuleContext.cpp

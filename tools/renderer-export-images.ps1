@@ -1,7 +1,8 @@
 # Exact native screenshot qualification, including the shipped uncompressed TGA
-# writer's 5-bit channels. No tolerance, crop, orientation or alpha exceptions.
+# writer's 5-bit channels. No tolerance, orientation or alpha exceptions.
+# Subtitle cases separately require their intentional bottom text overlay.
 function Test-RendererExportImage {
-    param([string]$Reference,[string]$Export,[int]$Scale=1,[bool]$Tga=$false,[bool]$Upload1555=$false)
+    param([string]$Reference,[string]$Export,[int]$Scale=1,[bool]$Tga=$false,[bool]$Upload1555=$false,[int]$SubtitleTop=-1)
     if (!("RendererExportImageCheck" -as [type])) {
         Add-Type -AssemblyName System.Drawing -ErrorAction Stop
         $drawingTypes = @([Drawing.Bitmap],[Drawing.Color]) + [Drawing.Bitmap].GetInterfaces()
@@ -11,7 +12,7 @@ using System;
 using System.Drawing;
 using System.IO;
 public static class RendererExportImageCheck {
-    public static long[] Check(string reference, string exported, int scale, bool tga, bool upload1555) {
+    public static long[] Check(string reference, string exported, int scale, bool tga, bool upload1555, int subtitleTop) {
         if (scale != 1 && scale != 2) throw new ArgumentException("Invalid export scale");
         using (var source = new Bitmap(reference)) {
             Bitmap png = null; byte[] bytes = null;
@@ -26,7 +27,9 @@ public static class RendererExportImageCheck {
                 } else { png = new Bitmap(exported); width = png.Width; height = png.Height; }
                 if (width != source.Width*scale || height != source.Height*scale)
                     throw new InvalidDataException("Export extent mismatch");
-                long mismatch = 0, transparent = 0;
+                if (subtitleTop != -1 && (!upload1555 || tga || scale != 1 || subtitleTop < height/2 || subtitleTop >= height))
+                    throw new InvalidDataException("Invalid intentional subtitle region");
+                long mismatch = 0, transparent = 0, subtitleChanged = 0;
                 for (int y = 0; y < height; ++y) for (int x = 0; x < width; ++x) {
                     Color expected = source.GetPixel(x/scale,y/scale);
                     // Native source PNG bit-replicates 5-bit channels; the
@@ -40,16 +43,19 @@ public static class RendererExportImageCheck {
                         actual = Color.FromArgb(bytes[i+3],bytes[i+2],bytes[i+1],bytes[i]);
                         expected = Color.FromArgb(255,expected.R&248,expected.G&248,expected.B&248);
                     } else actual = png.GetPixel(x,y);
-                    if (actual.ToArgb() != expected.ToArgb()) ++mismatch;
+                    if (actual.ToArgb() != expected.ToArgb()) {
+                        if (subtitleTop >= 0 && y >= subtitleTop) ++subtitleChanged;
+                        else ++mismatch;
+                    }
                     if (actual.A != 255) ++transparent;
                 }
-                return new long[] {width,height,mismatch,transparent};
+                return new long[] {width,height,mismatch,transparent,subtitleChanged};
             } finally { if (png != null) png.Dispose(); }
         }
     }
 }
 '@
     }
-    $result = [RendererExportImageCheck]::Check($Reference,$Export,$Scale,$Tga,$Upload1555)
-    [ordered]@{width=$result[0]; height=$result[1]; mismatches=$result[2]; transparent=$result[3]}
+    $result = [RendererExportImageCheck]::Check($Reference,$Export,$Scale,$Tga,$Upload1555,$SubtitleTop)
+    [ordered]@{width=$result[0]; height=$result[1]; mismatches=$result[2]; transparent=$result[3]; intentional_subtitle_changes=$result[4]}
 }
