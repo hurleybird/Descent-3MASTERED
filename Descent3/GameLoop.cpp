@@ -246,6 +246,7 @@ struct automated_capture_state
 	int series_from_frame;
 	int series_until_frame;
 	int options_after_frame;
+	int screenshot_mode; // 0 off, 1 normal, 2 clean, 3 doubled, 4 clean+doubled
 	int gameplay_frame;
 	float fixed_delta;
 	bool realtime;
@@ -544,6 +545,15 @@ static void InitAutomatedCapture()
 	Automated_capture.series_from_frame = capture_frame_option("-capture-series-from", INT_MAX);
 	Automated_capture.series_until_frame = capture_frame_option("-capture-series-until", INT_MAX);
 	Automated_capture.options_after_frame = capture_frame_option("-capture-options-after", 0);
+	const int screenshot_arg = FindArg("-capture-screenshot-mode");
+	if (screenshot_arg) {
+		const char* mode = GetArg(screenshot_arg+1);
+		if (mode && !stricmp(mode,"normal")) Automated_capture.screenshot_mode = 1;
+		else if (mode && !stricmp(mode,"clean")) Automated_capture.screenshot_mode = 2;
+		else if (mode && !stricmp(mode,"double")) Automated_capture.screenshot_mode = 3;
+		else if (mode && !stricmp(mode,"clean-double")) Automated_capture.screenshot_mode = 4;
+		else Error("Invalid capture screenshot mode");
+	}
 	Automated_capture.force_primary_fire =
 		FindArg("-capture-fire-primary") != 0;
 	Automated_capture.place_scorch = FindArg("-capture-scorch") != 0;
@@ -703,6 +713,13 @@ static void BeginAutomatedCaptureFrame()
 		return;
 
 	Automated_capture.gameplay_frame_active = true;
+	if (Automated_capture.gameplay_frame == 20 && Automated_capture.screenshot_mode) {
+		const int mode = Automated_capture.screenshot_mode;
+		if (mode >= 3) RequestDoubleResolutionScreenshot();
+		if (mode == 2 || mode == 4) RequestCleanGameplayScreenshot();
+		else Screenshot_requested = true;
+		AutomatedCaptureLog("capture native screenshot requested mode=%d frame=20",mode);
+	}
 	if (Automated_capture.gameplay_frame == 0 && FindArg("-capture-no-fog"))
 	{
 		Detail_settings.Fog_enabled = false;

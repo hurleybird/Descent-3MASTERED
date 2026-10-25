@@ -44,7 +44,8 @@ param(
     [ValidateSet(-1,0,1,2)][int]$LodProbeTier = -1,
     [switch]$HistoryProbe,
     [switch]$DeformationProbe,
-    [ValidateSet('ordinary','retirement','save-export','save-settings','auxiliary-lifecycle','modal-ui')][string]$Scenario = 'ordinary'
+    [string]$DemoFile = '',
+    [ValidateSet('ordinary','retirement','save-export','save-settings','auxiliary-lifecycle','modal-ui','screenshot-normal','screenshot-clean','screenshot-double','screenshot-tga','demo-movie')][string]$Scenario = 'ordinary'
 )
 
 # Run only copied installations and copied pilot/save data. Never point Runtime
@@ -55,6 +56,14 @@ $registry = Get-Content -LiteralPath $scenarioFile -Raw | ConvertFrom-Json
 if ($registry.schemaVersion -ne 1) { throw 'Unsupported runtime scenario registry' }
 $scenarioSpec = $registry.scenarios.PSObject.Properties[$Scenario].Value
 if (!$scenarioSpec -or $Frame -lt $scenarioSpec.minimumFrame) { throw 'Scenario requires a later capture frame' }
+if ($scenarioSpec.maximumFrame -and $Frame -gt $scenarioSpec.maximumFrame) { throw 'Scenario exceeds its bounded capture frame count' }
+$inputIsDemo = $scenarioSpec.inputKind -eq 'demo'
+if ($inputIsDemo) {
+    if (!$DemoFile -or !(Test-Path -LiteralPath $DemoFile -PathType Leaf) -or $PSBoundParameters.ContainsKey('Saves')) {
+        throw 'Demo scenario requires DemoFile and cannot also select saves'
+    }
+    $DemoFile = [IO.Path]::GetFullPath($DemoFile)
+} elseif ($DemoFile) { throw 'DemoFile requires a demo scenario' }
 if ($TimeoutSeconds -lt 1) { throw 'Capture timeout must be positive' }
 foreach ($save in $Saves) { if ($save -notmatch '^saveg\d{3}$') { throw "Invalid save name: $save" } }
 foreach ($pattern in $scenarioSpec.requiredLog) { [void][regex]::new($pattern) }
@@ -163,8 +172,11 @@ $manifest = [ordered]@{
     scenario = $Scenario; scenario_revision = $scenarioSpec.revision
     scenario_registry_hash = (Get-FileHash -LiteralPath $scenarioFile).Hash
     harness_hash = (Get-FileHash -LiteralPath $PSCommandPath).Hash
+    export_comparison_hash = (Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'renderer-export-images.ps1')).Hash
+    input_kind = $(if ($inputIsDemo) {'demo'} else {'save'})
     scenario_required_log = $scenarioSpec.requiredLog
-    runtime = $runtimePath; profile = $Profile; frame = $Frame; seed = $Seed; scene_inspection = [bool]$SceneInspection
+    runtime = $runtimePath; profile = $Profile; frame = $Frame; seed = $(if ($inputIsDemo) {$null} else {$Seed}); scene_inspection = [bool]$SceneInspection
+    rng_policy = $(if ($inputIsDemo) {'Native demo playback, including recorded event seeds; no capture-seed override'} else {'Fixed seed after native save load'})
     supersampling = $sampleScale
     inspection_banner_revision = $(if ($SceneInspection) { 2 } else { 0 })
     msaa_samples = $msaaCount
@@ -217,13 +229,14 @@ $manifest = [ordered]@{
 $oldLog = $env:DESCENT3MASTERED_CAPTURE_LOG
 $oldPerfLog = $env:DESCENT3MASTERED_FRAME_PERF_LOG
 $manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $outputPath 'manifest.json') -Encoding UTF8
+if ($inputIsDemo) { $Saves = @('demo') }
 try {
     foreach ($save in $Saves) {
-        if ($save -notmatch '^saveg\d{3}$') { throw "Invalid save name: $save" }
+        if (!$inputIsDemo -and $save -notmatch '^saveg\d{3}$') { throw "Invalid save name: $save" }
         if ((Read-Settings) -cne $settings) { throw 'User graphics settings changed during the corpus run.' }
         Copy-Item -LiteralPath (Join-Path $seedPath 'Jeff.plt') -Destination (Join-Path $runtimePath 'Jeff.plt')
         # Loading increments a sibling .cnt file. Never load directly from seeds.
-        $savePath = Join-Path $runtimePath "savegame\$save"
+        $savePath = if ($inputIsDemo) { Join-Path $outputPath 'input.dem' } else { Join-Path $runtimePath "savegame\$save" }
         foreach ($destination in @($savePath,"$savePath.cnt")) {
             if ((Test-Path -LiteralPath $destination) -and
                 ((Get-Item -LiteralPath $destination -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
@@ -231,8 +244,11 @@ try {
             }
         }
         New-Item -ItemType Directory -Force -Path (Split-Path -Parent $savePath) | Out-Null
-        Copy-Item -LiteralPath (Join-Path $seedPath "savegame\$save") -Destination $savePath
-        Copy-Item -LiteralPath (Join-Path $seedPath "savegame\$save.cnt") -Destination "$savePath.cnt"
+        if ($inputIsDemo) { Copy-Item -LiteralPath $DemoFile -Destination $savePath }
+        else {
+            Copy-Item -LiteralPath (Join-Path $seedPath "savegame\$save") -Destination $savePath
+            Copy-Item -LiteralPath (Join-Path $seedPath "savegame\$save.cnt") -Destination "$savePath.cnt"
+        }
         $png = Join-Path $outputPath "$save.png"
         $log = Join-Path $outputPath "$save.log"
         $env:DESCENT3MASTERED_CAPTURE_LOG = $log
@@ -242,6 +258,11 @@ try {
             '-capture-frame',"$Frame",'-capture-dt','0.016666667','-capture-seed',"$Seed",'-capture-headlight',
             '-capture-output',('"{0}"' -f $png),'-render-resolution','1280','720',
             '-perpixellighting')
+        if ($inputIsDemo) {
+            $arguments[$arguments.IndexOf('-loadgame')] = '-playdemo'
+            $seedIndex = $arguments.IndexOf('-capture-seed')
+            $arguments = @($arguments[0..($seedIndex-1)]) + @($arguments[($seedIndex+2)..($arguments.Count-1)])
+        }
         if ($MotionBlur) { $arguments += '-motion-blur-new' }
         else { $arguments += '-nomotionblur' }
         if ($Profile -eq 'effects') { $arguments += @('-ao','-bloom') }
@@ -285,7 +306,7 @@ try {
         $nativeSave = Join-Path $outputPath "$save.native"
         $uiImage = Join-Path $outputPath "$save.ui.png"
         foreach ($argument in $scenarioSpec.arguments) {
-            $value = $argument.Replace('{save-output}',$nativeSave).Replace('{ui-output}',$uiImage)
+            $value = $argument.Replace('{save-output}',$nativeSave).Replace('{ui-output}',$uiImage).Replace('{movie-until}',[string]($Frame-1))
             if ($value -match '\s') { $value = '"'+$value+'"' }
             $arguments += $value
         }
@@ -295,7 +316,7 @@ try {
         [ordered]@{scenario=$Scenario; revision=$scenarioSpec.revision
             executable=(Get-FileHash -LiteralPath $exe).Hash
             save_hash=(Get-FileHash -LiteralPath $savePath).Hash
-            count_hash=(Get-FileHash -LiteralPath "$savePath.cnt").Hash
+            count_hash=$(if (!$inputIsDemo) { (Get-FileHash -LiteralPath "$savePath.cnt").Hash } else { $null })
             arguments=$arguments; started_utc=[DateTime]::UtcNow.ToString('o')
         } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $outputPath "$save.launch.json") -Encoding UTF8
         $started = Get-Date
@@ -319,6 +340,35 @@ try {
             $scenarioValidated = $scenarioValidated -and ($logText -match $pattern)
         }
         $exports = @()
+        if ($inputIsDemo) {
+            . (Join-Path $PSScriptRoot 'renderer-export-images.ps1')
+            $movieImages = [regex]::Matches($logText,'native screenshot saved path=(.+) width=\d+ height=\d+ scale=1 format=png')
+            $scenarioValidated = $scenarioValidated -and $movieImages.Count -eq $Frame
+            for ($i=0; $i -lt $movieImages.Count; ++$i) {
+                $movie = $movieImages[$i].Groups[1].Value
+                if ((Split-Path -Parent ([IO.Path]::GetFullPath($movie))) -ine $runtimePath) { throw 'Movie screenshot escaped private runtime' }
+                $evidence = Join-Path $outputPath ("movie.{0:D6}.png" -f $i)
+                Copy-Item -LiteralPath $movie -Destination $evidence
+                $reference = $png+'.frame'+('{0:D6}' -f $i)+'.png'
+                $comparison = Test-RendererExportImage -Reference $reference -Export $evidence
+                $scenarioValidated = $scenarioValidated -and $comparison.mismatches -eq 0 -and $comparison.transparent -eq 0
+                $exports += [ordered]@{frame=$i; movie_hash=(Get-FileHash -LiteralPath $evidence).Hash; preceding_display_hash=(Get-FileHash -LiteralPath $reference).Hash; comparison=$comparison}
+            }
+        }
+        if ($scenarioSpec.exportScale) {
+            . (Join-Path $PSScriptRoot 'renderer-export-images.ps1')
+            $match = [regex]::Match($logText,'native screenshot saved path=(.+) width=\d+ height=\d+ scale=\d+ format=(png|tga)')
+            if (!$match.Success) { $scenarioValidated = $false }
+            else {
+                $nativeImage = $match.Groups[1].Value
+                if ((Split-Path -Parent ([IO.Path]::GetFullPath($nativeImage))) -ine $runtimePath) { throw 'Native screenshot escaped private runtime' }
+                $evidence = Join-Path $outputPath ($save+'.native.'+$match.Groups[2].Value)
+                Copy-Item -LiteralPath $nativeImage -Destination $evidence
+                $comparison = Test-RendererExportImage -Reference ($png+'.frame000020.png') -Export $evidence -Scale $scenarioSpec.exportScale -Tga ([bool]$scenarioSpec.exportTga)
+                $scenarioValidated = $scenarioValidated -and $comparison.mismatches -eq 0 -and $comparison.transparent -eq 0
+                $exports += [ordered]@{image=(Split-Path -Leaf $evidence); hash=(Get-FileHash -LiteralPath $evidence).Hash; comparison=$comparison}
+            }
+        }
         if ($Scenario -eq 'modal-ui') {
             $uiExists = Test-Path -LiteralPath $uiImage
             $scenarioValidated = $scenarioValidated -and $uiExists
@@ -389,7 +439,7 @@ try {
             (-not $MirrorSurfaceProbe -or ($logText.Contains('scene mirror surface camera') -and $logText.Contains('scene view image key='))) -and $process.ExitCode -eq 1 -and
             (Test-Path -LiteralPath $png) -and $logText.Contains('capture saved') -and
             $logText.Contains('capture headlight enabled') -and
-            $logText.Contains("capture rng seed=$Seed") -and
+            ($(if ($inputIsDemo) { $logText.Contains('playdemo accepted path=') } else { $logText.Contains("capture rng seed=$Seed") })) -and
             $logText.Contains('winmain application run returned')
         $manifest.results += [ordered]@{
             save=$save; save_hash=(Get-FileHash -LiteralPath $savePath).Hash

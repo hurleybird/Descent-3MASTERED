@@ -34,6 +34,41 @@
       "requiredLog": ["scene resource transition frame=10", "scene resource transition frame=20", "scene resource transition frame=30", "scene resource transition frame=40", "scene resource transition frame=50", "scene save thumbnail decoded width=160 height=120 mismatches=0 transparent=0", "save saved output="],
       "purpose": "Actual post-composition save after SSAA/MSAA transitions. Resource changes intentionally invalidate history, unlike independent export."
     },
+    "demo-movie": {
+      "revision": 1, "minimumFrame": 2, "maximumFrame": 60, "inspectionRequired": true,
+      "inputKind": "demo",
+      "arguments": ["-makemovie", "-fastdemo", "-demoexit", "-capture-series-from", "0", "-capture-series-until", "{movie-until}"],
+      "requiredLog": ["playdemo accepted path=", "native screenshot saved path="],
+      "purpose": "Real demo playback/movie caller exports the preceding presented image before advancing playback. Every movie frame must exactly match its independently captured display."
+    },
+    "screenshot-normal": {
+      "revision": 1, "minimumFrame": 22, "inspectionRequired": true,
+      "arguments": ["-capture-screenshot-mode", "normal", "-capture-series-from", "20", "-capture-series-until", "20"],
+      "requiredLog": ["capture native screenshot requested mode=1 frame=20", "native screenshot saved path=.+scale=1 format=png"],
+      "exportScale": 1,
+      "purpose": "Normal screenshot request through the game-owned final composition boundary; exact published-frame comparison."
+    },
+    "screenshot-clean": {
+      "revision": 1, "minimumFrame": 22, "inspectionRequired": true,
+      "arguments": ["-capture-screenshot-mode", "clean", "-capture-series-from", "20", "-capture-series-until", "20"],
+      "requiredLog": ["capture native screenshot requested mode=2 frame=20", "native screenshot saved path=.+scale=1 format=png"],
+      "exportScale": 1,
+      "purpose": "Native clean screenshot request before publication, export at the completed-frame boundary."
+    },
+    "screenshot-double": {
+      "revision": 1, "minimumFrame": 22, "inspectionRequired": true,
+      "arguments": ["-capture-screenshot-mode", "double", "-capture-series-from", "20", "-capture-series-until", "20"],
+      "requiredLog": ["capture native screenshot requested mode=3 frame=20", "native screenshot saved path=.+scale=2 format=png"],
+      "exportScale": 2,
+      "purpose": "Native doubled PNG: exact 2x nearest duplication of the same published frame, not a second simulation/render."
+    },
+    "screenshot-tga": {
+      "revision": 1, "minimumFrame": 22, "inspectionRequired": true,
+      "arguments": ["-capture-screenshot-mode", "normal", "-screenshottga", "-capture-series-from", "20", "-capture-series-until", "20"],
+      "requiredLog": ["capture native screenshot requested mode=1 frame=20", "native screenshot saved path=.+scale=1 format=tga"],
+      "exportScale": 1, "exportTga": true,
+      "purpose": "Native bitmap readback/TGA export, compared with the same published frame at its documented 5-bit color precision."
+    },
     "modal-ui": {
       "revision": 1,
       "minimumFrame": 22,

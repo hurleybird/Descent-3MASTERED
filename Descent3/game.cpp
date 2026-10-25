@@ -1015,6 +1015,8 @@ void DoScreenshot()
 		saved = 0;
 	if (!saved)
 		ddio_DeleteFile(temporary_filename);
+	AutomatedCaptureLog("native screenshot %s path=%s width=%d height=%d scale=%d format=%s",
+		saved ? "saved" : "failed", filename, width, height, output_scale, extension);
 
 	if (saved && Demo_flags != DF_PLAYBACK)
 	{

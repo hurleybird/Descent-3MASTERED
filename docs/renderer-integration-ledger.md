@@ -1107,3 +1107,44 @@ Root Release and standalone Debug pass all3 contracts. This closes the identifie
 display-source defect, not the entire UI/export gate: real pilot/custom-logo/
 movie/console consumers, normal save/quicksave UI, clean/doubled screenshots and
 demo movie caller coverage still need qualification. No autosave caller was found.
+
+## Native screenshot/movie callers and UI ship preview (I25/I26/I29)
+
+Native DoScreenshot now records its actual result/path/extent/scale/format in the
+optional capture log. Registered screenshot-normal/clean/double/tga cases request
+the native screenshot path at20; they do not call a substitute writer. The clean
+request precedes publication, so existing producer policy suppresses HUD overlays
+while retaining cockpit instruments/reticle. Doubled output is the existing exact
+2x nearest duplication, not new rendering or simulation. The TGA path exercises
+the legacy bitmap readback and native top-left BGRA writer.
+
+Tracked renderer-export-images.ps1 compares every pixel and full opacity against
+an independently exported same-frame reference, with no spatial/crop/tolerance
+waivers. TGA alone uses its defined (channel>>3)<<3 precision. The comparator was
+checked on Windows PowerShell5 and bundled PowerShell7, rejects wrong extents,
+and detects728950 differing pixels when given a different frame.
+qual-shot-{normal,clean,double,tga}-v2-20261024 all pass003 with zero mismatched or
+transparent pixels; double is2560x1440, the others1280x720. Clean image inspected.
+The first normal run failed comparator compilation due to PowerShell7's split
+Drawing assemblies, not rendering. Interface-derived assembly references fix it.
+
+Registered demo-movie takes an explicit copied DemoFile, bounded to2–60frames,
+replays through real DemoPlaybackFile/DemoFrame with -makemovie, and checks every
+native movie screenshot against its preceding presented frame. It records native
+demo RNG policy, not the save-load-only fixed seed override. qual-demo-final-
+20261024 passes5movie images from the retained Secret2 demo, each byte-identical
+to its separately captured preceding display. The earlier registered run had all
+five exact matches but failed the inappropriate save-load RNG-log assertion;
+its failed result remains evidence, not a qualified run.
+
+qual-pilot-v2-20261024 captures the real nonmodal pilot configuration screen.
+qual-pilot-ship-v2-20261024 enters real PltSelectShip, waits for five real preview
+paints (not loading/wait UI callbacks), and captures once. Both inspected images
+are correct; ship is visibly rendered in the actual customization window. The
+retained pilot has no custom logo, so uploaded/animated logos remain unqualified.
+The initial pilot run timed out in intro playback before reaching the menu; the
+successful capture explicitly skips startup intro, and does not qualify movies.
+
+Root Release contracts pass. Hosted CI40162017498 at0c2a1d4 passes all3jobs.
+Normal SaveGameDialog/QuickSave UI, interactive movie/console/module consumers and
+the full gameplay acceptance matrix remain open; no Candidate promotion occurred.

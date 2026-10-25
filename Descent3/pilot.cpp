@@ -633,6 +633,7 @@ void selectcb(newuiMenu* menu, short id, void* data)
 
 static const char* Pilot_capture_output = NULL;
 static int Pilot_capture_frames = 0;
+static bool Pilot_capture_ship_active = false;
 static void (*Pilot_capture_old_ui_callback)() = NULL;
 
 static void PilotCaptureUICallback()
@@ -640,7 +641,8 @@ static void PilotCaptureUICallback()
 	if (Pilot_capture_old_ui_callback)
 		(*Pilot_capture_old_ui_callback)();
 
-	if (Pilot_capture_output && ++Pilot_capture_frames >= 5)
+	if (Pilot_capture_output && (!FindArg("-capture-pilot-ship") || Pilot_capture_ship_active) &&
+		++Pilot_capture_frames >= 5)
 	{
 		ui_RequestScreenshotAndForceQuit(Pilot_capture_output);
 	}
@@ -753,7 +755,7 @@ void PilotSelect(void)
 	// run menu
 	do
 	{
-		res = menu.DoUI();
+		res = capture_pilot && FindArg("-capture-pilot-ship") ? IDP_SHIPCONFIG : menu.DoUI();
 		if (capture_pilot && res == NEWUIRES_FORCEQUIT)
 		{
 			done = true;
@@ -1034,6 +1036,7 @@ void PilotSelect(void)
 		case IDP_SHIPCONFIG:
 		{
 			PltSelectShip(&working_pilot);
+			if (capture_pilot && FindArg("-capture-pilot-ship")) done = true;
 		}break;
 
 		case IDP_CUSTOMDIFFICULTY:
@@ -3230,9 +3233,15 @@ bool PltSelectShip(pilot* Pilot)
 	DoWaitMessage(false);
 
 	window.Open();
+	if (Pilot_capture_output && FindArg("-capture-pilot-ship")) {
+		Pilot_capture_ship_active = true;
+		Pilot_capture_frames = 0;
+	}
 	while (!exit_menu)
 	{
 		int res = window.DoUI();
+		if (Pilot_capture_output && FindArg("-capture-pilot-ship") && res == NEWUIRES_FORCEQUIT)
+			break;
 
 		// handle all UI results.
 		switch (res)
@@ -3578,6 +3587,7 @@ bool PltSelectShip(pilot* Pilot)
 
 
 ship_id_err:
+	Pilot_capture_ship_active = false;
 
 	//no use for this since stream files will stop
 	//Sound_system.StopAllSounds();
@@ -3859,6 +3869,8 @@ void UI3DWindow::OnDraw()
 		return;
 	}
 
+	if (Pilot_capture_output && FindArg("-capture-pilot-ship"))
+		AutomatedCaptureLog("scene UI ship preview model=%d texture=%d",ship_model,ship_pos.texture_id);
 	static polymodel_effect pefx;
 
 	vector viewer_eye = { 0,0,0 };
