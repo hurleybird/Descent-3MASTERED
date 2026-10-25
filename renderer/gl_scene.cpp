@@ -2112,7 +2112,7 @@ void main() {
         // Read the actual scene outputs at a few capture boundaries, including
         // the history fixture's cut. This never runs in interactive rendering.
         const int capture_frame = AutomatedCaptureFrameIndex();
-        const bool export_history_probe = FindArg("-scene-history-export-probe") &&
+        const bool export_history_probe = (FindArg("-scene-history-export-probe") || FindArg("-scene-independent-export-audit")) &&
             capture_frame >= 20 && capture_frame <= 22;
         const bool retirement_probe = FindArg("-scene-retirement-probe") &&
             capture_frame >= 20 && capture_frame <= 22;

@@ -577,12 +577,28 @@ static bool UI_deferred_modal_frame = false;
 // target the renderer happened to bind. Deferred modal paint must finish first.
 static void PublishUIFrameForReadback()
 {
-	if (UI_deferred_modal_frame) {
-		UI_deferred_modal_frame = false;
-		rend_EndModalUIFrame();
-	}
+	if (UI_deferred_modal_frame) Error("UI export requested before deferred painting completed");
 	if (!rend_IsPostPresentFramePending() && !rend_BeginPostPresentFrame())
 		Error("UI export has no composed display image");
+}
+
+// A tiled window may still own late preview/cursor painting after ui_DoFrame.
+// Only its completion boundary may export that frame or request capture exit.
+static void CompleteUIFrameExports()
+{
+	if (UI_screenshot_and_quit_filename) {
+		PublishUIFrameForReadback();
+		if (!rend_SaveScreenshotPNG(UI_screenshot_and_quit_filename))
+			Error("UI composed display export failed");
+		AutomatedCaptureLog("scene UI export saved output=%s", UI_screenshot_and_quit_filename);
+		UI_screenshot_and_quit_filename = NULL;
+		UI_frame_result = NEWUIRES_FORCEQUIT;
+	}
+	if (UI_input.printscreen) {
+		UI_input.printscreen = false;
+		PublishUIFrameForReadback();
+		DoScreenshot();
+	}
 }
 
 int DoUI()
@@ -682,23 +698,8 @@ void DoUIFrame()
 				rend_EndModalUIFrame();
 		}
 
-		if (UI_screenshot_and_quit_filename)
-		{
-			PublishUIFrameForReadback();
-			if (!rend_SaveScreenshotPNG(UI_screenshot_and_quit_filename))
-				Error("UI composed display export failed");
-			AutomatedCaptureLog("scene UI export saved output=%s", UI_screenshot_and_quit_filename);
-			UI_screenshot_and_quit_filename = NULL;
-			UI_frame_result = NEWUIRES_FORCEQUIT;
-		}
 	}
-
-	if (UI_input.printscreen) 
-	{
-		UI_input.printscreen = false;
-		PublishUIFrameForReadback();
-		DoScreenshot();
-	}
+	if (!UI_defer_modal_frame_end) CompleteUIFrameExports();
 }
 
 
@@ -5413,6 +5414,7 @@ int newuiTiledWindow::DoUI()
 			UI_deferred_modal_frame = false;
 			rend_EndModalUIFrame();
 		}
+		CompleteUIFrameExports();
 		DebugBlockPrint("UZ");
 		rend_Flip();
 	}

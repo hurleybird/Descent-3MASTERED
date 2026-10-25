@@ -69,12 +69,29 @@
       "exportScale": 1, "exportTga": true,
       "purpose": "Native bitmap readback/TGA export, compared with the same published frame at its documented 5-bit color precision."
     },
+    "quicksave": {
+      "revision": 1, "minimumFrame": 22, "inspectionRequired": true,
+      "quickSaveSlot": 3,
+      "arguments": ["-capture-quicksave-slot", "3", "-scene-save-image-audit", "-scene-independent-export-audit", "-scene-gl-audit", "-capture-series-from", "19", "-capture-series-until", "19"],
+      "previousDisplayFrame": 19,
+      "requiredLog": ["native quicksave saved slot=3 output=", "scene save thumbnail decoded width=160 height=120 mismatches=0 transparent=0", "scene save thumbnail simulation state unchanged", "scene motion frame=20 camera_history=1", "scene motion frame=21 camera_history=1"],
+      "purpose": "Actual QuickSaveGame against the copied input slot, independent thumbnail decode, preceding display preservation and temporal continuity."
+    },
+    "save-dialog": {
+      "revision": 1, "minimumFrame": 22, "inspectionRequired": true,
+      "previewInput": "saveg000",
+      "arguments": ["-capture-save-dialog-output", "{ui-output}"],
+      "requiredLog": ["scene save dialog preview painted frames=5 slot=0", "scene UI export saved output="],
+      "uiExport": true,
+      "purpose": "Real save dialog over a presented world, including its deferred native thumbnail preview/cursor paint, then cancel and resume. Does not accept a slot or write a save."
+    },
     "modal-ui": {
       "revision": 1,
       "minimumFrame": 22,
       "inspectionRequired": true,
       "arguments": ["-scene-gl-audit", "-capture-options-output", "{ui-output}", "-capture-options-after", "20"],
       "requiredLog": ["scene options capture after frame=20", "scene UI export saved output="],
+      "uiExport": true,
       "purpose": "Real options menu over a completed gameplay display; export the modal UI composition, then resume and export gameplay."
     },
     "auxiliary-lifecycle": {

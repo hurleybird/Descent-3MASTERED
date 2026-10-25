@@ -246,6 +246,7 @@ struct automated_capture_state
 	int series_from_frame;
 	int series_until_frame;
 	int options_after_frame;
+	int quicksave_slot;
 	int screenshot_mode; // 0 off, 1 normal, 2 clean, 3 doubled, 4 clean+doubled
 	int gameplay_frame;
 	float fixed_delta;
@@ -545,6 +546,9 @@ static void InitAutomatedCapture()
 	Automated_capture.series_from_frame = capture_frame_option("-capture-series-from", INT_MAX);
 	Automated_capture.series_until_frame = capture_frame_option("-capture-series-until", INT_MAX);
 	Automated_capture.options_after_frame = capture_frame_option("-capture-options-after", 0);
+	Automated_capture.quicksave_slot = capture_frame_option("-capture-quicksave-slot", INT_MAX);
+	if (Automated_capture.quicksave_slot != INT_MAX && Automated_capture.quicksave_slot >= GAMESAVE_SLOTS)
+		Error("Capture quicksave slot is outside native save slots");
 	const int screenshot_arg = FindArg("-capture-screenshot-mode");
 	if (screenshot_arg) {
 		const char* mode = GetArg(screenshot_arg+1);
@@ -3917,6 +3921,19 @@ void StartTerrainSound()
 //The main loop for D3.  It renders, gets input, etc. for one frame
 void GameFrame(void)
 {
+	static bool quicksave_capture_started = false;
+	if (!quicksave_capture_started && Automated_capture.enabled && Automated_capture.gameplay_frame == 20 &&
+		Automated_capture.quicksave_slot != INT_MAX) {
+		quicksave_capture_started = true;
+		Quicksave_game_slot = Automated_capture.quicksave_slot;
+		QuickSaveGame();
+	}
+	static bool save_dialog_capture_started = false;
+	if (!save_dialog_capture_started && Automated_capture.enabled && Automated_capture.gameplay_frame == 20 &&
+		FindArg("-capture-save-dialog-output")) {
+		save_dialog_capture_started = true;
+		SaveGameDialog();
+	}
 	static bool options_capture_started = false;
 	if (!options_capture_started && FindArg("-capture-options-output"))
 	{

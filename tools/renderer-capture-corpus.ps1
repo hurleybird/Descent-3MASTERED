@@ -45,7 +45,7 @@ param(
     [switch]$HistoryProbe,
     [switch]$DeformationProbe,
     [string]$DemoFile = '',
-    [ValidateSet('ordinary','retirement','save-export','save-settings','auxiliary-lifecycle','modal-ui','screenshot-normal','screenshot-clean','screenshot-double','screenshot-tga','demo-movie')][string]$Scenario = 'ordinary'
+    [ValidateSet('ordinary','retirement','save-export','save-settings','auxiliary-lifecycle','modal-ui','save-dialog','quicksave','screenshot-normal','screenshot-clean','screenshot-double','screenshot-tga','demo-movie')][string]$Scenario = 'ordinary'
 )
 
 # Run only copied installations and copied pilot/save data. Never point Runtime
@@ -66,6 +66,7 @@ if ($inputIsDemo) {
 } elseif ($DemoFile) { throw 'DemoFile requires a demo scenario' }
 if ($TimeoutSeconds -lt 1) { throw 'Capture timeout must be positive' }
 foreach ($save in $Saves) { if ($save -notmatch '^saveg\d{3}$') { throw "Invalid save name: $save" } }
+if ($scenarioSpec.quickSaveSlot -ne $null -and ($Saves.Count -ne 1 -or $Saves[0] -ne ('saveg{0:D3}' -f [int]$scenarioSpec.quickSaveSlot))) { throw 'Quicksave scenario must load its explicitly copied target slot' }
 foreach ($pattern in $scenarioSpec.requiredLog) { [void][regex]::new($pattern) }
 if ($scenarioSpec.inspectionRequired -and !$SceneInspection) { throw 'Scenario requires explicit scene inspection' }
 if ($Scenario -ne 'ordinary') {
@@ -174,6 +175,7 @@ $manifest = [ordered]@{
     harness_hash = (Get-FileHash -LiteralPath $PSCommandPath).Hash
     export_comparison_hash = (Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'renderer-export-images.ps1')).Hash
     input_kind = $(if ($inputIsDemo) {'demo'} else {'save'})
+    preview_input_hash = $(if ($scenarioSpec.previewInput) { (Get-FileHash -LiteralPath (Join-Path $seedPath ('savegame/'+$scenarioSpec.previewInput))).Hash } else { $null })
     scenario_required_log = $scenarioSpec.requiredLog
     runtime = $runtimePath; profile = $Profile; frame = $Frame; seed = $(if ($inputIsDemo) {$null} else {$Seed}); scene_inspection = [bool]$SceneInspection
     rng_policy = $(if ($inputIsDemo) {'Native demo playback, including recorded event seeds; no capture-seed override'} else {'Fixed seed after native save load'})
@@ -235,6 +237,12 @@ try {
         if (!$inputIsDemo -and $save -notmatch '^saveg\d{3}$') { throw "Invalid save name: $save" }
         if ((Read-Settings) -cne $settings) { throw 'User graphics settings changed during the corpus run.' }
         Copy-Item -LiteralPath (Join-Path $seedPath 'Jeff.plt') -Destination (Join-Path $runtimePath 'Jeff.plt')
+        if ($scenarioSpec.previewInput) {
+            if ($scenarioSpec.previewInput -notmatch '^saveg\d{3}$') { throw 'Invalid preview input name' }
+            $previewPath = Join-Path $runtimePath ('savegame/'+$scenarioSpec.previewInput)
+            if ((Test-Path -LiteralPath $previewPath) -and ((Get-Item -LiteralPath $previewPath -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Preview save is a reparse point' }
+            Copy-Item -LiteralPath (Join-Path $seedPath ('savegame/'+$scenarioSpec.previewInput)) -Destination $previewPath
+        }
         # Loading increments a sibling .cnt file. Never load directly from seeds.
         $savePath = if ($inputIsDemo) { Join-Path $outputPath 'input.dem' } else { Join-Path $runtimePath "savegame\$save" }
         foreach ($destination in @($savePath,"$savePath.cnt")) {
@@ -313,9 +321,10 @@ try {
         if ($arguments.Count -gt 63 -or @($arguments | Where-Object {[Text.Encoding]::UTF8.GetByteCount($_.Trim('"')) -gt 99}).Count) {
             throw 'Capture arguments exceed the shipped 64x100 module ABI'
         }
+        $launchInputHash = (Get-FileHash -LiteralPath $savePath).Hash
         [ordered]@{scenario=$Scenario; revision=$scenarioSpec.revision
             executable=(Get-FileHash -LiteralPath $exe).Hash
-            save_hash=(Get-FileHash -LiteralPath $savePath).Hash
+            save_hash=$launchInputHash
             count_hash=$(if (!$inputIsDemo) { (Get-FileHash -LiteralPath "$savePath.cnt").Hash } else { $null })
             arguments=$arguments; started_utc=[DateTime]::UtcNow.ToString('o')
         } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $outputPath "$save.launch.json") -Encoding UTF8
@@ -369,12 +378,24 @@ try {
                 $exports += [ordered]@{image=(Split-Path -Leaf $evidence); hash=(Get-FileHash -LiteralPath $evidence).Hash; comparison=$comparison}
             }
         }
-        if ($Scenario -eq 'modal-ui') {
+        if ($scenarioSpec.uiExport) {
             $uiExists = Test-Path -LiteralPath $uiImage
             $scenarioValidated = $scenarioValidated -and $uiExists
             $exports += [ordered]@{ui_image=$uiImage; hash=$(if ($uiExists) { (Get-FileHash -LiteralPath $uiImage).Hash } else { $null })}
         }
-        if ($Scenario -in @('save-export','save-settings')) {
+        if ($Scenario -eq 'quicksave') {
+            $audit = [regex]::Matches($logText,'scene save thumbnail simulation state unchanged frame=\d+ evidence=(.+)')
+            if ($audit.Count -ne 1) { $scenarioValidated = $false }
+            else {
+                $prefix = $audit[0].Groups[1].Value.Trim()
+                if ($prefix -ine ($savePath+'.audit1')) { throw 'Quicksave evidence escaped copied input slot' }
+                foreach ($kind in @('live-before','live-after','thumbnail','world')) {
+                    Copy-Item -LiteralPath ($prefix+".$kind.png") -Destination ($nativeSave+".audit1.$kind.png")
+                }
+                Copy-Item -LiteralPath $savePath -Destination $nativeSave
+            }
+        }
+        if ($Scenario -in @('save-export','save-settings','quicksave')) {
             $pairs = @(Get-ChildItem -LiteralPath $outputPath -Filter "$save.native.audit*.live-before.png")
             $minimumPairs = if ($Scenario -eq 'save-export') { 2 } else { 1 }
             $scenarioValidated = $scenarioValidated -and $pairs.Count -ge $minimumPairs -and (Test-Path -LiteralPath $nativeSave)
@@ -442,7 +463,8 @@ try {
             ($(if ($inputIsDemo) { $logText.Contains('playdemo accepted path=') } else { $logText.Contains("capture rng seed=$Seed") })) -and
             $logText.Contains('winmain application run returned')
         $manifest.results += [ordered]@{
-            save=$save; save_hash=(Get-FileHash -LiteralPath $savePath).Hash
+            save=$save; save_hash=$launchInputHash
+            final_input_hash=(Get-FileHash -LiteralPath $savePath).Hash
             success=$ok; exit_code=$process.ExitCode; timeout=$timedOut
             resource_transitions_validated=$resourceValidated
             scenario_validated=$scenarioValidated; exports=$exports

@@ -119,6 +119,8 @@ struct tSaveGamePreviewData
 {
 	int cur_slot;
 	chunked_bitmap chunk;
+	const char* capture_output = nullptr;
+	int capture_frames = 0;
 };
 
 #if defined(LINUX)
@@ -181,6 +183,11 @@ void __cdecl SaveGamePreviewDialogCB(newuiTiledWindow* wnd, void* data)
 		x = (wnd->W() - bm_item.width()) / 2;
 		y = (wnd->H() - bm_item.height()) / 4;
 		bm_item.draw(x, y);
+		if (cb_data->capture_output && ++cb_data->capture_frames >= 5) {
+			AutomatedCaptureLog("scene save dialog preview painted frames=%d slot=%d",cb_data->capture_frames,
+				cb_data->cur_slot-SAVE_HOTSPOT_ID);
+			ui_RequestScreenshotAndForceQuit(cb_data->capture_output);
+		}
 	}
 }
 
@@ -227,6 +234,7 @@ void QuickSaveGame()
 			{
 				if (SaveGameState(pathname, desc))
 				{
+					AutomatedCaptureLog("native quicksave saved slot=%d output=%s",i,pathname);
 					AddHUDMessage(TXT_QUICKSAVE);
 					return;	// we're okay. game saved. put up hud message?
 				}
@@ -242,6 +250,8 @@ void QuickSaveGame()
 void SaveGameDialog()
 {
 	tSaveGamePreviewData preview_data;
+	const int capture_arg = FindArg("-capture-save-dialog-output");
+	if (capture_arg) preview_data.capture_output = GetArg(capture_arg+1);
 	newuiTiledWindow wnd;
 	newuiSheet* sheet;
 	int i, res;

@@ -1148,3 +1148,38 @@ successful capture explicitly skips startup intro, and does not qualify movies.
 Root Release contracts pass. Hosted CI40162017498 at0c2a1d4 passes all3jobs.
 Normal SaveGameDialog/QuickSave UI, interactive movie/console/module consumers and
 the full gameplay acceptance matrix remain open; no Candidate promotion occurred.
+
+## Completed UI paint boundary and actual quicksave caller (I25/I26)
+
+UI export handling now runs after all painting owned by the UI frame. A tiled
+window's late draw callback and cursor may follow ui_DoFrame (the native save
+dialog uses this for its thumbnail). Ending its deferred modal layer and reading
+it inside DoUIFrame was too early. CompleteUIFrameExports now services both native
+PrintScreen and capture-exit requests at the owning completion boundary; readback
+rejects unfinished deferred painting instead of forcibly ending it. No callbacks
+were moved into the renderer, and ordinary world execution gains no pixel work.
+
+qual-save-dialog-20261024 captures the real save dialog after five late preview
+paints over completed corridor003. Its inspected PNG includes the native slot0
+thumbnail and complete menu, with gameplay correctly preserved behind it. The
+registered case explicitly copies/hashes its preview input; it cancels, does not
+accept a slot or serialize a save. qual-modal-boundary-20261024 also passes real
+options UI over mirror006 after this scheduling change.
+
+Registered quicksave invokes actual QuickSaveGame against its explicitly copied
+slot3, not SaveGameState directly. qual-quicksave-v2-20261024 passes: embedded
+thumbnail decode has zero pixel/opacity mismatches; pre/post-save display hashes
+equal the independently captured presented frame19; GPU camera history remains
+valid20–22. The saved native file reloads successfully in qual-quicksave-reload-
+20261024; its actual corridor image was inspected. Launch/input and final-input
+hashes are recorded separately because quicksave intentionally changes its copy.
+The first quicksave run preserved all pixels but failed missing history-log
+assertions. A separate independent-export audit enables that exact check without
+also triggering the interleaved-save fixture. No history failure was suppressed.
+
+A suspected disappearing ship menu during visual inspection was a false alarm:
+the unchanged saved PNG contains the full panel, confirmed by reopening it and
+three exact-command repetitions. No renderer changes resulted from that suspicion.
+Root Release contracts pass. Remaining UI acceptance includes actually accepting
+the save-description/overwrite dialogs, uploaded logos, interactive movies and
+consoles/module consumers. The no-probe promotion gate remains closed.
