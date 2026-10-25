@@ -673,6 +673,9 @@ void rend_EndFrame();
 void rend_PerfGpuSceneMark(renderer_gpu_scene_mark mark);
 
 bool rend_BeginPostPresentFrame();
+// Start a replacement full-display canvas containing already encoded color.
+// No world AO, bloom, motion processing, SSAA reduction or game gamma transform.
+bool rend_BeginDisplayFrame();
 bool rend_IsPostPresentFramePending();
 void rend_StartPostPresentFrame(int x1,int y1,int x2,int y2,int clear_flags=RF_CLEAR_ZBUFFER);
 void rend_EndPostPresentFrame();

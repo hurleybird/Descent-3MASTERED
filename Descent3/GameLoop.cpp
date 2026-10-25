@@ -3921,6 +3921,16 @@ void StartTerrainSound()
 //The main loop for D3.  It renders, gets input, etc. for one frame
 void GameFrame(void)
 {
+	static bool movie_capture_started = false;
+	if (!movie_capture_started && Automated_capture.enabled && Automated_capture.gameplay_frame == 20 &&
+		FindArg("-capture-decoded-movie-output")) {
+		const int movie_arg = FindArg("-capture-decoded-movie-name");
+		const char* movie = movie_arg ? GetArg(movie_arg+1) : nullptr;
+		if (!movie || !*movie) Error("Decoded movie fixture requires a native movie name");
+		movie_capture_started = true;
+		DoMissionMovie(const_cast<char*>(movie));
+		AutomatedCaptureLog("scene decoded movie returned frame=20 screen=%d",GetScreenMode());
+	}
 	static bool quicksave_capture_started = false;
 	if (!quicksave_capture_started && Automated_capture.enabled && Automated_capture.gameplay_frame == 20 &&
 		Automated_capture.quicksave_slot != INT_MAX) {

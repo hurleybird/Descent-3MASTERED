@@ -1004,6 +1004,7 @@ public:
 	void GetFramePacingInfo(renderer_frame_pacing_info* info) override;
 	void GetVrrInfo(renderer_vrr_info* info) override;
 	bool BeginPostPresentFrame() override;
+	bool BeginDisplayFrame() override;
 	bool IsPostPresentFramePending() const override;
 	void StartPostPresentFrame(int x1, int y1, int x2, int y2, int clear_flags = RF_CLEAR_ZBUFFER) override;
 	void EndPostPresentFrame() override;

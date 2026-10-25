@@ -36,6 +36,7 @@
 
 #include <fcntl.h>
 #include <string.h>
+#include <string>
 
 
 #include "movie.h"
@@ -48,6 +49,8 @@
 #include "bitmap.h"
 #include "gamefont.h"
 #include "game.h"
+#include "gameloop.h"
+#include "args.h"
 
 #include "../mve/libmve.h"
 #include "llsopenal.h"
@@ -64,6 +67,9 @@ namespace
 	uint                  Movie_current_framenum = 0;
 	bool                  Movie_looping = false;
 	bool				  Movie_vid_set = false;
+	const char* Movie_capture_output = nullptr;
+	unsigned int Movie_capture_frame = 0;
+	bool Movie_capture_complete = false;
 }
 
 void* CallbackAlloc( unsigned int size );
@@ -114,6 +120,17 @@ void mve_SetRenderProperties(short x, short y, short w, short h, bool hicolor)
 int mve_PlayMovie( const char *pMovieName, oeApplication *pApp )
 {
 #ifndef NO_MOVIES
+	Movie_capture_output = nullptr; Movie_capture_frame = 0; Movie_capture_complete = false;
+	const int capture_arg = FindArg("-capture-decoded-movie-output");
+	if (capture_arg) {
+		Movie_capture_output = GetArg(capture_arg+1);
+		const int frame_arg = FindArg("-capture-decoded-movie-frame");
+		const char* value = frame_arg ? GetArg(frame_arg+1) : nullptr;
+		char* end = nullptr; const long frame = value ? strtol(value,&end,10) : -1;
+		if (!Movie_capture_output || !*Movie_capture_output || !value || end == value || *end || frame < 2 || frame > 600)
+			Error("Invalid decoded movie capture request");
+		Movie_capture_frame = unsigned(frame);
+	}
 	// open movie file.
 	int hFile = open( pMovieName, O_RDONLY|O_BINARY );
 	if( hFile == -1 )
@@ -153,6 +170,7 @@ int mve_PlayMovie( const char *pMovieName, oeApplication *pApp )
 	Movie_current_framenum = 0;
 	while( (result = MVE_rmStepMovie()) == 0 )
 	{
+		if (Movie_capture_complete) break;
 		// let the OS do its thing
 		pApp->defer();
 	
@@ -188,7 +206,7 @@ int mve_PlayMovie( const char *pMovieName, oeApplication *pApp )
 	{
 		err = MVELIB_PLAYBACK_ABORTED;
 	}
-	else if( result != MVE_ERR_EOF )
+	else if( result != MVE_ERR_EOF && !Movie_capture_complete )
 	{
 		err = MVELIB_PLAYBACK_ERROR;
 	}
@@ -343,6 +361,8 @@ void CallbackShowFrame( unsigned char* buf, unsigned int bufw, unsigned int bufh
 		rend_SetPreferredState(&Render_preferred_state);
 	}
 
+	// Decoded movie pixels are finished display color, not scene radiance.
+	if (!rend_BeginDisplayFrame()) Error("Decoded movie display frame unavailable");
 	StartFrame( 0, 0, drawWidth, drawHeight, false );
 
 	rend_ClearScreen( GR_BLACK );
@@ -366,6 +386,19 @@ void CallbackShowFrame( unsigned char* buf, unsigned int bufw, unsigned int bufh
 	++Movie_current_framenum;
 
 	EndFrame();
+	if (Movie_capture_output && (Movie_current_framenum == Movie_capture_frame-1 ||
+		Movie_current_framenum == Movie_capture_frame)) {
+		const std::string path = Movie_current_framenum == Movie_capture_frame ? Movie_capture_output :
+			std::string(Movie_capture_output)+".previous.png";
+		if (!rend_SaveScreenshotPNG(path.c_str())) Error("Decoded movie display export failed");
+		if (Movie_current_framenum == Movie_capture_frame) {
+			if (!bm_SaveBitmapPNG((std::string(Movie_capture_output)+".source.png").c_str(),Movie_bm_handle))
+				Error("Decoded movie source export failed");
+			Movie_capture_complete = true;
+		}
+		AutomatedCaptureLog("scene decoded movie exported frame=%u width=%d height=%d revision=%llu output=%s",
+			Movie_current_framenum,drawWidth,drawHeight,static_cast<unsigned long long>(bm_ContentRevision(Movie_bm_handle)),path.c_str());
+	}
 
 	rend_Flip();
 }

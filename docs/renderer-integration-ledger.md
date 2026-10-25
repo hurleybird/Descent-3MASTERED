@@ -1183,3 +1183,37 @@ three exact-command repetitions. No renderer changes resulted from that suspicio
 Root Release contracts pass. Remaining UI acceptance includes actually accepting
 the save-description/overwrite dialogs, uploaded logos, interactive movies and
 consoles/module consumers. The no-probe promotion gate remains closed.
+
+## Explicit display-color frames and decoded movie consumer (I25)
+
+rend_BeginDisplayFrame declares a replacement full-display canvas of already
+encoded color. It publishes/clears owned RGBA8 display storage directly, drops
+old overlay membership and current scene motion inputs, and never resolves a
+scratch world image or applies world AO/bloom/motion/SSAA/game gamma. The normal
+world composite path is unchanged. This is a source-selected output contract,
+not a decoder-specific conditional in the world executor. Movie callbacks,
+subtitle policy and playback cadence remain outside rendering.
+
+CallbackShowFrame now uses this entry point for its real decoded mutable bitmap.
+The obsolete DoMissionMovie windowed-mode skip is removed: native windowed decode
+and return to gameplay are qualified, not replaced with a synthetic image.
+Bounded explicit capture requests retain consecutive presented frames and the
+actual decoded bitmap source; normal playback/export timing is unchanged.
+
+qual-decoded-movie-v2-20261024 passes real mainmenu.mve at640x480 with SSAA4/MSAA4,
+AO/bloom/modern blur enabled. The movie image is byte-identical to the clean
+SSAA1/MSAA0/effects-off run; world effect settings cannot leak into display color.
+qual-decoded-palette-20261024 passes real dolby1.mv8 palette decoding at640x360.
+Both have increasing bitmap revisions and distinct consecutive frames. Every GPU
+pixel matches its decoded source after the exact current1555 upload conversion,
+with zero opacity failures. Native source PNG bit-replicates channels, whereas
+gl_image's unpacked RGBA8 table truncates255*(n/31) (gl_init disables packed pixels).
+The comparator implements that exact conversion, not a per-channel tolerance;
+the initially tried nearest-byte normalized expansion was rejected by evidence.
+Both movie and resumed-game images were visually inspected. These clips have no
+enabled subtitles, so subtitle layout remains a separate qualification target.
+
+qual-ui-regress-{before,after}-20261024 compares all eight ordinary saves at30
+against the frozen executable preceding the UI completion change: all eight are
+pixel-identical, full-frame/full-opacity. This is not a pre-rewrite performance
+comparison. Root Release contracts pass; hosted CI40163618373 at1a2d734 is green.

@@ -69,6 +69,26 @@
       "exportScale": 1, "exportTga": true,
       "purpose": "Native bitmap readback/TGA export, compared with the same published frame at its documented 5-bit color precision."
     },
+    "decoded-movie": {
+      "revision": 1, "minimumFrame": 30, "inspectionRequired": true,
+      "movieInput": "mainmenu.mve",
+      "movieCaptureFrame": 16,
+      "sourceUpload1555": true,
+      "arguments": ["-capture-decoded-movie-name", "mainmenu.mve", "-capture-decoded-movie-frame", "16", "-capture-decoded-movie-output", "{ui-output}", "-scene-gl-audit"],
+      "uiExport": true,
+      "requiredLog": ["scene decoded movie exported frame=15", "scene decoded movie exported frame=16", "scene decoded movie returned frame=20"],
+      "purpose": "Actual windowed mission movie entry, decoded mutable bitmap into explicit display color at native video dimensions, exact source-pixel check and distinct consecutive frames, then restoration/resumed gameplay. This clip has no subtitles."
+    },
+    "decoded-movie-paletted": {
+      "revision": 1, "minimumFrame": 30, "inspectionRequired": true,
+      "movieInput": "dolby1.mv8",
+      "movieCaptureFrame": 60,
+      "sourceUpload1555": true,
+      "arguments": ["-capture-decoded-movie-name", "dolby1.mv8", "-capture-decoded-movie-frame", "60", "-capture-decoded-movie-output", "{ui-output}", "-scene-gl-audit"],
+      "uiExport": true,
+      "requiredLog": ["scene decoded movie exported frame=59", "scene decoded movie exported frame=60", "scene decoded movie returned frame=20"],
+      "purpose": "Native paletted MV8 decode, palette translation and per-frame upload into the explicit display canvas, then restore gameplay."
+    },
     "quicksave": {
       "revision": 1, "minimumFrame": 22, "inspectionRequired": true,
       "quickSaveSlot": 3,

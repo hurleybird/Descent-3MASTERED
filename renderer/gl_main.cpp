@@ -2060,6 +2060,25 @@ bool GL4Renderer::BeginPostPresentFrame()
 	return true;
 }
 
+bool GL4Renderer::BeginDisplayFrame()
+{
+	if (!framebuffer_ok || modal_ui_frame_active || cockpit_scene_frame_active ||
+		OpenGL_state.screen_width <= 0 || OpenGL_state.screen_height <= 0) return false;
+	FlushFontBatch();
+	post_present_framebuffer.Update(OpenGL_state.screen_width,OpenGL_state.screen_height,0,GL_RGBA8);
+	if (!post_present_framebuffer.Handle()) return false;
+	// This producer replaces the entire display. It does not resolve or consume
+	// any scratch world image, nor inherit an overlay from a previous publication.
+	display_image.invalidate();
+	display_image.beginBase();
+	modal_ui_composite_pending = false;
+	scene_motion = {};
+	StartPostPresentFrame(0,0,OpenGL_state.screen_width,OpenGL_state.screen_height,
+		RF_CLEAR_COLOR | RF_CLEAR_ZBUFFER);
+	UseDrawVAO();
+	return true;
+}
+
 bool GL4Renderer::IsPostPresentFramePending() const
 {
 	return display_image.composing();

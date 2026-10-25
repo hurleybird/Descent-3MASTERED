@@ -45,7 +45,7 @@ param(
     [switch]$HistoryProbe,
     [switch]$DeformationProbe,
     [string]$DemoFile = '',
-    [ValidateSet('ordinary','retirement','save-export','save-settings','auxiliary-lifecycle','modal-ui','save-dialog','quicksave','screenshot-normal','screenshot-clean','screenshot-double','screenshot-tga','demo-movie')][string]$Scenario = 'ordinary'
+    [ValidateSet('ordinary','retirement','save-export','save-settings','auxiliary-lifecycle','modal-ui','save-dialog','quicksave','decoded-movie','decoded-movie-paletted','screenshot-normal','screenshot-clean','screenshot-double','screenshot-tga','demo-movie')][string]$Scenario = 'ordinary'
 )
 
 # Run only copied installations and copied pilot/save data. Never point Runtime
@@ -176,6 +176,7 @@ $manifest = [ordered]@{
     export_comparison_hash = (Get-FileHash -LiteralPath (Join-Path $PSScriptRoot 'renderer-export-images.ps1')).Hash
     input_kind = $(if ($inputIsDemo) {'demo'} else {'save'})
     preview_input_hash = $(if ($scenarioSpec.previewInput) { (Get-FileHash -LiteralPath (Join-Path $seedPath ('savegame/'+$scenarioSpec.previewInput))).Hash } else { $null })
+    movie_input_hash = $(if ($scenarioSpec.movieInput) { (Get-FileHash -LiteralPath (Join-Path $runtimePath ('movies/'+$scenarioSpec.movieInput))).Hash } else { $null })
     scenario_required_log = $scenarioSpec.requiredLog
     runtime = $runtimePath; profile = $Profile; frame = $Frame; seed = $(if ($inputIsDemo) {$null} else {$Seed}); scene_inspection = [bool]$SceneInspection
     rng_policy = $(if ($inputIsDemo) {'Native demo playback, including recorded event seeds; no capture-seed override'} else {'Fixed seed after native save load'})
@@ -382,6 +383,27 @@ try {
             $uiExists = Test-Path -LiteralPath $uiImage
             $scenarioValidated = $scenarioValidated -and $uiExists
             $exports += [ordered]@{ui_image=$uiImage; hash=$(if ($uiExists) { (Get-FileHash -LiteralPath $uiImage).Hash } else { $null })}
+            if ($scenarioSpec.movieInput) {
+                foreach ($suffix in @('.previous.png','.source.png')) {
+                    $exists = Test-Path -LiteralPath ($uiImage+$suffix)
+                    $scenarioValidated = $scenarioValidated -and $exists
+                    $exports += [ordered]@{movie_image=$uiImage+$suffix; hash=$(if ($exists) {(Get-FileHash -LiteralPath ($uiImage+$suffix)).Hash} else {$null})}
+                }
+                $frames = [regex]::Matches($logText,'scene decoded movie exported frame=(\d+) width=\d+ height=\d+ revision=(\d+)')
+                $scenarioValidated = $scenarioValidated -and $frames.Count -eq 2
+                if ($frames.Count -eq 2) {
+                    $scenarioValidated = $scenarioValidated -and [int]$frames[0].Groups[1].Value -eq $scenarioSpec.movieCaptureFrame-1 -and
+                        [int]$frames[1].Groups[1].Value -eq $scenarioSpec.movieCaptureFrame -and
+                        [uint64]$frames[1].Groups[2].Value -gt [uint64]$frames[0].Groups[2].Value
+                }
+                if ($scenarioValidated) {
+                    . (Join-Path $PSScriptRoot 'renderer-export-images.ps1')
+                    $comparison = Test-RendererExportImage -Reference ($uiImage+'.source.png') -Export $uiImage -Upload1555 ([bool]$scenarioSpec.sourceUpload1555)
+                    $changed = (Get-FileHash -LiteralPath $uiImage).Hash -ne (Get-FileHash -LiteralPath ($uiImage+'.previous.png')).Hash
+                    $scenarioValidated = $comparison.mismatches -eq 0 -and $comparison.transparent -eq 0 -and $changed
+                    $exports += [ordered]@{decoded_source_comparison=$comparison; consecutive_frames_changed=$changed}
+                }
+            }
         }
         if ($Scenario -eq 'quicksave') {
             $audit = [regex]::Matches($logText,'scene save thumbnail simulation state unchanged frame=\d+ evidence=(.+)')

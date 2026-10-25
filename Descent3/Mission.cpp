@@ -1234,10 +1234,7 @@ bool Skip_next_movie = false;
 void DoMissionMovie(char* movie)
 {
 	char temppath[PSPATHNAME_LEN + PSFILENAME_LEN];
-	if (PROGRAM(windowed)) {
-		mprintf((0, "Skipping movie...can't do in windowed mode!\n"));
-		return;
-	}
+	// The decoded-image presenter supports windowed and fullscreen output alike.
 	//Don't play this movie the first time through. This is a horrible hack.
 	if (Skip_next_movie)
 	{

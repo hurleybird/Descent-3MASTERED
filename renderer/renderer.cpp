@@ -568,6 +568,11 @@ bool rend_BeginPostPresentFrame()
 	return renderer_inst->BeginPostPresentFrame();
 }
 
+bool rend_BeginDisplayFrame()
+{
+	return Renderer_initted && renderer_inst->BeginDisplayFrame();
+}
+
 bool rend_IsPostPresentFramePending()
 {
 	if (!Renderer_initted)
