@@ -245,6 +245,7 @@ struct automated_capture_state
 	int target_frame;
 	int series_from_frame;
 	int series_until_frame;
+	int series_stride;
 	int options_after_frame;
 	int quicksave_slot;
 	int screenshot_mode; // 0 off, 1 normal, 2 clean, 3 doubled, 4 clean+doubled
@@ -545,6 +546,8 @@ static void InitAutomatedCapture()
 	Automated_capture.heading_from_frame = capture_frame_option("-capture-heading-from", 0);
 	Automated_capture.series_from_frame = capture_frame_option("-capture-series-from", INT_MAX);
 	Automated_capture.series_until_frame = capture_frame_option("-capture-series-until", INT_MAX);
+	Automated_capture.series_stride = capture_frame_option("-capture-series-stride", 1);
+	if (!Automated_capture.series_stride) Error("Capture series stride must be positive");
 	Automated_capture.options_after_frame = capture_frame_option("-capture-options-after", 0);
 	Automated_capture.quicksave_slot = capture_frame_option("-capture-quicksave-slot", INT_MAX);
 	if (Automated_capture.quicksave_slot != INT_MAX && Automated_capture.quicksave_slot >= GAMESAVE_SLOTS)
@@ -717,6 +720,24 @@ static void BeginAutomatedCaptureFrame()
 		return;
 
 	Automated_capture.gameplay_frame_active = true;
+	if (FindArg("-capture-message-consoles")) {
+		const int frame = Automated_capture.gameplay_frame;
+		if (frame == 10) {
+			AddHUDMessage("Renderer HUD console qualification");
+			AddGameMessage("Renderer game console qualification");
+			OpenHUDMessageConsole();
+			if (!AreHUDMessageConsolesOpen()) Error("Native HUD message console did not open");
+			AutomatedCaptureLog("scene console transition frame=10 kind=hud open=1");
+		} else if (frame == 20) {
+			OpenGameMessageConsole();
+			if (!AreHUDMessageConsolesOpen()) Error("Native game message console did not open");
+			AutomatedCaptureLog("scene console transition frame=20 kind=game open=1");
+		} else if (frame == 25) {
+			CloseHUDMessageConsole(); CloseGameMessageConsole();
+			if (AreHUDMessageConsolesOpen()) Error("Native message consoles did not close");
+			AutomatedCaptureLog("scene console transition frame=25 open=0");
+		}
+	}
 	if (Automated_capture.gameplay_frame == 20 && Automated_capture.screenshot_mode) {
 		const int mode = Automated_capture.screenshot_mode;
 		if (mode >= 3) RequestDoubleResolutionScreenshot();
@@ -765,6 +786,7 @@ static void BeginAutomatedCaptureFrame()
 		Automated_capture.gameplay_frame == Automated_capture.target_frame ||
 		(Automated_capture.gameplay_frame >= Automated_capture.series_from_frame &&
 		 Automated_capture.gameplay_frame <= Automated_capture.series_until_frame &&
+		 (Automated_capture.gameplay_frame-Automated_capture.series_from_frame)%Automated_capture.series_stride == 0 &&
 		 Automated_capture.gameplay_frame < Automated_capture.target_frame);
 	if (!Automated_capture.realtime)
 		Frametime = Automated_capture.fixed_delta;

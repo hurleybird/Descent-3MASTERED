@@ -45,7 +45,7 @@ param(
     [switch]$HistoryProbe,
     [switch]$DeformationProbe,
     [string]$DemoFile = '',
-    [ValidateSet('ordinary','retirement','save-export','save-settings','auxiliary-lifecycle','modal-ui','save-dialog','quicksave','decoded-movie','decoded-movie-paletted','decoded-movie-subtitles','screenshot-normal','screenshot-clean','screenshot-double','screenshot-tga','demo-movie')][string]$Scenario = 'ordinary'
+    [ValidateSet('ordinary','retirement','save-export','save-settings','auxiliary-lifecycle','modal-ui','save-dialog','quicksave','decoded-movie','decoded-movie-paletted','decoded-movie-subtitles','message-consoles','screenshot-normal','screenshot-clean','screenshot-double','screenshot-tga','demo-movie')][string]$Scenario = 'ordinary'
 )
 
 # Run only copied installations and copied pilot/save data. Never point Runtime
@@ -356,6 +356,12 @@ try {
             $scenarioValidated = $scenarioValidated -and ($logText -match $pattern)
         }
         $exports = @()
+        foreach ($evidenceFrame in $scenarioSpec.evidenceFrames) {
+            $evidence = $png+'.frame'+('{0:D6}' -f [int]$evidenceFrame)+'.png'
+            $exists = Test-Path -LiteralPath $evidence
+            $scenarioValidated = $scenarioValidated -and $exists
+            $exports += [ordered]@{frame=$evidenceFrame; image=$evidence; hash=$(if ($exists) {(Get-FileHash -LiteralPath $evidence).Hash} else {$null})}
+        }
         if ($inputIsDemo) {
             . (Join-Path $PSScriptRoot 'renderer-export-images.ps1')
             $movieImages = [regex]::Matches($logText,'native screenshot saved path=(.+) width=\d+ height=\d+ scale=1 format=png')

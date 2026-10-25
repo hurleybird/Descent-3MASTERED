@@ -1256,3 +1256,15 @@ subtitle-dialog-20261024 passes the real deferred save preview after the stricte
 completion check. Root Release and standalone Debug pass all3contracts, including
 timeline reset/replay/skips/overflow and240/360/480/1080-line layout. Hosted
 CI40164486113 atf4d6ed2 is green. Full release qualification remains open.
+
+## Real message-console lifecycle (I25)
+
+Registered message-consoles uses native message/console APIs: HUD rollback opens
+at10, switching to the game-message console at20 closes the first, and both close
+at25. Sparse capture stride retains15/22/29 plus final30 without a large frame
+dump. qual-consoles-20261024 passes003/006; inspected images show the correct
+headers, actual loaded mission messages, wrapped fixture text and translucent
+panel over the world, then no residual panel after closing. No renderer world
+callback or alternate traversal was introduced. Root Release contracts pass;
+hosted CI40165585015 at4b31483 is green. Source/UI coverage is advancing, but
+ordinary no-probe release acceptance remains closed.

@@ -69,6 +69,13 @@
       "exportScale": 1, "exportTga": true,
       "purpose": "Native bitmap readback/TGA export, compared with the same published frame at its documented 5-bit color precision."
     },
+    "message-consoles": {
+      "revision": 1, "minimumFrame": 30, "inspectionRequired": true,
+      "arguments": ["-capture-message-consoles", "-capture-series-from", "15", "-capture-series-until", "29", "-capture-series-stride", "7"],
+      "evidenceFrames": [15,22,29],
+      "requiredLog": ["scene console transition frame=10 kind=hud open=1", "scene console transition frame=20 kind=game open=1", "scene console transition frame=25 open=0"],
+      "purpose": "Real HUD rollback console, switch to game message console through native source APIs, then close both and resume. Sparse images retain both open states and closed output."
+    },
     "decoded-movie": {
       "revision": 1, "minimumFrame": 30, "inspectionRequired": true,
       "movieInput": "mainmenu.mve",
