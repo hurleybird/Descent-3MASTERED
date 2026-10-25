@@ -1068,3 +1068,42 @@ reproduced: piping native cmake --version to Select-Object -First1 produced exit
 in99/100 Windows PowerShell trials; draining output first gives0/100 failures.
 467aa64 fixes both CI identity and package metadata capture without masking native
 errors. This does not replace GPU/interactive qualification or promote Candidate.
+
+## Owned display publication and export (I25/I26)
+
+The pre-world export defect above is fixed at display publication, not by making
+readback reconstruct a frame from the current scratch target. DisplayImagePublication
+tracks empty/composing/presented base state and an independently published modal
+overlay. Swapping preserves readable output; new base publication and resize
+invalidate old overlay membership. World/auxiliary/thumbnail execution cannot
+retire the last completed display. Paused modal frames reuse its frozen base
+without rerunning world postprocessing or accumulating the preceding UI overlay.
+
+PNG and legacy bitmap export now read this owned base. UI exports first finish
+deferred modal painting; immediate nonmodal UI explicitly publishes its painted
+frame. Modal layers retain native-density GPU presentation. Only export performs
+CPU premultiplied source-over composition (bilinear layer sampling, UI-only gamma);
+normal presentation gains no full-frame copy/readback or CPU pixel work. Common
+GL readback preserves read/draw targets, read mode, PBO and all used pack stride/
+offset state. An explicit GL audit checks exact pixels under hostile PBO/packing
+state. CPU contracts cover publication transitions and export blending/validation.
+
+Native evidence, private runtime only:
+- qual-display-v1-20261023: corridor003 and actual mirror006 pass registered
+  save-export revision2. The first pre-world export is byte-identical to the
+  separately saved preceding displayed frame19, not merely equal before/after
+  a thumbnail. Both actual saves decode with zero pixel/opacity mismatches;
+  main temporal history remains valid. Inspected corridor readback contains the
+  correct complete world/HUD/cockpit. Ordinary final003 matches the preceding
+  qualified executable pixel-for-pixel. Hostile GL readback audit passes.
+- qual-display-retire-20261023: registered mirror006 retirement passes after
+  explicit scene reset/double GPU retirement/rebuild.
+- qual-modal-20261024: new registered modal-ui case opens the real OptionsMenu
+  after20 gameplay frames, exports after five real menu paints, then resumes
+  gameplay through22. Inspected UI PNG has the options over the frozen corridor;
+  final gameplay has no residual UI or black backdrop. Both exports succeed.
+
+Root Release and standalone Debug pass all3 contracts. This closes the identified
+display-source defect, not the entire UI/export gate: real pilot/custom-logo/
+movie/console consumers, normal save/quicksave UI, clean/doubled screenshots and
+demo movie caller coverage still need qualification. No autosave caller was found.

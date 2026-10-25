@@ -1,5 +1,6 @@
 // Descent 3MASTERED - GPL-3.0-or-later
 #include "gl_local.h"
+#include "gl_readback.h"
 #include "gl_mesh.h"
 #include "SceneView.h"
 #include "SceneGeometry.h"
@@ -1322,24 +1323,7 @@ d3scene::ImageMip GL4Renderer::ReadViewImage(const d3scene::Presentation& presen
     if (scene_asset_lifetime != presentation.data().scene_lifetime || found == scene_view_images.end() ||
         found->second.sequence != presentation.data().sequence)
         throw std::logic_error("Readback requested a missing or stale view image");
-    auto& buffer = found->second.buffer;
-    d3scene::ImageMip result; result.width = buffer.Width(); result.height = buffer.Height();
-    result.pixels.resize(size_t(result.width)*result.height*4);
-    GLint read,draw,pack_buffer,alignment,row_length,skip_rows,skip_pixels;
-    glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING,&read); glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING,&draw);
-    glGetIntegerv(GL_PIXEL_PACK_BUFFER_BINDING,&pack_buffer); glGetIntegerv(GL_PACK_ALIGNMENT,&alignment);
-    glGetIntegerv(GL_PACK_ROW_LENGTH,&row_length); glGetIntegerv(GL_PACK_SKIP_ROWS,&skip_rows);
-    glGetIntegerv(GL_PACK_SKIP_PIXELS,&skip_pixels);
-    glBindBuffer(GL_PIXEL_PACK_BUFFER,0); glPixelStorei(GL_PACK_ALIGNMENT,1);
-    glPixelStorei(GL_PACK_ROW_LENGTH,0); glPixelStorei(GL_PACK_SKIP_ROWS,0); glPixelStorei(GL_PACK_SKIP_PIXELS,0);
-    buffer.BindForRead();
-    glReadBuffer(GL_COLOR_ATTACHMENT0);
-    glReadPixels(0,0,result.width,result.height,GL_RGBA,GL_UNSIGNED_BYTE,result.pixels.data());
-    glBindFramebuffer(GL_READ_FRAMEBUFFER,read); glBindFramebuffer(GL_DRAW_FRAMEBUFFER,draw);
-    glBindBuffer(GL_PIXEL_PACK_BUFFER,pack_buffer); glPixelStorei(GL_PACK_ALIGNMENT,alignment);
-    glPixelStorei(GL_PACK_ROW_LENGTH,row_length); glPixelStorei(GL_PACK_SKIP_ROWS,skip_rows); glPixelStorei(GL_PACK_SKIP_PIXELS,skip_pixels);
-    if (glGetError() != GL_NO_ERROR) throw std::runtime_error("View image readback failed");
-    return result;
+    return GL_ReadColorImage(found->second.buffer);
 }
 d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::PreparedView& prepared) {
     const auto& presentation = prepared.frame();
@@ -1347,8 +1331,8 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::PreparedVi
     EnsureSceneLifetime(presentation);
     const bool display_target = view.target == d3scene::ViewTarget::Display;
     if (!framebuffer_ok || modal_ui_frame_active ||
-        (display_target && (!post_present_pending_swap || cockpit_scene_frame_active)) ||
-        (!display_target && post_present_pending_swap && !cockpit_scene_frame_active) ||
+        (display_target && (!display_image.composing() || cockpit_scene_frame_active)) ||
+        (!display_target && display_image.composing() && !cockpit_scene_frame_active) ||
         (view.kind == d3scene::ViewKind::Main && cockpit_scene_frame_active))
         Error("Scene view target is unavailable in the current composition phase");
     auto& output = display_target ? post_present_framebuffer : framebuffers[framebuffer_current_draw];
@@ -1446,6 +1430,10 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     check_scene_error("font flush");
     if (!scene_sample_resolve_verified) {
         GL_VerifySceneSampleResolve();
+        if (audit_scene_gl) {
+            GL_VerifyColorReadback();
+            AutomatedCaptureLog("scene readback verified: owned image, preserved targets/read mode/PBO/packing");
+        }
         scene_sample_resolve_verified = true;
         check_scene_error("sample resolve self-test");
     }

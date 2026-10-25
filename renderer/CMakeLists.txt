@@ -1,6 +1,8 @@
 SET (RENDERER_SOURCES
 		renderer/Scene.h
 		renderer/SceneCache.h
+		renderer/DisplayImage.h
+		renderer/gl_readback.h
 		renderer/Scene.cpp
 		renderer/SceneView.h
 		renderer/SceneMeshExposure.h

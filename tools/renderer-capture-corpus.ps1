@@ -44,7 +44,7 @@ param(
     [ValidateSet(-1,0,1,2)][int]$LodProbeTier = -1,
     [switch]$HistoryProbe,
     [switch]$DeformationProbe,
-    [ValidateSet('ordinary','retirement','save-export','save-settings','auxiliary-lifecycle')][string]$Scenario = 'ordinary'
+    [ValidateSet('ordinary','retirement','save-export','save-settings','auxiliary-lifecycle','modal-ui')][string]$Scenario = 'ordinary'
 )
 
 # Run only copied installations and copied pilot/save data. Never point Runtime
@@ -283,8 +283,9 @@ try {
         if ($LodProbeTier -ge 0) { $arguments += @('-scene-lod-probe',"$LodProbeTier") }
         if ($DeformationProbe) { $arguments += '-scene-deformation-probe' }
         $nativeSave = Join-Path $outputPath "$save.native"
+        $uiImage = Join-Path $outputPath "$save.ui.png"
         foreach ($argument in $scenarioSpec.arguments) {
-            $value = $argument.Replace('{save-output}',$nativeSave)
+            $value = $argument.Replace('{save-output}',$nativeSave).Replace('{ui-output}',$uiImage)
             if ($value -match '\s') { $value = '"'+$value+'"' }
             $arguments += $value
         }
@@ -318,6 +319,11 @@ try {
             $scenarioValidated = $scenarioValidated -and ($logText -match $pattern)
         }
         $exports = @()
+        if ($Scenario -eq 'modal-ui') {
+            $uiExists = Test-Path -LiteralPath $uiImage
+            $scenarioValidated = $scenarioValidated -and $uiExists
+            $exports += [ordered]@{ui_image=$uiImage; hash=$(if ($uiExists) { (Get-FileHash -LiteralPath $uiImage).Hash } else { $null })}
+        }
         if ($Scenario -in @('save-export','save-settings')) {
             $pairs = @(Get-ChildItem -LiteralPath $outputPath -Filter "$save.native.audit*.live-before.png")
             $minimumPairs = if ($Scenario -eq 'save-export') { 2 } else { 1 }
@@ -338,6 +344,14 @@ try {
                 $exports += [ordered]@{before=$before.Name; before_hash=$beforeHash; after_hash=$afterHash
                     thumbnail_hash=(Get-FileHash -LiteralPath $thumbnail).Hash
                     world_hash=(Get-FileHash -LiteralPath $world).Hash}
+            }
+            if ($scenarioSpec.previousDisplayFrame -ne $null) {
+                $reference = $png+'.frame'+('{0:D6}' -f [int]$scenarioSpec.previousDisplayFrame)+'.png'
+                $beforeWorld = Join-Path $outputPath "$save.native.audit1.live-before.png"
+                $published = (Get-FileHash -LiteralPath $reference).Hash
+                $selected = (Get-FileHash -LiteralPath $beforeWorld).Hash
+                $scenarioValidated = $scenarioValidated -and $published -eq $selected
+                $exports += [ordered]@{presented_reference_hash=$published; before_world_selected_hash=$selected}
             }
         }
         if ($AutomapProbe) { $resourceValidated = $logText.Contains('scene automap prepared rooms=') }

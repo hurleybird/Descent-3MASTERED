@@ -24,4 +24,8 @@ std::array<uint8_t,4> imageRgbaPixel(ImageFormat,uint16_t);
 // Non-overlapping rows; caller supplies count*4 destination bytes. Accepts
 // unaligned packed sources and preserves the scalar conversion exactly.
 void expandImageRgba(ImageFormat,const uint8_t* source,size_t count,uint8_t* destination);
+// Export-only composition of retained display layers. Same origin for both
+// inputs, bilinear UI sampling, premultiplied source-over and UI-only gamma.
+// Keeps native-density UI separate during regular presentation: no frame copy.
+ImageMip compositeDisplayReadback(ImageMip base,const ImageMip& overlay,float gamma);
 }

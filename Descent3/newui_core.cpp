@@ -22,6 +22,7 @@
 #include "mem.h"
 #include "pserror.h"
 #include "game.h"
+#include "gameloop.h"
 #include "ddio.h"
 #include "renderer.h"
 #include "descent.h"
@@ -572,6 +573,18 @@ static const char* UI_screenshot_and_quit_filename = NULL;
 static bool UI_defer_modal_frame_end = false;
 static bool UI_deferred_modal_frame = false;
 
+// Export the current UI producer's completed composition, not whichever scene
+// target the renderer happened to bind. Deferred modal paint must finish first.
+static void PublishUIFrameForReadback()
+{
+	if (UI_deferred_modal_frame) {
+		UI_deferred_modal_frame = false;
+		rend_EndModalUIFrame();
+	}
+	if (!rend_IsPostPresentFramePending() && !rend_BeginPostPresentFrame())
+		Error("UI export has no composed display image");
+}
+
 int DoUI()
 {
 	// this should poll UI_frame_result.
@@ -671,7 +684,10 @@ void DoUIFrame()
 
 		if (UI_screenshot_and_quit_filename)
 		{
-			rend_SaveScreenshotPNG(UI_screenshot_and_quit_filename);
+			PublishUIFrameForReadback();
+			if (!rend_SaveScreenshotPNG(UI_screenshot_and_quit_filename))
+				Error("UI composed display export failed");
+			AutomatedCaptureLog("scene UI export saved output=%s", UI_screenshot_and_quit_filename);
 			UI_screenshot_and_quit_filename = NULL;
 			UI_frame_result = NEWUIRES_FORCEQUIT;
 		}
@@ -680,6 +696,7 @@ void DoUIFrame()
 	if (UI_input.printscreen) 
 	{
 		UI_input.printscreen = false;
+		PublishUIFrameForReadback();
 		DoScreenshot();
 	}
 }

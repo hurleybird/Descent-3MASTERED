@@ -17,6 +17,8 @@
 * along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 #include "gl_local.h"
+#include "gl_readback.h"
+#include "SceneImages.h"
 #include "args.h"
 #include "gameloop.h"
 #include "game.h"
@@ -1633,7 +1635,7 @@ void GL4Renderer::StartFrame(int x1, int y1, int x2, int y2, int clear_flags)
 		return;
 	}
 
-	if (post_present_pending_swap)
+	if (display_image.composing())
 	{
 		StartPostPresentFrame(x1, y1, x2, y2, clear_flags);
 		return;
@@ -1740,7 +1742,7 @@ void GL4Renderer::Flip()
 {
 	FlushFontBatch();
 
-	if (post_present_pending_swap)
+	if (display_image.composing())
 	{
 		EndPostPresentFrame();
 		if (GetFunctionMode() == MENU_MODE)
@@ -1898,7 +1900,7 @@ bool GL4Renderer::BeginPostPresentFrame()
 {
 	FlushFontBatch();
 
-	if (post_present_pending_swap)
+	if (display_image.composing())
 		return true;
 
 
@@ -2054,13 +2056,13 @@ bool GL4Renderer::BeginPostPresentFrame()
 		Int3();
 	}
 #endif
-	post_present_pending_swap = true;
+	display_image.beginBase();
 	return true;
 }
 
 bool GL4Renderer::IsPostPresentFramePending() const
 {
-	return post_present_pending_swap;
+	return display_image.composing();
 }
 
 
@@ -2387,7 +2389,7 @@ void GL4Renderer::EndPostPresentFrame()
 {
 	FlushFontBatch();
 
-	if (post_present_pending_swap)
+	if (display_image.composing())
 	{
 		UpdatePresentRect();
 		blitshader.Use();
@@ -2431,19 +2433,19 @@ void GL4Renderer::EndPostPresentFrame()
 #if defined(SDL3)
 	{
 		PERF_MARKER_SCOPE("Renderer.Flip.SwapBuffers");
-		GL4PerfPresentState("BeforeSwap", framebuffer_current_draw, post_present_pending_swap);
+		GL4PerfPresentState("BeforeSwap", framebuffer_current_draw, display_image.composing());
 		SDL_GL_SwapWindow(GLWindow);
 	}
 #elif defined(WIN32)
 	{
 		PERF_MARKER_SCOPE("Renderer.Flip.SwapBuffers");
-		GL4PerfPresentState("BeforeSwap", framebuffer_current_draw, post_present_pending_swap);
+		GL4PerfPresentState("BeforeSwap", framebuffer_current_draw, display_image.composing());
 		SwapBuffers((HDC)hOpenGLDC);
 	}
 #elif defined(__LINUX__)
 	{
 		PERF_MARKER_SCOPE("Renderer.Flip.SwapBuffers");
-		GL4PerfPresentState("BeforeSwap", framebuffer_current_draw, post_present_pending_swap);
+		GL4PerfPresentState("BeforeSwap", framebuffer_current_draw, display_image.composing());
 		SDL_GL_SwapBuffers();
 	}
 #endif
@@ -2461,7 +2463,7 @@ void GL4Renderer::EndPostPresentFrame()
 		post_protection_mask_dirty = false;
 		post_protection_mask_cleared_this_frame = false;
 		motion_vectors_capture_locked = false;
-		post_present_pending_swap = false;
+		display_image.present();
 		cockpit_scene_frame_active = false;
 		// Presentation inputs expire with the composed frame. Menu/canvas frames
 		// must not reuse movement from the last world view.
@@ -2520,7 +2522,7 @@ void GL4Renderer::RenderForeground(const d3scene::Presentation& frame,
 	if (!framebuffer_ok || modal_ui_frame_active || cockpit_scene_frame_active)
 		Error("Foreground composition unavailable in this frame phase");
 	if (layer.composition == d3scene::ForegroundComposition::InScene) {
-		if (post_present_pending_swap) Error("In-scene canvas requested after world presentation completed");
+		if (display_image.composing()) Error("In-scene canvas requested after world presentation completed");
 		FlushFontBatch();
 		for (const auto& view : layer.scene_views) RenderSceneView(d3scene::prepareView(frame,view));
 		UseDrawVAO();
@@ -2565,7 +2567,7 @@ void GL4Renderer::RenderForeground(const d3scene::Presentation& frame,
 
 void GL4Renderer::EndCockpitFrame()
 {
-	if (!post_present_pending_swap)
+	if (!display_image.composing())
 		return;
 
 	FlushFontBatch();
@@ -2596,8 +2598,10 @@ bool GL4Renderer::BeginModalUIFrame(int reference_height)
 	// Modal UI belongs to the resolved display image. If no late/post-present
 	// layer exists yet, resolve the scene now rather than compositing the
 	// 720p UI back into supersampled scene storage.
-	if (!post_present_pending_swap && !BeginPostPresentFrame())
-		return false;
+	if (!display_image.composing()) {
+		if (display_image.readable()) display_image.reuseBase();
+		else if (!BeginPostPresentFrame()) return false;
+	}
 
 	glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &modal_ui_destination_framebuffer);
 	glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &modal_ui_destination_read_framebuffer);
@@ -2669,6 +2673,7 @@ void GL4Renderer::EndModalUIFrame()
 	if (ui_texture == 0)
 		return;
 	modal_ui_composite_pending = true;
+	display_image.publishOverlay();
 
 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, modal_ui_destination_framebuffer);
 	glBindFramebuffer(GL_READ_FRAMEBUFFER, modal_ui_destination_read_framebuffer);
@@ -3463,7 +3468,7 @@ void GL4Renderer::SetAOClass(int value)
 
 bool GL4Renderer::BeginTerrainSurface(bool fog_enabled)
 {
-	if (terrain_surface_active || !framebuffer_ok || post_present_pending_swap ||
+	if (terrain_surface_active || !framebuffer_ok || display_image.composing() ||
 		cockpit_scene_frame_active || post_protection_mask.mask_texture == 0)
 	{
 		return false;
@@ -3732,171 +3737,60 @@ void GL4Renderer::DLLGetRenderState(DLLrendering_state* rstate)
 #undef COPY_ELEMENT
 }
 
-void GL4Renderer::BindScreenshotSourceForRead(int& read_x, int& read_y)
+d3scene::ImageMip GL4Renderer::ReadDisplayImage()
 {
-	read_x = 0;
-	read_y = 0;
-	if (post_present_pending_swap)
-	{
-		post_present_framebuffer.BindForRead();
-		return;
+	if (!display_image.readable() || modal_ui_frame_active) return {};
+	auto pixels = GL_ReadColorImage(post_present_framebuffer);
+	if (display_image.hasOverlay()) {
+		const auto overlay = GL_ReadColorImage(modal_ui_framebuffer);
+		const float gamma = modal_ui_apply_gamma && OpenGL_preferred_state.gamma != 0 ? 1.f/OpenGL_preferred_state.gamma : 1.f;
+		pixels = d3scene::compositeDisplayReadback(std::move(pixels),overlay,gamma);
 	}
-
-	const int supersampling_factor = SupersamplingFactor();
-	const int visible_origin_x = framebuffer_logical_offset_x;
-	const int visible_origin_y =
-		framebuffer_logical_height - OpenGL_state.screen_height - framebuffer_logical_offset_y;
-	const int visible_width = OpenGL_state.screen_width;
-	const int visible_height = OpenGL_state.screen_height;
-	const float display_gamma = OpenGL_preferred_state.gamma != 0.0f ? 1.f / OpenGL_preferred_state.gamma : 1.f;
-
-	Framebuffer* present_framebuffer = &framebuffers[framebuffer_current_draw];
-	if (supersampling_factor >= 4)
-	{
-		downsampleshader.Use();
-		framebuffers[framebuffer_current_draw].DownsampleTo(downscale_framebuffer.Handle(), 0, 0,
-			downscale_framebuffer.Width(), downscale_framebuffer.Height(), downsampleshader_gamma, display_gamma,
-			downsampleshader_dest_origin, downsampleshader_source_visible_origin,
-			downsampleshader_source_visible_size, visible_origin_x * 4,
-			visible_origin_y * 4, visible_width * 4, visible_height * 4);
-		downsampleshader.Use();
-		downscale_framebuffer.DownsampleTo(resolved_framebuffer.Handle(), 0, 0,
-			resolved_framebuffer.Width(), resolved_framebuffer.Height(), downsampleshader_gamma, display_gamma,
-			downsampleshader_dest_origin, downsampleshader_source_visible_origin,
-			downsampleshader_source_visible_size, visible_origin_x * 2,
-			visible_origin_y * 2, visible_width * 2, visible_height * 2);
-		present_framebuffer = &resolved_framebuffer;
-	}
-	else if (supersampling_factor >= 2)
-	{
-		downsampleshader.Use();
-		framebuffers[framebuffer_current_draw].DownsampleTo(resolved_framebuffer.Handle(), 0, 0,
-			resolved_framebuffer.Width(), resolved_framebuffer.Height(), downsampleshader_gamma, display_gamma,
-			downsampleshader_dest_origin, downsampleshader_source_visible_origin,
-			downsampleshader_source_visible_size, visible_origin_x * 2,
-			visible_origin_y * 2, visible_width * 2, visible_height * 2);
-		present_framebuffer = &resolved_framebuffer;
-	}
-
-	if (supersampling_factor >= 2)
-	{
-	post_present_framebuffer.Update(OpenGL_state.screen_width, OpenGL_state.screen_height, 0,GL_RGBA8);
-		const float uv_origin_x = present_framebuffer->Width() > 0 ?
-			(float)visible_origin_x / (float)present_framebuffer->Width() : 0.0f;
-		const float uv_origin_y = present_framebuffer->Height() > 0 ?
-			(float)visible_origin_y / (float)present_framebuffer->Height() : 0.0f;
-		const float uv_scale_x = present_framebuffer->Width() > 0 ?
-			(float)visible_width / (float)present_framebuffer->Width() : 1.0f;
-		const float uv_scale_y = present_framebuffer->Height() > 0 ?
-			(float)visible_height / (float)present_framebuffer->Height() : 1.0f;
-
-		blitshader.Use();
-		glUniform1f(blitshader_gamma, 1.0f);
-		if (blitshader_uv_origin != -1)
-			glUniform2f(blitshader_uv_origin, uv_origin_x, uv_origin_y);
-		if (blitshader_uv_scale != -1)
-			glUniform2f(blitshader_uv_scale, uv_scale_x, uv_scale_y);
-		present_framebuffer->BlitTo(post_present_framebuffer.Handle(), 0, 0,
-			post_present_framebuffer.Width(), post_present_framebuffer.Height(), false);
-		if (blitshader_uv_origin != -1)
-			glUniform2f(blitshader_uv_origin, 0.0f, 0.0f);
-		if (blitshader_uv_scale != -1)
-			glUniform2f(blitshader_uv_scale, 1.0f, 1.0f);
-		ShaderProgram::ClearBinding();
-		post_present_framebuffer.BindForRead();
-	}
-	else
-	{
-		framebuffers[framebuffer_current_draw].BindForRead();
-		read_x = visible_origin_x;
-		read_y = visible_origin_y;
-	}
+	return pixels;
 }
 
 // Takes a screenshot of the current frame and puts it into the handle passed
 void GL4Renderer::Screenshot(int bm_handle)
 {
-	ushort* dest_data;
-	uint* temp_data;
-	int i, t;
-	int total = OpenGL_state.screen_width * OpenGL_state.screen_height;
-
-	ASSERT((bm_w(bm_handle, 0)) == OpenGL_state.screen_width);
-	ASSERT((bm_h(bm_handle, 0)) == OpenGL_state.screen_height);
-
-	int w = bm_w(bm_handle, 0);
-	int h = bm_h(bm_handle, 0);
-
-	temp_data = (uint*)mem_malloc(total * 4);
-	ASSERT(temp_data);	// Ran out of memory?
-
-	dest_data = bm_data(bm_handle, 0);
-
-	int read_x = 0;
-	int read_y = 0;
-	BindScreenshotSourceForRead(read_x, read_y);
-	glReadPixels(read_x, read_y, OpenGL_state.screen_width, OpenGL_state.screen_height, GL_RGBA, GL_UNSIGNED_BYTE, (GLvoid*)temp_data);
-	glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
-	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, framebuffers[framebuffer_current_draw].Handle());
-
-	for (i = 0; i < h; i++)
-	{
-		for (t = 0; t < w; t++)
-		{
-			uint spix = temp_data[i * w + t];
-
-			int r = spix & 0xff;
-			int g = (spix >> 8) & 0xff;
-			int b = (spix >> 16) & 0xff;
-
-			dest_data[(((h - 1) - i) * w) + t] = GR_RGB16(r, g, b);
-		}
+	const auto pixels = ReadDisplayImage();
+	const int w = bm_w(bm_handle,0), h = bm_h(bm_handle,0);
+	if (pixels.width != uint32_t(w) || pixels.height != uint32_t(h))
+		Error("Screenshot requires a completed display of matching extent");
+	auto* destination = bm_data(bm_handle,0);
+	for (int y = 0; y < h; ++y) for (int x = 0; x < w; ++x) {
+		const auto* source = pixels.pixels.data()+(size_t(h-1-y)*w+x)*4;
+		destination[size_t(y)*w+x] = GR_RGB16(source[0],source[1],source[2]);
 	}
-
-	mem_free(temp_data);
+	bm_MarkChanged(bm_handle);
 }
 
 int GL4Renderer::SaveScreenshotPNG(const char* filename, int output_scale)
 {
-	int w = OpenGL_state.screen_width;
-	int h = OpenGL_state.screen_height;
-	int total = w * h;
+	const auto pixels = ReadDisplayImage();
+	if (pixels.pixels.empty()) return 0;
+	const int w = pixels.width, h = pixels.height;
 	output_scale = output_scale == 2 ? 2 : 1;
 	const int output_w = w * output_scale;
 	const int output_h = h * output_scale;
 
-	uint* temp_data = (uint*)mem_malloc(total * 4);
-	if (!temp_data)
-		return 0;
-
 	ubyte* rgba_data = (ubyte*)mem_malloc(output_w * output_h * 4);
 	if (!rgba_data)
-	{
-		mem_free(temp_data);
 		return 0;
-	}
-
-	int read_x = 0;
-	int read_y = 0;
-	BindScreenshotSourceForRead(read_x, read_y);
-	glReadPixels(read_x, read_y, w, h, GL_RGBA, GL_UNSIGNED_BYTE, (GLvoid*)temp_data);
-	glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
-	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, framebuffers[framebuffer_current_draw].Handle());
 
 	for (int y = 0; y < h; y++)
 	{
 		for (int x = 0; x < w; x++)
 		{
-			uint spix = temp_data[((h - 1) - y) * w + x];
+			const auto* source = pixels.pixels.data()+(size_t(h-1-y)*w+x)*4;
 			for (int oy = 0; oy < output_scale; ++oy)
 			{
 				for (int ox = 0; ox < output_scale; ++ox)
 				{
 					ubyte* dest = &rgba_data[(((y * output_scale + oy) * output_w) +
 						(x * output_scale + ox)) * 4];
-					dest[0] = (ubyte)(spix & 0xff);
-					dest[1] = (ubyte)((spix >> 8) & 0xff);
-					dest[2] = (ubyte)((spix >> 16) & 0xff);
+					dest[0] = source[0];
+					dest[1] = source[1];
+					dest[2] = source[2];
 					dest[3] = 255;
 				}
 			}
@@ -3905,12 +3799,12 @@ int GL4Renderer::SaveScreenshotPNG(const char* filename, int output_scale)
 
 	int saved = bm_SaveRawRGBA32PNG(filename, output_w, output_h, rgba_data);
 	mem_free(rgba_data);
-	mem_free(temp_data);
 	return saved;
 }
 
 void GL4Renderer::UpdateFramebuffer(void)
 {
+	display_image.invalidate();
 	// Image products are one allocation-generation unit: depth, velocity,
 	// material class and identity. Never resample only velocity into new
 	// attachments while retaining old camera history.
@@ -4076,6 +3970,7 @@ void GL4Renderer::UpdateFramebuffer(void)
 
 void GL4Renderer::CloseFramebuffer(void)
 {
+	display_image.invalidate();
 	DestroyFramePacingFences();
 	GL4PerfGpuSplitShutdown();
 	GL4PerfGpuFrameShutdown();

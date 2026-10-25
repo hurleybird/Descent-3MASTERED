@@ -460,7 +460,7 @@ bool GL4Renderer::CurrentDrawWritesPixelMotionVectors() const
 		return false;
 
 	if (!PixelMotionVectorModeEnabled() || MotionVectorsFrozen() ||
-		post_present_pending_swap || OpenGL_state.cur_zbuffer_state == 0)
+		display_image.composing() || OpenGL_state.cur_zbuffer_state == 0)
 		return false;
 
 	if (!motion_object_active)
@@ -3358,7 +3358,7 @@ void GL4Renderer::BeginMotionObject(int object_handle, int motion_object_flags)
 	motion_object_force_capture = false;
 	motion_object_id = 0;
 	motion_object_active = object_handle >= 0 && framebuffer_ok &&
-		!post_present_pending_swap &&
+		!display_image.composing() &&
 		(!motion_vectors_capture_locked || cockpit_draw) &&
 		SceneSurfaceConsumerActive() &&
 		surface_records.velocity_texture != 0;
@@ -3407,7 +3407,7 @@ void GL4Renderer::FillMotionVectorRegion(int object_handle)
 	FlushFontBatch();
 
 	if (!PixelMotionVectorModeEnabled() || MotionVectorsFrozen() ||
-		post_present_pending_swap || !framebuffer_ok || surface_records.velocity_texture == 0)
+		display_image.composing() || !framebuffer_ok || surface_records.velocity_texture == 0)
 	{
 		return;
 	}

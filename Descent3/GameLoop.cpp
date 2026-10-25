@@ -244,6 +244,8 @@ struct automated_capture_state
 	bool exit_pending;
 	int target_frame;
 	int series_from_frame;
+	int series_until_frame;
+	int options_after_frame;
 	int gameplay_frame;
 	float fixed_delta;
 	bool realtime;
@@ -540,6 +542,8 @@ static void InitAutomatedCapture()
 	Automated_capture.heading_until_frame = capture_frame_option("-capture-heading-until", INT_MAX);
 	Automated_capture.heading_from_frame = capture_frame_option("-capture-heading-from", 0);
 	Automated_capture.series_from_frame = capture_frame_option("-capture-series-from", INT_MAX);
+	Automated_capture.series_until_frame = capture_frame_option("-capture-series-until", INT_MAX);
+	Automated_capture.options_after_frame = capture_frame_option("-capture-options-after", 0);
 	Automated_capture.force_primary_fire =
 		FindArg("-capture-fire-primary") != 0;
 	Automated_capture.place_scorch = FindArg("-capture-scorch") != 0;
@@ -739,6 +743,7 @@ static void BeginAutomatedCaptureFrame()
 	Automated_capture.capture_pending =
 		Automated_capture.gameplay_frame == Automated_capture.target_frame ||
 		(Automated_capture.gameplay_frame >= Automated_capture.series_from_frame &&
+		 Automated_capture.gameplay_frame <= Automated_capture.series_until_frame &&
 		 Automated_capture.gameplay_frame < Automated_capture.target_frame);
 	if (!Automated_capture.realtime)
 		Frametime = Automated_capture.fixed_delta;
@@ -3898,9 +3903,13 @@ void GameFrame(void)
 	static bool options_capture_started = false;
 	if (!options_capture_started && FindArg("-capture-options-output"))
 	{
-		options_capture_started = true;
-		extern void OptionsMenu();
-		OptionsMenu();
+		InitAutomatedCapture();
+		if (Automated_capture.gameplay_frame >= Automated_capture.options_after_frame) {
+			options_capture_started = true;
+			AutomatedCaptureLog("scene options capture after frame=%d", Automated_capture.gameplay_frame);
+			extern void OptionsMenu();
+			OptionsMenu();
+		}
 	}
 
 	if (Menu_interface_mode || Game_interface_mode == GAME_OPTIONS_INTERFACE)

@@ -4,7 +4,38 @@
 #include <limits>
 #include <stdexcept>
 #include <algorithm>
+#include <cmath>
 namespace d3scene {
+ImageMip compositeDisplayReadback(ImageMip base,const ImageMip& overlay,float gamma) {
+    const auto valid = [](const ImageMip& image) {
+        return image.width && image.height && image.width <= INT32_MAX && image.height <= INT32_MAX &&
+            uint64_t(image.width)*image.height <= SIZE_MAX/4 &&
+            image.pixels.size() == size_t(image.width)*image.height*4;
+    };
+    if (!valid(base) || !valid(overlay) || !std::isfinite(gamma) || gamma <= 0)
+        throw std::invalid_argument("Invalid display export layers");
+    const auto sample = [&](int x,int y,int channel) {
+        x = (std::max)(0,(std::min)(int(overlay.width)-1,x));
+        y = (std::max)(0,(std::min)(int(overlay.height)-1,y));
+        return overlay.pixels[(size_t(y)*overlay.width+x)*4+channel]/255.f;
+    };
+    for (uint32_t y = 0; y < base.height; ++y) for (uint32_t x = 0; x < base.width; ++x) {
+        const float u = (x+.5f)*overlay.width/base.width-.5f, v = (y+.5f)*overlay.height/base.height-.5f;
+        const int left = int(std::floor(u)), bottom = int(std::floor(v));
+        const float dx = u-left, dy = v-bottom;
+        float color[4];
+        for (int c = 0; c < 4; ++c) color[c] =
+            (sample(left,bottom,c)*(1-dx)+sample(left+1,bottom,c)*dx)*(1-dy)+
+            (sample(left,bottom+1,c)*(1-dx)+sample(left+1,bottom+1,c)*dx)*dy;
+        auto* pixel = base.pixels.data()+(size_t(y)*base.width+x)*4;
+        for (int c = 0; c < 4; ++c) {
+            const float source = c == 3 || gamma == 1 ? color[c] : std::pow(color[c],gamma);
+            const float value = source+pixel[c]/255.f*(1-color[3]);
+            pixel[c] = uint8_t(std::lround((std::max)(0.f,(std::min)(1.f,value))*255));
+        }
+    }
+    return base;
+}
 std::array<uint8_t,4> imageRgbaPixel(ImageFormat format,uint16_t pixel) {
     const auto expand = [](uint16_t channel,float maximum) { return static_cast<uint8_t>(255*(static_cast<float>(channel)/maximum)); };
     if (format == ImageFormat::ARGB1555) {

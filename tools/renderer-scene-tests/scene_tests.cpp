@@ -703,6 +703,7 @@ int runFrameStorageTests();
 int runRoomCoronaTests();
 int runRasterTrailTests();
 int runSaveContractTests();
+int runDisplayOutputTests();
 int runAutomapTests();
 int runEffectTests();
 int runGameVisualTests();
@@ -762,6 +763,7 @@ int main() {
         Checks += runRoomCoronaTests();
         Checks += runRasterTrailTests();
         Checks += runSaveContractTests();
+        Checks += runDisplayOutputTests();
         Checks += runAutomapTests();
         Checks += runEffectTests();
         Checks += runGameVisualTests();

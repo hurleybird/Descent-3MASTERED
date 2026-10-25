@@ -54,6 +54,7 @@
 #include "SceneGpuCache.h"
 #include "SceneCompositing.h"
 #include "SceneHistory.h"
+#include "DisplayImage.h"
 #include "gl_shared.h"
 #include "IRenderer.h"
 #include <unordered_map>
@@ -315,7 +316,7 @@ class GL4Renderer : public IRenderer
 	int framebuffer_logical_height = 0;
 	int framebuffer_logical_offset_x = 0;
 	int framebuffer_logical_offset_y = 0;
-	bool post_present_pending_swap = false;
+	d3scene::DisplayImagePublication display_image;
 	int msaa_downshift_release_frames = 0;
 	int msaa_forced_off_target_samples = 0;
 	bool msaa_forced_off_scene_presented = false;
@@ -749,7 +750,7 @@ private:
 	void CompositeWorldDisplay(Framebuffer* world_source,Framebuffer* color_source,ColorFramebuffer* bloom_output,
 		GLuint protection_mask,float uv_x,float uv_y,float uv_w,float uv_h,float display_gamma);
 	void CompositePendingModalUI();
-	void BindScreenshotSourceForRead(int& read_x, int& read_y);
+	d3scene::ImageMip ReadDisplayImage();
 	int SupersamplingFactor() const;
 	int FramebufferWidth() const;
 	int FramebufferHeight() const;

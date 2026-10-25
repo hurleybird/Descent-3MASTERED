@@ -18,12 +18,13 @@
       "purpose": "Double retire/rebuild of world, auxiliary, image and history resources, then actual level-exit retirement."
     },
     "save-export": {
-      "revision": 1,
+      "revision": 2,
       "minimumFrame": 22,
       "inspectionRequired": true,
-      "arguments": ["-scene-gl-audit", "-scene-save-image-audit", "-scene-history-export-probe", "-capture-save-output", "{save-output}"],
+      "arguments": ["-scene-gl-audit", "-scene-save-image-audit", "-scene-history-export-probe", "-capture-save-output", "{save-output}", "-capture-series-from", "19", "-capture-series-until", "19"],
+      "previousDisplayFrame": 19,
       "requiredLog": ["scene interleaved save exported before world", "scene motion frame=20 camera_history=1", "scene motion frame=21 camera_history=1", "scene save thumbnail decoded width=160 height=120 mismatches=0 transparent=0", "scene save thumbnail simulation state unchanged", "save saved output="],
-      "purpose": "Actual native saves before world and after display composition; decode embedded thumbnails, check live image immutability and independent history."
+      "purpose": "Actual native saves before world and after display composition; decode embedded thumbnails, check live image immutability, exact preceding displayed-frame selection and independent history."
     },
     "save-settings": {
       "revision": 1,
@@ -32,6 +33,14 @@
       "arguments": ["-scene-gl-audit", "-scene-save-image-audit", "-scene-resource-probe", "-capture-save-output", "{save-output}"],
       "requiredLog": ["scene resource transition frame=10", "scene resource transition frame=20", "scene resource transition frame=30", "scene resource transition frame=40", "scene resource transition frame=50", "scene save thumbnail decoded width=160 height=120 mismatches=0 transparent=0", "save saved output="],
       "purpose": "Actual post-composition save after SSAA/MSAA transitions. Resource changes intentionally invalidate history, unlike independent export."
+    },
+    "modal-ui": {
+      "revision": 1,
+      "minimumFrame": 22,
+      "inspectionRequired": true,
+      "arguments": ["-scene-gl-audit", "-capture-options-output", "{ui-output}", "-capture-options-after", "20"],
+      "requiredLog": ["scene options capture after frame=20", "scene UI export saved output="],
+      "purpose": "Real options menu over a completed gameplay display; export the modal UI composition, then resume and export gameplay."
     },
     "auxiliary-lifecycle": {
       "revision": 1,
