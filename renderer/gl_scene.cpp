@@ -1428,7 +1428,10 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         owns_world_products && OpenGL_preferred_state.ao_enabled && framebuffer_ok,
         owns_world_products && !target.coverage.width && !FindArg("-scene-native-particles") &&
             SupersamplingFactor() > 1};
-    const auto passes = d3scene::buildViewPasses(presentation,visibility,products);
+    // Execution is synchronous and observation-free: one renderer-owned plan
+    // can be reused by main, auxiliary, image and canvas views without nesting.
+    d3scene::buildViewPasses(presentation,visibility,products,scene_view_passes);
+    const auto& passes = scene_view_passes;
     const auto history = target.history.prepare(presentation.data(),view,visibility.camera);
     const bool clears_sky = visibility.exterior_visible && presentation.data().sky_enabled;
     // Plan before uploading or touching driver state. An empty overlay has no

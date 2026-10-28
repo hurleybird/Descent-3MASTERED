@@ -938,6 +938,12 @@ MaterialPolicy visibleSurfacePolicy(const Presentation& frame,const VisibleSurfa
         frame.data().modelsFor(item.model_instance_index)[item.model_variant].modulation.alpha*(item.view_alpha/255.f) : item.view_alpha/255.f);
 }
 std::vector<ViewPass> buildViewPasses(const Presentation& frame,const ViewVisibility& view,ViewProducts products) {
+    std::vector<ViewPass> passes;
+    buildViewPasses(frame,view,products,passes);
+    return passes;
+}
+void buildViewPasses(const Presentation& frame,const ViewVisibility& view,ViewProducts products,std::vector<ViewPass>& passes) {
+    passes.clear();
     if (view.ordering == ViewOrdering::Compositing) {
         if (products.opaque_scene || products.occlusion || products.soft_volume_layer)
             throw std::invalid_argument("Compositing surfaces cannot export opaque world products");
@@ -946,12 +952,11 @@ std::vector<ViewPass> buildViewPasses(const Presentation& frame,const ViewVisibi
             if (visibleSurfacePolicy(frame,item).testsDepth() || surface.soft_depth_range > 0 || item.layer == RenderLayer::Background)
                 throw std::invalid_argument("Compositing surfaces require explicit depth-independent coverage");
         }
-        if (view.surfaces.empty()) return {};
-        return {{ViewPassKind::CompositeSurfaces,0,static_cast<uint32_t>(view.surfaces.size())}};
+        if (!view.surfaces.empty()) passes.push_back({ViewPassKind::CompositeSurfaces,0,static_cast<uint32_t>(view.surfaces.size())});
+        return;
     }
     if (products.occlusion && !products.opaque_scene)
         throw std::invalid_argument("World occlusion requires an opaque scene product");
-    std::vector<ViewPass> passes;
     uint32_t index = 0;
     while (index < view.surfaces.size() && view.surfaces[index].layer == RenderLayer::Background) ++index;
     if (index) passes.push_back({ViewPassKind::Background,0,index});
@@ -970,7 +975,7 @@ std::vector<ViewPass> buildViewPasses(const Presentation& frame,const ViewVisibi
     if (products.opaque_scene && !products.occlusion) passes.push_back({ViewPassKind::ExportOpaqueScene,index,index});
     if (!products.soft_volume_layer) {
         if (index < view.surfaces.size()) passes.push_back({ViewPassKind::LateWorld,index,static_cast<uint32_t>(view.surfaces.size())});
-        return passes;
+        return;
     }
     bool late_depth_changed = false;
     const auto soft_volume = [&](uint32_t i) {
@@ -999,6 +1004,5 @@ std::vector<ViewPass> buildViewPasses(const Presentation& frame,const ViewVisibi
             (!soft || visibleSurfacePolicy(frame,view.surfaces[index]).blend == blend));
         passes.push_back({soft ? ViewPassKind::SoftVolumes : ViewPassKind::LateWorld,first,index});
     }
-    return passes;
 }
 } // namespace d3scene

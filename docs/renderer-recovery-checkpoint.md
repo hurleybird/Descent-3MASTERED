@@ -28,6 +28,16 @@ audit and all eight producer caches cleared. Evidence in qual-map-lifecycle-
 latest process check. Baseline executables still exist at out/baseline-pre-rewrite.exe
 and out/observation-baseline.exe; their provenance still needs checking before use.
 
+Further Oct27:94d0281 resolves independently supersampled images to declared
+logical dimensions before publication/readback/dependent sampling. Image1/2/4x,
+retirement and quality-transition captures pass; ordinary003/006 remain exact.
+Subsequent view-pass scratch reuse passes contracts and exact003/007 captures.
+Current baseline hash was verified A6286E9315A60F3C93B3A764C93A808B8FA385924ADDFACE1B573433374F3DA4:
+this is the reconstructed bfb59647 IPO baseline, NOT the deleted original binary.
+ABBA integrated clean720p1x/MSAA0 corpus is running into perf-integrated-{new-a,
+old-a,old-b,new-b}-20261027 with500frames; analyze warm200..449. Same private
+runtime is swapped serially and restored in finally. No interactive windows.
+
 ## October 22 — display-resolution soft particles qualified for testing
 
 User selected scaling idea 2 only: display-resolution soft particles. No other

@@ -1418,3 +1418,15 @@ GL audits, scene retirement and five quality/resource transitions. Ordinary
 20261027. No overall performance improvement is claimed for this quality fix.
 This is the prerequisite for isolating TelCom's3D content without losing SSAA;
 TelCom itself still changes screen mode and uses the scene compositor.
+
+## Reusable execution schedule storage (October 27)
+
+The shared view-pass compiler now accepts caller-owned storage. The synchronous,
+observation-free GL executor retains one schedule across main/auxiliary/image/
+canvas views instead of allocating a new vector every execution. The convenience
+value-returning overload remains for non-hot-path callers and contract fixtures;
+both use the same compiler. Tests verify128warm replays preserve storage and
+exact ordering/ranges, empty plans clear old passes, and rejected plans cannot
+leave a stale prior schedule. Root integration passes. qual-pass-storage-before-
+20261027 versus qual-pass-storage-after-20261027 images003/007 are pixel-identical.
+This removes known allocator traffic; no measurable frame-time win is yet claimed.

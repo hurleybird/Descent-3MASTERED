@@ -199,6 +199,9 @@ MaterialPolicy visibleSurfacePolicy(const Presentation&,const VisibleSurface&);
 void orderViewSurfaces(const Presentation&,ViewVisibility&);
 uint32_t selectModelVariant(const ModelInstance&,const Camera&);
 std::vector<ViewPass> buildViewPasses(const Presentation&,const ViewVisibility&,ViewProducts products = {});
+// Hot-path callers own reusable schedule storage. No geometry/asset ownership
+// escapes into this scratch, and each invocation replaces the previous plan.
+void buildViewPasses(const Presentation&,const ViewVisibility&,ViewProducts,std::vector<ViewPass>&);
 
 // Pure geometry query over published scene data, frusta and portal apertures.
 // Results are view-local indices, never marks written into shared objects.

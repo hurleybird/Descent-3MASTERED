@@ -1468,6 +1468,26 @@ int runSceneViewTests() {
     const auto scheduled_frame = d3scene::Presentation::freeze(scheduled);
     const auto scheduled_visibility = d3scene::queryView(*scheduled_frame,view());
     const auto passes = d3scene::buildViewPasses(*scheduled_frame,scheduled_visibility);
+    {
+        std::vector<d3scene::ViewPass> retained;
+        d3scene::buildViewPasses(*scheduled_frame,scheduled_visibility,{},retained);
+        const auto storage = retained.data(); const auto capacity = retained.capacity();
+        for (unsigned replay = 0; replay < 128; ++replay) {
+            d3scene::buildViewPasses(*scheduled_frame,scheduled_visibility,{},retained);
+            check(retained.data() == storage && retained.capacity() == capacity && retained.size() == passes.size(),
+                "Warm view schedule replaced its retained storage");
+            for (size_t index = 0; index < passes.size(); ++index)
+                check(retained[index].kind == passes[index].kind && retained[index].begin == passes[index].begin &&
+                    retained[index].end == passes[index].end,"Retained view schedule changed ordering or ranges");
+        }
+        auto empty = scheduled_visibility; empty.surfaces.clear();
+        d3scene::buildViewPasses(*scheduled_frame,empty,{},retained);
+        check(retained.empty() && retained.capacity() == capacity,"Empty schedule retained old passes or discarded storage");
+        bool rejected = false;
+        try { d3scene::buildViewPasses(*scheduled_frame,scheduled_visibility,{false,true},retained); }
+        catch (const std::invalid_argument&) { rejected = true; }
+        check(rejected && retained.empty(),"Invalid schedule leaked a previous view's passes");
+    }
     check(passes.size() == 4 && passes[0].kind == d3scene::ViewPassKind::Background &&
         passes[1].kind == d3scene::ViewPassKind::OpaqueWorld && passes[2].kind == d3scene::ViewPassKind::SnapshotOpaqueDepth &&
         passes[3].kind == d3scene::ViewPassKind::LateWorld,"Opaque depth dependency was scheduled after its consumer");

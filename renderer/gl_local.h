@@ -701,6 +701,7 @@ private:
 	void UseSceneDrawBuffers();
 	void ExportOpaqueScene(bool prepass_ready);
 	d3scene::ViewHistory scene_view_history;
+	std::vector<d3scene::ViewPass> scene_view_passes;
 	bool scene_temporal_reset = true;
 	bool scene_sample_resolve_verified = false;
 	// AO changes surface radiance, never fog/emissive radiance. This image stays
