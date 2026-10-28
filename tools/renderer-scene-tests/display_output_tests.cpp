@@ -40,6 +40,12 @@ int runDisplayOutputTests() {
     const auto narrow = displayViewport(1,1000000,100,1);
     check(narrow.width == 1 && narrow.height == 1 && narrow.x == 49);
     rejects([&] {displayViewport(0,480,640,480);});
+    const RasterMapping native{480};
+    check(native.x(0) == 0 && native.width(1) == 1 && native.height-native.y(480) == 0);
+    const RasterMapping world{2056,4,4,-23,-17};
+    check(world.x(0) == 92 && world.width(1) == 4 && world.height-world.y(480) == 68);
+    const RasterMapping modal{720,2,1.5,10,20};
+    check(modal.x(10) == 0 && modal.y(20) == 0 && modal.width(1) == 2 && modal.extentY(2) == 3);
 
     ImageMip base; base.width = base.height = 1; base.pixels = {0,0,255,255};
     ImageMip ui = base; ui.pixels = {128,0,0,128};

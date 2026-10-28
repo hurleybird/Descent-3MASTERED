@@ -547,8 +547,6 @@ class GL4Renderer : public IRenderer
 	bool have_cockpit_previous_view_projection = false;
 
 	//IMAGE
-	ubyte opengl_Framebuffer_ready = 0;
-	chunked_bitmap opengl_Chunked_bitmap;
 
 	ushort* OpenGL_bitmap_remap = nullptr;
 	ushort* OpenGL_lightmap_remap = nullptr;
@@ -734,7 +732,6 @@ private:
 	void TranslateBitmapToOpenGL(int texnum, int bm_handle, int map_type, int replace, int tn);
 	void DestroyRetainedRoomLightmaps();
 	void UploadRetainedRoomLightmap(int lightmap_handle);
-	void ChangeChunkedBitmap(int bm_handle, chunked_bitmap* chunk);
 
 	bool CheckExtension(char* extName);
 	void UpdateFramebuffer();
@@ -754,6 +751,7 @@ private:
 	int SupersamplingFactor() const;
 	int FramebufferWidth() const;
 	int FramebufferHeight() const;
+	d3scene::RasterMapping CompatibilityRasterMapping() const;
 	int ScaledX(int x) const;
 	int ScaledY(int y) const;
 	int ScaledW(int w) const;
@@ -1021,13 +1019,6 @@ public:
 	void DrawSpecialLineBatch(const renderer_line_batch_item *items, int count) override;
 
 	//OTHER TRANSFERS
-
-	// Takes a bitmap and blits it to the screen using linear frame buffer stuff
-	// X and Y are the destination X,Y.
-	void CopyBitmapToFramebuffer(int bm_handle, int x, int y) override;
-
-	// Gets a renderer ready for a framebuffer copy, or stops a framebuffer copy
-	void SetFrameBufferCopyState(bool state) override;
 
 	// Takes a screenshot of the current frame and puts it into the handle passed
 	void Screenshot(int bm_handle) override;

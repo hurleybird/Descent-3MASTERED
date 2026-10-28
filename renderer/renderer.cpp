@@ -1289,25 +1289,6 @@ void rend_RetireScene()
 	if (Renderer_initted) renderer_inst->RetireScene();
 }
 
-// Takes a bitmap and blits it to the screen using linear frame buffer stuff
-// X and Y are the destination X,Y.
-void rend_CopyBitmapToFramebuffer(int bm_handle, int x, int y)
-{
-	if (!Renderer_initted)
-		return;
-
-	renderer_inst->CopyBitmapToFramebuffer(bm_handle, x, y);
-}
-
-// Gets a renderer ready for a framebuffer copy, or stops a framebuffer copy
-void rend_SetFrameBufferCopyState(bool state)
-{
-	if (!Renderer_initted)
-		return;
-
-	renderer_inst->SetFrameBufferCopyState(state);
-}
-
 void rend_UpdateCommon(float* projection, float* modelview, int depth)
 {
 	if (!Renderer_initted)

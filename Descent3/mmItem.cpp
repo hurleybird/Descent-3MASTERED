@@ -23,6 +23,8 @@
 #include "program.h"
 #include "descent.h"
 #include "cinematics.h"
+#include "gameloop.h"
+#include "args.h"
 #include "hlsoundlib.h"
 #include "soundload.h"
 #include "d3music.h"
@@ -320,6 +322,11 @@ void mmInterface::Create()
 //	does user interface.
 int mmInterface::DoUI()
 {
+	const int capture_arg = FindArg("-capture-main-menu-output");
+	const char* capture_output = capture_arg ? GetArg(capture_arg+1) : nullptr;
+	if (capture_arg && (!capture_output || !*capture_output || !FindArg("-background")))
+		Error("Main menu capture requires an output and background mode");
+	unsigned capture_frames = 0;
 	UI_frame_result = -1;
 	ui_ShowCursor();
 
@@ -330,6 +337,13 @@ int mmInterface::DoUI()
 		Descent->defer();
 		DoUIFrame();
 		rend_Flip();
+		if (capture_output && ++capture_frames == 1200) {
+			if (!rend_SaveScreenshotPNG(capture_output)) Error("Main menu capture failed");
+			AutomatedCaptureLog("scene main menu exported frames=%u animated=%d output=%s",
+				capture_frames,m_static_background ? 0 : 1,capture_output);
+			SetFunctionMode(QUIT_MODE);
+			UI_frame_result = 0;
+		}
 	}
 
 	ui_HideCursor();
@@ -453,6 +467,10 @@ void MenuScene()
 
 	if (MM_object)
 	{
+		// Authored menu art and decoded video are display color, not world
+		// radiance. The UI that follows shares this explicitly owned canvas.
+		if (!rend_BeginDisplayFrame(Max_window_w,Max_window_h))
+			Error("Main menu display frame unavailable");
 		StartFrame();
 
 		if (MM_object->m_static_background)

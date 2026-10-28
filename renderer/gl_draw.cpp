@@ -3645,8 +3645,21 @@ void GL4Renderer::DrawScaledBitmapWithZ(int x1, int y1, int x2, int y2,
 }
 
 // Fills a rectangle on the display
+d3scene::RasterMapping GL4Renderer::CompatibilityRasterMapping() const
+{
+	if (post_present_framebuffer.Handle() && GL4DrawTargetIsFramebuffer(post_present_framebuffer.Handle()))
+		return {int(post_present_framebuffer.Height())};
+	if (modal_ui_frame_active)
+		return {int(modal_ui_framebuffer.Height()),double(modal_ui_framebuffer.Width())/modal_ui_width,
+			double(modal_ui_framebuffer.Height())/modal_ui_height,modal_ui_origin_x,modal_ui_origin_y};
+	return {FramebufferHeight(),double(SupersamplingFactor()),double(SupersamplingFactor()),
+		-framebuffer_logical_offset_x,-framebuffer_logical_offset_y};
+}
+
 void GL4Renderer::FillRect(ddgr_color color, int x1, int y1, int x2, int y2)
 {
+	FlushFontBatch();
+	const auto raster = CompatibilityRasterMapping();
 	int r = GR_COLOR_RED(color);
 	int g = GR_COLOR_GREEN(color);
 	int b = GR_COLOR_BLUE(color);
@@ -3658,14 +3671,14 @@ void GL4Renderer::FillRect(ddgr_color color, int x1, int y1, int x2, int y2)
 	y1 += OpenGL_state.clip_y1;
 
 	glEnable(GL_SCISSOR_TEST);
-	glScissor(ScaledX(x1), FramebufferHeight() - ScaledY(height + y1), ScaledW(width), ScaledH(height));
+	glScissor(raster.x(x1), raster.height-raster.y(height+y1), raster.width(width), raster.extentY(height));
 	glClearColor((float)r / 255.0, (float)g / 255.0, (float)b / 255.0, 0);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
 	width = OpenGL_state.clip_x2 - OpenGL_state.clip_x1;
 	height = OpenGL_state.clip_y2 - OpenGL_state.clip_y1;
 
-	glScissor(ScaledX(OpenGL_state.clip_x1), FramebufferHeight() - ScaledY(OpenGL_state.clip_y1 + height), ScaledW(width), ScaledH(height));
+	glScissor(raster.x(OpenGL_state.clip_x1), raster.height-raster.y(OpenGL_state.clip_y1+height), raster.width(width), raster.extentY(height));
 	glDisable(GL_SCISSOR_TEST);
 }
 
@@ -3697,7 +3710,7 @@ void GL4Renderer::SetPixel(ddgr_color color, int x, int y)
 
 	//please do not call this function if you can avoid it.
 	int offset = CopyVertices(1);
-	GLfloat point_size = std::max(1.0f, std::min((GLfloat)SupersamplingFactor(), max_point_size));
+	GLfloat point_size = std::max(1.0f, std::min((GLfloat)CompatibilityRasterMapping().scale_x, max_point_size));
 	glPointSize(point_size);
 	rend_RecordDrawCall(RENDERER_DRAW_CALL_PRIMITIVE);
 	glDrawArrays(GL_POINTS, offset, 1);

@@ -1,8 +1,20 @@
 // Descent 3MASTERED - GPL-3.0-or-later
 #pragma once
 #include <cstdint>
+#include <cmath>
 #include <stdexcept>
 namespace d3scene {
+// Compatibility UI commands use logical coordinates; the active target owns
+// their raster scale and origin, independently of world rendering preferences.
+struct RasterMapping {
+    int height;
+    double scale_x = 1, scale_y = 1;
+    int origin_x = 0, origin_y = 0;
+    int x(int value) const { return int(std::lround((double(value)-origin_x)*scale_x)); }
+    int y(int value) const { return int(std::lround((double(value)-origin_y)*scale_y)); }
+    int width(int value) const { return int(std::lround(double(value)*scale_x)); }
+    int extentY(int value) const { return int(std::lround(double(value)*scale_y)); }
+};
 struct DisplayViewport { int x,y,width,height; };
 inline DisplayViewport displayViewport(int width,int height,int view_width,int view_height) {
     if (width <= 0 || height <= 0 || view_width <= 0 || view_height <= 0)

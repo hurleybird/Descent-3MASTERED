@@ -314,13 +314,6 @@ public:
 
 	//OTHER TRANSFERS
 
-	// Takes a bitmap and blits it to the screen using linear frame buffer stuff
-	// X and Y are the destination X,Y.
-	virtual void CopyBitmapToFramebuffer(int bm_handle, int x, int y) = 0;
-
-	// Gets a renderer ready for a framebuffer copy, or stops a framebuffer copy
-	virtual void SetFrameBufferCopyState(bool state) = 0;
-
 	// Takes a screenshot of the current frame and puts it into the handle passed
 	virtual void Screenshot(int bm_handle) = 0;
 

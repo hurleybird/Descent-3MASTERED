@@ -1291,3 +1291,34 @@ overwrote prior failed scenario checks. It now accumulates failure, and both
 scenarios were rerun with that correction. Interactive fullscreen switching and
 ordinary no-probe release qualification remain open; these captures do not claim
 either one or a performance improvement.
+
+## Main-menu display producer and compatibility raster coordinates (October 27)
+
+The actual MenuScene producer now begins an encoded display canvas. Its decoded
+looping video/static art and subsequent UI draw into that canvas, not world
+radiance targets. Removed the unused framebuffer-copy API, its backend chunked
+bitmap state/conversion and the sequence decoder's meaningless enable/disable
+calls (193 deleted lines). Repository call-site/export search found no consumers
+of the copy entry; the separate live chunked UI drawing APIs remain supported.
+Historical renderer/ref source is not compiled and remains untouched.
+
+Background main-menu qualification runs 1200 real UI iterations, logs decoder
+loop boundaries, exports the completed menu and exits through normal menu
+destruction. The explicit capture flag requires background mode and suppresses
+input. Persistent settings are not saved. The first effects/native comparison
+exposed 2128 differing pixels: FillRect still mapped its one-pixel border through
+world SSAA/overscan while targeting the display canvas. A target-owned raster
+mapping now governs compatibility rectangle clears and point size; queued text
+is submitted before a rectangle clear. Pure tests cover native, overscanned and
+offset/scaled modal spaces. World framebuffer-sizing helpers retain their
+world-only meaning rather than becoming dependent on incidental current targets.
+
+menu-raster-{effects,clean}-20261027 both complete with repeated decoder loops.
+Their 640x480 exports are exactly identical, fully opaque, comparing AO/bloom,
+SSAA4/MSAA4 against effects-off SSAA1/MSAA0. Menu artwork/text were inspected.
+Root integration build and all3contracts pass. Earlier ordinary003/006 captures
+pass after menu routing; no performance improvement is claimed from these tests.
+One attempted interactive run captured the user's mouse; it was immediately
+closed, and further verification is background-only. Interactive acceptance is
+still open, not silently substituted by these fixtures. Candidate, Previous
+Candidate and lib/gitinfo.h remain untouched.

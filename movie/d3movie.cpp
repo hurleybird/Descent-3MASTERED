@@ -438,9 +438,6 @@ unsigned int mve_SequenceStart( const char *mvename, int *fhandle, oeApplication
 	Movie_current_framenum = 0;
 	Movie_frame_width = Movie_frame_height = 0;
 
-	// let the render know we will be copying bitmaps to framebuffer (or something)
-	rend_SetFrameBufferCopyState(true);
-
 	*fhandle = hfile;
 	if (MVE_rmPrepMovie(hfile, -1, -1, 0) != 0)
 	{
@@ -489,6 +486,8 @@ reread_frame:
 
 	if( Movie_looping && err == MVE_ERR_EOF )
 	{
+		if (FindArg("-capture-main-menu-output"))
+			AutomatedCaptureLog("scene movie sequence loop decoded_frames=%u",Movie_current_framenum);
 		if (MVE_rmPrepMovie(fhandle, -1, -1, 0) != 0)
 			return (unsigned int)( -1 );
 		sequence = true;
@@ -518,8 +517,6 @@ bool mve_SequenceClose( unsigned int hMovie, int hFile )
 		Movie_bm_handle = -1;
 	}
 
-	// We're no longer needing this
-	rend_SetFrameBufferCopyState( false );
 	Movie_frame_width = Movie_frame_height = 0;
 
 	return true;

@@ -381,7 +381,7 @@ static void AutomatedFramePerfLog(int gameplay_frame, double frame_start_interva
 
 bool AutomatedCaptureSuppressesInput()
 {
-	return FindArg("-capture-frame") || FindArg("-screenshot-frame");
+	return FindArg("-capture-frame") || FindArg("-screenshot-frame") || FindArg("-capture-main-menu-output");
 }
 
 bool AutomatedCaptureForcesForwardInput()
