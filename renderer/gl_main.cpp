@@ -2384,6 +2384,8 @@ void GL4Renderer::StartPostPresentFrame(int x1, int y1, int x2, int y2, int clea
 
 void GL4Renderer::EndPostPresentFrame()
 {
+	if (!display_image.composing())
+		throw std::logic_error("Display presentation has no composed image");
 	FlushFontBatch();
 	const bool encoded_canvas = display_image.encodedCanvasActive();
 

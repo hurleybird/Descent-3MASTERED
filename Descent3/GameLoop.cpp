@@ -4376,7 +4376,10 @@ void GameFrame(void)
 						DoScreenshot();
 						Screenshot_requested = false;
 					}
-					post_present_frame_ready = true;
+					// A nested modal producer may have consumed this display and
+					// presented its own frames. Query ownership after those callers,
+					// not the success of BeginPostPresentFrame before entering them.
+					post_present_frame_ready = rend_IsPostPresentFramePending();
 				}
 				else
 				{

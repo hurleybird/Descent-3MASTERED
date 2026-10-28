@@ -1322,3 +1322,15 @@ One attempted interactive run captured the user's mouse; it was immediately
 closed, and further verification is background-only. Interactive acceptance is
 still open, not silently substituted by these fixtures. Candidate, Previous
 Candidate and lib/gitinfo.h remain untouched.
+
+## Nested modal presentation ownership (October 27)
+
+The pre-change TelCom fixture reproduced a stale game-loop decision: its nested
+automap presenter had consumed the game display and presented its own frames,
+but the outer loop still called EndPostPresentFrame based on its earlier Begin.
+The loop now reads pending ownership after nested export/modal callers. The
+backend rejects missing ownership before any blit/swap/framebuffer rotation,
+instead of only when updating the publication after those side effects.
+qual-telcom-ownership-20261027 passes the actual TelCom map capture and exits;
+qual-telcom-before-20261027 remains failed evidence. This does not qualify map
+controls or return to active gameplay. No ownership assertion was weakened.
