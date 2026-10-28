@@ -28,11 +28,22 @@ inline void validateForeground(const ForegroundLayer& layer) {
 struct ImageReduction { uint32_t source_scale, destination_scale; };
 // One reduction law for world and overlay layers. Each kernel reduces by two;
 // cropping remains expressed in logical coordinates until the final consumer.
-inline std::vector<ImageReduction> imageReductionSteps(uint32_t scale) {
-    if (scale != 1 && scale != 2 && scale != 4) throw std::invalid_argument("Unsupported image reduction scale");
-    std::vector<ImageReduction> result;
-    for (; scale > 1; scale /= 2) result.push_back({scale,scale/2});
-    return result;
+class ImageReductionSteps {
+    std::array<ImageReduction,2> steps_{};
+    size_t count_ = 0;
+public:
+    explicit ImageReductionSteps(uint32_t scale) {
+        if (scale != 1 && scale != 2 && scale != 4) throw std::invalid_argument("Unsupported image reduction scale");
+        for (; scale > 1; scale /= 2) steps_[count_++] = {scale,scale/2};
+    }
+    const ImageReduction* begin() const { return steps_.data(); }
+    const ImageReduction* end() const { return begin()+count_; }
+    size_t size() const { return count_; }
+    bool empty() const { return count_ == 0; }
+    const ImageReduction& operator[](size_t i) const { return steps_[i]; }
+};
+inline ImageReductionSteps imageReductionSteps(uint32_t scale) {
+    return ImageReductionSteps(scale);
 }
 // Reference algebra for the scene MRT contract. `eligible` contains only the
 // opaque surface's AO-eligible radiance after fog transmission and subsequent

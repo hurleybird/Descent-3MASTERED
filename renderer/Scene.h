@@ -899,6 +899,8 @@ void validateView(const View& view);
 struct ViewImageRequest {
     uint64_t image = 0;
     View view;
+    // Raster quality only: the published color image always has viewport size.
+    // Reduction completes before consumers/readback can access the image.
     uint32_t scale = 1, samples = 0;
 };
 void validateViewImage(const ViewImageRequest&);

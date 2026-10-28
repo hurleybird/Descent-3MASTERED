@@ -3,6 +3,7 @@
 #include "gl_readback.h"
 #include "gl_mesh.h"
 #include "SceneView.h"
+#include "SceneCompositing.h"
 #include "SceneGeometry.h"
 #include "SceneLighting.h"
 #include "SceneImages.h"
@@ -680,7 +681,7 @@ void GL4Renderer::RetireScene() {
 
 void GL4Renderer::DestroySceneResources() {
     scene_ao_debug_shader.Destroy();
-    for (auto& image : scene_view_images) { image.second.buffer.Destroy(); image.second.depth.Destroy(); }
+    for (auto& image : scene_view_images) image.second.Destroy();
     scene_view_images.clear();
     scene_view_history.clear();
     scene_motion = {}; completed_scene_motion = {};
@@ -1285,36 +1286,63 @@ void GL4Renderer::RenderViewImage(const d3scene::PreparedViewImage& product) {
     const auto sequence = presentation.data().sequence;
     for (auto it = scene_view_images.begin(); it != scene_view_images.end();) {
         if (!d3scene::retainViewImageStorage(it->second.sequence,presentation.data())) {
-            it->second.buffer.Destroy(); it->second.depth.Destroy(); it = scene_view_images.erase(it);
+            it->second.Destroy(); it = scene_view_images.erase(it);
         } else ++it;
     }
     auto& image = scene_view_images[product.image()];
     if (image.sequence == sequence) throw std::logic_error("View image has more than one producer in a presentation");
     image.sequence = 0; // failed/in-flight products are never readable
     GLint draw, read, viewport[4];
+    const GLboolean inherited_scissor = glIsEnabled(GL_SCISSOR_TEST);
     glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING,&draw); glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING,&read);
     glGetIntegerv(GL_VIEWPORT,viewport);
     const auto restore = [&] {
         glBindFramebuffer(GL_DRAW_FRAMEBUFFER,draw); glBindFramebuffer(GL_READ_FRAMEBUFFER,read);
         glViewport(viewport[0],viewport[1],viewport[2],viewport[3]);
+        if (inherited_scissor) glEnable(GL_SCISSOR_TEST);
     };
     try {
-        const bool reallocated = image.buffer.Width() != uint32_t(view.viewport.width)*product.scale() ||
-            image.buffer.Height() != uint32_t(view.viewport.height)*product.scale() ||
+        glDisable(GL_SCISSOR_TEST); // caller canvas clipping cannot clip an independent producer
+        const auto extent = product.rasterExtent();
+        const bool reallocated = image.buffer.Width() != extent.width ||
+            image.buffer.Height() != extent.height ||
             image.buffer.RequestedSamples() != product.samples();
         if (reallocated) image.history.clear();
-        image.buffer.Update(view.viewport.width*product.scale(),view.viewport.height*product.scale(),product.samples());
+        image.buffer.Update(extent.width,extent.height,product.samples());
         image.buffer.ClearAll();
         const auto raster = d3scene::rasterViewport(view.viewport,image.buffer.Height(),product.scale());
         const auto coverage = view.coverage.width ?
             d3scene::rasterViewport(view.coverage,image.buffer.Height(),product.scale()) : d3scene::Rect{};
         ExecuteSceneView(prepared,{image.buffer,raster,SceneOutputRole::Image,image.depth,image.history,coverage});
+        // Publish logical-sized scene color, never expose the supersampled
+        // raster and rely on an arbitrary consumer's texture filter to reduce it.
+        // Image transport stays in scene color space; display gamma belongs to
+        // the eventual compositor, not an offscreen producer's hidden state.
+        Framebuffer* source = &image.buffer;
+        glDisable(GL_SCISSOR_TEST); // a caller's canvas clip is not this image's reduction extent
+        for (const auto step : d3scene::imageReductionSteps(product.scale())) {
+            auto& destination = step.destination_scale == 1 ? image.reduced : image.reduction_scratch;
+            destination.Update(view.viewport.width*step.destination_scale,view.viewport.height*step.destination_scale,0);
+            downsampleshader.Use();
+            source->DownsampleTo(destination.Handle(),0,0,destination.Width(),destination.Height(),
+                downsampleshader_gamma,1.f,downsampleshader_dest_origin,
+                downsampleshader_source_visible_origin,downsampleshader_source_visible_size,
+                0,0,source->Width(),source->Height());
+            destination.MarkColorDirty();
+            source = &destination;
+        }
+        if (product.scale() < 4) image.reduction_scratch.Destroy();
+        if (product.scale() == 1) image.reduced.Destroy();
+        image.scale = product.scale();
         image.matrices = d3scene::viewMatrices(prepared.visibility().camera);
         image.sequence = sequence;
         if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
             AutomatedCaptureLog("scene view image key=%llu size=%ux%u samples=%u sequence=%llu coverage=%d,%d,%d,%d reallocated=%d",
                 static_cast<unsigned long long>(product.image()),image.buffer.Width(),image.buffer.Height(),image.buffer.Samples(),
                 static_cast<unsigned long long>(sequence),view.coverage.x,view.coverage.y,view.coverage.width,view.coverage.height,reallocated);
+        if (AutomatedCapturePending())
+            AutomatedCaptureLog("scene view image published key=%llu size=%ux%u raster_scale=%u",
+                static_cast<unsigned long long>(product.image()),image.Color().Width(),image.Color().Height(),product.scale());
     } catch (...) { restore(); throw; }
     restore();
 }
@@ -1323,7 +1351,7 @@ d3scene::ImageMip GL4Renderer::ReadViewImage(const d3scene::Presentation& presen
     if (scene_asset_lifetime != presentation.data().scene_lifetime || found == scene_view_images.end() ||
         found->second.sequence != presentation.data().sequence)
         throw std::logic_error("Readback requested a missing or stale view image");
-    return GL_ReadColorImage(found->second.buffer);
+    return GL_ReadColorImage(found->second.Color());
 }
 d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::PreparedView& prepared) {
     const auto& presentation = prepared.frame();
@@ -2361,11 +2389,11 @@ void main() {
             const auto found = scene_view_images.find(input.image);
             if (found == scene_view_images.end() || found->second.sequence != sequence)
                 throw std::logic_error("Surface requested a missing, stale or in-flight view image");
-            if (found->second.buffer.Handle() == output.Handle())
+            if (found->second.Color().Handle() == output.Handle() || found->second.buffer.Handle() == output.Handle())
                 throw std::logic_error("View image cannot sample its own render target");
             GLint draw, read;
             glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING,&draw); glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING,&read);
-            const auto texture = found->second.buffer.ColorTextureForRead();
+            const auto texture = found->second.Color().ColorTextureForRead();
             glBindFramebuffer(GL_DRAW_FRAMEBUFFER,draw); glBindFramebuffer(GL_READ_FRAMEBUFFER,read);
             image_bindings = {};
             BindSceneSampler(unit,false,surface.texture_filter != d3scene::TextureFilter::Nearest,false);

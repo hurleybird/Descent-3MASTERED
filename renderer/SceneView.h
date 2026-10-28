@@ -156,6 +156,14 @@ public:
     uint64_t image() const { return image_; }
     uint32_t scale() const { return scale_; }
     uint32_t samples() const { return samples_; }
+    ImageExtent publishedExtent() const {
+        const auto& viewport = producer_.view().viewport;
+        return {uint32_t(viewport.width),uint32_t(viewport.height)};
+    }
+    ImageExtent rasterExtent() const {
+        const auto extent = publishedExtent();
+        return {extent.width*scale_,extent.height*scale_};
+    }
 };
 struct ImagePlanStoragePool;
 class PreparedImagePlan {

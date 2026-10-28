@@ -11,6 +11,7 @@
 #include <stdexcept>
 #include <thread>
 #include <algorithm>
+#include <type_traits>
 
 namespace {
 int Checks = 0;
@@ -589,6 +590,18 @@ int runSceneViewTests() {
                 later.images()[0].producer().view().camera.position.x == 100,
                 "Prepared producer borrowed later camera/frame state");
             const auto copied = compiled;
+            for (uint32_t scale : {1u,2u,4u}) {
+                auto scaled = requests;
+                for (auto& request : scaled) request.scale = scale;
+                const auto plan = prepareViewImages(*later_frame,scaled);
+                for (const auto& product : plan.images()) {
+                    const auto logical = product.publishedExtent(), raster = product.rasterExtent();
+                    check(logical.width == uint32_t(product.producer().view().viewport.width) &&
+                        logical.height == uint32_t(product.producer().view().viewport.height) &&
+                        raster.width == logical.width*scale && raster.height == logical.height*scale,
+                        "Independent image quality changed its published extent");
+                }
+            }
             check(copied.images()[0].producer().visibility().surfaces.size() == 1,
                 "Copied image plan lost independently owned query results");
             auto external = requests[0];
@@ -874,6 +887,8 @@ int runSceneViewTests() {
         check(!rejected(),"Native-resolution-only layer rejected");
     }
     check(d3scene::imageReductionSteps(1).empty(),"Native resolution introduced a reduction pass");
+    static_assert(std::is_trivially_copyable<d3scene::ImageReductionSteps>::value,
+        "Bounded reduction schedule must not own heap storage");
     const auto reduction2 = d3scene::imageReductionSteps(2), reduction4 = d3scene::imageReductionSteps(4);
     check(reduction2.size() == 1 && reduction2[0].source_scale == 2 && reduction2[0].destination_scale == 1,
         "Two-times layer reduction changed kernel scale");

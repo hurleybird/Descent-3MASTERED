@@ -1100,6 +1100,7 @@ void RenderGameSceneView(const d3scene::Presentation& frame, d3scene::View view,
         image.view.history_key = SceneViewImageProbe;
         image.view.viewport = image.view.projection_anchor = {0,0,320,180};
         image.samples = 4;
+        image.scale = Render_preferred_state.supersampling_factor;
         d3scene::ViewImageRequest copy;
         copy.image = SceneViewImageProbe+1;
         copy.view = MakeSceneCanvasView(SceneViewImageProbe+1,{0,0,320,180},d3scene::ViewTarget::Scene,true);
@@ -1123,6 +1124,14 @@ void RenderGameSceneView(const d3scene::Presentation& frame, d3scene::View view,
             CaptureGameRoomCoronaView(planar.consumer); // cached publication replay, no second clock or ray pass
     }
     d3scene::renderViewImages(producers);
+    if (FindArg("-scene-view-image-probe") && view.kind == d3scene::ViewKind::Main && AutomatedCapturePending()) {
+        for (uint64_t key : {SceneViewImageProbe,SceneViewImageProbe+1}) {
+            const auto pixels = d3scene::readViewImage(frame,key);
+            if (pixels.width != 320 || pixels.height != 180)
+                throw std::logic_error("Independent image published raster rather than logical dimensions");
+        }
+        AutomatedCaptureLog("scene view image logical readback verified size=320x180");
+    }
     if (FindArg("-scene-observation-probe") && (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)) {
         for (const auto& image : producers.images()) if (image.producer().view().kind == d3scene::ViewKind::Mirror) {
             const auto& producer = image.producer();

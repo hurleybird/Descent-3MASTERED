@@ -45,7 +45,7 @@ param(
     [switch]$HistoryProbe,
     [switch]$DeformationProbe,
     [string]$DemoFile = '',
-    [ValidateSet('ordinary','automap-cache','automap-lifecycle','automap-settings','retirement','save-export','save-settings','auxiliary-lifecycle','modal-ui','save-dialog','quicksave','decoded-movie','decoded-movie-paletted','decoded-movie-subtitles','decoded-movie-screenshot','message-consoles','screenshot-normal','screenshot-clean','screenshot-double','screenshot-tga','demo-movie')][string]$Scenario = 'ordinary'
+    [ValidateSet('ordinary','image-lifecycle','image-settings','automap-cache','automap-lifecycle','automap-settings','retirement','save-export','save-settings','auxiliary-lifecycle','modal-ui','save-dialog','quicksave','decoded-movie','decoded-movie-paletted','decoded-movie-subtitles','decoded-movie-screenshot','message-consoles','screenshot-normal','screenshot-clean','screenshot-double','screenshot-tga','demo-movie')][string]$Scenario = 'ordinary'
 )
 
 # Run only copied installations and copied pilot/save data. Never point Runtime
@@ -78,6 +78,7 @@ if ($Scenario -ne 'ordinary') {
     }
 }
 if ($Scenario -in @('automap-cache','automap-lifecycle','automap-settings')) { $AutomapTelcomProbe = $true }
+if ($Scenario -in @('image-lifecycle','image-settings')) { $ViewImageProbe = $true }
 if ($AutomapTerrainProbe) { $AutomapProbe = $true }
 if ($AutomapTelcomProbe -and (-not $SceneInspection -or $AutomapProbe)) { throw 'TelCom fixture requires scene inspection and the normal world presentation.' }
 if ($AutomapProbe -and (-not $SceneInspection -or $HudProbe -or $CockpitProbe -or $ReticleProbe -or $TerrainProbe -or $SkyProbe -or $HistoryProbe -or $MirrorSurfaceProbe -or $MirrorCameraProbe -or $ModelEffectsProbe -or $ObservationProbe -or $ViewImageProbe)) {
@@ -216,7 +217,7 @@ $manifest = [ordered]@{
     automap_terrain_probe = [bool]$AutomapTerrainProbe
     automap_telcom_probe = [bool]$AutomapTelcomProbe
     hud_view_probe = $HudViewProbe
-    view_image_revision = $(if ($ViewImageProbe) { 2 } else { 0 })
+    view_image_revision = $(if ($ViewImageProbe) { 3 } else { 0 })
     cockpit_probe_revision = $(if ($CockpitProbe) { 4 } else { 0 })
     scorch_probe = [bool]$ScorchProbe
     scorch_view_probe = [bool]$ScorchViewProbe
@@ -521,7 +522,8 @@ try {
             (-not $HudProbe -or $logText.Contains('scene HUD items prepared')) -and
             (-not $HudMessageProbe -or $logText.Contains('scene HUD messages prepared')) -and
             ($HudViewProbe -eq 'none' -or $logText.IndexOf("scene HUD view policy mode=$HudViewProbe",[StringComparison]::OrdinalIgnoreCase) -ge 0) -and
-            (-not $ViewImageProbe -or $logText.Contains('scene view image key=')) -and
+            (-not $ViewImageProbe -or ($logText.Contains('scene view image key=') -and
+                $logText.Contains('scene view image logical readback verified size=320x180'))) -and
             (-not $MirrorSurfaceProbe -or ($logText.Contains('scene mirror surface camera') -and $logText.Contains('scene view image key='))) -and $process.ExitCode -eq 1 -and
             (Test-Path -LiteralPath $png) -and $logText.Contains('capture saved') -and
             $logText.Contains('capture headlight enabled') -and

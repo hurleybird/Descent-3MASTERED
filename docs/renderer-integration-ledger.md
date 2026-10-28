@@ -1397,3 +1397,24 @@ Both scenarios pass003/006 with GL auditing and fresh-compilation comparisons;
 scene retirement clears all eight producer caches (remaining=0). Evidence:
 qual-map-lifecycle-20261027 and qual-map-settings-20261027. These remain bounded
 background integration fixtures, not ordinary no-probe release acceptance.
+
+## Independent image raster versus publication extent (October 27)
+
+ViewImageRequest scale now controls raster quality, not the consumer image's
+dimensions. An independent producer completes the existing two-to-one SSAA
+reduction before publication; readback and dependent surfaces use that logical
+image. Existing scale-one consumers are unchanged. Image reduction is in scene
+color space (gamma one), independent of the eventual display transform. Retained
+per-image reduction targets are retired with the producer lifetime and released
+when quality drops. Caller scissor state no longer clips independent producers.
+The bounded reduction schedule is allocation-free for world/foreground/images.
+
+Root integration and all three contracts pass. qual-image-logical-ssaa1/2/4-
+20261027 verifies actual producer/dependent readback at320x180; the4x producer
+raster is1280x720 and reduces through640x360. Inspected the preview output.
+qual-image-lifecycle-20261027 and qual-image-settings-20261027 pass003/006 with
+GL audits, scene retirement and five quality/resource transitions. Ordinary
+003/006 images in qual-image-world-20261027 exactly match qual-map-world-after-
+20261027. No overall performance improvement is claimed for this quality fix.
+This is the prerequisite for isolating TelCom's3D content without losing SSAA;
+TelCom itself still changes screen mode and uses the scene compositor.

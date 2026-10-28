@@ -1,6 +1,19 @@
 {
   "schemaVersion": 1,
   "scenarios": {
+    "image-lifecycle": {
+      "revision": 1, "minimumFrame": 30, "inspectionRequired": true,
+      "arguments": ["-scene-retirement-probe", "-scene-gl-audit"],
+      "requiredLog": ["scene retirement live reset frame=20", "scene motion frame=21 camera_history=1", "scene view image logical readback verified size=320x180", "scene retirement game lifetime=\\d+ producers=\\d+ remaining=0"],
+      "purpose": "Supersampled independent image and dependent canvas preserve their logical extent across scene retirement; producer raster scale follows the selected SSAA profile."
+    },
+    "image-settings": {
+      "revision": 1, "minimumFrame": 55, "inspectionRequired": true,
+      "arguments": ["-scene-resource-probe", "-scene-gl-audit", "-capture-series-from", "15", "-capture-series-until", "45", "-capture-series-stride", "10"],
+      "evidenceFrames": [15,25,35,45],
+      "requiredLog": ["scene resource transition frame=10", "scene resource transition frame=20", "scene resource transition frame=30", "scene resource transition frame=40", "scene resource transition frame=50", "scene view image logical readback verified size=320x180"],
+      "purpose": "Independent image quality reallocates across SSAA/MSAA changes without changing published dimensions, including dependency consumption and readback."
+    },
     "automap-settings": {
       "revision": 1, "minimumFrame": 55, "inspectionRequired": true,
       "arguments": ["-scene-automap-cache-audit", "-scene-resource-probe", "-scene-gl-audit", "-capture-series-from", "25", "-capture-series-until", "25"],

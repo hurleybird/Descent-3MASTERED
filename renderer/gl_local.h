@@ -241,6 +241,10 @@ class GL4Renderer : public IRenderer
 	std::array<SceneSamplerGpu,8> scene_samplers;
 	struct SceneViewImageGpu {
 		Framebuffer buffer;
+		Framebuffer reduced, reduction_scratch;
+		uint32_t scale = 1;
+		Framebuffer& Color() { return scale > 1 ? reduced : buffer; }
+		void Destroy() { buffer.Destroy(); reduced.Destroy(); reduction_scratch.Destroy(); depth.Destroy(); }
 		SceneDepthSnapshot depth;
 		d3scene::ViewHistory history;
 		d3scene::ViewMatrices matrices;
