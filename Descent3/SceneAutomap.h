@@ -4,6 +4,22 @@
 #include <array>
 
 enum class AutomapFaceAppearance { Hidden, Baked, Black, Unexplored };
+struct AutomapFaceRevision {
+    AutomapFaceAppearance appearance = AutomapFaceAppearance::Black;
+    int lightmap = -1;
+    uint64_t content = 0;
+};
+inline bool operator==(const AutomapFaceRevision& a,const AutomapFaceRevision& b) {
+    return a.appearance == b.appearance && a.lightmap == b.lightmap && a.content == b.content;
+}
+struct AutomapGeometryKey {
+    d3scene::AssetId geometry;
+    uint64_t appearance = 0;
+    std::vector<AutomapFaceRevision> faces;
+};
+inline bool operator==(const AutomapGeometryKey& a,const AutomapGeometryKey& b) {
+    return a.geometry == b.geometry && a.appearance == b.appearance && a.faces == b.faces;
+}
 struct AutomapFaceSource {
     AutomapFaceAppearance appearance = AutomapFaceAppearance::Black;
     uint8_t detail = 0; // 0 always, 1 through depth 600, 2 through depth 300

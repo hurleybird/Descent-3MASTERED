@@ -1,5 +1,26 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## October 27 — resumed original task after Sol continuation
+
+Active worktree remains renderer-rearchitecture, branch codex/renderer-rearchitecture.
+Sol continuation01a164b5-04fe-78d0-b4f8-619a0f143d48 was idle/interrupted at82bd23a.
+Finished its pending independent movie canvas inb0e87b2. Further checkpoints:
+10fc2ff main-menu display canvas/target-owned raster mapping and obsolete copy API
+removal;9e9f73c nested-modal display ownership;3dcb666 TelCom draw-local sampling.
+Current automap work separates room-asset publication from full world extraction
+and retains compiled meshes with exact invalidation; ledger contains tests and
+bounded CPU timings12.339->0.742ms and5.199->0.543ms. World003/006 images exact.
+
+Use docs/renderer-integration-ledger.md as the current integration inventory.
+Private runtime C:/tmp/D3RendererVerification/integration-runtime-20261022.
+No Candidate/Previous Candidate/desktop/shadow changes. Preserve lib/gitinfo.h.
+An interactive test captured Jeff's mouse and was immediately closed: continue
+background-only unless he authorizes an interactive test window. Last usage
+check56%consumed, credits62044.8730600000 unchanged this turn; check again and
+stop before included usage reaches zero. Ordinary no-probe qualification remains
+closed. TelCom still changes screen mode and its full shell/map composition is
+not yet separated; don't claim otherwise. Do not resume cancelled cockpit edits.
+
 ## October 22 — display-resolution soft particles qualified for testing
 
 User selected scaling idea 2 only: display-resolution soft particles. No other

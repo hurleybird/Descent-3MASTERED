@@ -1350,3 +1350,42 @@ monitor region6677pixels differ, maximum channel difference22/255; animated
 shell lights also differ. The image remains comparable, but this explicit policy
 change is not claimed as exact legacy equivalence or a measured speedup. Root
 integration and all3contracts pass. No interactive window was launched.
+
+## Automap geometry ownership and warm CPU cost (October 27)
+
+PrepareGameRoomAsset is now the shared geometry/volume publication boundary for
+world extraction and automap. The map no longer extracts an unused full world
+presentation (objects, portals and material tables) merely to obtain rooms.
+Its compiled room meshes belong to SceneAssets through SceneCache, and are reused
+until exact geometry/appearance/face revision keys change. Keys include lightmap
+handle/content revision and explored/secret portal appearance; disappearing
+groups drop their old references. FrameData comes from the existing pool and is
+published by move. Pulsing color, depth-tier selection, ship/marker poses and
+visibility remain per-presentation, not baked into the cache.
+
+Root integration and all3contracts pass, including10new exact-key checks.
+Registered automap-cache invokes the actual TelCom producer and freshly compiles
+every warm room for comparison against retained topology/UVs/colors/normals.
+qual-map-cache-audit-20261027 passes003/006. No diagnostic reference fallback is
+retained in normal code. qual-map-world-{before,after}-20261027 ordinary003/006
+images are fully pixel-identical at1280x720 with effects and motion blur.
+
+Timing evidence: qual-map-cpu-reference-fixed-20261027 versus qual-map-cpu-cached-
+20261027, each16actual map preparations (first excluded from warm median):
+
+| Save | Full extraction/recompilation | Shared geometry + retained compilation |
+| --- | ---: | ---: |
+| 003 | 12.339ms | 0.742ms |
+| 006 | 5.199ms | 0.543ms |
+
+Cached cold preparation was8.036/3.937ms, with zero room rebuilds on every warm
+sample. These are bounded local CPU-preparation samples, not whole-frame/GPU or
+pre-rewrite claims. Full TelCom images are not deterministic because shell
+lights/scanline use wall-clock animation; inspect geometry directly via the audit.
+
+The first comparison also exposed physical input leaking into hidden automap
+through DoMovement, which bypasses ReadPlayerControls. The lower movement entry
+now zeros and returns for automated captures; scripted gameplay input remains in
+ReadPlayerControls. Earlier unfixed camera comparisons are not image-equivalence
+evidence. The fixed-input reference executable is retained only as a local
+measurement artifact at out/automap-extraction-reference.exe.

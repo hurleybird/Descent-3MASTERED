@@ -450,6 +450,10 @@ void DoMovement(game_controls *controls)
 	controls->bank_thrust = 0.0f;
 	controls->heading_thrust = 0.0f;
 	controls->afterburn_thrust = 0.0f;
+	// Automap callers enter here directly instead of ReadPlayerControls.
+	// Hidden verification must not consume physical workstation movement.
+	if (AutomatedCaptureSuppressesInput())
+		return;
 
 //	only read controls in game interface mode.
 	if (Game_interface_mode != GAME_INTERFACE) 

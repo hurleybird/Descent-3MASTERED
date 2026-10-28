@@ -1,6 +1,12 @@
 {
   "schemaVersion": 1,
   "scenarios": {
+    "automap-cache": {
+      "revision": 1, "minimumFrame": 30, "inspectionRequired": true,
+      "arguments": ["-scene-automap-cache-audit"],
+      "requiredLog": ["scene automap TelCom composed", "scene automap CPU prepare_ms=[0-9.]+ rebuilt_rooms=0 audited_rooms=[1-9]"],
+      "purpose": "Actual TelCom automap with hidden physical input suppressed; compare cached mesh topology, UVs, colors and normals against a fresh compilation on every warm frame."
+    },
     "ordinary": {
       "revision": 1,
       "minimumFrame": 1,

@@ -35,6 +35,9 @@ void InvalidateGameSceneGeometry();
 void InvalidateGameSceneAppearance();
 uint64_t GameSceneGeometryRevision();
 uint64_t GameSceneAppearanceRevision();
+// Publish only immutable room geometry/volume. UI/map consumers do not need a
+// gameplay frame, object inventory, material table or temporal advance for it.
+d3scene::RoomAssetRef PrepareGameRoomAsset(int number,bool audit_geometry = false);
 void PrepareGameModelInstances(d3scene::FrameData&, const d3scene::Presentation* previous,bool retain_materials = false);
 d3scene::ModelAssetRef PrepareGameModelAsset(int number,bool audit_geometry = false);
 void AuditGameModelPoses(const d3scene::Presentation&);

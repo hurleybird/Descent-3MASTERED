@@ -113,6 +113,23 @@ uint64_t AllocateGamePresentationSequence() {
     return ++Sequence;
 }
 
+d3scene::RoomAssetRef PrepareGameRoomAsset(int number,bool audit_geometry) {
+    if (number < 0 || number >= MAX_ROOMS || !Rooms[number].used)
+        throw std::invalid_argument("Room asset requested an unavailable source");
+    auto& assets = d3scene::assets();
+    const auto& source = Rooms[number];
+    auto asset = assets.room(number);
+    if (asset && PublishedGeometryEpoch[number] == GeometryEpoch) {
+        if (audit_geometry && (!matches(asset->geometry(),source) || !matchesVolume(asset->volume(),source)))
+            throw std::logic_error("Room geometry changed without producer invalidation");
+    } else {
+        if (!asset || !matches(asset->geometry(),source) || !matchesVolume(asset->volume(),source))
+            asset = assets.publishRoom(number,extractGeometry(source),extractVolume(source));
+        PublishedGeometryEpoch[number] = GeometryEpoch;
+    }
+    return asset;
+}
+
 d3scene::FrameData ExtractGameFrame(double time, float delta, bool paused, bool advance_history,
     const d3scene::Presentation* retained_frame,bool audit_geometry) {
     auto& assets = d3scene::assets();
@@ -129,15 +146,7 @@ d3scene::FrameData ExtractGameFrame(double time, float delta, bool paused, bool 
     for (int i = 0; i < MAX_ROOMS; ++i) {
         if (!Rooms[i].used) { assets.removeRoom(i); continue; }
         const room& source = Rooms[i];
-        auto asset = assets.room(i);
-        if (asset && PublishedGeometryEpoch[i] == GeometryEpoch) {
-            if (audit_geometry && (!matches(asset->geometry(),source) || !matchesVolume(asset->volume(),source)))
-                throw std::logic_error("Room geometry changed without producer invalidation");
-        } else {
-            if (!asset || !matches(asset->geometry(),source) || !matchesVolume(asset->volume(),source))
-                asset = assets.publishRoom(i,extractGeometry(source),extractVolume(source));
-            PublishedGeometryEpoch[i] = GeometryEpoch;
-        }
+        auto asset = PrepareGameRoomAsset(i,audit_geometry);
         d3scene::RoomState state;
         state.number = i;
         state.source_material_revision = AppearanceEpoch;

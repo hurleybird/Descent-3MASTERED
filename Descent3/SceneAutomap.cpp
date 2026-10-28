@@ -2,6 +2,7 @@
 #include "SceneAutomap.h"
 #include "SceneExtraction.h"
 #include "../renderer/SceneGeometry.h"
+#include "../renderer/SceneCache.h"
 #include "room.h"
 #include "game.h"
 #include "object.h"
@@ -12,12 +13,22 @@
 #include "gameloop.h"
 #include "polymodel.h"
 #include "args.h"
+#include "ddio.h"
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
 
 extern ubyte AutomapVisMap[MAX_ROOMS];
 namespace {
+struct AutomapRoomCompilation {
+    AutomapGeometryKey key;
+    std::array<d3scene::MeshAssetRef,9> groups;
+    bool valid = false;
+};
+struct AutomapCompilation {
+    std::array<AutomapRoomCompilation,MAX_ROOMS> rooms;
+    AutomapGeometryKey scratch;
+};
 d3scene::Vec3 value(const vector& p) { return {p.x,p.y,p.z}; }
 void markerDisk(d3scene::FrameData& data,const vector& p,d3scene::Vec3 color,float radius) {
     d3scene::PreparedMesh mesh;
@@ -32,68 +43,108 @@ void markerDisk(d3scene::FrameData& data,const vector& p,d3scene::Vec3 color,flo
 }
 
 d3scene::PresentationRef PrepareGameAutomap(uint64_t sequence,double display_time,bool terrain,int ship_model,int selected_marker) {
+    const double prepare_begin = timer_GetTime64();
     if (!std::isfinite(display_time)) throw std::invalid_argument("Invalid automap display clock");
-    // Reuse the canonical room asset publisher without advancing world history.
-    // The map has its own frame/clock and does not prepare normal gameplay effects.
-    const auto source = ExtractGamePresentation(Gametime,0,true,false);
-    d3scene::FrameData data;
-    data.sequence = sequence; data.scene_lifetime = source->data().scene_lifetime;
+    // The map owns its clock and requests only the shared immutable geometry;
+    // constructing an unused gameplay presentation is not a prerequisite.
+    auto data = d3scene::acquireFrameData();
+    static d3scene::SceneCache<AutomapCompilation> compilation_cache;
+    const auto compilation = compilation_cache.acquire(d3scene::assets());
+    unsigned rebuilt = 0, audited = 0;
+    const bool audit_cache = FindArg("-scene-automap-cache-audit") != 0;
+    data.sequence = sequence; data.scene_lifetime = d3scene::assets().lifetime();
     data.simulation_time = Gametime; data.paused = true;
     const float pulse = float(display_time-std::floor(display_time));
     const int start = Viewer_object ? Viewer_object->roomnum : -1;
     size_t room_count = 0;
-    for (const auto& room : source->data().rooms) {
-        const auto& game_room = Rooms[room.number];
-        const bool exterior = (room.authored_flags & RF_EXTERNAL) != 0;
-        if (exterior ? !terrain : (!AutomapVisMap[room.number] && room.number != start)) continue;
-        const auto& geometry = room.asset->geometry();
-        std::vector<AutomapFaceSource> faces(geometry.polygons.size());
-        for (size_t index = 0; index < faces.size(); ++index) {
+    for (int number = 0; number < MAX_ROOMS; ++number) {
+        const auto& game_room = Rooms[number];
+        if (!game_room.used) continue;
+        const bool exterior = (game_room.flags & RF_EXTERNAL) != 0;
+        if (exterior ? !terrain : (!AutomapVisMap[number] && number != start)) continue;
+        const auto asset = PrepareGameRoomAsset(number);
+        const auto& geometry = asset->geometry();
+        auto& key = compilation->scratch;
+        key.geometry = asset->id(); key.appearance = GameSceneAppearanceRevision();
+        key.faces.clear(); key.faces.reserve(geometry.polygons.size());
+        for (size_t index = 0; index < geometry.polygons.size(); ++index) {
             const auto& face = game_room.faces[index];
-            auto& target = faces[index];
-            std::vector<vector> vertices;
-            for (const auto& corner : geometry.polygons[index].corners) {
-                const auto& p = geometry.vertices[corner.vertex]; vertices.push_back({p.x,p.y,p.z});
-            }
-            if (vertices.size() >= 3) {
-                vector center;
-                const float area = vm_GetCentroidFast(&center,vertices.data(),int(vertices.size()));
-                target.detail = area < 60 ? 2 : area < 120 ? 1 : 0;
-            }
+            AutomapFaceRevision stamp;
             if (face.portal_num >= 0) {
+                if (face.portal_num >= game_room.num_portals) throw std::invalid_argument("Automap portal index is invalid");
                 const int other = game_room.portals[face.portal_num].croom;
                 if (other < 0 || other >= MAX_ROOMS || !Rooms[other].used)
                     throw std::invalid_argument("Automap portal has no destination room");
-                target.appearance = AutomapVisMap[other] ? AutomapFaceAppearance::Hidden :
+                stamp.appearance = AutomapVisMap[other] ? AutomapFaceAppearance::Hidden :
                     (Rooms[other].flags & RF_SECRET) ? AutomapFaceAppearance::Black : AutomapFaceAppearance::Unexplored;
             } else if (face.flags & FF_LIGHTMAP) {
                 if (face.lmi_handle < 0 || face.lmi_handle >= MAX_LIGHTMAP_INFOS)
                     throw std::invalid_argument("Automap face has no baked lighting");
-                const int handle = LightmapInfo[face.lmi_handle].lm_handle;
-                if (handle < 0 || handle >= MAX_LIGHTMAPS) throw std::invalid_argument("Automap lightmap is unavailable");
-                const int width = lm_w(handle), height = lm_h(handle);
-                const auto* texels = lm_data(handle);
-                if (!texels || width <= 0 || height <= 0) throw std::invalid_argument("Automap lightmap is empty");
-                target.appearance = AutomapFaceAppearance::Baked;
-                for (int corner = 0; corner < face.num_verts; ++corner) {
-                    const auto& uv = face.face_uvls[corner];
-                    const int x = (std::max)(0,(std::min)(width-1,int(uv.u2*width)));
-                    const int y = (std::max)(0,(std::min)(height-1,int(uv.v2*height)));
-                    const auto texel = texels[y*width+x];
-                    target.colors.push_back({float((texel>>10)&31)/31,float((texel>>5)&31)/31,float(texel&31)/31});
+                stamp.lightmap = LightmapInfo[face.lmi_handle].lm_handle;
+                if (stamp.lightmap < 0 || stamp.lightmap >= MAX_LIGHTMAPS || !GameLightmaps[stamp.lightmap].used)
+                    throw std::invalid_argument("Automap lightmap is unavailable");
+                stamp.appearance = AutomapFaceAppearance::Baked;
+                stamp.content = lm_ContentRevision(stamp.lightmap);
+            }
+            key.faces.push_back(stamp);
+        }
+        auto& compiled = compilation->rooms[number];
+        const bool cache_hit = compiled.valid && compiled.key == key;
+        if (!cache_hit || audit_cache) {
+            compiled.valid = false;
+            std::vector<AutomapFaceSource> faces(geometry.polygons.size());
+            for (size_t index = 0; index < faces.size(); ++index) {
+                const auto& face = game_room.faces[index];
+                auto& target = faces[index];
+                std::vector<vector> vertices;
+                for (const auto& corner : geometry.polygons[index].corners) {
+                    const auto& p = geometry.vertices[corner.vertex]; vertices.push_back({p.x,p.y,p.z});
+                }
+                if (vertices.size() >= 3) {
+                    vector center;
+                    const float area = vm_GetCentroidFast(&center,vertices.data(),int(vertices.size()));
+                    target.detail = area < 60 ? 2 : area < 120 ? 1 : 0;
+                }
+                target.appearance = key.faces[index].appearance;
+                if (target.appearance == AutomapFaceAppearance::Baked) {
+                    const int handle = key.faces[index].lightmap;
+                    const int width = lm_w(handle), height = lm_h(handle);
+                    const auto* texels = lm_data(handle);
+                    if (!texels || width <= 0 || height <= 0) throw std::invalid_argument("Automap lightmap is empty");
+                    for (int corner = 0; corner < face.num_verts; ++corner) {
+                        const auto& uv = face.face_uvls[corner];
+                        const int x = (std::max)(0,(std::min)(width-1,int(uv.u2*width)));
+                        const int y = (std::max)(0,(std::min)(height-1,int(uv.v2*height)));
+                        const auto texel = texels[y*width+x];
+                        target.colors.push_back({float((texel>>10)&31)/31,float((texel>>5)&31)/31,float(texel&31)/31});
+                    }
                 }
             }
+            auto groups = CompileAutomapGeometry(geometry,faces);
+            for (unsigned group = 0; group < groups.size(); ++group) {
+                if (cache_hit) {
+                    const auto& previous = compiled.groups[group];
+                    if (bool(previous) != !groups[group].polygons.empty() ||
+                        (previous && !(previous->geometry() == groups[group])))
+                        throw std::logic_error("Automap cached geometry differs from fresh compilation");
+                    continue;
+                }
+                // Empty replacement groups must retire their previous mesh too.
+                compiled.groups[group] = groups[group].polygons.empty() ? d3scene::MeshAssetRef{} :
+                    d3scene::assets().publishMesh(0x10000u+uint32_t(number)*9+group,std::move(groups[group]));
+            }
+            if (cache_hit) ++audited;
+            else { compiled.key = key; ++rebuilt; }
+            compiled.valid = true;
         }
-        auto groups = CompileAutomapGeometry(geometry,faces);
-        for (unsigned group = 0; group < groups.size(); ++group) {
-            if (groups[group].polygons.empty()) continue;
+        for (unsigned group = 0; group < compiled.groups.size(); ++group) {
+            if (!compiled.groups[group]) continue;
             d3scene::PreparedMesh mesh;
-            // The game reserves mesh slots 0x10000.. for automap room groups.
-            mesh.asset = d3scene::assets().publishMesh(0x10000u+uint32_t(room.number)*9+group,std::move(groups[group]));
+            mesh.asset = compiled.groups[group];
             mesh.surface.unlit = true;
             if (group/3 == 2) mesh.surface.color_modulation = {pulse,pulse,pulse};
             mesh.maximum_depth = group%3 == 2 ? 300.f : group%3 == 1 ? 600.f : 0.f;
-            mesh.depth_reference = room.asset->bounds();
+            mesh.depth_reference = asset->bounds();
             data.meshes.push_back(std::move(mesh));
         }
         ++room_count;
@@ -130,7 +181,11 @@ d3scene::PresentationRef PrepareGameAutomap(uint64_t sequence,double display_tim
     if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
         AutomatedCaptureLog("scene automap prepared rooms=%u meshes=%u terrain=%d models=%u",unsigned(room_count),
             unsigned(data.meshes.size()),terrain,unsigned(data.model_instances.size()));
-    return d3scene::Presentation::freeze(data);
+    const auto result = d3scene::Presentation::publish(std::move(data));
+    if (FindArg("-scene-automap-telcom-probe"))
+        AutomatedCaptureLog("scene automap CPU prepare_ms=%.6f rebuilt_rooms=%u audited_rooms=%u",
+            (timer_GetTime64()-prepare_begin)*1000,rebuilt,audited);
+    return result;
 }
 
 d3scene::PresentationRef PrepareAutomapInspection() {
