@@ -1334,3 +1334,19 @@ instead of only when updating the publication after those side effects.
 qual-telcom-ownership-20261027 passes the actual TelCom map capture and exits;
 qual-telcom-before-20261027 remains failed evidence. This does not qualify map
 controls or return to active gameplay. No ownership assertion was weakened.
+
+## TelCom draw-local sampling (October 27)
+
+TelCom no longer rewrites Render_preferred_state.mipping/filtering or calls
+SetPreferredState merely to configure UI texture sampling. It disables mipmaps
+and filtering through existing draw-local state and restores the caller's state
+on exit. Its existing screen-mode transition is unchanged and remains a larger
+composition/lifecycle migration target.
+
+qual-telcom-sampling-20261027 completes and was visually inspected. This is not
+pixel-identical: scene-owned automap geometry now honors configured world
+mipmapping rather than TelCom's temporary preference override. In the fixed map
+monitor region6677pixels differ, maximum channel difference22/255; animated
+shell lights also differ. The image remains comparable, but this explicit policy
+change is not claimed as exact legacy equivalence or a measured speedup. Root
+integration and all3contracts pass. No interactive window was launched.

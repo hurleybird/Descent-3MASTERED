@@ -355,8 +355,8 @@ bool TelComShow(bool ingame, bool ShipSelect)
 	// must do this to clear out keyboard events
 	ddio_KeyFlush();
 
-	ubyte oldmip = Render_preferred_state.mipping;
-	ubyte oldbil = Render_preferred_state.filtering;
+	rendering_state incoming_draw_state;
+	rend_GetRenderState(&incoming_draw_state);
 
 	if (!TelCom_init)
 	{
@@ -401,11 +401,9 @@ bool TelComShow(bool ingame, bool ShipSelect)
 		}
 	}
 
-	//turn off mipmapping
-	Render_preferred_state.mipping = 0;
-	//turn off bilinear filtering
-	Render_preferred_state.filtering = 1;
-	rend_SetPreferredState(&Render_preferred_state);
+	// UI sampling is draw-local. It must not rewrite the user's world settings
+	// or reconfigure renderer resources just to draw the TelCom shell.
+	rend_SetMipState(0);
 	rend_SetFiltering(0);
 
 	//keep the mouse in view
@@ -433,10 +431,8 @@ telcom_bad_error:
 
 	//reset some states
 	rend_SetZBufferState(1);
-	Render_preferred_state.mipping = oldmip;
-	Render_preferred_state.filtering = oldbil;
-	rend_SetPreferredState(&Render_preferred_state);
-	rend_SetFiltering(1);
+	rend_SetMipState(incoming_draw_state.cur_mip_state);
+	rend_SetFiltering(incoming_draw_state.cur_bilinear_state);
 	rend_SetWrapType(WT_WRAP);
 
 	Telcom_intelcom = false;
