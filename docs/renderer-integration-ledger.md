@@ -1376,7 +1376,7 @@ Timing evidence: qual-map-cpu-reference-fixed-20261027 versus qual-map-cpu-cache
 | Save | Full extraction/recompilation | Shared geometry + retained compilation |
 | --- | ---: | ---: |
 | 003 | 12.339ms | 0.742ms |
-| 006 | 5.199ms | 0.543ms |
+| 006 | 5.198ms | 0.543ms |
 
 Cached cold preparation was8.036/3.937ms, with zero room rebuilds on every warm
 sample. These are bounded local CPU-preparation samples, not whole-frame/GPU or
@@ -1389,3 +1389,11 @@ now zeros and returns for automated captures; scripted gameplay input remains in
 ReadPlayerControls. Earlier unfixed camera comparisons are not image-equivalence
 evidence. The fixed-input reference executable is retained only as a local
 measurement artifact at out/automap-extraction-reference.exe.
+
+Follow-up lifecycle qualification: automap-lifecycle opens the real TelCom at
+frame10, resumes world rendering, retires the scene twice at20, and reopens at30.
+automap-settings opens at25/55 across five SSAA/MSAA resource transitions.
+Both scenarios pass003/006 with GL auditing and fresh-compilation comparisons;
+scene retirement clears all eight producer caches (remaining=0). Evidence:
+qual-map-lifecycle-20261027 and qual-map-settings-20261027. These remain bounded
+background integration fixtures, not ordinary no-probe release acceptance.

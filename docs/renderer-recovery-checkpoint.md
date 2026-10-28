@@ -9,17 +9,24 @@ Finished its pending independent movie canvas inb0e87b2. Further checkpoints:
 removal;9e9f73c nested-modal display ownership;3dcb666 TelCom draw-local sampling.
 Current automap work separates room-asset publication from full world extraction
 and retains compiled meshes with exact invalidation; ledger contains tests and
-bounded CPU timings12.339->0.742ms and5.199->0.543ms. World003/006 images exact.
+bounded CPU timings12.339->0.742ms and5.198->0.543ms. World003/006 images exact.
 
 Use docs/renderer-integration-ledger.md as the current integration inventory.
 Private runtime C:/tmp/D3RendererVerification/integration-runtime-20261022.
 No Candidate/Previous Candidate/desktop/shadow changes. Preserve lib/gitinfo.h.
 An interactive test captured Jeff's mouse and was immediately closed: continue
 background-only unless he authorizes an interactive test window. Last usage
-check56%consumed, credits62044.8730600000 unchanged this turn; check again and
+check61%consumed, credits62044.8730600000 unchanged this turn; check again and
 stop before included usage reaches zero. Ordinary no-probe qualification remains
 closed. TelCom still changes screen mode and its full shell/map composition is
 not yet separated; don't claim otherwise. Do not resume cancelled cockpit edits.
+
+Automap lifecycle and settings scenarios now pass003/006: repeated real TelCom
+entry around scene retirement and five SSAA/MSAA changes, with fresh geometry
+audit and all eight producer caches cleared. Evidence in qual-map-lifecycle-
+20261027 and qual-map-settings-20261027. No 3MASTERED process remained at the
+latest process check. Baseline executables still exist at out/baseline-pre-rewrite.exe
+and out/observation-baseline.exe; their provenance still needs checking before use.
 
 ## October 22 — display-resolution soft particles qualified for testing
 

@@ -1,6 +1,20 @@
 {
   "schemaVersion": 1,
   "scenarios": {
+    "automap-settings": {
+      "revision": 1, "minimumFrame": 55, "inspectionRequired": true,
+      "arguments": ["-scene-automap-cache-audit", "-scene-resource-probe", "-scene-gl-audit", "-capture-series-from", "25", "-capture-series-until", "25"],
+      "evidenceFrames": [25],
+      "requiredLog": ["scene automap TelCom composed[\\s\\S]*scene automap TelCom composed", "scene resource transition frame=10", "scene resource transition frame=20", "scene resource transition frame=30", "scene resource transition frame=40", "scene resource transition frame=50", "scene automap CPU prepare_ms=[0-9.]+ rebuilt_rooms=0 audited_rooms=[1-9]"],
+      "purpose": "Reenter real TelCom before and after five SSAA/MSAA transitions while freshly auditing retained map geometry; return to ordinary world rendering between captures."
+    },
+    "automap-lifecycle": {
+      "revision": 1, "minimumFrame": 30, "inspectionRequired": true,
+      "arguments": ["-scene-automap-cache-audit", "-scene-retirement-probe", "-scene-gl-audit", "-capture-series-from", "10", "-capture-series-until", "10"],
+      "evidenceFrames": [10],
+      "requiredLog": ["scene automap TelCom composed[\\s\\S]*scene automap TelCom composed", "scene retirement live reset frame=20", "scene motion frame=21 camera_history=1", "scene automap CPU prepare_ms=[0-9.]+ rebuilt_rooms=0 audited_rooms=[1-9]", "scene retirement game lifetime=\\d+ producers=\\d+ remaining=0"],
+      "purpose": "Open/capture/close real TelCom at10, resume world, retire scene twice at20, then reopen/capture at30. Audit retained map geometry and scene-owned cache cleanup across the lifetime change."
+    },
     "automap-cache": {
       "revision": 1, "minimumFrame": 30, "inspectionRequired": true,
       "arguments": ["-scene-automap-cache-audit"],

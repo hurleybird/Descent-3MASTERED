@@ -45,7 +45,7 @@ param(
     [switch]$HistoryProbe,
     [switch]$DeformationProbe,
     [string]$DemoFile = '',
-    [ValidateSet('ordinary','automap-cache','retirement','save-export','save-settings','auxiliary-lifecycle','modal-ui','save-dialog','quicksave','decoded-movie','decoded-movie-paletted','decoded-movie-subtitles','decoded-movie-screenshot','message-consoles','screenshot-normal','screenshot-clean','screenshot-double','screenshot-tga','demo-movie')][string]$Scenario = 'ordinary'
+    [ValidateSet('ordinary','automap-cache','automap-lifecycle','automap-settings','retirement','save-export','save-settings','auxiliary-lifecycle','modal-ui','save-dialog','quicksave','decoded-movie','decoded-movie-paletted','decoded-movie-subtitles','decoded-movie-screenshot','message-consoles','screenshot-normal','screenshot-clean','screenshot-double','screenshot-tga','demo-movie')][string]$Scenario = 'ordinary'
 )
 
 # Run only copied installations and copied pilot/save data. Never point Runtime
@@ -77,7 +77,7 @@ if ($Scenario -ne 'ordinary') {
         }
     }
 }
-if ($Scenario -eq 'automap-cache') { $AutomapTelcomProbe = $true }
+if ($Scenario -in @('automap-cache','automap-lifecycle','automap-settings')) { $AutomapTelcomProbe = $true }
 if ($AutomapTerrainProbe) { $AutomapProbe = $true }
 if ($AutomapTelcomProbe -and (-not $SceneInspection -or $AutomapProbe)) { throw 'TelCom fixture requires scene inspection and the normal world presentation.' }
 if ($AutomapProbe -and (-not $SceneInspection -or $HudProbe -or $CockpitProbe -or $ReticleProbe -or $TerrainProbe -or $SkyProbe -or $HistoryProbe -or $MirrorSurfaceProbe -or $MirrorCameraProbe -or $ModelEffectsProbe -or $ObservationProbe -or $ViewImageProbe)) {
