@@ -6,6 +6,8 @@ param(
     [int]$Frame = 60,
     [uint32]$Seed = 12345,
     [int]$TimeoutSeconds = 120,
+    [switch]$Uncapped,
+    [ValidateRange(-1,62)][int]$RenderThreadCpu = -1,
     [ValidateSet('clean','antialias','effects','occlusion')][string]$Profile = 'effects',
     [ValidateSet(0,1,2,4)][int]$Supersampling = 0,
     [ValidateSet(-1,0,2,4,8)][int]$MsaaSamples = -1,
@@ -67,6 +69,7 @@ if ($inputIsDemo) {
     $DemoFile = [IO.Path]::GetFullPath($DemoFile)
 } elseif ($DemoFile) { throw 'DemoFile requires a demo scenario' }
 if ($TimeoutSeconds -lt 1) { throw 'Capture timeout must be positive' }
+if ($RenderThreadCpu -ge [Environment]::ProcessorCount) { throw 'Diagnostic CPU index is unavailable' }
 foreach ($save in $Saves) { if ($save -notmatch '^saveg\d{3}$') { throw "Invalid save name: $save" } }
 if ($scenarioSpec.quickSaveSlot -ne $null -and ($Saves.Count -ne 1 -or $Saves[0] -ne ('saveg{0:D3}' -f [int]$scenarioSpec.quickSaveSlot))) { throw 'Quicksave scenario must load its explicitly copied target slot' }
 foreach ($pattern in $scenarioSpec.requiredLog) { [void][regex]::new($pattern) }
@@ -190,6 +193,8 @@ $manifest = [ordered]@{
     supersampling = $sampleScale
     inspection_banner_revision = $(if ($SceneInspection) { 2 } else { 0 })
     msaa_samples = $msaaCount
+    uncapped = [bool]$Uncapped
+    render_thread_cpu = $RenderThreadCpu
     deformation_probe = [bool]$DeformationProbe
     vertex_lighting = [bool]$VertexLighting
     terrain_probe = [bool]$TerrainProbe
@@ -242,6 +247,7 @@ $oldLog = $env:DESCENT3MASTERED_CAPTURE_LOG
 $oldPerfLog = $env:DESCENT3MASTERED_FRAME_PERF_LOG
 $manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $outputPath 'manifest.json') -Encoding UTF8
 if ($inputIsDemo) { $Saves = @('demo') }
+$process = $null
 try {
     foreach ($save in $Saves) {
         if (!$inputIsDemo -and $save -notmatch '^saveg\d{3}$') { throw "Invalid save name: $save" }
@@ -287,6 +293,7 @@ try {
         elseif ($Profile -eq 'occlusion') { $arguments += @('-ao','-nobloom') }
         else { $arguments += @('-noao','-nobloom') }
         $arguments += @('-ssaa',"$sampleScale",'-msaa',"$msaaCount")
+        if ($Uncapped) { $arguments += @('-limitframe','0') }
         if ($SceneInspection) { $arguments += '-scene-inspection' }
         if ($HistoryProbe) { $arguments += '-scene-history-probe' }
         if ($VertexLighting) { $arguments += '-noperpixellighting' }
@@ -345,6 +352,12 @@ try {
         } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $outputPath "$save.launch.json") -Encoding UTF8
         $started = Get-Date
         $process = Start-Process -FilePath $exe -ArgumentList $arguments -WorkingDirectory $runtimePath -WindowStyle Hidden -PassThru
+        if ($RenderThreadCpu -ge 0) {
+            $process.Refresh()
+            $mainThread = $process.Threads | Sort-Object StartTime | Select-Object -First 1
+            if (!$mainThread) { throw 'Main thread unavailable for diagnostic affinity' }
+            $mainThread.ProcessorAffinity = [IntPtr]([long]1 -shl $RenderThreadCpu)
+        }
         $timedOut = $false
         while (-not $process.HasExited) {
             if (((Get-Date) - $started).TotalSeconds -gt $TimeoutSeconds) {
@@ -550,6 +563,12 @@ try {
     }
     if ((Read-Settings) -cne $settings) { throw 'Global settings changed during capture; comparison invalid.' }
 } finally {
-    $env:DESCENT3MASTERED_CAPTURE_LOG = $oldLog
-    $env:DESCENT3MASTERED_FRAME_PERF_LOG = $oldPerfLog
+    try {
+        # Only this invocation's owned child. Failure during affinity/setup or
+        # evidence collection must not leave a game behind on the desktop.
+        if ($process -and !$process.HasExited) { $process.Kill(); [void]$process.WaitForExit(3000) }
+    } finally {
+        $env:DESCENT3MASTERED_CAPTURE_LOG = $oldLog
+        $env:DESCENT3MASTERED_FRAME_PERF_LOG = $oldPerfLog
+    }
 }

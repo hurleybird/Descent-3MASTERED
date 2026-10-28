@@ -1463,3 +1463,36 @@ versus1.515ms exact geometry, but CPU3.078 versus2.993ms; this is not yet an ove
 win or the same workload as legacy fog. Raw profiles: profile-integrated-005/007,
 profile-resource-owner-005, profile-resource-validation-005 and
 profile-resource-field-007, all suffixed-20261027. Release gate remains closed.
+
+Pinned uncapped follow-up (October28): clean720p1x/MSAA0/noAO/noBloom,
+render threadCPU2,1500frames, warm400..1199, no perf markers. New explicitly uses
+field320; old uses legacy fog. ABBA median CPU/GPU milliseconds:
+
+| Save | New A | Old A | Old B | New B |
+| --- | --- | --- | --- | --- |
+|000|2.115 / .520|1.932 / .310|1.849 / .305|2.192 / .514|
+|005|1.145 / .139|.798 / .235|.812 / .235|1.000 / .138|
+|007|1.889 / .514|1.084 / .396|1.137 / .396|1.902 / .514|
+
+Evidence: perf-integrated-field-pinned-{new-a,old-a,old-b,new-b}-{saveg000,
+saveg005,saveg007}-20261028 under C:/tmp/D3RendererVerification. CPU deficits
+remain despite the resource repair.005 GPU wins,000/007 GPU still lose. Never
+sum CPU/GPU intervals. These are comparable workloads, not strict image parity:
+the new fog policy differs, and the previously reported darker barrels remain
+visible in007. Main runtime restored after serial binary swaps; no game left
+running. Further optimization and visual qualification remain required.
+
+Rejected experiment: transforming model vertices once per placed part before
+polygon light refinement preserved005/007 images exactly and passed contracts,
+but did not establish a reliable win. Pinned ABBA whole-frame CPU results were
+variable; marked007 table construction was0.185ms before versus0.203ms after.
+Removed the experiment completely rather than retaining unproven scratch and
+API complexity. Evidence: perf-placed-light-{after-a,before-a,before-b,after-b}-
+{saveg005,saveg007}-20261028 and profile-placed-light-{before,after}-007-20261028.
+
+The tracked corpus harness now exposes Uncapped and RenderThreadCpu explicitly,
+records both in its manifest, and terminates only its own child on exceptional
+exit (including affinity/setup failure). Defaults are unchanged. Pinned field
+005/007 captures at500frames match the earlier field captures exactly; forced
+one-second timeout correctly reports failure and leaves no game process.
+Evidence: qual-corpus-pinned-20261028 and qual-corpus-timeout-20261028.

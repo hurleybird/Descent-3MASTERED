@@ -16,7 +16,7 @@ Private runtime C:/tmp/D3RendererVerification/integration-runtime-20261022.
 No Candidate/Previous Candidate/desktop/shadow changes. Preserve lib/gitinfo.h.
 An interactive test captured Jeff's mouse and was immediately closed: continue
 background-only unless he authorizes an interactive test window. Last usage
-check61%consumed, credits62044.8730600000 unchanged this turn; check again and
+check94%consumed, credits62044.8730600000 unchanged this turn; check again and
 stop before included usage reaches zero. Ordinary no-probe qualification remains
 closed. TelCom still changes screen mode and its full shell/map composition is
 not yet separated; don't claim otherwise. Do not resume cancelled cockpit edits.
@@ -34,9 +34,22 @@ retirement and quality-transition captures pass; ordinary003/006 remain exact.
 Subsequent view-pass scratch reuse passes contracts and exact003/007 captures.
 Current baseline hash was verified A6286E9315A60F3C93B3A764C93A808B8FA385924ADDFACE1B573433374F3DA4:
 this is the reconstructed bfb59647 IPO baseline, NOT the deleted original binary.
-ABBA integrated clean720p1x/MSAA0 corpus is running into perf-integrated-{new-a,
-old-a,old-b,new-b}-20261027 with500frames; analyze warm200..449. Same private
-runtime is swapped serially and restored in finally. No interactive windows.
+ABBA integrated clean720p1x/MSAA0 corpus completed; see ledger for results.
+e5057ec fixes producer resource-history cache thrashing and removes redundant
+publication dependency sorting. All eight exact-mode images unchanged; scene
+retirement passes. Pinned uncapped field-mode ABBA1500frames completed Oct28:
+CPU000/005/007 still slower than reconstructed legacy baseline.005 GPU wins;
+000/007 GPU lose. Ledger records exact medians and evidence paths. No universal
+performance or visual-parity claim: darker barrels in007 remain unresolved.
+Same private runtime swapped serially and restored in finally. No interactive
+windows. TelCom isolation and ordinary no-probe release qualification unfinished.
+
+Latest user asks yield at the next natural checkpoint with roughly5% usage left.
+Placed-vertex lighting experiment was tested and removed: no reliable benefit.
+No experimental renderer source remains. Tracked corpus now supports Uncapped
+and RenderThreadCpu, records them, and cleans up only its owned child on failure.
+Pinned005/007 screenshots exact; forced timeout leaves no game. No new Sol
+handoff requested. Continue here when asked; do not resume stale subagents.
 
 ## October 22 — display-resolution soft particles qualified for testing
 
