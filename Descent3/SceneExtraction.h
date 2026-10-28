@@ -1,6 +1,7 @@
 // Descent 3MASTERED - GPL-3.0-or-later
 #pragma once
 #include "../renderer/Scene.h"
+#include "../renderer/SceneCache.h"
 #include "vecmat.h"
 
 struct object;
@@ -42,7 +43,17 @@ void PrepareGameModelInstances(d3scene::FrameData&, const d3scene::Presentation*
 d3scene::ModelAssetRef PrepareGameModelAsset(int number,bool audit_geometry = false);
 void AuditGameModelPoses(const d3scene::Presentation&);
 void PrepareGameStaticModel(d3scene::FrameData&,int model,const d3scene::Transform&,uint64_t identity,uint64_t collection = 0);
-void PrepareGameSceneResources(d3scene::FrameData&);
+// Resource dependency history belongs to a publication producer, not whichever
+// world/UI/map frame happened to run most recently on the render thread.
+class GameSceneResources {
+    struct State;
+    d3scene::SceneCache<State> state_;
+public:
+    GameSceneResources() = default;
+    GameSceneResources(const GameSceneResources&) = delete;
+    GameSceneResources& operator=(const GameSceneResources&) = delete;
+    void prepare(d3scene::FrameData&);
+};
 void PrepareGameInspectionBanner(d3scene::FrameData&);
 void PrepareGameDisplayLabels(d3scene::FrameData&,d3scene::Rect display);
 void PrepareGameSceneLights(d3scene::FrameData&);

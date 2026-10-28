@@ -204,7 +204,11 @@ void CaptureGameRoomCoronaView(const d3scene::PreparedView& main) {
             source.room,source.polygon,source.size,exposure.fade,alpha,source.color.x,source.color.y,source.color.z);
     }
     const unsigned draws = unsigned(output.meshes.size());
-    if (draws) { PrepareGameSceneResources(output); Published = d3scene::Presentation::publish(std::move(output)); }
+    if (draws) {
+        static GameSceneResources resources;
+        resources.prepare(output);
+        Published = d3scene::Presentation::publish(std::move(output));
+    }
     else Published.reset();
     if (AutomatedCapturePending()) AutomatedCaptureLog("scene room coronas authored=%u rays=%u visible=%u retained=%u draws=%u fast=%d",
         authored,rays,candidates.count,Clock.count(),draws,FastCoronas);

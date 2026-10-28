@@ -9,6 +9,8 @@ param(
     [ValidateSet('clean','antialias','effects','occlusion')][string]$Profile = 'effects',
     [ValidateSet(0,1,2,4)][int]$Supersampling = 0,
     [ValidateSet(-1,0,2,4,8)][int]$MsaaSamples = -1,
+    [ValidateSet('exact','field')][string]$FogMethod = 'exact',
+    [ValidateRange(32,2048)][int]$FogFieldWidth = 320,
     [switch]$SceneInspection,
     [switch]$VertexLighting,
     [switch]$TerrainProbe,
@@ -119,6 +121,7 @@ if ($ModelEffectsProbe -and (-not $SceneInspection -or $TerrainProbe -or $SkyPro
 if ($DeformationProbe -and -not $SceneInspection) { throw 'Deformation probe requires the explicit scene inspection executor.' }
 if ($TerrainProbe -and -not $SceneInspection) { throw 'Terrain probe requires the explicit scene inspection executor.' }
 if ($ViewImageProbe -and -not $SceneInspection) { throw 'View image probe requires scene inspection.' }
+if ($FogMethod -eq 'field' -and -not $SceneInspection) { throw 'Field fog requires the scene renderer.' }
 if ($HudProbe -and -not $SceneInspection) { throw 'HUD publication probe requires scene inspection.' }
 if ($HudMessageProbe -and -not $HudProbe) { throw 'HUD message probe requires HUD publication.' }
 if ($HudSmallProbe -and -not $HudProbe) { throw 'Small HUD probe requires HUD publication.' }
@@ -210,6 +213,8 @@ $manifest = [ordered]@{
     mirror_surface_probe = [bool]$MirrorSurfaceProbe
     planar_composition_revision = $(if ($SceneInspection) { 2 } else { 0 })
     view_image_probe = [bool]$ViewImageProbe
+    fog_method = $FogMethod
+    fog_field_width = $(if ($FogMethod -eq 'field') { $FogFieldWidth } else { 0 })
     hud_probe = [bool]$HudProbe
     hud_message_probe = [bool]$HudMessageProbe
     hud_small_probe = [bool]$HudSmallProbe
@@ -299,6 +304,7 @@ try {
         if ($ObservationProbe) { $arguments += '-scene-observation-probe' }
         if ($MirrorCameraProbe) { $arguments += '-scene-mirror-camera-probe' }
         if ($ViewImageProbe) { $arguments += '-scene-view-image-probe' }
+        if ($FogMethod -eq 'field') { $arguments += @('-scene-fog-field','-scene-fog-field-width',"$FogFieldWidth") }
         if ($HudProbe) { $arguments += '-scene-hud-probe' }
         if ($HudMessageProbe) { $arguments += '-scene-hud-message-probe' }
         if ($HudSmallProbe) { $arguments += '-scene-hud-small-probe' }

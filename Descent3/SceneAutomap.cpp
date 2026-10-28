@@ -177,7 +177,8 @@ d3scene::PresentationRef PrepareGameAutomap(uint64_t sequence,double display_tim
             selected ? 9+9*pulse : 2.5f+2.5f*pulse);
     }
     PrepareGameInspectionBanner(data);
-    PrepareGameSceneResources(data);
+    static GameSceneResources resources;
+    resources.prepare(data);
     if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
         AutomatedCaptureLog("scene automap prepared rooms=%u meshes=%u terrain=%d models=%u",unsigned(room_count),
             unsigned(data.meshes.size()),terrain,unsigned(data.model_instances.size()));

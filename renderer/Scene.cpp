@@ -5,7 +5,6 @@
 #include "SceneTerrain.h"
 #include "SceneFog.h"
 #include "SceneGeometry.h"
-#include "SceneDependencies.h"
 #include "SceneLighting.h"
 #include <atomic>
 #include <cmath>
@@ -949,19 +948,13 @@ PresentationRef Presentation::complete(FrameData data) {
         const auto* image = validateImage(dependency.binding);
         require(!image || !dependency.classify_alpha || image->format() == dependency.format,"Image format changed without material recompilation");
     };
-    // Frame bindings are validated against the union of retained requirements,
-    // not repeatedly against every instance/part that shares those bindings.
-    // Only immutable requirement lists are retained; actual image ownership and
-    // formats are checked anew for this frame, including held/replayed frames.
-    const auto dependency_order = [](const RoomSurfaces::ImageDependency& a,const RoomSurfaces::ImageDependency& b) {
-        return std::make_tuple(a.binding,a.classify_alpha,a.format) < std::make_tuple(b.binding,b.classify_alpha,b.format);
+    // Sealed tables already contain compact requirements, not per-face data.
+    // Validation is an indexed membership/format check, not a sorted union.
+    // Walk those requirements directly: no cross-producer cache, sorting, or
+    // retained material owners, and every publication checks its actual images.
+    const auto validateDependencies = [&](const auto& dependencies) {
+        if (dependencies) for (const auto& dependency : *dependencies) validateDependency(dependency);
     };
-    static thread_local RetainedDependencies<RoomSurfaces::ImageDependency,decltype(dependency_order)> image_requirements(dependency_order);
-    static thread_local uint64_t requirement_lifetime = 0;
-    if (requirement_lifetime != data.scene_lifetime) {
-        image_requirements.clear(); requirement_lifetime = data.scene_lifetime;
-    }
-    image_requirements.begin();
     for (auto index : data.light_candidate_indices)
         require(index < data.lights.size(),"Candidate table references missing emitter");
     for (float value : data.model_pose_inputs)
@@ -1092,7 +1085,7 @@ PresentationRef Presentation::complete(FrameData data) {
             // Static asset ownership was validated when this table was sealed.
             // Explicit authored emitter indices still belong to this frame.
             require(room.surfaces.requiredLightCount() <= data.lights.size(),"Surface references missing emitter");
-            image_requirements.add(room.surfaces.imageDependencies());
+            validateDependencies(room.surfaces.imageDependencies());
             const auto& reflections = room.surfaces.reflectionDependencies();
             data.has_reflection_fields = data.has_reflection_fields || (reflections && !reflections->empty());
         }
@@ -1214,7 +1207,7 @@ PresentationRef Presentation::complete(FrameData data) {
                 const auto& summary = *model.parts.summary();
                 require(summary.required_light_count <= data.lights.size(),"Model references missing emitter");
                 require(summary.required_candidate_count <= data.light_candidate_indices.size(),"Model references missing candidate range");
-                image_requirements.add(summary.images);
+                validateDependencies(summary.images);
                 data.has_reflection_fields = data.has_reflection_fields || (summary.reflections && !summary.reflections->empty());
                 continue;
             }
@@ -1242,14 +1235,12 @@ PresentationRef Presentation::complete(FrameData data) {
                 }
                 } else {
                     require(part.surfaces.requiredLightCount() <= data.lights.size(),"Surface references missing emitter");
-                    image_requirements.add(part.surfaces.imageDependencies());
+                    validateDependencies(part.surfaces.imageDependencies());
                 }
             }
         }
     }
     require(model_end == data.model_variants.size(),"Unowned model variants in frame storage");
-    image_requirements.finish();
-    for (const auto& dependency : image_requirements.values()) validateDependency(dependency);
     for (auto& mesh : data.meshes) {
         require(std::isfinite(mesh.deformation_response.vertices) && mesh.deformation_response.vertices >= 0 &&
             std::isfinite(mesh.deformation_response.translation) && mesh.deformation_response.translation >= 0,

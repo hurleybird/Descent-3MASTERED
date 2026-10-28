@@ -182,7 +182,17 @@ struct MaterialResolution {
     }
 };
 void resolveMaterial(d3scene::SurfaceBinding&,MaterialResolution&,bool model,bool exterior);
-void prepareImages(d3scene::FrameData& data,MaterialResolution& resolution) {
+using ImageDependency = d3scene::RoomSurfaces::ImageDependency;
+struct ImageDependencyOrder {
+    bool operator()(const ImageDependency& a,const ImageDependency& b) const {
+        const auto key = [](const ImageDependency& d) {
+            return std::make_tuple(d.binding,d.handle,d.texture,d.baked,d.format,d.wrap,d.u_scale,d.v_scale,d.classify_alpha);
+        };
+        return key(a)<key(b);
+    }
+};
+using ImageDependencies = d3scene::RetainedDependencies<ImageDependency,ImageDependencyOrder>;
+void prepareImages(d3scene::FrameData& data,MaterialResolution& resolution,ImageDependencies& dependency_set) {
     // Source handles and resource names occupy bounded registries. Reuse index
     // scratch, not thousands of per-frame hash nodes/reference-counted entries.
     static thread_local std::array<int,MAX_BITMAPS+MAX_LIGHTMAPS> pixels;
@@ -331,17 +341,7 @@ void prepareImages(d3scene::FrameData& data,MaterialResolution& resolution) {
     // Retain the union of immutable dependency lists, not last frame's images.
     // Owning the lists prevents address reuse from masquerading as identity.
     // Unpublished/edited tables are prepared independently below.
-    using Dependency = d3scene::RoomSurfaces::ImageDependency;
-    const auto order = [](const Dependency& a,const Dependency& b) {
-        const auto key = [](const Dependency& d) {
-            return std::make_tuple(d.binding,d.handle,d.texture,d.baked,d.format,d.wrap,d.u_scale,d.v_scale,d.classify_alpha);
-        };
-        return key(a)<key(b);
-    };
-    static thread_local d3scene::RetainedDependencies<Dependency,decltype(order)> dependency_set(order);
-    static thread_local uint64_t dependency_lifetime = 0;
     size_t table_count = 0;
-    if (dependency_lifetime != data.scene_lifetime) { dependency_set.clear(); dependency_lifetime = data.scene_lifetime; }
     dependency_set.begin();
     const auto add_table = [&](const d3scene::RoomSurfaces& table) {
         if (table.published()) dependency_set.add(table.imageDependencies());
@@ -532,8 +532,12 @@ void resolveMaterial(d3scene::SurfaceBinding& surface, MaterialResolution& resol
 }
 }
 
-void PrepareGameSceneResources(d3scene::FrameData& data) {
+struct GameSceneResources::State { ImageDependencies dependencies; };
+void GameSceneResources::prepare(d3scene::FrameData& data) {
     PERF_MARKER_SCOPE("Scene.PrepareResources");
+    if (data.scene_lifetime != d3scene::assets().lifetime())
+        throw std::invalid_argument("Resource producer belongs to a retired scene");
+    const auto state = state_.acquire(d3scene::assets());
     MaterialResolution resolution(static_cast<float>(data.simulation_time));
     { PERF_MARKER_SCOPE("Scene.Resources.Materials");
     for (auto& surface : data.terrain.materials) resolveMaterial(surface,resolution,false,true);
@@ -547,7 +551,7 @@ void PrepareGameSceneResources(d3scene::FrameData& data) {
       }
     }
     }
-    prepareImages(data,resolution);
+    prepareImages(data,resolution,state->dependencies);
     d3scene::prepareTerrainPatches(data.terrain);
 }
 
@@ -727,7 +731,8 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance,const GameMainView
         if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
             AutomatedCaptureLog("scene standalone model fixture instances=%u",detached);
     }
-    PrepareGameSceneResources(data);
+    static GameSceneResources resources;
+    resources.prepare(data);
     { PERF_MARKER_SCOPE("Scene.PrepareLights"); PrepareGameSceneLights(data); }
     for (auto& room : data.rooms) {
       if (room.portals.publishedFor(room.surfaces)) continue;
@@ -852,7 +857,8 @@ d3scene::PresentationRef PrepareGameOverlayPresentation(const d3scene::Presentat
         foreground.layer.display_views.push_back(std::move(canvas));
         data.foregrounds.push_back(std::move(foreground));
     }
-    PrepareGameSceneResources(data);
+    static GameSceneResources resources;
+    resources.prepare(data);
     if (FindArg("-scene-canvas-sampler-probe")) {
         constexpr uint64_t collection = 0x53414d504c455201ull;
         constexpr uint32_t binding = 0x7ffffffe;

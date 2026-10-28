@@ -1430,3 +1430,36 @@ exact ordering/ranges, empty plans clear old passes, and rejected plans cannot
 leave a stale prior schedule. Root integration passes. qual-pass-storage-before-
 20261027 versus qual-pass-storage-after-20261027 images003/007 are pixel-identical.
 This removes known allocator traffic; no measurable frame-time win is yet claimed.
+
+## Integrated corpus audit and resource-owner repair (October 27)
+
+The reconstructed pre-rewrite comparator was verified as A6286E9315A60F3C93B3A764C93A808B8FA385924ADDFACE1B573433374F3DA4
+(bfb59647 IPO rebuild, NOT the deleted original binary). Ordinary integrated
+clean720p1x/MSAA0/noAO/noBloom ABBA runs of all eight saves,500frames with warm
+200..449, exposed CPU regressions in000/003/005/007.004/006 were faster;002 was
+near parity and001 faster. GPU regressions in that run used exact-geometry fog;
+the previously qualified320-wide field remained opt-in. Do not describe those
+numbers as measurements of the qualified field path or claim universal wins.
+Raw evidence: perf-integrated-{new-a,old-a,old-b,new-b}-20261027.
+
+Profiling found two caches with the wrong owner: world/HUD publications replaced
+one shared dependency inventory on alternating calls. GameSceneResources now
+owns its producer's dependency compiler via SceneCache (world,overlay,corona,map),
+retired with the scene. The publication validator needs no sorted union at all:
+it directly checks compact sealed requirements against current indexed bindings.
+No validation is omitted or borrowed from an earlier frame. Interleaving and
+retirement contracts added; existing missing-image/changed-format contracts pass.
+
+CPU2-marked005 profiles, warm201..450: resource preparation0.46->0.24ms with
+owner repair, then0.21ms; publication validation0.33->0.24ms after direct checks.
+Overall preparation1.46->1.10ms. These are sequential scoped profiles, not an
+ABBA whole-frame speed claim. All eight500-frame images in perf-resource-owner-
+exact-20261027 match perf-integrated-new-b-20261027 exactly. Automap retirement
+003/006 passes, including11producer caches cleared with remaining=0.
+
+Harness now records exact versus field fog explicitly, with320field width by
+default when selected. A CPU2-marked007 field profile reports GPU median0.526ms
+versus1.515ms exact geometry, but CPU3.078 versus2.993ms; this is not yet an overall
+win or the same workload as legacy fog. Raw profiles: profile-integrated-005/007,
+profile-resource-owner-005, profile-resource-validation-005 and
+profile-resource-field-007, all suffixed-20261027. Release gate remains closed.

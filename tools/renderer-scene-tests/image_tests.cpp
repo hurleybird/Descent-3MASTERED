@@ -1,6 +1,7 @@
 // Descent 3MASTERED - GPL-3.0-or-later
 #include "../../renderer/SceneImages.h"
 #include "../../renderer/SceneDependencies.h"
+#include "../../renderer/SceneCache.h"
 #include "../../renderer/SceneGpuCache.h"
 #include "../../renderer/SceneWaterImage.h"
 #include "../../Descent3/TextureNamePolicy.h"
@@ -17,6 +18,25 @@ template<class F> void rejects(F f) {
 int runSceneImageTests() {
     using namespace d3scene;
     checks = 0;
+    {
+        SceneAssets owner;
+        SceneCache<RetainedDependencies<uint64_t>> world,canvas;
+        auto list = std::make_shared<const std::vector<uint64_t>>(std::initializer_list<uint64_t>{1,3,5});
+        auto world_state = world.acquire(owner), canvas_state = canvas.acquire(owner);
+        world_state->begin(); world_state->add(list); world_state->finish();
+        for (unsigned frame = 0; frame < 128; ++frame) {
+            canvas_state->begin(); canvas_state->addValue(frame); canvas_state->finish();
+            world_state->begin(); world_state->add(list);
+            check(!world_state->layoutChanged() && !world_state->finish() &&
+                world_state->values() == std::vector<uint64_t>({1,3,5}),
+                "Interleaved canvas publication invalidated world resource dependencies");
+        }
+        std::weak_ptr<const std::vector<uint64_t>> lifetime = list;
+        list.reset(); world_state.reset(); canvas_state.reset();
+        owner.reset();
+        check(lifetime.expired(),"Retired producer resource compiler retained old dependency owners");
+        check(world.acquire(owner)->values().empty(),"New scene inherited old producer resource dependencies");
+    }
     {
         struct CountedPixels final : ImmutablePixels {
             std::shared_ptr<int> calls;
