@@ -77,31 +77,40 @@
       "purpose": "Real HUD rollback console, switch to game message console through native source APIs, then close both and resume. Sparse images retain both open states and closed output."
     },
     "decoded-movie": {
-      "revision": 1, "minimumFrame": 30, "inspectionRequired": true,
+      "revision": 2, "minimumFrame": 30, "inspectionRequired": true,
       "movieInput": "mainmenu.mve",
       "movieCaptureFrame": 16,
       "sourceUpload1555": true,
-      "arguments": ["-capture-decoded-movie-name", "mainmenu.mve", "-capture-decoded-movie-frame", "16", "-capture-decoded-movie-output", "{ui-output}", "-scene-gl-audit"],
+      "arguments": ["-capture-decoded-movie-name", "mainmenu.mve", "-capture-decoded-movie-frame", "16", "-capture-decoded-movie-output", "{ui-output}", "-scene-gl-audit", "-scene-independent-export-audit"],
       "uiExport": true,
       "requiredLog": ["scene decoded movie exported frame=15", "scene decoded movie exported frame=16", "scene decoded movie returned frame=20"],
       "purpose": "Actual windowed mission movie entry, decoded mutable bitmap into explicit display color at native video dimensions, exact source-pixel check and distinct consecutive frames, then restoration/resumed gameplay. This clip has no subtitles."
     },
-    "decoded-movie-subtitles": {
+    "decoded-movie-screenshot": {
       "revision": 1, "minimumFrame": 30, "inspectionRequired": true,
+      "movieInput": "mainmenu.mve", "movieCaptureFrame": 16,
+      "sourceUpload1555": true, "movieNativeScreenshot": true,
+      "arguments": ["-capture-decoded-movie-name", "mainmenu.mve", "-capture-decoded-movie-frame", "16", "-capture-decoded-movie-output", "{ui-output}", "-capture-decoded-movie-native-screenshot", "-screenshottga", "-scene-gl-audit", "-scene-independent-export-audit"],
+      "uiExport": true,
+      "requiredLog": ["scene decoded movie exported frame=16", "native screenshot saved path=.+ width=640 height=480 scale=1 format=tga", "scene decoded movie returned frame=20"],
+      "purpose": "Native bitmap/TGA screenshot of a published media image whose extent differs from the game render settings; exact quantized comparison and resumed world history."
+    },
+    "decoded-movie-subtitles": {
+      "revision": 2, "minimumFrame": 30, "inspectionRequired": true,
       "movieInput": "dolby1.mv8", "movieCaptureFrame": 60,
       "sourceUpload1555": true, "subtitleOverlay": true,
       "subtitleAsset": "renderer_subtitles.msb",
-      "arguments": ["-capture-decoded-movie-name", "dolby1.mv8", "-capture-decoded-movie-frame", "60", "-capture-decoded-movie-output", "{ui-output}", "-subtitles", "-capture-subtitle-input", "{subtitle-input}", "-scene-gl-audit"],
+      "arguments": ["-capture-decoded-movie-name", "dolby1.mv8", "-capture-decoded-movie-frame", "60", "-capture-decoded-movie-output", "{ui-output}", "-subtitles", "-capture-subtitle-input", "{subtitle-input}", "-scene-gl-audit", "-scene-independent-export-audit"],
       "uiExport": true,
       "requiredLog": ["scene decoded movie exported frame=59", "scene decoded movie exported frame=60", "scene decoded movie returned frame=20", "scene decoded movie simulation unchanged", "scene movie subtitle frame=59 lines=3 width=640 height=360 first_y="],
       "purpose": "Real subtitle parser/timeline/callback over a 360-line movie, three simultaneous lines including literal percent text. Require unchanged source outside the declared caption region and visible changes inside; inspect the actual words."
     },
     "decoded-movie-paletted": {
-      "revision": 1, "minimumFrame": 30, "inspectionRequired": true,
+      "revision": 2, "minimumFrame": 30, "inspectionRequired": true,
       "movieInput": "dolby1.mv8",
       "movieCaptureFrame": 60,
       "sourceUpload1555": true,
-      "arguments": ["-capture-decoded-movie-name", "dolby1.mv8", "-capture-decoded-movie-frame", "60", "-capture-decoded-movie-output", "{ui-output}", "-scene-gl-audit"],
+      "arguments": ["-capture-decoded-movie-name", "dolby1.mv8", "-capture-decoded-movie-frame", "60", "-capture-decoded-movie-output", "{ui-output}", "-scene-gl-audit", "-scene-independent-export-audit"],
       "uiExport": true,
       "requiredLog": ["scene decoded movie exported frame=59", "scene decoded movie exported frame=60", "scene decoded movie returned frame=20"],
       "purpose": "Native paletted MV8 decode, palette translation and per-frame upload into the explicit display canvas, then restore gameplay."

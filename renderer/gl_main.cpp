@@ -1301,40 +1301,9 @@ void GL4Renderer::UpdatePresentRect()
 	OpenGL_state.view_width = view_width;
 	OpenGL_state.view_height = view_height;
 
-	framebuffer_blit_x = 0;
-	framebuffer_blit_y = 0;
-	framebuffer_blit_w = view_width;
-	framebuffer_blit_h = view_height;
-
-	float baseAspect = width / (float)height;
-	float trueAspect = view_width / (float)view_height;
-	if (baseAspect <= 0.0f || trueAspect <= 0.0f || fabsf(baseAspect - trueAspect) < 0.001f)
-		return;
-
-	if (baseAspect < trueAspect) //base screen is less wide, so pillarbox it
-	{
-		int blit_w = (int)(view_height * baseAspect + 0.5f);
-		if (blit_w < 1)
-			blit_w = 1;
-		if (blit_w > view_width)
-			blit_w = view_width;
-		framebuffer_blit_h = view_height;
-		framebuffer_blit_y = 0;
-		framebuffer_blit_w = blit_w;
-		framebuffer_blit_x = (view_width - blit_w) / 2;
-	}
-	else //base screen is more wide, so letterbox it
-	{
-		int blit_h = (int)(view_width / baseAspect + 0.5f);
-		if (blit_h < 1)
-			blit_h = 1;
-		if (blit_h > view_height)
-			blit_h = view_height;
-		framebuffer_blit_w = view_width;
-		framebuffer_blit_x = 0;
-		framebuffer_blit_h = blit_h;
-		framebuffer_blit_y = (view_height - blit_h) / 2;
-	}
+	const auto viewport = d3scene::displayViewport(width,height,view_width,view_height);
+	framebuffer_blit_x = viewport.x; framebuffer_blit_y = viewport.y;
+	framebuffer_blit_w = viewport.width; framebuffer_blit_h = viewport.height;
 }
 
 void GL4Renderer::UpdateWindow()
@@ -1587,7 +1556,7 @@ static void GL4ClearBuffers(GLbitfield clear_flags)
 
 void GL4Renderer::StartFrame(int x1, int y1, int x2, int y2, int clear_flags)
 {
-	if (msaa_deferred_apply_pending && framebuffer_ok)
+	if (msaa_deferred_apply_pending && framebuffer_ok && !display_image.encodedCanvasActive())
 	{
 		PERF_MARKER_SCOPE("Renderer.StartFrame.DeferredMsaaUpdate");
 		msaa_deferred_apply_pending = false;
@@ -2060,23 +2029,31 @@ bool GL4Renderer::BeginPostPresentFrame()
 	return true;
 }
 
-bool GL4Renderer::BeginDisplayFrame()
+bool GL4Renderer::BeginDisplayFrame(int width,int height)
 {
 	if (!framebuffer_ok || modal_ui_frame_active || cockpit_scene_frame_active ||
-		OpenGL_state.screen_width <= 0 || OpenGL_state.screen_height <= 0) return false;
+		width <= 0 || height <= 0) return false;
 	FlushFontBatch();
-	post_present_framebuffer.Update(OpenGL_state.screen_width,OpenGL_state.screen_height,0,GL_RGBA8);
+	RefreshViewSize();
+	post_present_framebuffer.Update(width,height,0,GL_RGBA8);
 	if (!post_present_framebuffer.Handle()) return false;
 	// This producer replaces the entire display. It does not resolve or consume
 	// any scratch world image, nor inherit an overlay from a previous publication.
 	display_image.invalidate();
-	display_image.beginBase();
+	display_image.beginBase(d3scene::DisplayImagePublication::Source::EncodedCanvas);
 	modal_ui_composite_pending = false;
 	scene_motion = {};
-	StartPostPresentFrame(0,0,OpenGL_state.screen_width,OpenGL_state.screen_height,
+	StartPostPresentFrame(0,0,width,height,
 		RF_CLEAR_COLOR | RF_CLEAR_ZBUFFER);
 	UseDrawVAO();
 	return true;
+}
+
+bool GL4Renderer::GetDisplayImageExtent(int& width,int& height) const
+{
+	if (!display_image.readable() || !post_present_framebuffer.Handle()) return false;
+	width = post_present_framebuffer.Width(); height = post_present_framebuffer.Height();
+	return width > 0 && height > 0;
 }
 
 bool GL4Renderer::IsPostPresentFramePending() const
@@ -2377,7 +2354,8 @@ void GL4Renderer::StartPostPresentFrame(int x1, int y1, int x2, int y2, int clea
 {
 	FlushFontBatch();
 
-	post_present_framebuffer.Update(OpenGL_state.screen_width, OpenGL_state.screen_height, 0,GL_RGBA8);
+	if (!display_image.encodedCanvasActive())
+		post_present_framebuffer.Update(OpenGL_state.screen_width, OpenGL_state.screen_height, 0,GL_RGBA8);
 	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, post_present_framebuffer.Handle());
 	glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
 	glDrawBuffer(GL_COLOR_ATTACHMENT0);
@@ -2401,16 +2379,19 @@ void GL4Renderer::StartPostPresentFrame(int x1, int y1, int x2, int y2, int clea
 	float projection[16];
 	GL_Ortho(projection, 0, x2 - x1, y2 - y1, 0, 0, 1);
 	UpdateLegacyBlock(projection, mat4_identity);
-	glViewport(x1, OpenGL_state.screen_height - y2, x2 - x1, y2 - y1);
+	glViewport(x1, post_present_framebuffer.Height() - y2, x2 - x1, y2 - y1);
 }
 
 void GL4Renderer::EndPostPresentFrame()
 {
 	FlushFontBatch();
+	const bool encoded_canvas = display_image.encodedCanvasActive();
 
 	if (display_image.composing())
 	{
 		UpdatePresentRect();
+		const auto viewport = d3scene::displayViewport(post_present_framebuffer.Width(),post_present_framebuffer.Height(),
+			OpenGL_state.view_width,OpenGL_state.view_height);
 		blitshader.Use();
 		glUniform1f(blitshader_gamma, 1.0f);
 		if (blitshader_uv_origin != -1)
@@ -2419,8 +2400,7 @@ void GL4Renderer::EndPostPresentFrame()
 			glUniform2f(blitshader_uv_scale, 1.0f, 1.0f);
 		{
 			PERF_MARKER_SCOPE("Renderer.Flip.BackbufferBlit");
-			post_present_framebuffer.BlitTo(0, framebuffer_blit_x, framebuffer_blit_y,
-				framebuffer_blit_w, framebuffer_blit_h, false);
+			post_present_framebuffer.BlitTo(0, viewport.x,viewport.y,viewport.width,viewport.height,false);
 		}
 		GL4PerfGpuDrain("GPU.BackbufferBlit");
 		GL4PerfGpuSplitMark(GL4_GPU_SPLIT_AFTER_BACKBUFFER_BLIT);
@@ -2482,6 +2462,11 @@ void GL4Renderer::EndPostPresentFrame()
 		post_protection_mask_dirty = false;
 		post_protection_mask_cleared_this_frame = false;
 		motion_vectors_capture_locked = false;
+		if (encoded_canvas) {
+			OpenGL_state.clip_x1 = OpenGL_state.clip_y1 = 0;
+			OpenGL_state.clip_x2 = OpenGL_state.screen_width;
+			OpenGL_state.clip_y2 = OpenGL_state.screen_height;
+		}
 		display_image.present();
 		cockpit_scene_frame_active = false;
 		// Presentation inputs expire with the composed frame. Menu/canvas frames

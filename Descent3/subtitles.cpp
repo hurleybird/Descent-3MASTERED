@@ -263,8 +263,9 @@ void SubtDrawSubtitles(int frame_num)
 	try { Subtitle_playback.advance(frame_num,Subtitles,Num_subtitles); }
 	catch (const std::exception& error) { Error("Invalid subtitle playback: %s",error.what()); }
 	if (!Subtitle_playback.size()) return;
-	rendering_state display; rend_GetRenderState(&display);
-	const auto layout = d3movie::subtitleLayout(display.screen_width,display.screen_height,
+	int width,height;
+	if (!mve_GetFrameExtent(&width,&height)) Error("Subtitle presentation has no decoded frame");
+	const auto layout = d3movie::subtitleLayout(width,height,
 		grfont_GetHeight(BRIEFING_FONT),int(d3movie::SubtitleTimeline::capacity));
 	int y = layout.first_y;
 	for (size_t i = 0; i < Subtitle_playback.size(); ++i) {
@@ -273,7 +274,7 @@ void SubtDrawSubtitles(int frame_num)
 	}
 	if (FindArg("-capture-decoded-movie-output"))
 		AutomatedCaptureLog("scene movie subtitle frame=%d lines=%u width=%d height=%d first_y=%d scale=%.6f",
-			frame_num,unsigned(Subtitle_playback.size()),display.screen_width,display.screen_height,layout.first_y,layout.font_scale);
+			frame_num,unsigned(Subtitle_playback.size()),width,height,layout.first_y,layout.font_scale);
 }
 
 //Prints out a subtitle on the screen, centered, at y pos y, with color color.

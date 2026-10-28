@@ -67,7 +67,7 @@ namespace
 	int                   Movie_bm_handle = -1;
 	uint                  Movie_current_framenum = 0;
 	bool                  Movie_looping = false;
-	bool				  Movie_vid_set = false;
+	int Movie_frame_width = 0, Movie_frame_height = 0;
 	const char* Movie_capture_output = nullptr;
 	unsigned int Movie_capture_frame = 0;
 	bool Movie_capture_complete = false;
@@ -106,6 +106,13 @@ void mve_SetCallback( MovieFrameCallback_fp callBack )
 #endif
 }
 
+bool mve_GetFrameExtent(int* width,int* height)
+{
+	if (!width || !height || Movie_frame_width <= 0 || Movie_frame_height <= 0) return false;
+	*width = Movie_frame_width; *height = Movie_frame_height;
+	return true;
+}
+
 llsSystem* mve_soundSystem;
 void mve_SetSoundSystem(llsSystem* system)
 {
@@ -122,6 +129,7 @@ int mve_PlayMovie( const char *pMovieName, oeApplication *pApp )
 {
 #ifndef NO_MOVIES
 	Movie_capture_output = nullptr; Movie_capture_frame = 0; Movie_capture_complete = false;
+	Movie_frame_width = Movie_frame_height = 0;
 	const int capture_arg = FindArg("-capture-decoded-movie-output");
 	if (capture_arg) {
 		Movie_capture_output = GetArg(capture_arg+1);
@@ -164,9 +172,6 @@ int mve_PlayMovie( const char *pMovieName, oeApplication *pApp )
 		return MVELIB_INIT_ERROR;
 	}
 
-	renderer_preferred_state oldstate = Render_preferred_state;
-	Movie_vid_set = false;
-
 	bool aborted = false;
 	Movie_current_framenum = 0;
 	while( (result = MVE_rmStepMovie()) == 0 )
@@ -180,8 +185,6 @@ int mve_PlayMovie( const char *pMovieName, oeApplication *pApp )
 		if (IsAltEnterFullscreenEnabled() && IsAltEnterFullscreenKey(key))
 		{
 			ToggleFullscreenMode();
-			oldstate = Render_preferred_state;
-			Movie_vid_set = false;
 			continue;
 		}
 		if (key == KEY_ESC)
@@ -216,12 +219,7 @@ int mve_PlayMovie( const char *pMovieName, oeApplication *pApp )
 	MVE_rmEndMovie();
 	MVE_ReleaseMem();
 	mve_SetSoundSystem(NULL);
-
-	if (Movie_vid_set)
-	{
-		rend_SetPreferredState(&oldstate);
-		Render_preferred_state = oldstate;
-	}
+	Movie_frame_width = Movie_frame_height = 0;
 
 	// return out
 	return err;
@@ -293,11 +291,13 @@ void BlitToMovieBitmap(unsigned char* buf, unsigned int bufw, unsigned int bufh,
 	texW = drawWidth;
 	texH = drawHeight;
 
-	if( Movie_bm_handle == -1 )
+	if (Movie_bm_handle == -1 || bm_w(Movie_bm_handle,0) != texW || bm_h(Movie_bm_handle,0) != texH)
 	{
 		// Allocate our bitmap
+		if (Movie_bm_handle != -1) bm_FreeBitmap(Movie_bm_handle);
 		Movie_bm_handle = bm_AllocBitmap( texW, texH, 0 );
 	}
+	Movie_frame_width = texW; Movie_frame_height = texH;
 
 	unsigned short* pPixelData = (ushort *)bm_data( Movie_bm_handle, 0 );
 	GameBitmaps[Movie_bm_handle].flags |= BF_CHANGED;
@@ -353,23 +353,16 @@ void CallbackShowFrame( unsigned char* buf, unsigned int bufw, unsigned int bufh
 	float u = float(drawWidth-1) / float(texW-1);
 	float v = float(drawHeight-1) / float(texH-1);
 
-	if (!Movie_vid_set)
-	{
-		Render_preferred_state.width = drawWidth;
-		Render_preferred_state.height = drawHeight;
-		Movie_vid_set = true;
-
-		rend_SetPreferredState(&Render_preferred_state);
-	}
-
 	// Decoded movie pixels are finished display color, not scene radiance.
-	if (!rend_BeginDisplayFrame()) Error("Decoded movie display frame unavailable");
+	if (!rend_BeginDisplayFrame(drawWidth,drawHeight)) Error("Decoded movie display frame unavailable");
 	StartFrame( 0, 0, drawWidth, drawHeight, false );
 
 	rend_ClearScreen( GR_BLACK );
 	rend_SetAlphaType( AT_CONSTANT );
 	rend_SetAlphaValue( 255 );
 	rend_SetLighting( LS_NONE );
+	rend_SetFogState(0);
+	rend_SetAlphaFactor(1.0f);
 	rend_SetColorModel( CM_MONO );
 	rend_SetOverlayType( OT_NONE );
 	rend_SetWrapType( WT_CLAMP );
@@ -398,6 +391,7 @@ void CallbackShowFrame( unsigned char* buf, unsigned int bufw, unsigned int bufh
 		if (Movie_current_framenum == Movie_capture_frame) {
 			if (!bm_SaveBitmapPNG((std::string(Movie_capture_output)+".source.png").c_str(),Movie_bm_handle))
 				Error("Decoded movie source export failed");
+			if (FindArg("-capture-decoded-movie-native-screenshot")) DoScreenshot();
 			Movie_capture_complete = true;
 		}
 		AutomatedCaptureLog("scene decoded movie exported frame=%u width=%d height=%d revision=%llu output=%s",
@@ -442,6 +436,7 @@ unsigned int mve_SequenceStart( const char *mvename, int *fhandle, oeApplication
 	Movie_bm_handle = -1;
 	Movie_looping   = looping;
 	Movie_current_framenum = 0;
+	Movie_frame_width = Movie_frame_height = 0;
 
 	// let the render know we will be copying bitmaps to framebuffer (or something)
 	rend_SetFrameBufferCopyState(true);
@@ -525,6 +520,7 @@ bool mve_SequenceClose( unsigned int hMovie, int hFile )
 
 	// We're no longer needing this
 	rend_SetFrameBufferCopyState( false );
+	Movie_frame_width = Movie_frame_height = 0;
 
 	return true;
 #else
@@ -534,10 +530,10 @@ bool mve_SequenceClose( unsigned int hMovie, int hFile )
 
 void mve_Puts( short x, short y, ddgr_color col, const char *txt )
 {
-	rendering_state display; rend_GetRenderState(&display);
-	const auto layout = d3movie::subtitleLayout(display.screen_width,display.screen_height,
+	int width,height; if (!mve_GetFrameExtent(&width,&height)) return;
+	const auto layout = d3movie::subtitleLayout(width,height,
 		grfont_GetHeight(BRIEFING_FONT),int(d3movie::SubtitleTimeline::capacity));
-	grtext_SetParameters(0,0,display.screen_width,display.screen_height);
+	grtext_SetParameters(0,0,width,height);
 	grtext_SetFont( BRIEFING_FONT );
 	grtext_SetFontScale(layout.font_scale);
 	grtext_SetColor( col );

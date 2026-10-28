@@ -568,9 +568,14 @@ bool rend_BeginPostPresentFrame()
 	return renderer_inst->BeginPostPresentFrame();
 }
 
-bool rend_BeginDisplayFrame()
+bool rend_BeginDisplayFrame(int width,int height)
 {
-	return Renderer_initted && renderer_inst->BeginDisplayFrame();
+	return Renderer_initted && renderer_inst->BeginDisplayFrame(width,height);
+}
+
+bool rend_GetDisplayImageExtent(int* width,int* height)
+{
+	return Renderer_initted && width && height && renderer_inst->GetDisplayImageExtent(*width,*height);
 }
 
 bool rend_IsPostPresentFramePending()

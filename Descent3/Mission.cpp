@@ -17,6 +17,7 @@
 */
 
 #include "Mission.h"
+#include "gameloop.h"
 #include "3d.h"
 #include "LoadLevel.h"
 #include "pserror.h"
@@ -1248,10 +1249,13 @@ void DoMissionMovie(char* movie)
 	{
 		char mpath[_MAX_PATH];
 		ddio_MakePath(mpath, LocalD3Dir, "movies", movie, NULL);
-		int sm_old = GetScreenMode();
-		SetScreenMode(SM_CINEMATIC);
+		// Decoded media owns a display image, not the game's screen mode or
+		// world target dimensions/history. Fullscreen changes remain user-owned.
+		struct PauseMovieTime {
+			PauseMovieTime() { StopTime(); }
+			~PauseMovieTime() { StartTime(); }
+		} pause;
 		PlayMovie(mpath);
-		SetScreenMode(sm_old);
 	}
 	//PlayMovie(movie);
 }

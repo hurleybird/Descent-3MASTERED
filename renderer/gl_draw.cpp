@@ -1358,14 +1358,17 @@ void GL4Renderer::BuildDrawVertex(gl_vertex& vert, const g3Point* pnt, float xsc
 void GL4Renderer::SetFontBatchFullscreenDrawState(GLint old_viewport[4])
 {
 	glGetIntegerv(GL_VIEWPORT, old_viewport);
+	const bool display_target = post_present_framebuffer.Handle() && GL4DrawTargetIsFramebuffer(post_present_framebuffer.Handle());
+	const int width = display_target ? post_present_framebuffer.Width() : OpenGL_state.screen_width;
+	const int height = display_target ? post_present_framebuffer.Height() : OpenGL_state.screen_height;
 
 	float projection[16];
-	GL4BuildOrtho(projection, 0, (float)OpenGL_state.screen_width, (float)OpenGL_state.screen_height, 0, 0, 1);
+	GL4BuildOrtho(projection, 0, float(width),float(height), 0, 0, 1);
 	UpdateLegacyBlock(projection, GL4FontBatchIdentity);
 
-	if (GL4DrawTargetIsFramebuffer(post_present_framebuffer.Handle()) || !framebuffer_ok)
+	if (display_target || !framebuffer_ok)
 	{
-		glViewport(0, 0, OpenGL_state.screen_width, OpenGL_state.screen_height);
+		glViewport(0, 0, width,height);
 	}
 	else
 	{

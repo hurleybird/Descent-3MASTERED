@@ -25,6 +25,21 @@ int runDisplayOutputTests() {
     display.invalidate(); display.invalidate(); check(!display.readable() && !display.hasOverlay());
     rejects([&] {display.reuseBase();});
     display.beginBase(); display.present(); check(display.readable());
+    display.beginBase(DisplayImagePublication::Source::EncodedCanvas);
+    check(display.encodedCanvasActive()); display.present(); check(!display.encodedCanvasActive());
+    display.reuseBase(); check(display.encodedCanvasActive()); display.present();
+    display.beginBase(); check(!display.encodedCanvasActive()); display.present();
+    rejects([&] {display.beginBase(static_cast<DisplayImagePublication::Source>(99));});
+    check(!display.composing());
+    const auto pillar = displayViewport(640,480,1280,720);
+    check(pillar.x == 160 && pillar.y == 0 && pillar.width == 960 && pillar.height == 720);
+    const auto letter = displayViewport(640,360,640,480);
+    check(letter.x == 0 && letter.y == 60 && letter.width == 640 && letter.height == 360);
+    const auto same = displayViewport(640,360,1280,720);
+    check(same.x == 0 && same.y == 0 && same.width == 1280 && same.height == 720);
+    const auto narrow = displayViewport(1,1000000,100,1);
+    check(narrow.width == 1 && narrow.height == 1 && narrow.x == 49);
+    rejects([&] {displayViewport(0,480,640,480);});
 
     ImageMip base; base.width = base.height = 1; base.pixels = {0,0,255,255};
     ImageMip ui = base; ui.pixels = {128,0,0,128};

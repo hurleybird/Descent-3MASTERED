@@ -914,7 +914,7 @@ void DoScreenshot()
 	const int output_scale = Double_resolution_screenshot_requested ? 2 : 1;
 	Double_resolution_screenshot_requested = false;
 
-	if (UseHardware)
+	if (UseHardware && !rend_GetDisplayImageExtent(&width,&height))
 	{
 		rendering_state rs;
 		rend_GetRenderState(&rs);

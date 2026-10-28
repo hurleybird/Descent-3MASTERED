@@ -1268,3 +1268,26 @@ panel over the world, then no residual panel after closing. No renderer world
 callback or alternate traversal was introduced. Root Release contracts pass;
 hosted CI40165585015 at4b31483 is green. Source/UI coverage is advancing, but
 ordinary no-probe release acceptance remains closed.
+
+## Independent media canvas extent (I25, October 27)
+
+Completed the inherited media-canvas work after reviewing the Sol continuation.
+Decoded images now declare their own extent instead of changing game render
+preferences or switching screen modes. Presentation fits the owned image to the
+window; native screenshots query the published image extent. Subtitle layout and
+font submission follow that same canvas. Mission playback pauses elapsed game
+time without recreating world targets or retiring world camera history.
+
+Root renderer_integration_check passes all three contracts. Private runtime
+qual-media-native-checked-20261027 and qual-media-subtitles-checked-20261027 pass
+real 640x480 MVE/native TGA export and 640x360 paletted/subtitled playback with
+SSAA4/MSAA4, effects and motion blur. Configuration/generation and simulation
+state are unchanged; resumed frames20/21/22 retain camera history. Exact decoded
+source comparisons pass outside intentional subtitles; native TGA matches the
+owned movie image. Subtitle words and resumed gameplay were visually inspected.
+
+Fixed a qualification bug discovered during review: the movie pixel comparison
+overwrote prior failed scenario checks. It now accumulates failure, and both
+scenarios were rerun with that correction. Interactive fullscreen switching and
+ordinary no-probe release qualification remain open; these captures do not claim
+either one or a performance improvement.

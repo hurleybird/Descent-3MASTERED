@@ -45,7 +45,7 @@ param(
     [switch]$HistoryProbe,
     [switch]$DeformationProbe,
     [string]$DemoFile = '',
-    [ValidateSet('ordinary','retirement','save-export','save-settings','auxiliary-lifecycle','modal-ui','save-dialog','quicksave','decoded-movie','decoded-movie-paletted','decoded-movie-subtitles','message-consoles','screenshot-normal','screenshot-clean','screenshot-double','screenshot-tga','demo-movie')][string]$Scenario = 'ordinary'
+    [ValidateSet('ordinary','retirement','save-export','save-settings','auxiliary-lifecycle','modal-ui','save-dialog','quicksave','decoded-movie','decoded-movie-paletted','decoded-movie-subtitles','decoded-movie-screenshot','message-consoles','screenshot-normal','screenshot-clean','screenshot-double','screenshot-tga','demo-movie')][string]$Scenario = 'ordinary'
 )
 
 # Run only copied installations and copied pilot/save data. Never point Runtime
@@ -355,6 +355,15 @@ try {
         foreach ($pattern in $scenarioSpec.requiredLog) {
             $scenarioValidated = $scenarioValidated -and ($logText -match $pattern)
         }
+        if ($scenarioSpec.movieInput) {
+            $scenarioValidated = $scenarioValidated -and $logText.Contains('scene decoded movie renderer configuration unchanged') -and
+                $logText.Contains('scene decoded movie simulation unchanged')
+            if ($MotionBlur) {
+                foreach ($historyFrame in @(20,21,22)) {
+                    $scenarioValidated = $scenarioValidated -and $logText.Contains("scene motion frame=$historyFrame camera_history=1 ")
+                }
+            }
+        }
         $exports = @()
         foreach ($evidenceFrame in $scenarioSpec.evidenceFrames) {
             $evidence = $png+'.frame'+('{0:D6}' -f [int]$evidenceFrame)+'.png'
@@ -418,9 +427,23 @@ try {
                     }
                     $comparison = Test-RendererExportImage -Reference ($uiImage+'.source.png') -Export $uiImage -Upload1555 ([bool]$scenarioSpec.sourceUpload1555) -SubtitleTop $subtitleTop
                     $changed = (Get-FileHash -LiteralPath $uiImage).Hash -ne (Get-FileHash -LiteralPath ($uiImage+'.previous.png')).Hash
-                    $scenarioValidated = $comparison.mismatches -eq 0 -and $comparison.transparent -eq 0 -and $changed
+                    $scenarioValidated = $scenarioValidated -and $comparison.mismatches -eq 0 -and $comparison.transparent -eq 0 -and $changed
                     if ($scenarioSpec.subtitleOverlay) { $scenarioValidated = $scenarioValidated -and $comparison.intentional_subtitle_changes -gt 0 }
-                    $exports += [ordered]@{decoded_source_comparison=$comparison; consecutive_frames_changed=$changed; intentional_subtitle_top=$subtitleTop}
+                    $exports += [ordered]@{decoded_source_comparison=$comparison; consecutive_frames_changed=$changed; intentional_subtitle_top=$subtitleTop; world_history_checked=[bool]$MotionBlur}
+                }
+                if ($scenarioSpec.movieNativeScreenshot) {
+                    $shot = [regex]::Match($logText,'native screenshot saved path=(.+) width=\d+ height=\d+ scale=1 format=tga')
+                    if (!$shot.Success) { $scenarioValidated = $false }
+                    else {
+                        $native = $shot.Groups[1].Value
+                        if ((Split-Path -Parent ([IO.Path]::GetFullPath($native))) -ine $runtimePath) { throw 'Media screenshot escaped private runtime' }
+                        $evidence = Join-Path $outputPath ($save+'.movie.tga')
+                        Copy-Item -LiteralPath $native -Destination $evidence
+                        . (Join-Path $PSScriptRoot 'renderer-export-images.ps1')
+                        $comparison = Test-RendererExportImage -Reference $uiImage -Export $evidence -Tga $true
+                        $scenarioValidated = $scenarioValidated -and $comparison.mismatches -eq 0 -and $comparison.transparent -eq 0
+                        $exports += [ordered]@{native_media_screenshot_hash=(Get-FileHash -LiteralPath $evidence).Hash; comparison=$comparison}
+                    }
                 }
             }
         }

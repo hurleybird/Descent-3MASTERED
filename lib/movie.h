@@ -55,6 +55,8 @@ void mve_SetRenderProperties(short x, short y, short w, short h, bool hicolor);
 // called every frame.
 typedef void (*MovieFrameCallback_fp)( int x, int y, int movieFrameNum );
 void mve_SetCallback( MovieFrameCallback_fp callBack );
+// Current decoded frame extent, not the game's configured render resolution.
+bool mve_GetFrameExtent(int* width,int* height);
 
 // call to print out text.
 void mve_Puts( short x, short y, ddgr_color col, const char *txt );

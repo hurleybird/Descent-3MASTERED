@@ -3954,10 +3954,21 @@ void GameFrame(void)
 		const unsigned random = ps_rand_get_state();
 		const float time = Gametime, delta = Frametime;
 		const int frame = FrameCount;
+		const auto preferences = Render_preferred_state;
+		const int screen = GetScreenMode(), window_w = Max_window_w, window_h = Max_window_h;
+		const auto generation = rend_GetGeneration();
 		DoMissionMovie(const_cast<char*>(movie));
 		if (random != ps_rand_get_state() || time != Gametime || delta != Frametime || frame != FrameCount)
 			Error("Decoded movie presentation advanced gameplay simulation");
+		if (preferences.width != Render_preferred_state.width || preferences.height != Render_preferred_state.height ||
+			preferences.supersampling_factor != Render_preferred_state.supersampling_factor ||
+			preferences.msaa_samples != Render_preferred_state.msaa_samples || preferences.gamma != Render_preferred_state.gamma ||
+			preferences.bloom_enabled != Render_preferred_state.bloom_enabled || preferences.ao_enabled != Render_preferred_state.ao_enabled ||
+			preferences.combined_motion_blur != Render_preferred_state.combined_motion_blur ||
+			screen != GetScreenMode() || window_w != Max_window_w || window_h != Max_window_h || generation != rend_GetGeneration())
+			Error("Decoded movie changed game rendering configuration");
 		AutomatedCaptureLog("scene decoded movie simulation unchanged");
+		AutomatedCaptureLog("scene decoded movie renderer configuration unchanged");
 		AutomatedCaptureLog("scene decoded movie returned frame=20 screen=%d",GetScreenMode());
 	}
 	static bool quicksave_capture_started = false;
