@@ -22,6 +22,24 @@ int runAuxiliaryViewTests() {
     check(CloseAuxiliarySlot(live,saved) && live.objhandle == 2048 && saved.objhandle == -1);
     OpenAuxiliarySlot(live,saved,popup); OpenAuxiliarySlot(live,saved,base);
     check(saved.objhandle == -1 && !CloseAuxiliarySlot(live,saved)); // explicit replacement cancels stale restoration
+    std::array<GameAuxiliarySlot,3> cameras{}, backups{};
+    check(!AuxiliaryViewsOwner(cameras,-1) && !AuxiliaryViewsOwner(cameras,2048));
+    OpenAuxiliarySlot(cameras[SVW_LEFT],backups[SVW_LEFT],base);
+    check(AuxiliaryViewsOwner(cameras,2048));
+    OpenAuxiliarySlot(cameras[SVW_LEFT],backups[SVW_LEFT],popup);
+    check(!AuxiliaryViewsOwner(cameras,2048) && AuxiliaryViewsOwner(cameras,4097));
+    CloseAuxiliarySlot(cameras[SVW_LEFT],backups[SVW_LEFT]);
+    check(AuxiliaryViewsOwner(cameras,2048) && !AuxiliaryViewsOwner(cameras,4097));
+    OpenAuxiliarySlot(cameras[SVW_RIGHT],backups[SVW_RIGHT],base);
+    CloseAuxiliarySlot(cameras[SVW_LEFT],backups[SVW_LEFT]);
+    check(AuxiliaryViewsOwner(cameras,2048)); // closing one of two cannot change camera mode
+    ObserveAuxiliarySource(cameras[SVW_RIGHT],false);
+    check(!AuxiliaryViewsOwner(cameras,2048)); // static noise is not a guided camera
+    cameras[SVW_CENTER] = base;
+    check(!AuxiliaryViewsOwner(cameras,2048)); // unsupported center slot cannot hide the main camera
+    base.objhandle = 6144; OpenAuxiliarySlot(cameras[SVW_RIGHT],backups[SVW_RIGHT],base);
+    check(!AuxiliaryViewsOwner(cameras,2048) && AuxiliaryViewsOwner(cameras,6144));
+    base.objhandle = 2048;
     live = popup; live.gun_num = 5; ObserveAuxiliarySource(live,false);
     check((live.flags&SVF_STATIC) && live.timer == SmallViewStaticTime && live.gun_num == -1);
     check(!AdvanceAuxiliaryTimer(live,false,.1f) && live.timer == SmallViewStaticTime);

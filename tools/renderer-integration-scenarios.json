@@ -1,6 +1,13 @@
 {
   "schemaVersion": 1,
   "scenarios": {
+    "guided-routing": {
+      "revision": 1, "minimumFrame": 40, "inspectionRequired": true,
+      "arguments": ["-scene-gl-audit", "-scene-guided-routing-probe", "-capture-series-from", "5", "-capture-series-until", "35", "-capture-series-stride", "5"],
+      "evidenceFrames": [5,10,15,20,25,30,35],
+      "requiredLog": ["scene guided routing frame=10 small=0 main_guided=1", "scene guided routing frame=15 small=1 main_guided=0", "scene guided routing frame=25 small=1 main_guided=0", "scene guided routing frame=30 small=0 main_guided=1", "scene guided routing frame=35 small=0 main_guided=0"],
+      "purpose": "Held native weapon camera: popup replacement/restoration, duplicate monitor owners, single close, explicit replacement and guided release. Qualifies routing and composition, not guided flight/combat."
+    },
     "save-dialog-accept": {
       "revision": 1, "minimumFrame": 22, "inspectionRequired": true,
       "previewInput": "saveg000", "dialogSaveSlot": 0, "uiExport": true,

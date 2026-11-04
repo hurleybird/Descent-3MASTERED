@@ -47,7 +47,6 @@ AuxiliaryFrameReceipt CaptureClock, ScheduleClock, TimerClock;
 GameAuxiliaryFrame Captured;
 GameAuxiliarySchedule Scheduled;
 uint64_t SchedulePublication = 0;
-int Guided_owner = OBJECT_HANDLE_NONE;
 constexpr uint64_t DecorationCollection = 0x4155584445434f01ull;
 void revise(unsigned slot) { if (!++Revisions[slot]) ++Revisions[slot]; }
 int StaticBitmap(float timer,uint64_t scene) {
@@ -77,7 +76,11 @@ int GunRoom(object& source,vector& point) {
 }
 }
 
-bool Guided_missile_smallview = false;
+bool GuidedMissileInSmallView() {
+    if (Player_num < 0 || Player_num >= MAX_PLAYERS) return false;
+    const auto* guided = Players[Player_num].guided_obj;
+    return guided && AuxiliaryViewsOwner(Small_views,guided->handle);
+}
 
 int GetSmallViewer(int window) {
     return window >= 0 && window < int(Count) ? Small_views[window].objhandle : OBJECT_HANDLE_NONE;
@@ -93,17 +96,11 @@ int CreateSmallView(int window,int owner,int flags,float time,float zoom,int gun
     OpenAuxiliarySlot(Small_views[window],Saved_views[window],next); revise(window);
     if (window == SVW_LEFT) Disable_primary_monitor = 1;
     if (window == SVW_RIGHT) Disable_secondary_monitor = 1;
-    if (ObjGet(owner) == Players[Player_num].guided_obj) {
-        Guided_missile_smallview = true; Guided_owner = owner;
-    }
     return window;
 }
 
 void CloseSmallView(int window) {
     if (window < 0 || window >= int(Count)) return;
-    if (Small_views[window].objhandle == Guided_owner) {
-        Guided_owner = OBJECT_HANDLE_NONE; Guided_missile_smallview = false;
-    }
     const bool restored = CloseAuxiliarySlot(Small_views[window],Saved_views[window]);
     revise(window);
     if (!restored) {
@@ -120,7 +117,6 @@ void ClosePopupView(int window) {
 void ResetSmallViews() {
     for (unsigned i = 0; i < Count; ++i) { Small_views[i] = {}; Saved_views[i] = {}; revise(i); }
     Disable_primary_monitor = Disable_secondary_monitor = 0;
-    Guided_missile_smallview = false; Guided_owner = OBJECT_HANDLE_NONE;
     AdmittedRevisions.fill(0);
     CaptureClock.reset(); ScheduleClock.reset(); TimerClock.reset();
     Captured = {}; Scheduled = {}; SchedulePublication = 0;

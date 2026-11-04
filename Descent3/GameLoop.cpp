@@ -2926,10 +2926,9 @@ static void GetMainViewOverscanFrame(int* x1, int* y1, int* x2, int* y2, int* an
 
 static GameMainView CaptureGameMainView()
 {
-	extern bool Guided_missile_smallview;
 	int x1,y1,x2,y2,anchor_x,anchor_y;
 	GetMainViewOverscanFrame(&x1,&y1,&x2,&y2,&anchor_x,&anchor_y);
-	const bool guided = !Cinematic_inuse && Players[Player_num].guided_obj && !Guided_missile_smallview;
+	const bool guided = !Cinematic_inuse && Players[Player_num].guided_obj && !GuidedMissileInSmallView();
 	const auto* viewer = guided ? Players[Player_num].guided_obj : Viewer_object;
 	const bool rear = !guided && viewer == Player_object && (Players[Player_num].flags & PLAYER_FLAGS_REARVIEW);
 	GameMainView result;
@@ -3506,13 +3505,54 @@ void GameRenderFrame(void)
 				Terrain_sky.star_color[i] = GR_RGB(255,tint == 1 ? 200 : 255,tint == 2 ? 200 : 255);
 			}
 		}
+		// Bounded hidden fixture: use a real weapon object but hold its motion to
+		// isolate monitor ownership transitions from flight/collision behavior.
+		const bool guided_fixture = FindArg("-scene-guided-routing-probe") && AutomatedCaptureFrameIndex() >= 0;
+		if (guided_fixture) {
+			static int owner = OBJECT_HANDLE_NONE;
+			const int index = AutomatedCaptureFrameIndex();
+			if (index == 0) {
+				ResetSmallViews();
+				const int weapon = FindWeaponName("Guided");
+				const int created = weapon < 0 ? -1 : FireWeaponFromObject(Player_object,weapon,-1,true,false);
+				if (created < 0) Error("Guided routing fixture could not create its weapon");
+				auto& missile = Objects[created];
+				missile.movement_type = MT_NONE; missile.control_type = CT_NONE; missile.lifeleft = 100;
+				Players[Player_num].guided_obj = &missile; owner = missile.handle;
+				CreateSmallView(SVW_LEFT,owner,SVF_CROSSHAIRS,0,0,-1,"Guided");
+			}
+			if (index < 35 && !ObjGet(owner)) Error("Guided routing source retired before fixture completion");
+			if (index == 10) CreateSmallView(SVW_LEFT,Player_object->handle,SVF_POPUP|SVF_REARVIEW,0,0,-1,"Rear popup");
+			if (index == 15) CloseSmallView(SVW_LEFT);
+			if (index == 20) CreateSmallView(SVW_RIGHT,owner,SVF_CROSSHAIRS,0,0,-1,"Guided");
+			if (index == 25) CloseSmallView(SVW_LEFT);
+			if (index == 30) CreateSmallView(SVW_RIGHT,Player_object->handle,SVF_REARVIEW,0,0,-1,"Rear");
+			if (index == 35) ReleaseGuidedMissile(Player_num);
+			const bool in_monitor = index < 10 || (index >= 15 && index < 30);
+			if (GuidedMissileInSmallView() != in_monitor) Error("Guided camera routing disagrees with live monitor ownership");
+		}
 		const auto main_view = CaptureGameMainView();
+		if (guided_fixture) {
+			const int index = AutomatedCaptureFrameIndex();
+			const bool full = (index >= 10 && index < 15) || (index >= 30 && index < 35);
+			const auto* expected = full ? Players[Player_num].guided_obj : Player_object;
+			if (!expected || main_view.world.camera_owner != uint32_t(expected->handle))
+				Error("Guided routing selected the wrong physical main camera");
+			if (index % 5 == 0) AutomatedCaptureLog("scene guided routing frame=%d small=%d main_guided=%d owner=%u",
+				index,GuidedMissileInSmallView(),full,main_view.world.camera_owner);
+		}
 		if (FindArg("-scene-view-deformation-probe") && AutomatedCapturePending()) {
 			const auto& effect = main_view.world.world_deformation;
 			AutomatedCaptureLog("scene viewer deformation owner=%u displacement=%.6g,%.6g,%.6g seed=%u",
 				main_view.world.camera_owner,effect.displacement.x,effect.displacement.y,effect.displacement.z,effect.seed);
 		}
 		const auto hud_layout = CaptureGameHUDLayout();
+		if (guided_fixture) {
+			const int index = AutomatedCaptureFrameIndex();
+			const bool full = (index >= 10 && index < 15) || (index >= 30 && index < 35);
+			if ((hud_layout.aim == HUDAimMode::Guided) != full)
+				Error("Guided HUD disagrees with the physical main camera");
+		}
 		const auto auxiliary_source = CaptureGameAuxiliaryViews(main_view);
 		if (FindArg("-scene-history-export-probe") && AutomatedCaptureFrameIndex() == 20) {
 			const int save_arg = FindArg("-capture-save-output");

@@ -49,6 +49,7 @@
 #include "special_face.h"
 #include "render.h"
 #include "gameloop.h"
+#include "SmallViews.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -1003,7 +1004,6 @@ void LoadHUDConfig(const char* filename, bool (*fn)(const char*, const char*, vo
 
 void RenderHUDFrame(float zoom)
 {
-	extern bool Guided_missile_smallview;			// from smallviews.cpp
 	const bool clean_screenshot = IsCleanGameplayScreenshotActive();
 
 	//	Start frame and 3d frame
@@ -1048,7 +1048,7 @@ void RenderHUDFrame(float zoom)
 	int post_world_hud_window_w = Game_window_w;
 	int post_world_hud_window_h = Game_window_h;
 	//	render special missile hud if available
-	if (Players[Player_num].guided_obj && !Guided_missile_smallview)
+	if (Players[Player_num].guided_obj && !GuidedMissileInSmallView())
 	{
 		if (!Cinematic_inuse)
 			render_guided_reticle_after_world_post = true;
@@ -2651,7 +2651,7 @@ inline void draw_reticle_sub(int cx, int cy, int rw, int rh, ushort on_mask, ush
 //	renders the reticle
 HUDCanvasLayout CaptureGameHUDLayout()
 {
-    extern bool HUD_disabled, Guided_missile_smallview;
+    extern bool HUD_disabled;
     HUDCanvasRequest request;
     request.world = {Game_window_x,Game_window_y,Game_window_w,Game_window_h};
     request.display = {0,0,Max_window_w,Max_window_h};
@@ -2666,7 +2666,7 @@ HUDCanvasLayout CaptureGameHUDLayout()
         const auto& player = Players[Player_num];
         request.aim_on_target = (player.flags & PLAYER_FLAGS_BULLSEYE) != 0;
         request.zoom_distance = player.zoom_distance;
-        if (player.guided_obj && !Guided_missile_smallview) request.mode = HUDViewMode::Guided;
+        if (player.guided_obj && !GuidedMissileInSmallView()) request.mode = HUDViewMode::Guided;
         else if (player.flags & PLAYER_FLAGS_ZOOMED) request.mode = HUDViewMode::Zoom;
         else if (player.flags & PLAYER_FLAGS_REARVIEW) request.mode = HUDViewMode::Rear;
         else if (mode == HUD_LETTERBOX) request.mode = HUDViewMode::Letterbox;

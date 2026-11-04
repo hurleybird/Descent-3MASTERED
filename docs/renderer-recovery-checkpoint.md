@@ -1,5 +1,19 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November 3 — guided monitor ownership repair
+
+Removed stale guided-camera Boolean/owner latches. Query live slots against
+current guided full handle for main and HUD camera choice; static/saved/center
+slots excluded. Unit coverage plus native held-weapon guided-routing fixture
+checks popup replacement/restoration, duplicate monitors, closing one, explicit
+replacement and release. Actual main camera and HUD agreement asserted.
+003/006 clean/effects pass; inspected full/restored cockpit captures.
+Auxiliary lifecycle003/006 effects passes; all8 ordinary500 clean/exact images
+EXACT to aa57954. Root3/3 pass. Evidence qual-guided-*-20261103.
+Runtime hash02CF5E9EC7A555FB8B364E95B392AEFC3550FE8193AF99EAEADD56DED306282A.
+No guided flight/combat claim; all release/protected-installation gates remain.
+Latest usage52% used, credits unchanged62044.8730600000. Continue, do not yield.
+
 ## November 3 — qualified field320 default (supersedes old opt-in notes)
 
 User was explicitly told the qualified fast fog path is becoming default.

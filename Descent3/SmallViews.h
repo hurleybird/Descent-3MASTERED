@@ -27,8 +27,8 @@
 // Flags and value-owned request/schedule types are in GameAuxiliaryViews.h.
 // SVF_TIMED and SVF_STATIC are internal lifecycle states, not creation flags.
 
-// if guided missile smallview is up, this will be true.
-extern bool Guided_missile_smallview;
+// Derived from the current missile and live monitor owners; no cached latch.
+bool GuidedMissileInSmallView();
 
 //Create a new small view.  If there is already a view in the given window, the old view gets blown away.
 //Parameters:	window - which window to open.  See constants in SmallViews.h

@@ -1,5 +1,28 @@
 # Renderer game integration
 
+## November 3: guided-camera ownership instead of a stale monitor latch
+
+Removed Guided_owner/Guided_missile_smallview duplicate state. Main camera and
+both HUD callers now derive guided-small-view selection from the current guided
+weapon's full handle and live nonstatic monitor slots. Replacing a guided view
+with another camera, restoring it beneath a popup, or closing only one of two
+guided monitors can no longer leave the main view/HUD in the wrong mode.
+Saved popup bases and the unsupported center slot do not count as live cameras.
+
+Root 3/3 pass, including replacement/restoration, duplicate owners, static views
+and generation changes. New guided-routing scenario holds a native fired weapon
+stationary and exercises those transitions plus release, asserting actual main
+camera ownership and guided HUD agreement.003/006 pass clean and SSAA2/MSAA4,
+AO/bloom/motion/field320; full-guided and restored-cockpit images inspected.
+This is routing/composition qualification, NOT guided flight/combat signoff.
+Existing auxiliary-lifecycle passes003/006 effects. All8 ordinary clean/exact
+500-frame images remain pixel-identical to aa57954.
+Evidence qual-guided-routing-{clean,effects}-20261103,
+qual-guided-aux-regression-20261103,qual-guided-ordinary-20261103.
+Binary SHA25602CF5E9EC7A555FB8B364E95B392AEFC3550FE8193AF99EAEADD56DED306282A.
+Hosted full integration was also confirmed green through aa57954.
+Release gate and protected installations remain unchanged.
+
 ## November 3: qualified fog becomes the normal method
 
 Announced default-policy change: capable perspective views now select the

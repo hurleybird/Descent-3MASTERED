@@ -15,6 +15,14 @@ struct GameAuxiliarySlot {
     int gun_num = -1;
     char label[20]{};
 };
+// Camera selection follows live slots, never popup restoration storage or a
+// separately maintained latch. Full handles distinguish recycled allocations.
+inline bool AuxiliaryViewsOwner(const std::array<GameAuxiliarySlot,3>& slots,int owner) {
+    if (owner == -1) return false;
+    for (unsigned i = 0; i < slots.size(); ++i)
+        if (i != SVW_CENTER && slots[i].objhandle == owner && !(slots[i].flags & SVF_STATIC)) return true;
+    return false;
+}
 inline bool ValidAuxiliaryRequest(int flags,float time,float zoom,int gun) {
     return !(flags & ~(SVF_POPUP|SVF_BIGGER|SVF_REARVIEW|SVF_CROSSHAIRS)) &&
         std::isfinite(time) && time >= 0 && std::isfinite(zoom) && zoom >= 0 && gun >= -1;
