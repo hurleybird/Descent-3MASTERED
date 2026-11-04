@@ -1,6 +1,13 @@
 {
   "schemaVersion": 1,
   "scenarios": {
+    "cinematic-transition": {
+      "revision": 1, "minimumFrame": 240, "inspectionRequired": true,
+      "arguments": ["-scene-gl-audit", "-scene-integration-cinematic-probe", "-capture-rear-smallview", "-capture-series-from", "70", "-capture-series-until", "210", "-capture-series-stride", "70"],
+      "evidenceFrames": [70,140,210],
+      "requiredLog": ["scene cinematic callback type=1 ", "scene cinematic callback type=2 ", "scene cinematic canvas active=1", "scene cinematic canvas active=0 tail=1"],
+      "purpose": "Native timed cinematic with text, post-stop fade tail and return to gameplay. The fixture deliberately replays callback commit to reject duplicate advancement; main HUD/cockpit admission belongs to captured layout. Not mission-script or physical-input acceptance."
+    },
     "observer-routing": {
       "revision": 2, "minimumFrame": 35, "inspectionRequired": true,
       "arguments": ["-scene-gl-audit", "-scene-observer-routing-probe", "-capture-series-from", "5", "-capture-series-until", "30", "-capture-series-stride", "5"],

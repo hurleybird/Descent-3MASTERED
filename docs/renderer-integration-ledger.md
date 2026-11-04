@@ -1,5 +1,24 @@
 # Renderer game integration
 
+## November 3: one foreground execution route, not inspection versus legacy
+
+Removed GameDrawHud and its obsolete non-inspection branch. WorldOverlay and
+FinalOverlay now execute the prepared foregrounds unconditionally, exactly as
+the other phases already did. HUD layout owns hidden/guided/observer/cinematic
+admission; inspection remains an acceptance gate, not a choice of renderer.
+The normal-world/foreground acceptance errors and pending-domain bits are NOT
+cleared. Retained legacy HUD/reference helpers are not removed indiscriminately.
+
+Root3/3 pass; all8 ordinary500 clean/exact images EXACT to541f116. Guided and
+observer003/006 effects transitions pass. New registered cinematic-transition
+scenario exercises native start/stop, text, post-stop fade, deliberately repeated
+callback commit and return to gameplay.003/006 effects pass; active cinematic,
+fade-tail and restored cockpit/monitor screenshots visually inspected. Start
+and stop callbacks present (91 frame callbacks in003), no duplicate-frame error.
+Evidence qual-foreground-routing-{ordinary,guided,observer,cinematic}-20261103;
+binary9BFD47E82A2CDA9B421551968BF2501ECF8EB948166C7339A46CB68169C8BB1C.
+This closes a stale routing fork, not mission-script/manual gameplay acceptance.
+
 ## November 3: shared owned UI model images and custom-logo clock
 
 Pilot customization no longer invokes DrawPolygonModel or mutates G3/raster

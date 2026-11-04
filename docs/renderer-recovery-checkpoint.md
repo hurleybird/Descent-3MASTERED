@@ -1,5 +1,17 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November 3 — single foreground execution route
+
+Removed dormant GameDrawHud/normal-mode legacy routing; all prepared foreground
+phases now execute independently of inspection selection. Release acceptance
+guards and pending bits unchanged. Root3/3 pass, all8 ordinary500 EXACT541f116,
+guided/observer003/006effects pass. Registered cinematic-transition240 native
+start/stop/text/post-stop-fade/return scenario003/006effects passes, inspected
+active/fade/restored images. Evidence qual-foreground-routing-*20261103.
+Runtime9BFD47E82A2CDA9B421551968BF2501ECF8EB948166C7339A46CB68169C8BB1C.
+No game active. Continue audit of release gates against actual producer/caller
+coverage, preserving protected installs and unrelated lib/gitinfo.h.
+
 ## November 3 — owned pilot preview and shared model-image producer
 
 Pilot UI3DWindow migrated off DrawPolygonModel/G3 to shared RenderGameModelImage

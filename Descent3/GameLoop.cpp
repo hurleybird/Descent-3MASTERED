@@ -2993,48 +2993,6 @@ void GameDrawMainView(const d3scene::Presentation& presentation, SceneFeedbackTr
 	DebugBlockPrint("DR");
 }
 
-//Added by Samir
-constexpr float HUD_RENDER_ZOOM = SceneCockpitZoom;
-
-//Do Cockpit/Hud
-void GameDrawHud()
-{
-	PERF_MARKER_SCOPE("GameDrawHud");
-	//render HUD
-	//[ISB] Moved frame start and end to RenderHUDFrame so it can make decisions based on the current HUD mode. 
-	{
-		PERF_MARKER_SCOPE("RenderHUDFrame");
-		RenderHUDFrame(HUD_RENDER_ZOOM);
-	}
-	rend_PerfGpuSceneMark(RENDERER_GPU_SCENE_AFTER_PRIMARY_HUD);
-
-	//render auxillary consoles
-	{
-		PERF_MARKER_SCOPE("StartFrame.AuxHUD");
-		StartFrame(0, 0, Max_window_w, Max_window_h, false);
-	}
-	{
-		PERF_MARKER_SCOPE("g3_StartFrame.AuxHUD");
-		g3_StartFrame(&Viewer_object->pos, &Viewer_object->orient, HUD_RENDER_ZOOM);
-	}
-
-	{
-		PERF_MARKER_SCOPE("RenderAuxHUDFrame");
-		RenderAuxHUDFrame();
-	}
-
-	//End frame
-	{
-		PERF_MARKER_SCOPE("g3_EndFrame.AuxHUD");
-		g3_EndFrame();
-	}
-	{
-		PERF_MARKER_SCOPE("EndFrame.AuxHUD");
-		EndFrame();
-	}
-	rend_PerfGpuSceneMark(RENDERER_GPU_SCENE_AFTER_AUX_HUD);
-}
-
 static void GameDrawPostPresentFrame(bool force_backbuffer_frame)
 {
 	const bool draw_message_consoles = !HUD_disabled &&
@@ -3603,16 +3561,9 @@ void GameRenderFrame(void)
 				AutomatedCaptureLog("scene layer fixture composed");
 		}
 
-		if (SceneGeometryInspection()) RenderGameForegrounds(*presentation,d3scene::ForegroundPhase::WorldOverlay,overlay_presentation.get());
-
-		// Do Cockpit/Hud
-		// Cinematics own their immutable final canvas below.
-		// Do not run either the primary or auxiliary gameplay HUD while one is active.
-		if (!HUD_disabled && !Cinematic_inuse && !SceneGeometryInspection())
-		{
-			PERF_MARKER_SCOPE("GameDrawHud.Total");
-			GameDrawHud();
-		}
+		// Preparation owns HUD/cockpit/cinematic admission. Inspection is a
+		// qualification gate, never a selector for a different foreground renderer.
+		RenderGameForegrounds(*presentation,d3scene::ForegroundPhase::WorldOverlay,overlay_presentation.get());
 		rend_PerfGpuSceneMark(RENDERER_GPU_SCENE_AFTER_HUD);
 
 		// Render Ingame Cinematics
@@ -3657,10 +3608,7 @@ void GameRenderFrame(void)
 			grtext_Flush();
 			EndFrame();
 		}
-		if (SceneGeometryInspection())
-		{
-			RenderGameForegrounds(*presentation,d3scene::ForegroundPhase::FinalOverlay,overlay_presentation.get());
-		}
+		RenderGameForegrounds(*presentation,d3scene::ForegroundPhase::FinalOverlay,overlay_presentation.get());
 		rend_FlushTextLayer();
 		rend_PerfGpuSceneMark(RENDERER_GPU_SCENE_AFTER_DEBUG);
 	}
