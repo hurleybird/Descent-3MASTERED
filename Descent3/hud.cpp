@@ -107,7 +107,6 @@ void InitDefaultHUDItems();
 void InitHUDItem(int new_item, tHUDItem* item);
 
 //	iterate through entire hud item list to draw.
-void RenderHUDItems(tStatMask stat_mask);
 
 //	frees up reticle bitmaps
 void FreeReticle();
@@ -130,13 +129,11 @@ extern bool RenderHUDGetTopLeftTextAnchor(int* x, int* y);
 extern bool RenderHUDGetTopLeftTextBottom(int* bottom);
 
 bool Hud_show_controls = false;
-static bool HUD_score_pending_aux = false;
 
 static GameDisplayLabelQueue Post_process_hud_text;
 
 //////////////////////////////////////////////////////////////////////////////
 
-static void RenderHUDItemList(tStatMask stat_mask, int small_filter);
 
 void ResetPostProcessHUDText()
 {
@@ -997,368 +994,7 @@ void LoadHUDConfig(const char* filename, bool (*fn)(const char*, const char*, vo
 
 
 //////////////////////////////////////////////////////////////////////////////
-//	render cockpit and gauges frame
-//		checks to see what cockpit mode we are in.
-//		draws stuff accordingly.
-//		render internal gauges too.
-
-void RenderHUDFrame(float zoom)
-{
-	const bool clean_screenshot = IsCleanGameplayScreenshotActive();
-
-	//	Start frame and 3d frame
-
-	// [ISB] Calculate a new 4:3 window from the vertical size
-	tHUDMode hudmode = GetHUDMode();
-
-	int temp_window_w = Game_window_w, temp_window_x = Game_window_x;
-	if (hudmode == HUD_FULLSCREEN || hudmode == HUD_COCKPIT)
-	{
-		int game_window_xmid = Game_window_x + Game_window_w / 2;
-
-		Game_window_w = Game_window_h * 4 / 3;
-		Game_window_x = game_window_xmid - Game_window_w / 2;
-	}
-
-	{
-		PERF_MARKER_SCOPE("HUD.StartFrame.Primary");
-		StartFrame(false);
-	}
-	{
-		PERF_MARKER_SCOPE("HUD.g3_StartFrame.Primary");
-		g3_StartFrame(&Viewer_object->pos, &Viewer_object->orient, zoom);
-	}
-
-	rend_SetOverlayType(OT_NONE);
-
-	// determine hud rendering properties.
-	Hud_aspect_x = (float)Game_window_w / DEFAULT_HUD_WIDTH;
-	Hud_aspect_y = (float)Game_window_h / DEFAULT_HUD_HEIGHT;
-	Small_hud_flag = (((float)Game_window_h / (float)Max_window_h) <= 0.80f) ? true : false;
-
-	bool must_render_cockpit = false;
-	bool render_hud_items_after_world_post = false;
-	bool render_hud_items_before_game_dll = false;
-	bool render_reticle_after_world_post = false;
-	bool render_guided_reticle_after_world_post = false;
-	bool render_zoom_reticle_after_world_post = false;
-	tStatMask post_world_hud_stat_mask = 0;
-	int post_world_hud_window_x = Game_window_x;
-	int post_world_hud_window_y = Game_window_y;
-	int post_world_hud_window_w = Game_window_w;
-	int post_world_hud_window_h = Game_window_h;
-	//	render special missile hud if available
-	if (Players[Player_num].guided_obj && !GuidedMissileInSmallView())
-	{
-		if (!Cinematic_inuse)
-			render_guided_reticle_after_world_post = true;
-	}
-	else if (Players[Player_num].flags & PLAYER_FLAGS_ZOOMED)
-	{
-		if (!Cinematic_inuse)
-			render_zoom_reticle_after_world_post = true;
-	}
-	else if (!(Players[Player_num].flags & PLAYER_FLAGS_REARVIEW))
-	{
-		switch (hudmode)
-		{
-		case HUD_FULLSCREEN:
-			render_hud_items_after_world_post = true;
-			post_world_hud_stat_mask = Hud_stat_mask;
-			must_render_cockpit = true; // needed to render animated deactivation sequence and should be dormant								
-			if (Game_toggles.show_reticle)
-				render_reticle_after_world_post = true;
-			break;
-
-		case HUD_COCKPIT:
-			render_hud_items_after_world_post = true;
-			post_world_hud_stat_mask = Hud_stat_mask;
-			must_render_cockpit = true; // called when cockpit is activating and functioning.									
-			if (Game_toggles.show_reticle)
-				render_reticle_after_world_post = true;
-			break;
-
-		case HUD_LETTERBOX:
-			if (!Cinematic_inuse)
-			{
-				render_hud_items_after_world_post = true;
-				render_hud_items_before_game_dll = true;
-				post_world_hud_stat_mask = Hud_stat_mask;
-			}
-			break;
-
-		case HUD_OBSERVER:
-			if (!Cinematic_inuse)
-			{
-				render_hud_items_after_world_post = true;
-				render_hud_items_before_game_dll = true;
-				post_world_hud_stat_mask = Hud_stat_mask;
-			}
-			break;
-
-		default:
-			Int3();
-		}
-	}
-
-	//	End frame
-	{
-		PERF_MARKER_SCOPE("HUD.g3_EndFrame.Primary");
-		g3_EndFrame();
-	}
-	{
-		PERF_MARKER_SCOPE("HUD.EndFrame.Primary");
-		EndFrame();
-	}
-
-	if (hudmode == HUD_FULLSCREEN || hudmode == HUD_COCKPIT)
-	{
-		Game_window_w = temp_window_w;
-		Game_window_x = temp_window_x;
-	}
-
-	const bool render_cockpit_geometry =
-		must_render_cockpit && IsValidCockpit() && CockpitState() != COCKPIT_STATE_DORMANT;
-	// The HUD DLL callback is presentation-layer rendering. In cockpit mode it
-	// must be later still, after deferred bloom is resolved over the cockpit.
-	const bool render_game_dll_after_world_post = !render_cockpit_geometry;
-	const bool render_game_dll_after_cockpit_bloom = render_cockpit_geometry;
-	const bool render_post_world_hud =
-		render_hud_items_after_world_post ||
-		render_reticle_after_world_post ||
-		render_guided_reticle_after_world_post ||
-		render_zoom_reticle_after_world_post ||
-		render_game_dll_after_world_post;
-
-	// [ISB] extra pass to render the cockpit so it always uses correct window
-	if (render_post_world_hud || render_cockpit_geometry)
-	{
-		bool post_world_frame = false;
-		if (render_cockpit_geometry)
-		{
-			PERF_MARKER_SCOPE("HUD.BeginCockpitFrame");
-			post_world_frame = rend_BeginCockpitFrame();
-		}
-		else
-		{
-			PERF_MARKER_SCOPE("HUD.BeginPostPresentFrame");
-			post_world_frame = rend_BeginPostPresentFrame();
-		}
-		if (post_world_frame)
-		{
-			PERF_MARKER_SCOPE("HUD.CloseScreenEffectsPostAO");
-			VisEffectRenderCloseScreenEffectsPostAO();
-		}
-		if (!clean_screenshot && HasPostProcessHUDText())
-		{
-			if (post_world_frame)
-			{
-				PERF_MARKER_SCOPE("HUD.StartDeferredTextFrame");
-				rend_StartPostPresentFrame(0, 0, Max_window_w, Max_window_h,
-					RF_CLEAR_ZBUFFER);
-				// The direct renderer frame does not update grtext's clip rectangle.
-				// The preceding HUD frame may have left it at the centered 4:3
-				// cockpit width, while deferred world labels use full-screen coords.
-				grtext_SetParameters(0, 0, Max_window_w, Max_window_h);
-			}
-			else
-			{
-				StartFrame(0, 0, Max_window_w, Max_window_h, false);
-			}
-			{
-				PERF_MARKER_SCOPE("HUD.RenderDeferredText.PostWorld");
-				RenderPostProcessHUDText();
-			}
-			if (post_world_frame)
-				rend_EndFrame();
-			else
-				EndFrame();
-		}
-		if (render_post_world_hud)
-		{
-			if (post_world_frame)
-			{
-				PERF_MARKER_SCOPE("HUD.StartPostPresentFrame");
-				rend_StartPostPresentFrame(post_world_hud_window_x, post_world_hud_window_y,
-					post_world_hud_window_x + post_world_hud_window_w, post_world_hud_window_y + post_world_hud_window_h,
-					RF_CLEAR_ZBUFFER);
-			}
-			else
-			{
-				StartFrame(post_world_hud_window_x, post_world_hud_window_y,
-					post_world_hud_window_x + post_world_hud_window_w, post_world_hud_window_y + post_world_hud_window_h,
-					false);
-			}
-
-			int saved_game_window_w = Game_window_w;
-			int saved_game_window_h = Game_window_h;
-			int saved_game_window_x = Game_window_x;
-			int saved_game_window_y = Game_window_y;
-			Game_window_w = post_world_hud_window_w;
-			Game_window_h = post_world_hud_window_h;
-			Game_window_x = post_world_hud_window_x;
-			Game_window_y = post_world_hud_window_y;
-
-			if (render_guided_reticle_after_world_post)
-			{
-				PERF_MARKER_SCOPE("HUD.RenderGuidedReticle.PostWorld");
-				Error("Guided reticles require published HUD geometry");
-			}
-			else if (render_zoom_reticle_after_world_post)
-			{
-				PERF_MARKER_SCOPE("HUD.RenderZoomReticle.PostWorld");
-				Error("Zoom reticles require published HUD geometry");
-			}
-
-			if (render_hud_items_after_world_post && render_hud_items_before_game_dll)
-			{
-				PERF_MARKER_SCOPE("HUD.RenderItems.PostWorld");
-				RenderHUDItems(post_world_hud_stat_mask);
-			}
-
-			if (render_game_dll_after_world_post && !clean_screenshot)
-			{
-				PERF_MARKER_SCOPE("HUD.CallGameDLL.PostWorld");
-				CallGameDLL(EVT_CLIENT_HUD_INTERVAL, &DLLInfo);
-			}
-
-			if (render_hud_items_after_world_post && !render_hud_items_before_game_dll)
-			{
-				PERF_MARKER_SCOPE("HUD.RenderItems.PostWorld");
-				RenderHUDItems(post_world_hud_stat_mask);
-			}
-			if (render_reticle_after_world_post)
-			{
-				PERF_MARKER_SCOPE("HUD.RenderReticle.PostWorld");
-				RenderReticle();
-			}
-			Game_window_w = saved_game_window_w;
-			Game_window_h = saved_game_window_h;
-			Game_window_x = saved_game_window_x;
-			Game_window_y = saved_game_window_y;
-
-			if (post_world_frame)
-			{
-				PERF_MARKER_SCOPE("HUD.EndPostPresentFrame");
-				rend_EndFrame();
-			}
-			else
-			{
-				PERF_MARKER_SCOPE("HUD.EndFrame.PostWorldFallback");
-				EndFrame();
-			}
-		}
-		if (render_cockpit_geometry)
-		{
-			{
-				PERF_MARKER_SCOPE("HUD.Cockpit.StartFrame");
-				StartFrame(false);
-			}
-			{
-				PERF_MARKER_SCOPE("HUD.Cockpit.g3_StartFrame");
-				g3_StartFrame(&Viewer_object->pos, &Viewer_object->orient, zoom);
-			}
-			{
-				PERF_MARKER_SCOPE("HUD.RenderCockpit");
-				RenderCockpit();
-			}
-			{
-				PERF_MARKER_SCOPE("HUD.Cockpit.g3_EndFrame");
-				g3_EndFrame();
-			}
-			{
-				PERF_MARKER_SCOPE("HUD.Cockpit.EndFrame");
-				EndFrame();
-			}
-			if (post_world_frame)
-			{
-				PERF_MARKER_SCOPE("HUD.EndCockpitFrame");
-				rend_EndCockpitFrame();
-			}
-			if (render_game_dll_after_cockpit_bloom && !clean_screenshot)
-			{
-				PERF_MARKER_SCOPE("HUD.CallGameDLL.FinalCockpitLayer");
-				rend_StartPostPresentFrame(post_world_hud_window_x, post_world_hud_window_y,
-					post_world_hud_window_x + post_world_hud_window_w,
-					post_world_hud_window_y + post_world_hud_window_h, RF_CLEAR_ZBUFFER);
-				CallGameDLL(EVT_CLIENT_HUD_INTERVAL, &DLLInfo);
-				rend_EndFrame();
-			}
-		}
-	}
-
-	rend_SetZBufferState(1);
-	mprintf_at((2, 0, 0, "FPS: %f", GetFPS()));
-}
-
-
-// renders hud frame before any graphics are drawn
-void RenderPreHUDFrame()
-{
-	extern void RenderHUDMsgDirtyRects();
-	const tStatMask stat_mask = IsCleanGameplayScreenshotActive() ?
-		(Hud_stat_mask & (STAT_PRIMARYLOAD | STAT_SECONDARYLOAD | STAT_SHIELDS |
-			STAT_ENERGY | STAT_AFTERBURN)) : Hud_stat_mask;
-
-	// render any dirty rectangles if small hud flag is set
-	if (Small_hud_flag)
-	{
-		for (int i = 0; i < MAX_HUD_ITEMS; i++)
-		{
-			if ((stat_mask & HUD_array[i].stat) && (HUD_array[i].flags & HUD_FLAG_SMALL))
-				HUD_array[i].dirty_rect.fill(GR_BLACK);
-		}
-
-		// messages.
-		if ((stat_mask & STAT_MESSAGES))
-			RenderHUDMsgDirtyRects();
-	}
-}
-
-
-// render auxillary hud
-void RenderAuxHUDFrame()
-{
-	//	take care of any 'small hud' stuff
-	//	render hud array list for items drawn differently on a smaller hud.
-	if (Small_hud_flag)
-	{
-		int cur_game_win_w = Game_window_w;
-		int cur_game_win_h = Game_window_h;
-		int cur_game_win_x = Game_window_x;
-		int cur_game_win_y = Game_window_y;
-		ushort stat_mask = Hud_stat_mask;
-		if (IsCleanGameplayScreenshotActive())
-		{
-			stat_mask &= STAT_PRIMARYLOAD | STAT_SECONDARYLOAD | STAT_SHIELDS |
-				STAT_ENERGY | STAT_AFTERBURN;
-		}
-
-		// emulating hud that takes up entire screen
-		Game_window_w = Max_window_w;
-		Game_window_h = Max_window_h;
-		Game_window_x = 0;
-		Game_window_y = 0;
-
-		// determine hud rendering properties.
-		Hud_aspect_x = (float)Game_window_w / DEFAULT_HUD_WIDTH;
-		Hud_aspect_y = (float)Game_window_h / DEFAULT_HUD_HEIGHT;
-
-		RenderHUDItemList(stat_mask, 1);
-
-		// messages.
-		if ((stat_mask & STAT_MESSAGES))
-			RenderHUDMessages();
-
-		grtext_Flush();
-
-		Game_window_w = cur_game_win_w;
-		Game_window_h = cur_game_win_h;
-		Game_window_x = cur_game_win_x;
-		Game_window_y = cur_game_win_y;
-	}
-
-}
+// Controller-binding text shared by authored HUD content.
 
 char* GetControllerBindingText(int fidcont)
 {
@@ -1418,91 +1054,42 @@ static void RenderHUDItem(tHUDItem* item)
 	RenderHUDSetTextPassItemType(0);
 }
 
-static void RenderHUDItemList(tStatMask stat_mask, int small_filter)
-{
-	tHUDItem* score_item = NULL;
-	bool score_item_matches_filter = false;
-
-	RenderHUDBeginTextPass();
-
-	for (int i = 0; i < MAX_HUD_ITEMS; i++)
-	{
-		bool is_small_item = (HUD_array[i].flags & HUD_FLAG_SMALL) != 0;
-		if (!(stat_mask & HUD_array[i].stat))
-			continue;
-		if (HUD_array[i].type == HUD_ITEM_SCORE)
-		{
-			score_item = &HUD_array[i];
-			score_item_matches_filter = small_filter < 0 ||
-				(small_filter == 0 && !is_small_item) ||
-				(small_filter == 1 && is_small_item);
-			continue;
-		}
-		if (small_filter == 0 && is_small_item)
-			continue;
-		if (small_filter == 1 && !is_small_item)
-			continue;
-
-		RenderHUDItem(&HUD_array[i]);
-	}
-
-	if (score_item)
-	{
-		bool defer_score_to_aux = Small_hud_flag && small_filter == 0 && !RenderHUDGetTopLeftTextAnchor(NULL, NULL);
-		bool render_deferred_score = small_filter == 1 && HUD_score_pending_aux;
-
-		if ((score_item_matches_filter && !defer_score_to_aux) || render_deferred_score)
-		{
-			RenderHUDItem(score_item);
-			HUD_score_pending_aux = false;
-		}
-		else if (score_item_matches_filter && defer_score_to_aux)
-		{
-			HUD_score_pending_aux = true;
-		}
-	}
-
-	RenderHUDEndTextPass();
-}
 
 extern bool Demo_make_movie;
 
 // [ISB] When the vertical resolution exceeds this threshold, start scaling the font up.
 constexpr int D3M_FONT_SCALE_THRESHOLD = 1080;
 
-static int HUDEnabledControlsLineAdvance()
-{
-	float extra_scale = 1.0f;
-	if (Max_window_h > D3M_FONT_SCALE_THRESHOLD)
-		extra_scale = (float)Max_window_h / D3M_FONT_SCALE_THRESHOLD;
 
-	int line_advance = grtext_GetHeight("X") + (int)(extra_scale * 2.0f + 0.5f);
-	return (line_advance < 14) ? 14 : line_advance;
-}
+struct SceneHUDDiagnosticText {
+    d3scene::FrameData& frame;
+    const GameMainView& camera;
+    d3scene::Rect viewport;
+    SceneTextStyle style;
+    bool draw_counts = false;
+    int32_t order = 0;
+    int width(const char* value) const { return MeasureSceneText(value,style).width; }
+    int height(const char* value) const { return MeasureSceneText(value,style).height; }
+    void emit(int flags,ddgr_color color,ubyte alpha,int saturation,int x,int y,const char* value) {
+        auto text = style; text.alpha = alpha/255.f;
+        text.color = {GR_COLOR_RED(color)/255.f,GR_COLOR_GREEN(color)/255.f,GR_COLOR_BLUE(color)/255.f};
+        if (flags & HUDTEXT_CENTERED) x = (viewport.width-width(value))/2;
+        text.additive = saturation != 0;
+        for (int pass = 0; pass <= saturation; ++pass)
+            PrepareSceneText(frame,SceneHUDDiagnostics,order,x,y,value,text);
+    }
+    void pixels(int flags,ddgr_color color,ubyte alpha,int saturation,int x,int y,const char* format,...) {
+        char value[1024]; va_list args; va_start(args,format); vsnprintf(value,sizeof(value),format,args); va_end(args);
+        emit(flags,color,alpha,saturation,x,y,value);
+    }
+    void reference(ddgr_color color,ubyte alpha,int saturation,int x,int y,const char* format,...) {
+        char value[1024]; va_list args; va_start(args,format); vsnprintf(value,sizeof(value),format,args); va_end(args);
+        emit(0,color,alpha,saturation,int(x*float(viewport.width)/DEFAULT_HUD_WIDTH),
+            int(y*float(viewport.height)/DEFAULT_HUD_HEIGHT),value);
+    }
+};
 
-static int HUDEnabledControlsSectionGap()
-{
-	if (Max_window_h <= D3M_FONT_SCALE_THRESHOLD)
-		return 0;
-
-	return (int)(((float)Max_window_h / D3M_FONT_SCALE_THRESHOLD - 1.0f) * 8.0f + 0.5f);
-}
-
-static int HUDEnabledControlsStartY()
-{
-	int y = 130;
-	int top_left_bottom = 0;
-	if (RenderHUDGetTopLeftTextBottom(&top_left_bottom))
-	{
-		int below_existing_hud = top_left_bottom + HUDEnabledControlsLineAdvance() + HUDEnabledControlsSectionGap();
-		if (y < below_existing_hud)
-			y = below_existing_hud;
-	}
-
-	return y;
-}
-
-static void HUDRenderDrawCallStats(const renderer_draw_call_stats& draw_stats)
+static void HUDRenderDrawCallStats(SceneHUDDiagnosticText& sink,const renderer_draw_call_stats& draw_stats)
 {
 	struct tDrawCallColumn
 	{
@@ -1511,11 +1098,10 @@ static void HUDRenderDrawCallStats(const renderer_draw_call_stats& draw_stats)
 		int value_width;
 	};
 
-	auto draw_row = [](int y, const tDrawCallColumn* columns, int count)
+	auto draw_row = [&](int y, const tDrawCallColumn* columns, int count)
 	{
-		const int gap_width = grtext_GetTextLineWidth("    ");
-		int left = 0, top = 0, right = Game_window_w, bottom = Game_window_h, tabspace = 0;
-		grtext_GetParameters(&left, &top, &right, &bottom, &tabspace);
+		const int gap_width = sink.width("    ");
+		int left = 0, top = 0, right = sink.viewport.width, bottom = sink.viewport.height, tabspace = 0;
 
 		char value_text[16];
 		int row_width = 0;
@@ -1525,9 +1111,9 @@ static void HUDRenderDrawCallStats(const renderer_draw_call_stats& draw_stats)
 			count = 4;
 		for (int i = 0; i < count; i++)
 		{
-			label_width[i] = grtext_GetTextLineWidth(columns[i].label);
+			label_width[i] = sink.width(columns[i].label);
 			snprintf(value_text, sizeof(value_text), "%u", columns[i].value);
-			int value_width = grtext_GetTextLineWidth(value_text);
+			int value_width = sink.width(value_text);
 			column_width[i] = label_width[i] + columns[i].value_width;
 			if (value_width > columns[i].value_width)
 				column_width[i] += value_width - columns[i].value_width;
@@ -1538,18 +1124,18 @@ static void HUDRenderDrawCallStats(const renderer_draw_call_stats& draw_stats)
 		int x = left + ((right - left) - row_width) / 2;
 		for (int i = 0; i < count; i++)
 		{
-			RenderHUDTextFlags(0, HUD_COLOR, HUD_ALPHA, 0, x, y, "%s", columns[i].label);
+			sink.pixels(0, HUD_COLOR, HUD_ALPHA, 0, x, y, "%s", columns[i].label);
 			snprintf(value_text, sizeof(value_text), "%u", columns[i].value);
-			const int value_width = grtext_GetTextLineWidth(value_text);
+			const int value_width = sink.width(value_text);
 			const int value_x = x + label_width[i] + columns[i].value_width - value_width;
-			RenderHUDTextFlags(0, HUD_COLOR, HUD_ALPHA, 0, value_x, y, "%s", value_text);
+			sink.pixels(0, HUD_COLOR, HUD_ALPHA, 0, value_x, y, "%s", value_text);
 			x += column_width[i] + gap_width;
 		}
 	};
 
-	const int reserved_value_width = grtext_GetTextLineWidth("88888");
-	const int line_height = grtext_GetHeight("X") + 2;
-	int y = Game_window_y + (Game_window_h / 2) - (line_height * 3);
+	const int reserved_value_width = sink.width("88888");
+	const int line_height = sink.height("X") + 2;
+	int y = 0 + (sink.viewport.height / 2) - (line_height * 3);
 
 	tDrawCallColumn total[] = {
 		{ "Draw calls: ", draw_stats.total, reserved_value_width },
@@ -1595,7 +1181,7 @@ static void HUDRenderDrawCallStats(const renderer_draw_call_stats& draw_stats)
 	draw_row(y, post, 2);
 }
 
-static void HUDRenderMotionVectorDebugSample()
+static void HUDRenderMotionVectorDebugSample(SceneHUDDiagnosticText& sink)
 {
 	renderer_motion_vector_debug_sample sample = {};
 	rend_GetMotionVectorDebugSample(&sample);
@@ -1604,13 +1190,13 @@ static void HUDRenderMotionVectorDebugSample()
 	if (sample.mode == RENDERER_MOTION_VECTOR_PIXEL)
 		mode = "Pixel";
 
-	const int line_height = grtext_GetHeight("X") + 2;
-	const int y = Game_window_y + Game_window_h - line_height - 4;
+	const int line_height = sink.height("X") + 2;
+	const int y = 0 + sink.viewport.height - line_height - 4;
 	if (sample.valid)
 	{
 		if (sample.probe_valid)
 		{
-			RenderHUDTextFlags(HUDTEXT_CENTERED, HUD_COLOR, HUD_ALPHA, 0, 0, y,
+			sink.pixels(HUDTEXT_CENTERED, HUD_COLOR, HUD_ALPHA, 0, 0, y,
 				"MV %s center (%d,%d)/%dx%d: %.6f %.6f  max (%d,%d): %.6f %.6f  probe: %.6f %.6f",
 				mode, sample.x, sample.y, sample.width, sample.height, sample.vx, sample.vy,
 				sample.max_x, sample.max_y, sample.max_vx, sample.max_vy,
@@ -1618,7 +1204,7 @@ static void HUDRenderMotionVectorDebugSample()
 		}
 		else
 		{
-			RenderHUDTextFlags(HUDTEXT_CENTERED, HUD_COLOR, HUD_ALPHA, 0, 0, y,
+			sink.pixels(HUDTEXT_CENTERED, HUD_COLOR, HUD_ALPHA, 0, 0, y,
 				"MV %s center (%d,%d)/%dx%d: %.6f %.6f  max (%d,%d): %.6f %.6f",
 				mode, sample.x, sample.y, sample.width, sample.height, sample.vx, sample.vy,
 				sample.max_x, sample.max_y, sample.max_vx, sample.max_vy);
@@ -1626,7 +1212,7 @@ static void HUDRenderMotionVectorDebugSample()
 	}
 	else
 	{
-		RenderHUDTextFlags(HUDTEXT_CENTERED, HUD_COLOR, HUD_ALPHA, 0, 0, y,
+		sink.pixels(HUDTEXT_CENTERED, HUD_COLOR, HUD_ALPHA, 0, 0, y,
 			"MV %s center: no sample", mode);
 	}
 }
@@ -1695,28 +1281,29 @@ static const char* HUDBitmapFormatName(int bm_handle)
 	return "1555";
 }
 
-static void HUDRenderFaceProbe()
+static void HUDRenderFaceProbe(SceneHUDDiagnosticText& sink)
 {
-	if (!Viewer_object)
-		return;
-
-	vector ray_end = Viewer_object->pos + (Viewer_object->orient.fvec * 10000.0f);
+	const auto& camera = sink.camera.world;
+	vector eye{camera.camera.position.x,camera.camera.position.y,camera.camera.position.z};
+	const vector forward{camera.camera.forward.x,camera.camera.forward.y,camera.camera.forward.z};
+	vector ray_end = eye+forward*10000.f;
 	fvi_query fq = {};
 	fvi_info hit_info = {};
-	fq.p0 = &Viewer_object->pos;
+	fq.p0 = &eye;
 	fq.p1 = &ray_end;
-	fq.startroom = Viewer_object->roomnum;
+	fq.startroom = camera.room;
 	fq.rad = 0.0f;
-	fq.thisobjnum = Viewer_object - Objects;
+	const auto* owner = ObjGet(int(camera.camera_owner));
+	fq.thisobjnum = owner ? OBJNUM(owner) : -1;
 	fq.flags = FQ_IGNORE_MOVING_OBJECTS | FQ_IGNORE_WEAPONS;
 
 	int hit = fvi_FindIntersection(&fq, &hit_info);
-	const int line_height = grtext_GetHeight("X") + 2;
-	int y = Game_window_y + (Game_window_h / 2) + line_height * (Render_draw_call_stats ? 4 : -3);
+	const int line_height = sink.height("X") + 2;
+	int y = (sink.viewport.height / 2) + line_height * (sink.draw_counts ? 4 : -3);
 
 	if (hit == HIT_NONE || hit_info.num_hits <= 0)
 	{
-		RenderHUDTextFlags(HUDTEXT_CENTERED, HUD_COLOR, HUD_ALPHA, 0, 0, y, "Face probe: no hit");
+		sink.pixels(HUDTEXT_CENTERED, HUD_COLOR, HUD_ALPHA, 0, 0, y, "Face probe: no hit");
 		return;
 	}
 
@@ -1733,7 +1320,7 @@ static void HUDRenderFaceProbe()
 
 	if (hit_index < 0)
 	{
-		RenderHUDTextFlags(HUDTEXT_CENTERED, HUD_COLOR, HUD_ALPHA, 0, 0, y,
+		sink.pixels(HUDTEXT_CENTERED, HUD_COLOR, HUD_ALPHA, 0, 0, y,
 			"Face probe: hit type %d, no mine face", hit);
 		return;
 	}
@@ -1743,15 +1330,19 @@ static void HUDRenderFaceProbe()
 	room* rp = &Rooms[roomnum];
 	if (!rp->used || facenum < 0 || facenum >= rp->num_faces)
 	{
-		RenderHUDTextFlags(HUDTEXT_CENTERED, HUD_COLOR, HUD_ALPHA, 0, 0, y,
+		sink.pixels(HUDTEXT_CENTERED, HUD_COLOR, HUD_ALPHA, 0, 0, y,
 			"Face probe: invalid room/face %d/%d", roomnum, facenum);
 		return;
 	}
 
 	face* fp = &rp->faces[facenum];
+	if (fp->tmap < 0 || fp->tmap >= MAX_TEXTURES || !GameTextures[fp->tmap].used) {
+		sink.pixels(HUDTEXT_CENTERED,HUD_COLOR,HUD_ALPHA,0,0,y,"Face probe: room %d face %d has no material",roomnum,facenum);
+		return;
+	}
 	texture* tex = &GameTextures[fp->tmap];
-	int bm_handle = GetTextureBitmap(fp->tmap, 0);
-	bool has_special = fp->special_handle != BAD_SPECIAL_FACE_INDEX;
+	int bm_handle = GetTextureBitmapAtTime(fp->tmap,0,float(sink.frame.simulation_time));
+	bool has_special = fp->special_handle >= 0 && fp->special_handle < MAX_SPECIAL_FACES && SpecialFaces[fp->special_handle].used;
 	bool has_vertnorms = has_special && SpecialFaces[fp->special_handle].vertnorms != nullptr;
 	bool smooth_flag = has_special && (SpecialFaces[fp->special_handle].flags & SFF_SPEC_SMOOTH);
 	int source_count = 0;
@@ -1773,35 +1364,35 @@ static void HUDRenderFaceProbe()
 	HUDFaceFlagsToString(fp->flags, face_flags, sizeof(face_flags));
 	HUDTextureFlagsToString(tex->flags, tex_flags, sizeof(tex_flags));
 
-	RenderHUDTextFlags(HUDTEXT_CENTERED, HUD_COLOR, HUD_ALPHA, 0, 0, y,
+	sink.pixels(HUDTEXT_CENTERED, HUD_COLOR, HUD_ALPHA, 0, 0, y,
 		"Face probe: room %d face %d hit %.2f", roomnum, facenum, hit_info.hit_dist);
 	y += line_height;
-	RenderHUDTextFlags(HUDTEXT_CENTERED, HUD_COLOR, HUD_ALPHA, 0, 0, y,
+	sink.pixels(HUDTEXT_CENTERED, HUD_COLOR, HUD_ALPHA, 0, 0, y,
 		"Texture %d \"%s\"  bitmap %d \"%s\"  format %s", fp->tmap, tex->name,
 		bm_handle, bm_handle >= 0 ? GameBitmaps[bm_handle].name : "invalid", HUDBitmapFormatName(bm_handle));
 	y += line_height;
-	RenderHUDTextFlags(HUDTEXT_CENTERED, HUD_COLOR, HUD_ALPHA, 0, 0, y,
+	sink.pixels(HUDTEXT_CENTERED, HUD_COLOR, HUD_ALPHA, 0, 0, y,
 		"Face flags 0x%04X: %s", fp->flags, face_flags);
 	y += line_height;
-	RenderHUDTextFlags(HUDTEXT_CENTERED, HUD_COLOR, HUD_ALPHA, 0, 0, y,
+	sink.pixels(HUDTEXT_CENTERED, HUD_COLOR, HUD_ALPHA, 0, 0, y,
 		"Texture flags 0x%08X: %s", (unsigned int)tex->flags, tex_flags);
 	y += line_height;
-	RenderHUDTextFlags(HUDTEXT_CENTERED, HUD_COLOR, HUD_ALPHA, 0, 0, y,
+	sink.pixels(HUDTEXT_CENTERED, HUD_COLOR, HUD_ALPHA, 0, 0, y,
 		"Lightmap %u  special %d  special refs %d  PPX refs exact/split/field %d/%d/%d",
 		fp->lmi_handle, fp->special_handle, source_count, ppx_exact_sources, ppx_split_sources,
 		ppx_field_sources);
 	y += line_height;
-	RenderHUDTextFlags(HUDTEXT_CENTERED, HUD_COLOR, HUD_ALPHA, 0, 0, y,
+	sink.pixels(HUDTEXT_CENTERED, HUD_COLOR, HUD_ALPHA, 0, 0, y,
 		"Special vert normals %s  PPX generated normals %d  SFF_SPEC_SMOOTH %s",
 		has_vertnorms ? "yes" : "no", ppx_normal_count, smooth_flag ? "yes" : "no");
 	y += line_height;
-	RenderHUDTextFlags(HUDTEXT_CENTERED, HUD_COLOR, HUD_ALPHA, 0, 0, y,
+	sink.pixels(HUDTEXT_CENTERED, HUD_COLOR, HUD_ALPHA, 0, 0, y,
 		"Alpha %.2f  reflect %.2f  material spec %s  normal %.2f %.2f %.2f",
 		tex->alpha, tex->reflectivity, (tex->flags & TF_SPECULAR) ? "yes" : "no",
 		fp->normal.x, fp->normal.y, fp->normal.z);
 }
 
-static void HUDRenderVrrStatus()
+static void HUDRenderVrrStatus(SceneHUDDiagnosticText& sink)
 {
 	renderer_vrr_info info = {};
 	rend_GetVrrInfo(&info);
@@ -1812,26 +1403,26 @@ static void HUDRenderVrrStatus()
 	int y = 45;
 	if (!info.api_available)
 	{
-		RenderHUDText(HUD_COLOR, HUD_ALPHA, 0, 10, y,
+		sink.reference(HUD_COLOR, HUD_ALPHA, 0, 10, y,
 			"VRR: driver status unavailable");
 	}
 	else if (!info.display_supported)
 	{
-		RenderHUDText(HUD_COLOR, HUD_ALPHA, 0, 10, y,
+		sink.reference(HUD_COLOR, HUD_ALPHA, 0, 10, y,
 			"VRR: not supported [%s]",
 			info.display_name[0] ? info.display_name : "unnamed display");
 	}
 	else
 	{
-		RenderHUDText(HUD_COLOR, HUD_ALPHA, 0, 10, y,
+		sink.reference(HUD_COLOR, HUD_ALPHA, 0, 10, y,
 			"VRR: %s, FreeSync gaming %s (%d-%d Hz) [%s]",
 			info.eligible ? "configured" : "not configured",
 			info.gaming_enabled ? "on" : "off",
 			info.min_refresh_hz, info.max_refresh_hz,
 			info.display_name[0] ? info.display_name : "unnamed display");
 	}
-	y += grtext_GetHeight("X") + 2;
-	RenderHUDText(HUD_COLOR, HUD_ALPHA, 0, 10, y,
+	y += sink.height("X") + 2;
+	sink.reference(HUD_COLOR, HUD_ALPHA, 0, 10, y,
 		"Present: VSync %s, %s, %d Hz; engagement unknown (borderless cap %s)",
 		info.swap_interval != 0 ? "on" : "off",
 		info.fullscreen ? "borderless fullscreen" : "windowed",
@@ -1839,134 +1430,57 @@ static void HUDRenderVrrStatus()
 		info.borderless_supported ? "yes" : "no");
 }
 
+void PrepareGameHUDDiagnostics(d3scene::FrameData& frame,const HUDCanvasLayout& layout,
+    const GameMainView& main_view,bool advance) {
+    if (!layout.status || IsCleanGameplayScreenshotActive()) return;
+    // Override captured requests only; never save settings or fake diagnostic results.
+    const bool fixture = SceneGeometryInspection() && AutomatedCaptureFrameIndex() >= 0 && FindArg("-scene-hud-diagnostics-probe");
+    const bool fps = (layout.item_mask & STAT_FPS) != 0 || fixture;
+    const bool vrr = Render_vrr_diagnostics || fixture, draws = Render_draw_call_stats || fixture;
+    const bool face = Render_face_probe || fixture, motion = Render_preferred_state.motion_vector_debug_preview || fixture;
+    if (!fps && !vrr && !draws && !face && !motion) return;
+    SceneHUDDiagnosticText sink{frame,main_view,layout.primary,MakeHUDTextStyle(layout.primary),draws};
+    const auto begin = frame.meshes.size();
+    if (fps) {
+        struct Counter { double previous = 0,elapsed = 0,rate = 0; int frames = 0,logical_frame = -1; };
+        static d3scene::SceneCache<Counter> counters;
+        auto counter = counters.acquire(d3scene::assets());
+        if (advance && counter->logical_frame != FrameCount) {
+            const double now = timer_GetTime64();
+            if (counter->logical_frame != FrameCount-1) {
+                counter->previous = 0; counter->elapsed = 0; counter->frames = 0; counter->rate = 0;
+            }
+            if (counter->previous > 0 && now > counter->previous) {
+                counter->elapsed += now-counter->previous; ++counter->frames;
+            }
+            counter->previous = now; counter->logical_frame = FrameCount;
+            if (counter->elapsed >= FRAMERATE_TIME_DELAY) {
+                counter->rate = counter->frames/counter->elapsed;
+                counter->elapsed = 0; counter->frames = 0;
+            }
+        }
+        char value[64]; snprintf(value,sizeof(value),"FPS: %.1f",counter->rate);
+        sink.pixels(0,HUD_COLOR,HUD_ALPHA,0,sink.viewport.width-sink.width(value)-10,10,"%s",value);
+    }
+    if (vrr) HUDRenderVrrStatus(sink);
+    if (draws) {
+        renderer_draw_call_stats stats{}; rend_GetDrawCallStats(&stats);
+        HUDRenderDrawCallStats(sink,stats);
+    }
+    if (face) HUDRenderFaceProbe(sink);
+    if (motion) HUDRenderMotionVectorDebugSample(sink);
+    if (frame.meshes.size() == begin) return;
+    d3scene::PreparedForeground diagnostic; diagnostic.identity = SceneHUDDiagnostics; diagnostic.order = 65;
+    diagnostic.layer.display_views.push_back(MakeSceneCanvasView(SceneHUDDiagnostics,layout.primary,
+        d3scene::ViewTarget::Display,SceneGeometryInspection()));
+    frame.foregrounds.push_back(std::move(diagnostic));
+    if (AutomatedCapturePending()) AutomatedCaptureLog("scene HUD diagnostics fps=%d vrr=%d draws=%d face=%d motion=%d meshes=%u",
+        fps,vrr,draws,face,motion,unsigned(frame.meshes.size()-begin));
+}
+
 #define HUD_KEYS_NEXT_LINE	hudconty += HUDEnabledControlsLineAdvance()
 
 //	iterate through entire hud item list to draw.
-static void RenderHUDItemsBeforeStatus(tStatMask stat_mask)
-{
-	static double last_avg_fps = 0.0;
-	static double previous_framerate_time = 0.0;
-	static double accumulated_frametime = 0.0;
-	static int accumulated_frames = 0;
-	float font_aspect_x, font_aspect_y;
-
-	HUD_score_pending_aux = false;
-
-	grtext_Reset();
-	grtext_SetFont(HUD_FONT);
-
-	//	for lores screens, we use different fonts, so DONT SCALE.
-	font_aspect_x = (float)Game_window_w / Max_window_w;
-	font_aspect_y = (float)Game_window_h / Max_window_h;
-
-	//[ISB] If the screen height goes above 1080, start scaling it extra to compensate.
-	//The max stock vertical res was 1200, so this seems like a good cutoff. 
-	float extra_scale = 1.0f;
-	if (Max_window_h > D3M_FONT_SCALE_THRESHOLD)
-	{
-		extra_scale = (float)Max_window_h / D3M_FONT_SCALE_THRESHOLD;
-	}
-
-	float hud_font_scale;
-	if (font_aspect_y <= 0.60f)
-		hud_font_scale = 0.60f * extra_scale * ConfigNormalizeHudTextScale(Hud_text_scale);
-	else if (font_aspect_y <= 0.80f)
-		hud_font_scale = 0.80f * extra_scale * ConfigNormalizeHudTextScale(Hud_text_scale);
-	else
-		hud_font_scale = extra_scale * ConfigNormalizeHudTextScale(Hud_text_scale);
-
-	grtext_SetFontScale(hud_font_scale);
-
-	if (IsCleanGameplayScreenshotActive())
-	{
-		stat_mask &= STAT_PRIMARYLOAD | STAT_SECONDARYLOAD | STAT_SHIELDS |
-			STAT_ENERGY | STAT_AFTERBURN;
-		RenderHUDItemList(stat_mask, Small_hud_flag ? 0 : -1);
-		grtext_Flush();
-		return;
-	}
-
-	// Use wall time rather than the simulation Frametime. The simulation timer is
-	// paused while an in-game menu is open, but rendering continues.
-	const double current_framerate_time = timer_GetTime64();
-	if (previous_framerate_time > 0.0 && current_framerate_time > previous_framerate_time)
-	{
-		accumulated_frametime += current_framerate_time - previous_framerate_time;
-		accumulated_frames++;
-	}
-	previous_framerate_time = current_framerate_time;
-
-	if (accumulated_frametime >= FRAMERATE_TIME_DELAY)
-	{
-		if (accumulated_frames > 0 && accumulated_frametime > 0.0f)
-			last_avg_fps = (double)accumulated_frames / accumulated_frametime;
-
-		accumulated_frametime = 0.0;
-		accumulated_frames = 0;
-	}
-
-	//	show framerate text gauge
-	if (stat_mask & STAT_FPS)
-		RenderHUDText(HUD_COLOR, HUD_ALPHA, 0, 10, 10, "FPS: %.1f", last_avg_fps);
-
-	if (Render_vrr_diagnostics)
-		HUDRenderVrrStatus();
-
-	if (Render_draw_call_stats)
-	{
-		renderer_draw_call_stats draw_stats = {};
-		rend_GetDrawCallStats(&draw_stats);
-		HUDRenderDrawCallStats(draw_stats);
-	}
-
-	if (Render_face_probe)
-		HUDRenderFaceProbe();
-
-	if (Render_preferred_state.motion_vector_debug_preview)
-		HUDRenderMotionVectorDebugSample();
-
-	// show music spew
-
-#ifdef _DEBUG
-	if (Music_debug_verbose)
-	{
-		int min, sec;
-		RenderHUDText(HUD_COLOR, HUD_ALPHA, 0, 10, 60, "Music: %s", IsD3MusicOn() ? "ON" : "OFF");
-		RenderHUDText(HUD_COLOR, HUD_ALPHA, 0, 10, 72, "Region: %d", D3MusicGetRegion());
-		RenderHUDText(HUD_COLOR, HUD_ALPHA, 0, 10, 84, "Song: %s", Music_type_names[Game_music_info.cur_song]);
-		min = (int)(Game_music_info.peace_timer / 60);
-		sec = (int)((Game_music_info.peace_timer / 60.0f - (float)min) * 60.0f);
-		RenderHUDText(HUD_COLOR, HUD_ALPHA, 0, 10, 96, "Peace time: %d:%.2d", min, sec);
-
-		if (Game_music_info.cur_loop_name) {
-			RenderHUDText(HUD_COLOR, HUD_ALPHA, 0, 10, 108, "Loop: %s", Game_music_info.cur_loop_name);
-		}
-	}
-
-	if (Viewer_object)
-	{
-		RenderHUDText(HUD_COLOR, HUD_ALPHA, 0, 10, 120, "Position: %.2f %.2f %.2f", Viewer_object->pos.x, Viewer_object->pos.y, Viewer_object->pos.z);
-		RenderHUDText(HUD_COLOR, HUD_ALPHA, 0, 10, 132, "Forward:  %.2f %.2f %.2f", Viewer_object->orient.fvec.x, Viewer_object->orient.fvec.y, Viewer_object->orient.fvec.z);
-	}
-
-	//	show timer
-	if (1)
-	{
-		// timer always displayed in debug builds.
-		int min, sec, y;
-
-		min = (int)(Gametime / 60);
-		sec = (int)((Gametime / 60.0f - (float)min) * 60.0f);
-
-		y = (Game_mode & GM_MULTI) ? 10 : 40;
-
-		RenderHUDText(HUD_COLOR, HUD_ALPHA, 0, 605, y, "%d:%.2d", min, sec);
-	}
-#endif
-
-	//	render hud array list.
-	RenderHUDItemList(stat_mask, Small_hud_flag ? 0 : -1);
-}
 
 struct HUDStatusInputs {
     int demo = 0;
@@ -1979,17 +1493,6 @@ static HUDStatusInputs CaptureHUDStatusInputs() {
     input.controls = Players[Player_num].controller_bitflags;
     return input;
 }
-struct LegacyHUDStatusSink {
-    int textHeight(const char* text) const { return grtext_GetHeight(text); }
-    int lineAdvance() const { return HUDEnabledControlsLineAdvance(); }
-    int sectionGap() const { return HUDEnabledControlsSectionGap(); }
-    int startY() const { return HUDEnabledControlsStartY(); }
-    int windowY() const { return Game_window_y; }
-    int windowHeight() const { return Game_window_h; }
-    void text(int flags,ddgr_color color,ubyte alpha,int x,int y,const char* value) const {
-        RenderHUDTextFlags(flags,color,alpha,0,x,y,"%s",value);
-    }
-};
 template<class Sink> static void LayoutHUDStatus(const HUDStatusInputs& input,Sink& sink) {
     const auto RenderHUDTextFlags = [&](int flags,ddgr_color color,ubyte alpha,int,int x,int y,const char* value) {
         sink.text(flags,color,alpha,x,y,value);
@@ -2235,23 +1738,6 @@ template<class Sink> static void LayoutHUDStatus(const HUDStatusInputs& input,Si
 
 }
 
-void RenderHUDItems(tStatMask stat_mask) {
-    RenderHUDItemsBeforeStatus(stat_mask);
-    if (IsCleanGameplayScreenshotActive()) return;
-    LegacyHUDStatusSink status;
-    LayoutHUDStatus(CaptureHUDStatusInputs(),status);
-	//	render hud messages. if in a small hud, don't do it now but inside RenderAuxHUDFrame
-	if ((stat_mask & STAT_MESSAGES) && !Small_hud_flag)
-		RenderHUDMessages();
-#if 0
-	grtext_SetColor(GR_GREEN);
-	grtext_SetAlpha(128);
-	grtext_SetFont(BIG_BRIEFING_FONT);
-	grtext_CenteredPrintf(0, 300, "Beta Version");
-#endif
-	grtext_Flush();
-
-}
 
 
 

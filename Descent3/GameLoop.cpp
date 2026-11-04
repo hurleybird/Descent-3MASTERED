@@ -3101,17 +3101,6 @@ void GameRenderFrame(void)
 			ObjDoLightingFrameAll();
 		}
 
-		// render preliminary hud view (for dirty rectangles)
-		if (Small_hud_flag)
-		{
-			PERF_MARKER_SCOPE("RenderPreHUDFrame");
-			// small hud flag is set in RenderHUDFrame in GameDrawHud.
-			StartFrame(0, 0, Max_window_w, Max_window_h, false);
-			RenderPreHUDFrame();
-			EndFrame();
-		}
-
-
 		// Publish once. Every world view below sees this same owned scene, not
 		// a second traversal of mutable simulation state.
 		if (AutomatedCaptureFrameIndex() == 0 && FindArg("-scene-close-model-probe") && Player_object) {
@@ -3521,7 +3510,7 @@ void GameRenderFrame(void)
 		module_images.clear();
 		if (!FindArg("-scene-automap-probe")) QueueGamePlayerLabels(*presentation,observations);
 		const auto overlay_presentation = FindArg("-scene-automap-probe") ? d3scene::PresentationRef{} :
-			PrepareGameOverlayPresentation(*presentation,hud_layout,true,module_images,&auxiliary_schedule);
+			PrepareGameOverlayPresentation(*presentation,hud_layout,main_view,true,module_images,&auxiliary_schedule);
 		if (FindArg("-scene-module-live-probe") && FindArg("-scene-module-unload-probe") && AutomatedCaptureFrameIndex() == 9) {
 			const auto identity = GameModuleCanvasIdentity();
 			FreeGameDLL();

@@ -341,14 +341,6 @@ void ResetHUD();
 //	loads in hud configuration file, adds hud items.
 void LoadHUDConfig(const char *filename, bool (*fn)(const char *,const char *, void *) = NULL, void *data=NULL);
 
-//	render cockpit and gauges frame
-void RenderHUDFrame(float zoom);
-
-// renders hud frame before any graphics are drawn
-void RenderPreHUDFrame();
-
-// render auxillary hud
-void RenderAuxHUDFrame();
 bool AreHUDMessageConsolesOpen();
 void RenderHUDMessageConsoles();
 

@@ -1,6 +1,12 @@
 {
   "schemaVersion": 1,
   "scenarios": {
+    "hud-diagnostics": {
+      "revision": 1, "minimumFrame": 60, "inspectionRequired": true,
+      "arguments": ["-scene-gl-audit", "-scene-hud-diagnostics-probe"],
+      "requiredLog": ["scene HUD diagnostics fps=1 vrr=1 draws=1 face=1 motion=1 meshes=[1-9]"],
+      "purpose": "Owned FPS/VRR/draw-count/face/motion diagnostic text from real source queries. Override request admission only, never persisted preferences or diagnostic values. Motion can legitimately report no sample."
+    },
     "cinematic-transition": {
       "revision": 1, "minimumFrame": 240, "inspectionRequired": true,
       "arguments": ["-scene-gl-audit", "-scene-integration-cinematic-probe", "-capture-rear-smallview", "-capture-series-from", "70", "-capture-series-until", "210", "-capture-series-stride", "70"],

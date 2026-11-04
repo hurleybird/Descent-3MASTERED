@@ -1,5 +1,23 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November 3 — dead HUD removed; omitted diagnostics published
+
+Removed unreachable primary/aux/preHUD orchestration and dead HUDItems/list/
+legacy status sink; shared helpers/oracles remain. Restored missing FPS/VRR/
+draw-count/face/motion overlays as owned geometry, explicit captured camera.
+Root3/3; small messages003/006 and message-console transitions EXACT7f049c2.
+All8 ordinary500 EXACT (qual-hud-retirement-final-20261103, B30AA17... binary).
+Latest321F2DD4F0BB4509AE7D29222B1CD38181EFEA72797E436F30832796723E0CEB
+fixes fixture activation to all frames (not export-only), removes unused helpers;
+qual-hud-diagnostics-clock-20261103 effects003/006 passes, inspected FPS56.5 in
+capped diagnostic run (not performance evidence). Old diagnostic-final0FPS is
+not temporal qualification. No GPU motion sample expected without debug mode.
+NEXT: owned gl_scene.cpp records all draws3D/Other, so category breakdown is
+misleading. Trace native submission categories from typed inputs, then measure
+actual breakdown. Do not infer a draw-count bottleneck merely from overlay.
+7f049c2 and541f116 hosted CI green. Credits unchanged62044.8730600000,61%used.
+Keep working; no game active. Preserve unrelated lib/gitinfo.h.
+
 ## November 3 — single foreground execution route
 
 Removed dormant GameDrawHud/normal-mode legacy routing; all prepared foreground

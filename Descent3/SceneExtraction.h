@@ -94,6 +94,7 @@ constexpr uint64_t SceneReticle = 0x4855445245540001ull;
 constexpr uint64_t SceneHUDItems = 0x4855444954450001ull;
 constexpr uint64_t SceneHUDMessages = 0x4855444d53470001ull;
 constexpr uint64_t SceneHUDStatus = 0x4855445354410001ull;
+constexpr uint64_t SceneHUDDiagnostics = 0x4855444449410001ull;
 constexpr uint64_t SceneDisplayLabels = 0x444953504c414201ull;
 constexpr uint64_t SceneHUDAuxiliary = 0x4855444155580001ull;
 constexpr uint64_t SceneViewImageProbe = 0x56494557494d4701ull;
@@ -105,6 +106,7 @@ void PrepareGameCockpitGauges(d3scene::FrameData&,const ModelTransforms&,const d
 void PrepareGameCockpit(d3scene::FrameData&, bool advance,const d3scene::FrameData* previous = nullptr,bool retain_materials = false);
 void PrepareGameReticle(d3scene::FrameData&,const HUDCanvasLayout&);
 void PrepareGameHUD(d3scene::FrameData&,const HUDCanvasLayout&,bool advance,std::vector<d3scene::ViewImageRequest>&);
+void PrepareGameHUDDiagnostics(d3scene::FrameData&,const HUDCanvasLayout&,const GameMainView&,bool advance);
 void RenderPreparedReticle(const d3scene::Presentation&);
 void RenderGameForegrounds(const d3scene::Presentation&,d3scene::ForegroundPhase,
     const d3scene::Presentation* overlays = nullptr);
@@ -116,7 +118,7 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance = true,const GameM
 // A game-owned post-observation publication. It owns HUD/module descriptions,
 // never extracts another world or advances the world's temporal predecessor.
 d3scene::PresentationRef PrepareGameOverlayPresentation(const d3scene::Presentation& world,
-    const HUDCanvasLayout&,bool advance,std::vector<d3scene::ViewImageRequest>& world_images,const GameAuxiliarySchedule* auxiliary = nullptr);
+    const HUDCanvasLayout&,const GameMainView&,bool advance,std::vector<d3scene::ViewImageRequest>& world_images,const GameAuxiliarySchedule* auxiliary = nullptr);
 void RenderGameSceneView(const d3scene::Presentation&, d3scene::View,
     SceneFeedbackTransaction* game_observations = nullptr);
 bool SceneGeometryInspection();

@@ -1,5 +1,40 @@
 # Renderer game integration
 
+## November 3: retire dead HUD orchestration, recover omitted diagnostics
+
+Caller audit after7f049c2 found no live references to RenderHUDFrame,
+RenderAuxHUDFrame or RenderPreHUDFrame. Removed their temporary window/3D state,
+dirty-rectangle pass and deferred cockpit/DLL orchestration. Also removed the
+now-unreachable RenderHUDItems/legacy status sink/item-list path and private
+layout helpers. Shared item, text, reticle-reference, control-label and native
+message-console APIs remain. Net source reduction is about530lines.
+
+The audit found an actual migration omission: FPS/VRR/draw-call/face/motion
+diagnostics existed only inside that dead route. They now publish owned text
+geometry from explicit viewport/style inputs. Face queries use the captured
+main camera and sampled time, not mutable Viewer_object; missing texture/special
+metadata is guarded. FPS samples wall time once per logical frame, scene-owned,
+with quarter-second smoothing and reset across hidden/disabled intervals.
+It is right-aligned at the top to keep the test-build warning legible. Disabled
+diagnostics make no diagnostic queries and allocate no diagnostic canvas.
+
+Root3/3 pass. Small-window messages003/006 and native message-console transitions
+are pixel-identical to7f049c2. All8 ordinary500 clean/exact images are identical
+(qual-hud-retirement-final-20261103, binaryB30AA17EDE5EA6AB773F722514D041C1D0C5774483C6BC85539CB3C87937E0AA).
+Final diagnostics fixture correction enables its requests on all captured frames,
+not just the export frame; FPS now visibly accumulates. Final binary
+321F2DD4F0BB4509AE7D29222B1CD38181EFEA72797E436F30832796723E0CEB,
+qual-hud-diagnostics-clock-20261103 effects003/006 pass and images inspected.
+Earlier qual-hud-diagnostics-final shows0FPS because that fixture was activated
+only at export; do not use it as temporal qualification. Motion legitimately
+reports no sample because the fixture does not enable GPU motion debug capture.
+
+Follow-up identified: owned execution currently records every native geometry
+submission as3D/Other. Total counts are real but the legacy category breakdown
+does not describe owned canvas/room/model draws. Repair attribution from explicit
+submission inputs before treating the breakdown as a profiling guide. No timing
+win claimed from this cleanup. Release gate and protected installations unchanged.
+
 ## November 3: one foreground execution route, not inspection versus legacy
 
 Removed GameDrawHud and its obsolete non-inspection branch. WorldOverlay and

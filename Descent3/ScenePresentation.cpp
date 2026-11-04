@@ -869,7 +869,7 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance,const GameMainView
 }
 
 d3scene::PresentationRef PrepareGameOverlayPresentation(const d3scene::Presentation& world,
-    const HUDCanvasLayout& layout,bool advance,std::vector<d3scene::ViewImageRequest>& world_images,const GameAuxiliarySchedule* auxiliary) {
+    const HUDCanvasLayout& layout,const GameMainView& main_view,bool advance,std::vector<d3scene::ViewImageRequest>& world_images,const GameAuxiliarySchedule* auxiliary) {
     PERF_MARKER_SCOPE("Scene.PrepareGameOverlays");
     auto data = d3scene::acquireFrameData();
     data.sequence = AllocateGamePresentationSequence();
@@ -879,6 +879,7 @@ d3scene::PresentationRef PrepareGameOverlayPresentation(const d3scene::Presentat
     data.paused = world.data().paused;
     PrepareGameReticle(data,layout);
     PrepareGameHUD(data,layout,advance,world_images);
+    PrepareGameHUDDiagnostics(data,layout,main_view,advance);
     if (auxiliary) PrepareGameAuxiliaryCanvas(data,*auxiliary);
     PrepareGameDisplayLabels(data,layout.display);
     PrepareCinematicCanvas(data);
