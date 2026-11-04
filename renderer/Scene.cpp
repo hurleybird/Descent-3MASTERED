@@ -893,7 +893,6 @@ PresentationRef Presentation::complete(FrameData data) {
         "Invalid presentation clock");
     require(finite(data.player_control_delta) && std::isfinite(data.afterburner_factor) &&
         data.afterburner_factor >= 0 && data.afterburner_factor <= 1,"Invalid presentation motion inputs");
-    require((data.pending_domains & ~AllPendingDomains) == 0, "Unknown pending scene domain");
     // These are publication checks, not lookup tables. Accumulate contiguous
     // keys and check adjacent sorted values instead of allocating tree/hash
     // nodes for every emitter and overlay on every frame. No borrowed state
@@ -1484,10 +1483,6 @@ PresentationRef Presentation::complete(FrameData data) {
     }
     prepared->data_.image_interface = edited_interface ? std::move(edited_interface) : prior_interface;
     return prepared;
-}
-void Presentation::requireExecutable() const {
-    if (data_.pending_domains != 0)
-        throw std::logic_error("Renderer migration incomplete: presentation contains unprepared domains");
 }
 void validateViewImageInputs(const FrameData& frame,const View& view) {
     for (const auto& input : view.image_inputs) if (input.producer)

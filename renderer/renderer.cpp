@@ -30,13 +30,10 @@ static IRenderer* renderer_inst;
 
 d3scene::VisibilityReport d3scene::renderView(const Presentation& frame, const View& view)
 {
-	if (!view.geometry_inspection)
-		frame.requireExecutable();
 	return renderView(prepareView(frame,view));
 }
 d3scene::VisibilityReport d3scene::renderView(const PreparedView& prepared)
 {
-	if (!prepared.view().geometry_inspection) prepared.frame().requireExecutable();
 	return renderer_inst->RenderSceneView(prepared);
 }
 static oeApplication* Renderer_app;
@@ -46,15 +43,11 @@ void d3scene::renderViewImages(const Presentation& frame,const std::vector<ViewI
 }
 void d3scene::renderViewImages(const PreparedImagePlan& plan)
 {
-	for (const auto& image : plan.images())
-		if (!image.producer().view().geometry_inspection) image.producer().frame().requireExecutable();
 	for (const auto& image : plan.images()) renderer_inst->RenderViewImage(image);
 }
 void d3scene::renderForeground(const Presentation& frame, const ForegroundLayer& layer)
 {
 	validateForeground(layer);
-	for (const auto& view : layer.scene_views) if (!view.geometry_inspection) frame.requireExecutable();
-	for (const auto& view : layer.display_views) if (!view.geometry_inspection) frame.requireExecutable();
 	renderer_inst->RenderForeground(frame,layer);
 }
 d3scene::ImageMip d3scene::readViewImage(const Presentation& frame,uint64_t image)

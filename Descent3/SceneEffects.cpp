@@ -1184,7 +1184,6 @@ void PrepareGameCameraEffects(d3scene::FrameData& frame,const GameMainView* main
     d3scene::PreparedForeground foreground;
     foreground.identity = SceneCloseScreenEffects; foreground.order = 35;
     auto view = d3scene::cameraOverlayView(main->world,SceneCloseScreenEffects,main->display_viewport);
-    view.geometry_inspection = SceneGeometryInspection();
     foreground.layer.display_views.push_back(std::move(view));
     frame.foregrounds.push_back(std::move(foreground));
     if (AutomatedCapturePending()) AutomatedCaptureLog("scene camera effect audience weapons=%u shared_geometry=1",weapons);

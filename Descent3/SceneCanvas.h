@@ -66,9 +66,9 @@ void PrepareSceneImageQuad(d3scene::FrameData&,uint64_t collection,int32_t& next
     d3scene::Rect rectangle,uint64_t image_slot,float opacity = 1);
 struct FrameScreenBlend;
 void PrepareFrameBlendCanvas(d3scene::FrameData&,uint64_t collection,d3scene::Rect viewport,
-    const std::vector<FrameScreenBlend>&,bool inspection);
+    const std::vector<FrameScreenBlend>&);
 d3scene::View MakeSceneCanvasView(uint64_t collection,d3scene::Rect viewport,
-    d3scene::ViewTarget target,bool inspection);
+    d3scene::ViewTarget target);
 // Plain legacy-byte text in logical top-left canvas coordinates. Atlas lookup
 // and layout happen during publication; the renderer receives ordinary quads.
 // Images are frozen by the same image publication pass as other scene content.

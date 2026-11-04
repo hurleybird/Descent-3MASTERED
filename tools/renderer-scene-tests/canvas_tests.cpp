@@ -179,7 +179,7 @@ int runCanvasTests() {
         try { d3scene::Presentation::freeze(image); } catch (const std::invalid_argument&) { rejected_image = true; }
         check(rejected_image,"Composed image accepted a second medium transport");
     }
-    const auto canvas = MakeSceneCanvasView(7,{20,30,800,600},d3scene::ViewTarget::Display,true);
+    const auto canvas = MakeSceneCanvasView(7,{20,30,800,600},d3scene::ViewTarget::Display);
     check(!canvas.temporal_history,"Canvas requested temporal camera ownership");
     check(canvas.viewport.x == 20 && canvas.projection_anchor.x == 0 && canvas.collection == 7 &&
         canvas.ordering == d3scene::ViewOrdering::Compositing && canvas.camera.up.y == -1,
@@ -217,7 +217,7 @@ int runCanvasTests() {
     {
         d3scene::FrameData overlay; overlay.sequence = 1; overlay.scene_lifetime = d3scene::assets().lifetime();
         std::vector<FrameScreenBlend> events{{1,0,0,.25f},{0,0,1,.5f}};
-        PrepareFrameBlendCanvas(overlay,41,{20,30,800,600},events,true);
+        PrepareFrameBlendCanvas(overlay,41,{20,30,800,600},events);
         check(overlay.meshes.size() == 2 && overlay.meshes[0].asset == overlay.meshes[1].asset &&
             overlay.meshes[0].vertices.empty() && overlay.meshes[0].texture_uvs.empty(),
             "Screen blend allocated per-event quad geometry");

@@ -48,7 +48,7 @@ int runModuleContextTests() {
     int32_t order = 0;
     {
         ModuleSceneScope world_scope(first);
-        ModuleCanvasScope capture(canvas_data,50,order,{100,80,800,600},900,images,inputs,true,4);
+        ModuleCanvasScope capture(canvas_data,50,order,{100,80,800,600},900,images,inputs,4);
         check(ModuleCanvasCapture() == &capture,"Source-side module canvas did not own its interval");
         capture.startFrame({160,120,200,100});
         vector eye{1,2,3}; matrix facing{};
@@ -108,7 +108,7 @@ int runModuleContextTests() {
         std::vector<d3scene::ViewImageInput> sources;
         int32_t next_order = 0;
         SceneTextStyle text_style; text_style.font = 0;
-        ModuleCanvasScope capture(output,70,next_order,{100,80,640,480},2000,requests,sources,true,0,text_style);
+        ModuleCanvasScope capture(output,70,next_order,{100,80,640,480},2000,requests,sources,0,text_style);
         capture.setTextColor(0x00ff00); capture.setTextAlpha(128);
         char text[] = "AB";
         capture.text(1,2,text); text[0] = 'Z';

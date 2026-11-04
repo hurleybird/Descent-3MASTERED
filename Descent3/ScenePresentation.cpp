@@ -592,11 +592,10 @@ void RenderGameModelImage(GameSceneResources& resources,const GameModelImage& re
     const matrix orientation = IDENTITY_MATRIX;
     auto camera = MakeGameSceneView(d3scene::ViewKind::Preview,request.identity,nullptr,
         eye,-1,orientation,D3_DEFAULT_ZOOM,false,local,local);
-    camera.geometry_inspection = SceneGeometryInspection();
     camera.portal_visibility = false; camera.dynamic_lighting = false;
     const auto quality = d3scene::configuredViewImageQuality();
     d3scene::renderViewImages(*frame,{{request.identity,camera,quality.scale,quality.samples,true}});
-    auto canvas = MakeSceneCanvasView(request.identity,request.destination,request.target,SceneGeometryInspection());
+    auto canvas = MakeSceneCanvasView(request.identity,request.destination,request.target);
     canvas.image_inputs.push_back({1,request.identity});
     d3scene::renderView(*frame,canvas);
 }
@@ -612,7 +611,7 @@ void PrepareGameInspectionBanner(d3scene::FrameData& data) {
     d3scene::PreparedForeground foreground; foreground.identity = SceneInspectionBanner;
     foreground.phase = d3scene::ForegroundPhase::FinalOverlay;
     foreground.layer.display_views.push_back(MakeSceneCanvasView(SceneInspectionBanner,{0,0,Max_window_w,Max_window_h},
-        d3scene::ViewTarget::Display,true));
+        d3scene::ViewTarget::Display));
     data.foregrounds.push_back(std::move(foreground));
 }
 
@@ -740,7 +739,7 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance,const GameMainView
     { PERF_MARKER_SCOPE("Scene.PrepareScorches"); PrepareGameScorches(data); }
     PrepareGameCameraEffects(data,main_view);
     if (overlays && main_view)
-        PrepareFrameBlendCanvas(data,SceneFrameScreenBlend,main_view->world.viewport,*overlays,SceneGeometryInspection());
+        PrepareFrameBlendCanvas(data,SceneFrameScreenBlend,main_view->world.viewport,*overlays);
     if (main_view) {
         const auto layout = hud_layout ? *hud_layout : CaptureGameHUDLayout();
         if (layout.cockpit && main_view->player_first_person) {
@@ -759,7 +758,7 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance,const GameMainView
         d3scene::PreparedForeground foreground; foreground.identity = SceneViewImageProbe; foreground.order = 30;
         if (FindArg("-scene-cross-publication-image-probe")) foreground.phase = d3scene::ForegroundPhase::FinalOverlay;
         foreground.layer.display_views.push_back(MakeSceneCanvasView(SceneViewImageProbe,{0,0,Max_window_w,Max_window_h},
-            d3scene::ViewTarget::Display,true));
+            d3scene::ViewTarget::Display));
         foreground.layer.display_views.back().image_inputs.push_back({1,SceneViewImageProbe+1});
         data.foregrounds.push_back(std::move(foreground));
         PrepareSceneImageQuad(data,SceneViewImageProbe+1,order,{0,0,320,180},1);
@@ -775,7 +774,7 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance,const GameMainView
             PrepareSceneImageQuad(data,SceneViewImageProbe+4,order,{0,0,320,180},1,.5f);
             d3scene::PreparedForeground audit; audit.identity = SceneViewImageProbe+4; audit.order = 31;
             audit.phase = d3scene::ForegroundPhase::FinalOverlay;
-            auto display = MakeSceneCanvasView(SceneViewImageProbe+4,{0,0,320,180},d3scene::ViewTarget::Display,true);
+            auto display = MakeSceneCanvasView(SceneViewImageProbe+4,{0,0,320,180},d3scene::ViewTarget::Display);
             display.image_inputs.push_back({1,SceneViewImageProbe+2});
             audit.layer.display_views.push_back(std::move(display));
             data.foregrounds.push_back(std::move(audit));
@@ -893,13 +892,13 @@ d3scene::PresentationRef PrepareGameOverlayPresentation(const d3scene::Presentat
         const bool resized = FindArg("-scene-module-view-resize-probe") && AutomatedCaptureFrameIndex() >= 10;
         {
             ModuleCanvasScope capture(data,collection,order,layout.display,collection+1,world_images,inputs,
-                SceneGeometryInspection(),resized ? 2 : Render_preferred_state.msaa_samples);
+                resized ? 2 : Render_preferred_state.msaa_samples);
             ExerciseModuleSceneViewAPI(Player_object,resized);
             capture.complete();
         }
         d3scene::PreparedForeground foreground; foreground.identity = collection; foreground.order = 40;
         foreground.phase = d3scene::ForegroundPhase::FinalOverlay;
-        auto canvas = MakeSceneCanvasView(collection,layout.display,d3scene::ViewTarget::Display,true);
+        auto canvas = MakeSceneCanvasView(collection,layout.display,d3scene::ViewTarget::Display);
         canvas.image_inputs = std::move(inputs);
         foreground.layer.display_views.push_back(std::move(canvas));
         data.foregrounds.push_back(std::move(foreground));
@@ -917,7 +916,7 @@ d3scene::PresentationRef PrepareGameOverlayPresentation(const d3scene::Presentat
         data.meshes.back().surface.texture_alpha = false;
         d3scene::PreparedForeground foreground; foreground.identity = collection; foreground.order = 31;
         foreground.phase = d3scene::ForegroundPhase::FinalOverlay;
-        auto canvas = MakeSceneCanvasView(collection,layout.display,d3scene::ViewTarget::Display,true);
+        auto canvas = MakeSceneCanvasView(collection,layout.display,d3scene::ViewTarget::Display);
         canvas.image_inputs.push_back({1,SceneViewImageProbe+1,world.shared_from_this()});
         foreground.layer.display_views.push_back(std::move(canvas));
         data.foregrounds.push_back(std::move(foreground));
@@ -943,7 +942,7 @@ d3scene::PresentationRef PrepareGameOverlayPresentation(const d3scene::Presentat
         }
         d3scene::PreparedForeground foreground; foreground.identity = collection; foreground.order = 50;
         foreground.phase = d3scene::ForegroundPhase::FinalOverlay;
-        foreground.layer.display_views.push_back(MakeSceneCanvasView(collection,layout.display,d3scene::ViewTarget::Display,true));
+        foreground.layer.display_views.push_back(MakeSceneCanvasView(collection,layout.display,d3scene::ViewTarget::Display));
         data.foregrounds.push_back(std::move(foreground));
     }
     return resources.publish(std::move(data));
@@ -953,7 +952,6 @@ void RenderGameSceneView(const d3scene::Presentation& frame, d3scene::View view,
     SceneFeedbackTransaction* game_observations) {
     if (!SceneGeometryInspection())
         Error("Renderer migration is incomplete. This test build requires -scene-inspection; use the preserved Candidate for gameplay.");
-    view.geometry_inspection = true;
     view.feedback = d3scene::NoFeedback;
     if (FindArg("-scene-automap-probe") && Player_object) {
         const auto& p = Player_object->pos;
@@ -1175,7 +1173,7 @@ void RenderGameSceneView(const d3scene::Presentation& frame, d3scene::View view,
         image.scale = quality.scale;
         d3scene::ViewImageRequest copy;
         copy.image = SceneViewImageProbe+1;
-        copy.view = MakeSceneCanvasView(SceneViewImageProbe+1,{0,0,320,180},d3scene::ViewTarget::Scene,true);
+        copy.view = MakeSceneCanvasView(SceneViewImageProbe+1,{0,0,320,180},d3scene::ViewTarget::Scene);
         copy.view.image_inputs.push_back({1,image.image});
         // Deliberately reversed producer order: the graph, not caller order,
         // owns the dependency from this canvas image to the scene image.
@@ -1183,13 +1181,13 @@ void RenderGameSceneView(const d3scene::Presentation& frame, d3scene::View view,
         if (FindArg("-scene-image-alpha-audit")) {
             d3scene::ViewImageRequest source;
             source.image = SceneViewImageProbe+2;
-            source.view = MakeSceneCanvasView(SceneViewImageProbe+3,{0,0,320,180},d3scene::ViewTarget::Scene,true);
+            source.view = MakeSceneCanvasView(SceneViewImageProbe+3,{0,0,320,180},d3scene::ViewTarget::Scene);
             source.scale = quality.scale;
             source.samples = quality.samples;
             source.transparent_background = true;
             d3scene::ViewImageRequest composite;
             composite.image = SceneViewImageProbe+4;
-            composite.view = MakeSceneCanvasView(SceneViewImageProbe+4,{0,0,320,180},d3scene::ViewTarget::Scene,true);
+            composite.view = MakeSceneCanvasView(SceneViewImageProbe+4,{0,0,320,180},d3scene::ViewTarget::Scene);
             composite.view.image_inputs.push_back({1,source.image});
             planar.images.push_back(std::move(composite)); planar.images.push_back(std::move(source));
         }
@@ -1334,7 +1332,7 @@ void PrepareCockpitComposition(d3scene::FrameData& frame,d3scene::Rect viewport,
     }
     if (!base && !layered && !late) Error("Cockpit fixture has no prepared cockpit model");
     d3scene::View view;
-    view.geometry_inspection = true; view.kind = d3scene::ViewKind::Preview;
+    view.kind = d3scene::ViewKind::Preview;
     view.viewport = viewport; view.projection_anchor = {0,0,viewport.width,viewport.height};
     view.zoom = zoom; view.dynamic_lighting = false; view.portal_visibility = false;
     d3scene::ForegroundLayer layer;
@@ -1355,7 +1353,7 @@ void PrepareCockpitComposition(d3scene::FrameData& frame,d3scene::Rect viewport,
         view.ordering = d3scene::ViewOrdering::Depth;
     }
     if (text) {
-        auto canvas = MakeSceneCanvasView(SceneCockpitText,viewport,d3scene::ViewTarget::Scene,true);
+        auto canvas = MakeSceneCanvasView(SceneCockpitText,viewport,d3scene::ViewTarget::Scene);
         layer.scene_views.push_back(canvas);
     }
     if (layered) {

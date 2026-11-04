@@ -24,7 +24,7 @@ public:
     ModuleCanvasScope(d3scene::FrameData&,uint64_t collection,int32_t& order,
         d3scene::Rect viewport,uint64_t preview_identity,
         std::vector<d3scene::ViewImageRequest>& images,std::vector<d3scene::ViewImageInput>& inputs,
-        bool inspection = false,uint32_t samples = 0,const SceneTextStyle& hud_style = {});
+        uint32_t samples = 0,const SceneTextStyle& hud_style = {});
     ~ModuleCanvasScope();
     ModuleCanvasScope(const ModuleCanvasScope&) = delete;
     ModuleCanvasScope& operator=(const ModuleCanvasScope&) = delete;
@@ -75,7 +75,6 @@ private:
     d3scene::Rect viewport_;
     std::array<d3scene::Rect,16> frames_{};
     size_t depth_ = 1,previews_ = 0;
-    bool inspection_ = false;
     uint32_t samples_ = 0;
     std::vector<d3scene::ViewImageRequest>& images_;
     std::vector<d3scene::ViewImageInput>& inputs_;

@@ -1464,8 +1464,6 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     const auto& presentation = prepared.frame();
     const bool detailed_statistics = presentation.data().draw_statistics;
     const auto& view = prepared.view();
-    if (!view.geometry_inspection)
-        Error("Scene executor migration incomplete: only explicit geometry inspection is currently supported.");
     if (scene_asset_lifetime != presentation.data().scene_lifetime)
         Error("Scene target was selected before establishing its scene lifetime");
     auto& output = target.framebuffer;

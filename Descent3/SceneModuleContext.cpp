@@ -46,9 +46,9 @@ d3scene::PresentationRef ModuleScenePresentation() {
 
 ModuleCanvasScope::ModuleCanvasScope(d3scene::FrameData& target,uint64_t collection,int32_t& order,
     d3scene::Rect viewport,uint64_t identity,std::vector<d3scene::ViewImageRequest>& images,
-    std::vector<d3scene::ViewImageInput>& inputs,bool inspection,uint32_t samples,const SceneTextStyle& hud_style)
+    std::vector<d3scene::ViewImageInput>& inputs,uint32_t samples,const SceneTextStyle& hud_style)
     : canvas_(target),world_(ModuleScenePresentation()),collection_(collection),identity_(identity),
-      order_(order),viewport_(viewport),inspection_(inspection),samples_(samples),images_(images),inputs_(inputs) {
+      order_(order),viewport_(viewport),samples_(samples),images_(images),inputs_(inputs) {
     if (canvas) throw std::logic_error("Nested module canvas capture");
     if (!collection || !identity || identity > std::numeric_limits<uint64_t>::max()-32 ||
         !validRectangle(viewport) || order < 0 || order > std::numeric_limits<int32_t>::max()-32 ||
@@ -213,7 +213,6 @@ void ModuleCanvasScope::preview(d3scene::View view) {
         y < std::numeric_limits<int32_t>::min() || y > std::numeric_limits<int32_t>::max())
         throw std::invalid_argument("Module preview placement overflow");
     view.kind = d3scene::ViewKind::Preview; view.feedback = d3scene::NoFeedback;
-    view.geometry_inspection = inspection_;
     view.target = d3scene::ViewTarget::Scene; view.history_key = identity;
     view.viewport = view.projection_anchor = {0,0,rectangle.width,rectangle.height};
     d3scene::validateView(view);

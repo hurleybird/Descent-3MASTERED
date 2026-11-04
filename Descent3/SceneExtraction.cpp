@@ -139,9 +139,6 @@ d3scene::FrameData ExtractGameFrame(double time, float delta, bool paused, bool 
     data.simulation_time = time;
     data.delta_time = delta;
     data.paused = paused;
-    // No domain is marked executable until its complete preparation exists.
-    // Capturing source object transforms is NOT equivalent to preparing models.
-    data.pending_domains = d3scene::AllPendingDomains;
     if (retained_frame && retained_frame->data().scene_lifetime != data.scene_lifetime) retained_frame = nullptr;
     for (int i = 0; i < MAX_ROOMS; ++i) {
         if (!Rooms[i].used) { assets.removeRoom(i); continue; }

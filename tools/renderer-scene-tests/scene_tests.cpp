@@ -522,7 +522,6 @@ void frameTests() {
     data.objects[0].current.position.x = 22;
     check(frozen->data().rooms[0].surfaces[0].texture == -1, "frame aliases surface bindings");
     check(frozen->data().objects[0].current.position.x == 0, "frame aliases transforms");
-    rejects([&] { frozen->requireExecutable(); }, "incomplete domains silently executable");
     data.rooms.push_back(room);
     rejects([&] { d3scene::Presentation::freeze(data); }, "duplicate rooms accepted");
     data.rooms.pop_back(); data.objects.push_back(object);

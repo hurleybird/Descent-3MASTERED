@@ -816,13 +816,6 @@ struct Light {
     bool directional = false, headlight = false;
 };
 
-enum class PendingDomain : uint32_t {
-    Materials = 1u << 0, ObjectPreparation = 1u << 1,
-    Terrain = 1u << 2, Effects = 1u << 3, Lights = 1u << 4,
-    Decals = 1u << 5, Cockpit = 1u << 6
-};
-constexpr uint32_t AllPendingDomains = (1u << 7) - 1;
-
 enum class LightingQuality : uint8_t { Vertex, Pixel };
 struct CameraPerturbation {
     uint32_t owner = 0;
@@ -857,8 +850,6 @@ inline bool operator==(const RoomSurfaceId& a,const RoomSurfaceId& b) {
     return a.room == b.room && a.polygon == b.polygon;
 }
 struct View {
-    // Explicit diagnostic execution, never a fallback selected by capability.
-    bool geometry_inspection = false;
     ViewKind kind = ViewKind::Main;
     ViewTarget target = ViewTarget::Scene;
     ViewOrdering ordering = ViewOrdering::Depth;
@@ -1028,7 +1019,6 @@ struct FrameData {
     Vec3 player_control_delta; // realized player-controlled translation, not camera motion
     float afterburner_factor = 0;
     LightingQuality lighting_quality = LightingQuality::Pixel;
-    uint32_t pending_domains = AllPendingDomains;
     std::vector<RoomState> rooms;
     std::vector<ObjectState> objects;
     std::vector<ModelInstance> model_instances;
@@ -1178,7 +1168,6 @@ public:
     const SceneLookup<int32_t,size_t>& roomIndices() const;
     const SceneLookup<uint32_t,size_t>& objectIndices() const;
     const SceneLookup<uint64_t,size_t>& modelIndices() const;
-    void requireExecutable() const;
 private:
     Presentation(FrameData&& data,std::shared_ptr<FrameCompilationStorage> storage)
         : data_(std::move(data)),storage_(std::move(storage)) {}

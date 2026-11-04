@@ -188,7 +188,7 @@ void PrepareGameDisplayLabels(d3scene::FrameData& frame,d3scene::Rect display) {
     }
     d3scene::PreparedForeground labels; labels.identity = SceneDisplayLabels; labels.order = 80;
     labels.phase = d3scene::ForegroundPhase::FinalOverlay;
-    labels.layer.display_views.push_back(MakeSceneCanvasView(SceneDisplayLabels,display,d3scene::ViewTarget::Display,SceneGeometryInspection()));
+    labels.layer.display_views.push_back(MakeSceneCanvasView(SceneDisplayLabels,display,d3scene::ViewTarget::Display));
     frame.foregrounds.push_back(std::move(labels));
     if (AutomatedCapturePending()) AutomatedCaptureLog("scene display labels count=%u",Post_process_hud_text.size());
 }
@@ -1484,7 +1484,7 @@ void PrepareGameHUDDiagnostics(d3scene::FrameData& frame,const HUDCanvasLayout& 
     if (frame.meshes.size() == begin) return;
     d3scene::PreparedForeground diagnostic; diagnostic.identity = SceneHUDDiagnostics; diagnostic.order = 65;
     diagnostic.layer.display_views.push_back(MakeSceneCanvasView(SceneHUDDiagnostics,layout.primary,
-        d3scene::ViewTarget::Display,SceneGeometryInspection()));
+        d3scene::ViewTarget::Display));
     frame.foregrounds.push_back(std::move(diagnostic));
     if (AutomatedCapturePending()) AutomatedCaptureLog("scene HUD diagnostics fps=%d vrr=%d draws=%d face=%d motion=%d meshes=%u",
         fps,vrr,draws,face,motion,unsigned(frame.meshes.size()-begin));
@@ -2209,7 +2209,7 @@ void PrepareHUDModuleCallback(d3scene::FrameData& frame,uint64_t collection,int3
         }
     } metadata(viewport);
     ModuleCanvasScope capture(frame,collection,order,viewport,identity,output.images,output.inputs,
-        SceneGeometryInspection(),Render_preferred_state.msaa_samples,MakeHUDTextStyle(viewport));
+        Render_preferred_state.msaa_samples,MakeHUDTextStyle(viewport));
     if (item) item->render_fn(item); else CallGameDLL(EVT_CLIENT_HUD_INTERVAL,&DLLInfo);
     capture.complete();
 }
@@ -2224,7 +2224,7 @@ static void PrepareModuleHUDInterval(d3scene::FrameData& frame,const HUDCanvasLa
     PrepareHUDModuleCallback(frame,collection,order,layout.primary,identity,output);
     if (frame.meshes.size() == begin) return;
     d3scene::PreparedForeground foreground; foreground.identity = collection; foreground.order = layout.module_order;
-    auto canvas = MakeSceneCanvasView(collection,layout.primary,d3scene::ViewTarget::Display,true);
+    auto canvas = MakeSceneCanvasView(collection,layout.primary,d3scene::ViewTarget::Display);
     canvas.image_inputs = std::move(inputs);
     foreground.layer.display_views.push_back(std::move(canvas)); frame.foregrounds.push_back(std::move(foreground));
     if (AutomatedCapturePending()) AutomatedCaptureLog("scene module HUD interval order=%d meshes=%u",layout.module_order,unsigned(frame.meshes.size()-begin));
@@ -2278,7 +2278,7 @@ static void PrepareHUDStatusCanvas(d3scene::FrameData& frame,const HUDCanvasLayo
     // Status describes the running game/recorder, not a surface under the
     // cockpit. Keep it above cockpit geometry and the full-display auxiliary HUD.
     d3scene::PreparedForeground status; status.identity = SceneHUDStatus; status.order = 55;
-    status.layer.display_views.push_back(MakeSceneCanvasView(SceneHUDStatus,layout.primary,d3scene::ViewTarget::Display,true));
+    status.layer.display_views.push_back(MakeSceneCanvasView(SceneHUDStatus,layout.primary,d3scene::ViewTarget::Display));
     frame.foregrounds.push_back(std::move(status));
 }
 void PrepareGameHUD(d3scene::FrameData& frame,const HUDCanvasLayout& layout,bool advance,
@@ -2307,12 +2307,12 @@ void PrepareGameHUD(d3scene::FrameData& frame,const HUDCanvasLayout& layout,bool
     int top_left_bottom = -1;
     const bool deferred_score = PrepareHUDItemCanvas(frame,SceneHUDItems,viewport,HUD_array,MAX_HUD_ITEMS,mask,is_small_hud ? 0 : -1,advance,false,&module_output,&top_left_bottom);
     d3scene::PreparedForeground foreground; foreground.identity = SceneHUDItems; foreground.order = 20;
-    foreground.layer.display_views.push_back(MakeSceneCanvasView(SceneHUDItems,viewport,d3scene::ViewTarget::Display,true));
+    foreground.layer.display_views.push_back(MakeSceneCanvasView(SceneHUDItems,viewport,d3scene::ViewTarget::Display));
     foreground.layer.display_views.back().image_inputs = std::move(inputs);
     if (layout.status) PrepareHUDStatusCanvas(frame,layout,top_left_bottom);
     if ((mask & STAT_MESSAGES) && !is_small_hud) {
         PrepareHUDMessageCanvas(frame,SceneHUDMessages,viewport,false,advance);
-        foreground.layer.display_views.push_back(MakeSceneCanvasView(SceneHUDMessages,viewport,d3scene::ViewTarget::Display,true));
+        foreground.layer.display_views.push_back(MakeSceneCanvasView(SceneHUDMessages,viewport,d3scene::ViewTarget::Display));
     }
     frame.foregrounds.push_back(std::move(foreground));
     if (is_small_hud) {
@@ -2320,11 +2320,11 @@ void PrepareGameHUD(d3scene::FrameData& frame,const HUDCanvasLayout& layout,bool
         inputs.clear();
         PrepareHUDItemCanvas(frame,SceneHUDAuxiliary,full,HUD_array,MAX_HUD_ITEMS,mask,1,advance,deferred_score,&module_output);
         d3scene::PreparedForeground auxiliary; auxiliary.identity = SceneHUDAuxiliary; auxiliary.order = 50;
-        auxiliary.layer.display_views.push_back(MakeSceneCanvasView(SceneHUDAuxiliary,full,d3scene::ViewTarget::Display,true));
+        auxiliary.layer.display_views.push_back(MakeSceneCanvasView(SceneHUDAuxiliary,full,d3scene::ViewTarget::Display));
         auxiliary.layer.display_views.back().image_inputs = std::move(inputs);
         if (mask & STAT_MESSAGES) {
             PrepareHUDMessageCanvas(frame,SceneHUDMessages,full,true,advance);
-            auxiliary.layer.display_views.push_back(MakeSceneCanvasView(SceneHUDMessages,full,d3scene::ViewTarget::Display,true));
+            auxiliary.layer.display_views.push_back(MakeSceneCanvasView(SceneHUDMessages,full,d3scene::ViewTarget::Display));
         }
         frame.foregrounds.push_back(std::move(auxiliary));
     }
@@ -2356,7 +2356,7 @@ void PrepareGameReticle(d3scene::FrameData& frame,const HUDCanvasLayout& layout)
 		PrepareSceneQuad(frame,SceneReticle,order,{cx-radius,cy,radius*2+1,1},line);
 		PrepareSceneQuad(frame,SceneReticle,order,{cx,cy-radius,1,radius*2+1},line);
 		d3scene::PreparedForeground foreground; foreground.identity = SceneReticle; foreground.order = 10;
-		foreground.layer.display_views.push_back(MakeSceneCanvasView(SceneReticle,viewport,d3scene::ViewTarget::Display,true));
+		foreground.layer.display_views.push_back(MakeSceneCanvasView(SceneReticle,viewport,d3scene::ViewTarget::Display));
 		frame.foregrounds.push_back(std::move(foreground));
 		if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
 			AutomatedCaptureLog("scene reticle prepared mode=%s quads=%d",zoomed ? "zoom" : "guided",order);
@@ -2394,7 +2394,7 @@ void PrepareGameReticle(d3scene::FrameData& frame,const HUDCanvasLayout& layout)
 	quad(cx,cy-RET_IMAGE_HEIGHT/2,Reticle_elem_array[RET_RGUNSIGHT].bmp_off);
 	d3scene::PreparedForeground foreground; foreground.identity = SceneReticle; foreground.order = 10;
 	foreground.layer.display_views.push_back(MakeSceneCanvasView(SceneReticle,
-		viewport,d3scene::ViewTarget::Display,true));
+		viewport,d3scene::ViewTarget::Display));
 	frame.foregrounds.push_back(std::move(foreground));
 	if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
 		AutomatedCaptureLog("scene reticle prepared quads=%d",order);

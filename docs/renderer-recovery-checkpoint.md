@@ -1,5 +1,22 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November 3 — renderer contract no longer carries migration bypasses
+
+Removed PendingDomain/pending_domains, Presentation::requireExecutable and
+View::geometry_inspection, including canvas/module constructor plumbing.
+Every publication was permanently marked incomplete and every execution bypassed
+that marker; it was not validation. Real frozen resource/material/geometry/view
+validation remains. Separate game-level inspection/acceptance guards remain.
+Build and root3/3 pass. qual-renderer-contract-20261103 all8 ordinary500 EXACT
+qual-hud-retirement-final. qual-renderer-contract-cinematic-20261103 effects/field
+003/006 final and all three transition images EXACT prior foreground-routing
+cinematic captures; 006 frame140 visually inspected. Binary DA2E8001D21B3884E6FD7A64EA33311978E5A589E5ADED080B0F032EE6CC797B.
+Only subsequent source edit removes an obsolete comment. No performance claim.
+Next: caller audit found RenderCockpit/RenderCockpitPostPost have no callers;
+RenderGauges only called by dead RenderCockpit. Remove obsolete execution chain
+without touching authored geometry, simulation/animation or owned preparation.
+No edits to that next task yet. Protected installs untouched; continue working.
+
 ## November 3 — opt-in native draw attribution
 
 Published purpose tags for text/cockpit/gauges, pure room/terrain/model/effect/

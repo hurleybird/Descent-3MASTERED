@@ -1172,7 +1172,7 @@ void PrepareCinematicCanvas(d3scene::FrameData& frame)
     if (frame.meshes.size() == begin) return;
     d3scene::PreparedForeground layer; layer.identity = collection;
     layer.phase = d3scene::ForegroundPhase::PostHUD;
-    layer.layer.display_views.push_back(MakeSceneCanvasView(collection,viewport,d3scene::ViewTarget::Display,SceneGeometryInspection()));
+    layer.layer.display_views.push_back(MakeSceneCanvasView(collection,viewport,d3scene::ViewTarget::Display));
     frame.foregrounds.push_back(std::move(layer));
     if (AutomatedCapturePending()) AutomatedCaptureLog("scene cinematic canvas active=%d tail=%d meshes=%u",
         Cinematic_inuse,GameCinema.doing_end_transition,unsigned(frame.meshes.size()-begin));

@@ -265,7 +265,7 @@ void PrepareGameAuxiliaryCanvas(d3scene::FrameData& frame,const GameAuxiliarySch
             quad({width/2-width/50,height/2,width/50*2+1,1},{0,1,0});
             quad({width/2,height/2-height/50,1,height/50*2+1},{0,1,0});
         }
-        auto canvas = MakeSceneCanvasView(collection,view.rectangle,d3scene::ViewTarget::Scene,SceneGeometryInspection());
+        auto canvas = MakeSceneCanvasView(collection,view.rectangle,d3scene::ViewTarget::Scene);
         canvas.motion_composition = d3scene::View::MotionComposition::Stationary;
         foreground.layer.scene_views.push_back(std::move(canvas));
     }

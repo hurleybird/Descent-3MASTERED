@@ -1381,7 +1381,6 @@ void SGSSnapshot(CFILE* fp,SnapshotAudit* audit)
 	image.view = MakeGameSceneView(d3scene::ViewKind::SaveThumbnail, image.image,
 		Viewer_object, Viewer_object->pos, Viewer_object->roomnum, Viewer_object->orient,
 		Render_zoom, false, {0, 0, Max_window_w, Max_window_h}, {0, 0, Max_window_w, Max_window_h});
-	image.view.geometry_inspection = SceneGeometryInspection();
 	auto plan = d3scene::planPlanarViews(*presentation,image.view);
 	image.view = plan.consumer.view();
 	plan.images.push_back(image);

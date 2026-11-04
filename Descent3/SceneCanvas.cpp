@@ -40,9 +40,9 @@ HUDCanvasLayout CompileHUDCanvasLayout(const HUDCanvasRequest& request) {
 }
 
 d3scene::View MakeSceneCanvasView(uint64_t collection,d3scene::Rect viewport,
-    d3scene::ViewTarget target,bool inspection) {
+    d3scene::ViewTarget target) {
     d3scene::View view;
-    view.geometry_inspection = inspection; view.kind = d3scene::ViewKind::Preview;
+    view.kind = d3scene::ViewKind::Preview;
     view.collection = view.history_key = collection;
     view.temporal_history = false;
     view.viewport = viewport; view.projection_anchor = {0,0,viewport.width,viewport.height};
@@ -89,7 +89,7 @@ void PrepareSceneImageQuad(d3scene::FrameData& frame,uint64_t collection,int32_t
 }
 
 void PrepareFrameBlendCanvas(d3scene::FrameData& frame,uint64_t collection,d3scene::Rect viewport,
-    const std::vector<FrameScreenBlend>& blends,bool inspection) {
+    const std::vector<FrameScreenBlend>& blends) {
     if (blends.empty()) return;
     const auto asset = d3scene::assets().quadMesh();
     int32_t order = 0;
@@ -115,7 +115,7 @@ void PrepareFrameBlendCanvas(d3scene::FrameData& frame,uint64_t collection,d3sce
     d3scene::PreparedForeground foreground;
     foreground.identity = collection; foreground.phase = d3scene::ForegroundPhase::AfterMainWorld;
     foreground.layer.composition = d3scene::ForegroundComposition::InScene;
-    foreground.layer.scene_views.push_back(MakeSceneCanvasView(collection,viewport,d3scene::ViewTarget::Scene,inspection));
+    foreground.layer.scene_views.push_back(MakeSceneCanvasView(collection,viewport,d3scene::ViewTarget::Scene));
     frame.foregrounds.push_back(std::move(foreground));
 }
 
