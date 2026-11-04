@@ -1,5 +1,35 @@
 # Renderer game integration
 
+## November 3: rejected reflection-interface specialization
+
+After9198503, tested a view-local reflection-field requirement collected during
+surface admission. Field-free views compiled out seven vec4 interpolants and
+their fetch/evaluation code, doubling the program cache from6 to12 variants.
+Root3/3 and all8 ordinary500 screenshots passed EXACT. The targeted1500-frame
+720p1x field-fog runs showed no meaningful GPU improvement:000 remained about
+.51ms,007 about.51-.52ms,006 about.66-.68ms,001 about.92-.93ms. This was one
+paired pass, enough to reject a material benefit, not a precision speed claim.
+Removed the experiment completely; restored private runtime to fog-asset-working.
+Evidence:qual-reflection-interface-world-20261103 and
+perf-reflection-interface-saveg00{0,1,6,7}-{parent,new}-20261103.
+
+Further rejected experiments (all removed, no runtime toggles retained):
+- Single emitter loop shared diffuse/specular attenuation. Four1500-frame
+  images EXACT, but GPU006 .693,001 .969,000 .515,007 .536ms; no benefit.
+- Fenced persistent uniform streams for view/draw records, with mutable fallback.
+  Same four images EXACT, GPU006 .6725,001 .922,000 .510,007 .517ms; no material
+  benefit over9198503. No new stream/cache retained.
+- Temporary shader-cost diagnostics on006: full .675ms, no specular .641,
+  no dynamic diffuse .628, neither .599. These deliberately changed images,
+  are NOT qualification evidence, and their code was removed.
+- Resolution diagnostic006: new/old GPU360p .545/.222,720p .673/.325,
+  1440p1.142/.786. Similar pixel-cost slope with roughly.32-.36ms extra fixed
+  interval. This points away from lighting arithmetic as the primary deficit;
+  timer intervals include command-stream gaps, not just GPU-busy shader work.
+Raw:perf-single-emitter-*,perf-uniform-stream-*,diagnostic-shading-006-*,
+diagnostic-scaling-006-*, all20261103. Private runtime restored to9198503
+fog-asset-working.exe. GPU deficits remain open; continue integration qualification.
+
 Goal: an ordinary, no-probe executable suitable for deployment qualification.
 Parent: 7855096. Audit: Jeff's Descent_3MASTERED_Renderer_Integration_Plan.txt,
 22 October 2026, pinned to 0cb2f5c with the 7855096 delta reviewed.

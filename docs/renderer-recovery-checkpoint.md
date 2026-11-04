@@ -30,12 +30,16 @@ not the deleted original. New field320 versus old fog and headlight differences
 mean NOT strict visual parity. Raw perf-fog-asset-vslegacy-saveg*-{old-a,new-a,
 new-b,old-b}-20261103. Runtime restored to out/fog-asset-working.exe.
 
-Next: investigate the GPU deficits without losing the CPU wins.006 has no fog
-and reflection-heavy opaque/late passes;001/007 spend heavily in translucent fog.
-One avenue to investigate (NOT implemented): the monolithic material shader
-retains authored-reflection varyings on simpler/unlit draws. Existing uniforms
-already use a shared view UBO; do not repeat the rejected canvas-fusion experiment.
-No new shader implementation yet. Candidate/Prev/main workspace untouched.
+GPU follow-up: tested and REMOVED reflection-interface variants, shared
+diffuse/specular emitter loop, and fenced persistent uniform streams. Images
+exact, no material GPU benefit. Do not repeat these blindly.006 shading-cost
+diagnostics only saved .076ms even with both lighting components omitted.
+Resolution360p/720p/1440p newGPU .545/.673/1.142 vs old .222/.325/.786: largely
+fixed extra interval, not extra pixel-cost slope. Diagnostics removed; no new
+shader/stream implementation kept. Detailed raw paths in integration ledger.
+Next: continue gameplay-integration qualification; GPU deficits still open.
+Private runtime is fog-asset-working.exe (9198503), not diagnostic build output.
+Candidate/Prev/main workspace untouched.
 
 ## November 3 — resource requirements belong to their producer
 
