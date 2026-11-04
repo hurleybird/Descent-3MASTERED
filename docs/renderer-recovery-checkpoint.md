@@ -1,5 +1,27 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November 4 — retire old deferred-world subsystem
+
+Removed old room/mirror traversal/draw dispatch and terrain room/object/main
+dispatch (12functions), their postrender queue producers, postrender.cpp/h and
+CMake/includes.1533lines deleted, recoverable in Git; owned scene scheduler,
+mirror metadata and source helpers unchanged. Root3/3/fullbuild pass;
+qual-world-queue-retirement-20261104 all8 clean60 EXACT source-world-helpers.
+LatestbinaryCF27DA39EEC559EF19D1453E6C81D867D77FD84C8CA21FF097CD5DBC8127EBEB.
+Next terrain boundary audit: terrainrender.cpp external functions now only
+PageInHighResolutionSky (source resolver), CodeTerrainPoint (called only by old
+TerrainSearch view traversal), TerrainRenderer_ResetLevelState (old GPU/draw
+scratch reset). Last_terrain_render_time is LIVE: SceneFrame commits visibility;
+viseffect uses it for weather admission, move this definition to terrain.cpp.
+TerrainSearch.cpp live physics/AI queries: GetTerrainCellFromPos,
+GetTerrainRoomFromPos,ComputeTerrainSegmentCenter,GetTerrainGroundPoint. Preserve
+them. Old TurnOffLODForCell/ClearLODOffs mutate TerrainDeltaBlocks each frame;
+only old view search consumes those deltas, no SceneTerrain/renderer usage.
+Need remove object/GameLoop calls if retiring old search. Init.cpp still sets
+Terrain_renderer_mode twice although new renderer does not consume it. Audit
+other exported globals before deleting whole terrainrender.cpp; do not rely on
+Release dead-strip to hide missing symbols. No next-task edits yet. Keep working.
+
 ## November 4 — separate live world data helpers from retired draw module
 
 Moved GetRoomDynamicScalar to lighting.cpp/h, three reflection diagnostic count

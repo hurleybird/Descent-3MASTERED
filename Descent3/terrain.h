@@ -299,11 +299,6 @@ extern void DisplayTerrainList (int,bool from_automap=0);
 extern int CheckToRenderSky (int);
 void PageInHighResolutionSky();
 
-//left,top,right,bot are optional parameters.  Omiting them (or setting them to -1) will
-//render to the whole screen.  Passing valid values will only render tiles visible in the
-//specified window (though it won't clip those tiles to the window)
-void RenderTerrain(ubyte from_mine,int left=-1,int top=-1,int right=-1,int bot=-1);
-
 void GetPreRotatedPoint(g3Point*,int,int,int);
 void GenerateTerrainLight ();
 

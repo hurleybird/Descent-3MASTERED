@@ -131,7 +131,6 @@ SET (MAIN_SOURCES
 		Descent3/player.h
 		Descent3/player_external.h
 		Descent3/player_external_struct.h
-		Descent3/postrender.h
 		Descent3/powerup.h
 		Descent3/procedurals.h
 		Descent3/program.h
@@ -270,7 +269,6 @@ SET (MAIN_SOURCES
 		Descent3/PilotPicsAPI.cpp
 		Descent3/pilot_class.cpp
 		Descent3/Player.cpp
-		Descent3/postrender.cpp
 		Descent3/procedurals.cpp
 		Descent3/program.cpp
 		Descent3/render.cpp

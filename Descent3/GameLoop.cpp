@@ -99,7 +99,6 @@
 #include "aiambient.h"
 #include "marker.h"
 #include "gamecinematics.h"
-#include "postrender.h"
 #include "debuggraph.h"
 #include "gamesave.h"
 #include "psrand.h"
