@@ -1,5 +1,44 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November 3 — TelCom owns its canvas and preview images
+
+TelCom no longer changes renderer resolution/mode or draws its map/ship geometry
+directly into the world target. It owns an encoded640x480 display canvas, with
+independent transparent scene images for both previews. A dedicated image
+compositor decodes the covered UI backdrop, composites scene radiance, then
+encodes once. No new world-fragment branch/sampler; backdrop scratch grows to
+high-water extent until retirement. Existing font/cursor adapters are scoped.
+
+Canvas views explicitly opt out of temporal history. Removing the resolution
+switch exposed a real banner-key collision between independent UI/game clocks;
+fixed at history ownership, not by restoring a reset. Root tests cover it.
+Preview quality now queries the current requested renderer configuration, not
+the persisted game setting (important for in-place transition tests).
+
+Ship reference captures exposed missing TF_LIGHT interpretation in shared model
+material compilation. Fixed there; temporary immediate-model comparison code
+was removed. All8 ordinary500-frame images: seven exact,003 differs at four
+pixels on an authored light panel. Hulls/glow centres inspected against the old
+draw at fixed orientation. TelCom shell now follows the menu's encoded-art
+policy; non-unit game gamma affects scene previews, not authored UI art.
+
+Evidence: qual-ui-compositor-midrange-20261103 tests gamma1/1.5/2.2, SSAA1/2/4,
+MSAA0/2/4, mid-range backdrop decoding, alpha/additive transport and opacity.
+qual-ui-compositor-retirement-20261103 passes. Actual map retirement/settings:
+qual-telcom-history-lifecycle-20261103, qual-telcom-configured-settings-20261103.
+Actual three ships at4x/MSAA4: qual-telcom-compositor-ships-20261103. Final world,
+auxiliary, modal and save-export suites: qual-telcom-final-*-20261103. All passed.
+Earlier qual-telcom-independent-lifecycle failed on the history collision;
+earlier transfer-settings run had a harness helper import failure. Both fixed.
+
+Latest pinned uncapped ABBA vs reconstructed legacy: new CPU averages0001.803,
+005.950,0071.522ms; old0001.769,0051.053,0071.236ms. GPU new .518/.143/.521,
+old .378/.239/.405ms. See ledger for precise samples/caveats.007 CPU still needs
+about .286ms removed merely to match; marked improvement remains the goal.
+Next: profile publication/model preparation before choosing upstream optimization.
+No release-gate removal, shadows, Candidate changes, interactive input or credits.
+
+
 ## November 3 — execution scratch and independent-image alpha
 
 Active worktree/branch unchanged. bdb35ab pushed: execution scratch retains its

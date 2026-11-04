@@ -1,37 +1,44 @@
 {
   "schemaVersion": 1,
   "scenarios": {
+    "ship-preview": {
+      "revision": 1, "minimumFrame": 50, "inspectionRequired": true,
+      "arguments": ["-scene-ship-telcom-probe", "-scene-gl-audit", "-capture-series-from", "30", "-capture-series-until", "40", "-capture-series-stride", "10"],
+      "evidenceFrames": [30,40],
+      "requiredLog": ["scene ship TelCom composed index=0", "scene ship TelCom composed index=1", "scene ship TelCom composed index=2", "scene TelCom preserved renderer extent"],
+      "purpose": "Hidden actual selector: publish all three ship previews over authored UI, return to world between captures without changing renderer extent, permissions or selected ship."
+    },
     "image-alpha": {
-      "revision": 1, "minimumFrame": 30, "inspectionRequired": true,
+      "revision": 2, "minimumFrame": 30, "inspectionRequired": true,
       "arguments": ["-scene-image-alpha-audit", "-scene-gl-audit"],
       "requiredLog": ["scene image alpha composition verified alpha and additive with half opacity"],
-      "purpose": "Pixel-readback proof that dependent scene images preserve translucent coverage, zero-alpha additive radiance and consumer opacity, including SSAA reduction."
+      "purpose": "GPU readback plus screenshot pixel proof of scene/display composition: partial coverage, zero-alpha additive radiance and consumer opacity survive SSAA reduction and display transfer."
     },
     "image-lifecycle": {
-      "revision": 2, "minimumFrame": 30, "inspectionRequired": true,
+      "revision": 3, "minimumFrame": 30, "inspectionRequired": true,
       "arguments": ["-scene-retirement-probe", "-scene-gl-audit", "-scene-image-alpha-audit"],
       "requiredLog": ["scene retirement live reset frame=20", "scene motion frame=21 camera_history=1", "scene view image logical readback verified size=320x180", "scene retirement game lifetime=\\d+ producers=\\d+ remaining=0", "scene image alpha composition verified alpha and additive with half opacity"],
       "purpose": "Supersampled independent image and dependent canvas preserve their logical extent across scene retirement; producer raster scale follows the selected SSAA profile."
     },
     "image-settings": {
-      "revision": 2, "minimumFrame": 55, "inspectionRequired": true,
+      "revision": 3, "minimumFrame": 55, "inspectionRequired": true,
       "arguments": ["-scene-resource-probe", "-scene-gl-audit", "-scene-image-alpha-audit", "-capture-series-from", "15", "-capture-series-until", "45", "-capture-series-stride", "10"],
       "evidenceFrames": [15,25,35,45],
-      "requiredLog": ["scene resource transition frame=10", "scene resource transition frame=20", "scene resource transition frame=30", "scene resource transition frame=40", "scene resource transition frame=50", "scene view image logical readback verified size=320x180", "scene image alpha composition verified alpha and additive with half opacity"],
+      "requiredLog": ["scene resource transition frame=10", "scene resource transition frame=20", "scene resource transition frame=30", "scene resource transition frame=40", "scene resource transition frame=50", "scene view image logical readback verified size=320x180", "scene image alpha composition verified alpha and additive with half opacity", "size=640x360 samples=2", "raster_scale=4", "scene display image transfer frame=25 gamma=1.500000", "scene display image transfer frame=35 gamma=2.200000"],
       "purpose": "Independent image quality reallocates across SSAA/MSAA changes without changing published dimensions, including dependency consumption and readback."
     },
     "automap-settings": {
-      "revision": 1, "minimumFrame": 55, "inspectionRequired": true,
+      "revision": 2, "minimumFrame": 55, "inspectionRequired": true,
       "arguments": ["-scene-automap-cache-audit", "-scene-resource-probe", "-scene-gl-audit", "-capture-series-from", "25", "-capture-series-until", "25"],
       "evidenceFrames": [25],
-      "requiredLog": ["scene automap TelCom composed[\\s\\S]*scene automap TelCom composed", "scene resource transition frame=10", "scene resource transition frame=20", "scene resource transition frame=30", "scene resource transition frame=40", "scene resource transition frame=50", "scene automap CPU prepare_ms=[0-9.]+ rebuilt_rooms=0 audited_rooms=[1-9]"],
+      "requiredLog": ["scene automap TelCom composed[\\s\\S]*scene automap TelCom composed", "scene resource transition frame=10", "scene resource transition frame=20", "scene resource transition frame=30", "scene resource transition frame=40", "scene resource transition frame=50", "scene automap CPU prepare_ms=[0-9.]+ rebuilt_rooms=0 audited_rooms=[1-9]", "raster_scale=2", "scene TelCom preserved renderer extent"],
       "purpose": "Reenter real TelCom before and after five SSAA/MSAA transitions while freshly auditing retained map geometry; return to ordinary world rendering between captures."
     },
     "automap-lifecycle": {
-      "revision": 1, "minimumFrame": 30, "inspectionRequired": true,
+      "revision": 2, "minimumFrame": 30, "inspectionRequired": true,
       "arguments": ["-scene-automap-cache-audit", "-scene-retirement-probe", "-scene-gl-audit", "-capture-series-from", "10", "-capture-series-until", "10"],
       "evidenceFrames": [10],
-      "requiredLog": ["scene automap TelCom composed[\\s\\S]*scene automap TelCom composed", "scene retirement live reset frame=20", "scene motion frame=21 camera_history=1", "scene automap CPU prepare_ms=[0-9.]+ rebuilt_rooms=0 audited_rooms=[1-9]", "scene retirement game lifetime=\\d+ producers=\\d+ remaining=0"],
+      "requiredLog": ["scene automap TelCom composed[\\s\\S]*scene automap TelCom composed", "scene retirement live reset frame=20", "scene motion frame=21 camera_history=1", "scene automap CPU prepare_ms=[0-9.]+ rebuilt_rooms=0 audited_rooms=[1-9]", "scene retirement game lifetime=\\d+ producers=\\d+ remaining=0", "scene TelCom preserved renderer extent"],
       "purpose": "Open/capture/close real TelCom at10, resume world, retire scene twice at20, then reopen/capture at30. Audit retained map geometry and scene-owned cache cleanup across the lifetime change."
     },
     "automap-cache": {

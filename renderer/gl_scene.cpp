@@ -295,6 +295,26 @@ bool particleDepthEdge(vec2 pixel) {
     return hi-lo > max(1.e-7,(1.0-hi)*0.01);
 }
 )GLSL";
+// Reuse the geometry/placement interface, but not world fragment shading.
+// Linking this small consumer prunes unused vertex lighting/reflection outputs.
+const std::string SceneImageFragmentShader = std::string(SceneLightingShader) + R"GLSL(
+uniform sampler2D colortexture, image_display_backdrop;
+uniform float image_display_gamma;
+uniform ivec2 image_display_origin;
+in vec4 normal_alpha, texture_coordinates;
+in vec4 surface_payload[3];
+layout(location=0) out vec4 color;
+void main() {
+    vec4 source = texture(colortexture,texture_coordinates.xy*texture_scale+texture_offset);
+    float opacity = normal_alpha.w*material_alpha;
+    source.rgb *= opacity*color_modulation*surface_payload[2].yzw*lighting_modulation;
+    source.a *= opacity;
+    vec4 backdrop = texelFetch(image_display_backdrop,ivec2(gl_FragCoord.xy)-image_display_origin,0);
+    vec3 linear_backdrop = pow(max(backdrop.rgb,vec3(0)),vec3(1.0/image_display_gamma));
+    color = vec4(pow(max(source.rgb+linear_backdrop*(1.0-source.a),vec3(0)),vec3(image_display_gamma)),
+        source.a+backdrop.a*(1.0-source.a));
+}
+)GLSL";
 const std::string SceneFragmentShader = std::string(SceneLightingShader) + R"GLSL(
 uniform sampler2D colortexture, lightmaptexture;
 uniform sampler2D planar_texture;
@@ -684,6 +704,8 @@ void GL4Renderer::RetireScene() {
 }
 
 void GL4Renderer::DestroySceneResources() {
+    scene_display_backdrop.Destroy();
+    scene_image_compositor.Destroy();
     scene_ao_debug_shader.Destroy();
     for (auto& image : scene_view_images) image.second.Destroy();
     scene_view_images.clear();
@@ -2427,6 +2449,47 @@ void main() {
             glActiveTexture(GL_TEXTURE0+unit); glBindTexture(GL_TEXTURE_2D,texture);
             return found->second;
         };
+        const bool display_image_composition = target.role == SceneOutputRole::Display &&
+            policy.blend == d3scene::BlendMode::PremultipliedAlpha;
+        if (display_image_composition) {
+            if (!scene_image_compositor.Handle()) {
+                scene_image_compositor.AttachSource(SceneVertexShader.c_str(),SceneImageFragmentShader.c_str());
+                scene_image_compositor.Use();
+                glUniformBlockBinding(scene_image_compositor.Handle(),glGetUniformBlockIndex(scene_image_compositor.Handle(),"SceneDrawBlock"),7);
+                glUniformBlockBinding(scene_image_compositor.Handle(),glGetUniformBlockIndex(scene_image_compositor.Handle(),"SceneViewBlock"),8);
+                glUniform1i(scene_image_compositor.FindUniform("colortexture"),0);
+                glUniform1i(scene_image_compositor.FindUniform("scene_lights"),2);
+                glUniform1i(scene_image_compositor.FindUniform("scene_influences"),3);
+                glUniform1i(scene_image_compositor.FindUniform("instance_uvs"),4);
+                glUniform1i(scene_image_compositor.FindUniform("instance_positions"),5);
+                glUniform1i(scene_image_compositor.FindUniform("scene_reflections"),9);
+                glUniform1i(scene_image_compositor.FindUniform("image_display_backdrop"),15);
+                scene_image_gamma = scene_image_compositor.FindUniform("image_display_gamma");
+                scene_image_origin = scene_image_compositor.FindUniform("image_display_origin");
+            }
+            if (AutomatedCapturePending() && FindArg("-scene-image-alpha-audit"))
+                AutomatedCaptureLog("scene display image transfer frame=%d gamma=%.6f",AutomatedCaptureFrameIndex(),
+                    OpenGL_preferred_state.gamma != 0 ? OpenGL_preferred_state.gamma : 1.f);
+            // A nonlinear display transfer cannot be applied to premultiplied
+            // RGB before blending. Snapshot only this view's canvas region,
+            // then decode/composite/encode in the image draw. Each ordered draw
+            // sees its actual predecessor, never samples its own attachment.
+            GLint read; glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING,&read);
+            const GLboolean scissor = glIsEnabled(GL_SCISSOR_TEST);
+            if (scene_display_backdrop.Width() < unsigned(raster.width) || scene_display_backdrop.Height() < unsigned(raster.height))
+                scene_display_backdrop.Update((std::max)(scene_display_backdrop.Width(),unsigned(raster.width)),
+                    (std::max)(scene_display_backdrop.Height(),unsigned(raster.height)),0,GL_RGBA8);
+            glDisable(GL_SCISSOR_TEST);
+            glBindFramebuffer(GL_READ_FRAMEBUFFER,output.Handle()); glReadBuffer(GL_COLOR_ATTACHMENT0);
+            glBindFramebuffer(GL_DRAW_FRAMEBUFFER,scene_display_backdrop.Handle());
+            glBlitFramebuffer(raster.x,raster.y,raster.x+raster.width,raster.y+raster.height,
+                0,0,raster.width,raster.height,GL_COLOR_BUFFER_BIT,GL_NEAREST);
+            scene_display_backdrop.MarkColorDirty();
+            glBindFramebuffer(GL_DRAW_FRAMEBUFFER,output.Handle()); glBindFramebuffer(GL_READ_FRAMEBUFFER,read);
+            if (scissor) glEnable(GL_SCISSOR_TEST);
+            BindSceneSampler(15,false,false,false);
+            glActiveTexture(GL_TEXTURE15); glBindTexture(GL_TEXTURE_2D,scene_display_backdrop.ColorTextureRaw());
+        }
         if (surface.view_image_slot) bind_view_image(surface.view_image_slot,0);
         const bool planar_image = policy.planar_slot && view.reflections == d3scene::ReflectionPolicy::Images;
         if (planar_image) {
@@ -2436,7 +2499,11 @@ void main() {
         }
         bind_image(surface.baked_image,1,surface.lightmap_wrap,true);
         bind_image(surface.specular_image,8,surface.texture_wrap,false);
-        scene_shader.Use();
+        if (display_image_composition) {
+            scene_image_compositor.Use();
+            glUniform1f(scene_image_gamma,OpenGL_preferred_state.gamma != 0 ? 1.f/OpenGL_preferred_state.gamma : 1.f);
+            glUniform2i(scene_image_origin,raster.x,raster.y);
+        } else scene_shader.Use();
         glBindBufferRange(GL_UNIFORM_BUFFER,7,scene_draw_buffer,item_index*record_bytes,24*16);
         const bool cull = item.terrain || item.model_material_group || (item.mesh && !surface.two_sided);
         // Authored polymodel fronts use clockwise winding, unlike the
@@ -2445,7 +2512,7 @@ void main() {
         const bool clockwise = cull && ((d3scene::reversesWinding(camera) != d3scene::reversesWinding(visibility.world(item))) != item.model);
         const RasterKey raster_key{policy.layer,policy.blend,policy.depth,cull,clockwise};
         if (!raster_bound || raster_key != previous_raster) {
-        if(policy.blended()) {
+        if(policy.blended() && !display_image_composition) {
             glEnablei(GL_BLEND,0);
             if (policy.blend == d3scene::BlendMode::Multiply) glBlendFuncSeparatei(0,GL_DST_COLOR,GL_ZERO,GL_ZERO,GL_ONE);
             else if (policy.blend == d3scene::BlendMode::Additive) glBlendFuncSeparatei(0,GL_SRC_ALPHA,GL_ONE,GL_ZERO,GL_ONE);

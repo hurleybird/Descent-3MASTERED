@@ -105,6 +105,7 @@ public:
         result.view = view; result.current = viewMatrices(camera); result.previous = result.current;
         result.previous_camera = camera.transform;
         result.previous_deformation = view.world_deformation;
+        if (!view.temporal_history) return result;
         const auto found = completed_.find({view.kind,view.history_key});
         if (found == completed_.end()) return result;
         const auto& prior = found->second;
@@ -125,6 +126,7 @@ public:
         return result;
     }
     void commit(const ViewHistorySample& sample) {
+        if (!sample.view.temporal_history) return;
         const auto key = std::make_pair(sample.view.kind,sample.view.history_key);
         const auto found = completed_.find(key);
         if (found != completed_.end() && found->second.lifetime == sample.lifetime && found->second.sequence > sample.sequence)

@@ -63,6 +63,10 @@ d3scene::ImageMip d3scene::readViewImage(const Presentation& frame,uint64_t imag
 }
 static renderer_preferred_state Renderer_last_preferred_state;
 static bool Renderer_last_preferred_state_valid = false;
+d3scene::ViewImageQuality d3scene::configuredViewImageQuality() {
+	if (!Renderer_last_preferred_state_valid) throw std::logic_error("Image quality requires an initialized renderer");
+	return {Renderer_last_preferred_state.supersampling_factor,Renderer_last_preferred_state.msaa_samples};
+}
 static uint32_t Renderer_generation = 0;
 static renderer_draw_call_stats Renderer_current_draw_call_stats = {};
 static renderer_draw_call_stats Renderer_last_draw_call_stats = {};

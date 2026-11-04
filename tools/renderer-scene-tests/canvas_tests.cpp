@@ -180,6 +180,7 @@ int runCanvasTests() {
         check(rejected_image,"Composed image accepted a second medium transport");
     }
     const auto canvas = MakeSceneCanvasView(7,{20,30,800,600},d3scene::ViewTarget::Display,true);
+    check(!canvas.temporal_history,"Canvas requested temporal camera ownership");
     check(canvas.viewport.x == 20 && canvas.projection_anchor.x == 0 && canvas.collection == 7 &&
         canvas.ordering == d3scene::ViewOrdering::Compositing && canvas.camera.up.y == -1,
         "Canvas inherited implicit viewport or world projection");

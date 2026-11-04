@@ -49,7 +49,7 @@ param(
     [switch]$HistoryProbe,
     [switch]$DeformationProbe,
     [string]$DemoFile = '',
-    [ValidateSet('ordinary','image-alpha','image-lifecycle','image-settings','automap-cache','automap-lifecycle','automap-settings','retirement','save-export','save-settings','auxiliary-lifecycle','modal-ui','save-dialog','quicksave','decoded-movie','decoded-movie-paletted','decoded-movie-subtitles','decoded-movie-screenshot','message-consoles','screenshot-normal','screenshot-clean','screenshot-double','screenshot-tga','demo-movie')][string]$Scenario = 'ordinary'
+    [ValidateSet('ordinary','ship-preview','image-alpha','image-lifecycle','image-settings','automap-cache','automap-lifecycle','automap-settings','retirement','save-export','save-settings','auxiliary-lifecycle','modal-ui','save-dialog','quicksave','decoded-movie','decoded-movie-paletted','decoded-movie-subtitles','decoded-movie-screenshot','message-consoles','screenshot-normal','screenshot-clean','screenshot-double','screenshot-tga','demo-movie')][string]$Scenario = 'ordinary'
 )
 
 # Run only copied installations and copied pilot/save data. Never point Runtime
@@ -508,6 +508,20 @@ try {
                 $selected = (Get-FileHash -LiteralPath $beforeWorld).Hash
                 $scenarioValidated = $scenarioValidated -and $published -eq $selected
                 $exports += [ordered]@{presented_reference_hash=$published; before_world_selected_hash=$selected}
+            }
+        }
+        if ($Scenario -in @('image-alpha','image-lifecycle','image-settings')) {
+            . (Join-Path $PSScriptRoot 'renderer-export-images.ps1')
+            $transfers = [regex]::Matches($logText,'scene display image transfer frame=(\d+) gamma=([0-9.]+)')
+            $scenarioValidated = $scenarioValidated -and $transfers.Count -gt 0
+            $verifiedFrames = @{}
+            foreach ($transfer in $transfers) {
+                $index = [int]$transfer.Groups[1].Value
+                if ($verifiedFrames.ContainsKey($index)) { continue }
+                $verifiedFrames[$index] = $true
+                $gamma = [double]::Parse($transfer.Groups[2].Value,[Globalization.CultureInfo]::InvariantCulture)
+                $image = if ($index -eq $Frame) { $png } else { "$png.frame$($index.ToString('D6')).png" }
+                $exports += Test-RendererDisplayAlphaImage -Image $image -Gamma $gamma
             }
         }
         if ($AutomapProbe) { $resourceValidated = $logText.Contains('scene automap prepared rooms=') }

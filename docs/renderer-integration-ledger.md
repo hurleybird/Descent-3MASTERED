@@ -1546,3 +1546,61 @@ Rejected experiment: per-producer FrameStorage snapshot pools preserved all eigh
 images but provided no meaningful CPU benefit.005 after .744/.756 versus before
 .747/.755ms;007 after1.574/1.495 versus before1.550/1.519ms. Removed fully before
 alpha work. Evidence perf-producer-storage-* and qual-producer-storage-20261103.
+
+## TelCom image ownership and display composition (November 3)
+
+Removed TelCom's SetScreenMode roundtrip and the selector's immediate g3/model
+draw. Native640x480 UI art owns a display canvas; automap and all three ship
+previews are immutable, independently sampled images. Legacy font/cursor layout
+adapters restore their caller; world extent and persisted settings stay intact.
+Requested image quality follows the current renderer configuration (including
+transient transitions), independently of the published logical image dimensions.
+
+The dedicated scene-image compositor snapshots only the consumer viewport,
+decodes its display backdrop, blends premultiplied scene radiance and encodes
+once. This preserves partial coverage and additive RGB at alpha0, with consumer
+opacity applied once. Scratch retains high-water dimensions; mixed viewport
+sizes do not reallocate each frame. The world fragment shader gains no display
+conversion sampler/branch. UI art is display-encoded like the main menu; game
+gamma applies to scene images, not again to authored TelCom artwork.
+
+Removing implicit renderer resets exposed a history-key collision: TelCom's
+banner clock replaced the gameplay banner's predecessor. Canvas views now
+declare no temporal camera ownership, and ViewHistory ignores their prepare/
+commit history lookup/storage. Tests prove that a high-numbered independent
+canvas cannot poison a world camera sharing its key. No global reset workaround.
+
+Matched-angle actual selector reference captures revealed missing full-bright
+TF_LIGHT semantics in model material compilation, not a glow sprite defect.
+Restored the shared material policy. Temporary old draw diagnostic was removed.
+All8 ordinary500-frame screenshots are unchanged except four expected brighter
+light-panel pixels in003 (coordinates497,372;495/497/499,373). No general model
+brightness adjustment. Reference evidence qual-telcom-ship-reference-20261103;
+new qual-telcom-ships-light-20261103 and qual-telcom-compositor-ships-20261103.
+
+Root3/3 pass. Actual map retirement and return-to-world motion pass003/006;
+quality changes pass with independently resized map images and unchanged world
+extent. Three actual ships captured at1x and4x/MSAA4, returning to world between
+each. World, auxiliary lifecycle, modal UI and native save/export pass. Evidence
+qual-telcom-final-*, qual-telcom-history-lifecycle-*, and
+qual-telcom-configured-settings-20261103. Pixel audits in
+qual-ui-compositor-midrange-20261103 additionally verify mid-range backdrop
+decoding at gamma1/1.5/2.2 across1/2/4x and MSAA0/2/4; retirement passes in
+qual-ui-compositor-retirement-20261103. Screenshot audits use two-byte tolerance.
+Physical mouse/flight interaction remains manual acceptance, not exercised by
+hidden captures. No-probe gameplay/release gates remain closed.
+
+PinnedCPU2, uncapped720p1x/MSAA0/noAO/noBloom ABBA1500frames, median400..1199:
+
+| Save | New A CPU/GPU ms | Old A | Old B | New B |
+| --- | --- | --- | --- | --- |
+|000|1.8325/.518|1.776/.376|1.761/.3795|1.773/.518|
+|005|.9395/.143|1.055/.239|1.0515/.239|.9595/.143|
+|007|1.535/.5215|1.230/.405|1.242/.404|1.508/.5205|
+
+Evidence perf-telcom-legacy-{new-a,old-a,old-b,new-b}-saveg*-20261103.
+CPU is whole-frame work_ms, GPU is gpu_frame_ms; never sum them. New field320
+versus old legacy fog; headlight response differs. Comparator is the reconstructed
+bfb59647 IPO binary, SHA256 A6286E9315A60F3C93B3A764C93A808B8FA385924ADDFACE1B573433374F3DA4,
+not the deleted frozen original.005 wins about10%CPU,000 near parity,007 remains
+about23% slower; GPU wins005 and loses000/007. Runtime restored after serial swaps.

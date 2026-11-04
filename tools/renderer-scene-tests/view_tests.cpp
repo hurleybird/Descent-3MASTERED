@@ -1631,6 +1631,16 @@ int runSceneViewTests() {
     check(second.previous_valid && second.previous.view_projection == first.current.view_projection,
         "Moving view did not retain its own predecessor");
     histories.commit(second);
+    {
+        auto canvas = main_view; canvas.temporal_history = false; canvas.camera.position.x = 100;
+        auto canvas_tick = tick; canvas_tick.sequence = uint64_t(1)<<63;
+        const auto canvas_sample = histories.prepare(canvas_tick,canvas,d3scene::prepareCamera(canvas));
+        check(!canvas_sample.previous_valid,"Non-temporal canvas borrowed world camera history");
+        const auto count = histories.size(); histories.commit(canvas_sample);
+        check(histories.size() == count &&
+            histories.prepare(tick,main_view,d3scene::prepareCamera(main_view)).previous.view_projection == second.previous.view_projection,
+            "Independent canvas replaced a world predecessor with its own publication clock");
+    }
     tick.delta_time = .02f; tick.afterburner_factor = .5f; tick.player_control_delta = {1,0,0};
     const auto exposure = d3scene::prepareImageMotion(tick,second,{});
     check(exposure.valid && !exposure.paused && exposure.camera.previous_valid && exposure.delta_time == .02f,

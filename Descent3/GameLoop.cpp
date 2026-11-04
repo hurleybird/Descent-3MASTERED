@@ -800,14 +800,18 @@ void CaptureAutomatedFrameIfRequested()
 	if (!Automated_capture.capture_pending)
 		return;
 	static bool capturing_ui = false;
-	if (!capturing_ui && SceneGeometryInspection() && FindArg("-scene-automap-telcom-probe")) {
+	if (!capturing_ui && SceneGeometryInspection() &&
+		(FindArg("-scene-automap-telcom-probe") || FindArg("-scene-ship-telcom-probe"))) {
 		// Complete the gameplay frame before entering the real modal presenter.
 		// TelCom captures its own fully composed frame before its swap.
 		rend_Flip();
 		capturing_ui = true;
-		TelComShow(TS_MAP,true,false);
+		const bool ship_preview = FindArg("-scene-ship-telcom-probe") != 0;
+		const int ship = Players[Player_num].ship_index;
+		TelComShow(ship_preview ? TS_SHIPSELECT : TS_MAP,!ship_preview,ship_preview);
+		Players[Player_num].ship_index = ship;
 		capturing_ui = false;
-		if (Automated_capture.capture_pending) Error("Automap TelCom fixture did not capture its presentation");
+		if (Automated_capture.capture_pending) Error("TelCom fixture did not capture its presentation");
 		return;
 	}
 
@@ -3094,6 +3098,10 @@ void GameRenderFrame(void)
 			if (index == 10 || index == 40) { state.supersampling_factor = 1; state.msaa_samples = 0; }
 			if (index == 20) { state.supersampling_factor = 2; state.msaa_samples = 2; }
 			if (index == 30) { state.supersampling_factor = 4; state.msaa_samples = 4; }
+			if (FindArg("-scene-image-alpha-audit")) {
+				if (index == 20) state.gamma = 1.5f;
+				if (index == 30) state.gamma = 2.2f;
+			}
 			state.antialised = state.msaa_samples > 0;
 			if (!rend_SetPreferredState(&state)) Error("Resource transition fixture could not apply renderer state");
 			AutomatedCaptureLog("scene resource transition frame=%d ssaa=%u msaa=%u",index,

@@ -477,6 +477,10 @@ void resolveMaterial(d3scene::SurfaceBinding& surface, MaterialResolution& resol
         Error("Scene material references missing texture %d", surface.texture);
     int base_texture = surface.texture;
     const auto& authored = GameTextures[surface.texture];
+    // Authored model light panels emit their texture color independently of
+    // directional/volume ambient. This belongs to material compilation, not a
+    // special case in the ship selector or an added glow sprite.
+    if (model && (authored.flags & TF_LIGHT)) surface.unlit = true;
     const auto pair = SplitSpecularTexturePathEnabled() ? FindSplitSpecularTexturePair(surface.texture) : SplitSpecularTexturePair{};
     if (!model && (surface.authored_flags & FF_DESTROYED) && (authored.flags & TF_DESTROYABLE))
         base_texture = authored.destroy_handle;
@@ -722,9 +726,17 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance,const GameMainView
             PrepareSceneQuad(data,SceneViewImageProbe+3,order,{0,0,160,180},source);
             source.alpha = .25f; source.color = {1,0,0}; source.additive = true;
             PrepareSceneQuad(data,SceneViewImageProbe+3,order,{160,0,160,180},source);
-            SceneQuadStyle background; background.color = {0,0,1};
+            // Mid-range encoded blue also detects a missing backdrop decode;
+            // endpoint colors alone cannot prove nonlinear composition.
+            SceneQuadStyle background; background.color = {0,0,.25f};
             PrepareSceneQuad(data,SceneViewImageProbe+4,order,{0,0,320,180},background);
             PrepareSceneImageQuad(data,SceneViewImageProbe+4,order,{0,0,320,180},1,.5f);
+            d3scene::PreparedForeground audit; audit.identity = SceneViewImageProbe+4; audit.order = 31;
+            audit.phase = d3scene::ForegroundPhase::FinalOverlay;
+            auto display = MakeSceneCanvasView(SceneViewImageProbe+4,{0,0,320,180},d3scene::ViewTarget::Display,true);
+            display.image_inputs.push_back({1,SceneViewImageProbe+2});
+            audit.layer.display_views.push_back(std::move(display));
+            data.foregrounds.push_back(std::move(audit));
         }
     }
     if (SceneGeometryInspection() && FindArg("-scene-standalone-model-probe") && Player_object) {
@@ -1110,13 +1122,14 @@ void RenderGameSceneView(const d3scene::Presentation& frame, d3scene::View view,
         }
     }
     if (FindArg("-scene-view-image-probe") && view.kind == d3scene::ViewKind::Main) {
+        const auto quality = d3scene::configuredViewImageQuality();
         d3scene::ViewImageRequest image;
         image.image = SceneViewImageProbe; image.view = view;
         image.view.kind = d3scene::ViewKind::Preview; image.view.feedback = d3scene::NoFeedback;
         image.view.history_key = SceneViewImageProbe;
         image.view.viewport = image.view.projection_anchor = {0,0,320,180};
         image.samples = 4;
-        image.scale = Render_preferred_state.supersampling_factor;
+        image.scale = quality.scale;
         d3scene::ViewImageRequest copy;
         copy.image = SceneViewImageProbe+1;
         copy.view = MakeSceneCanvasView(SceneViewImageProbe+1,{0,0,320,180},d3scene::ViewTarget::Scene,true);
@@ -1128,8 +1141,8 @@ void RenderGameSceneView(const d3scene::Presentation& frame, d3scene::View view,
             d3scene::ViewImageRequest source;
             source.image = SceneViewImageProbe+2;
             source.view = MakeSceneCanvasView(SceneViewImageProbe+3,{0,0,320,180},d3scene::ViewTarget::Scene,true);
-            source.scale = Render_preferred_state.supersampling_factor;
-            source.samples = Render_preferred_state.msaa_samples;
+            source.scale = quality.scale;
+            source.samples = quality.samples;
             source.transparent_background = true;
             d3scene::ViewImageRequest composite;
             composite.image = SceneViewImageProbe+4;
@@ -1171,7 +1184,7 @@ void RenderGameSceneView(const d3scene::Presentation& frame, d3scene::View view,
                     if (std::abs(int(pixels.pixels.at(offset+channel))-expected[channel]) > 2)
                         throw std::logic_error("Independent image coverage was multiplied twice or additive radiance was lost");
             };
-            check(80,{{64,64,255,255}}); check(240,{{32,0,255,255}});
+            check(80,{{64,64,112,255}}); check(240,{{32,0,64,255}});
             AutomatedCaptureLog("scene image alpha composition verified alpha and additive with half opacity");
         }
     }

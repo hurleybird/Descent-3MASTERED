@@ -867,6 +867,9 @@ struct View {
     MotionComposition motion_composition = MotionComposition::Preserve;
     uint64_t collection = 0; // selects content, independently of camera/history/target
     uint64_t history_key = 0;
+    // Canvas composition has no temporal camera predecessor. Its publication
+    // clock must not replace a world camera sharing the same content identity.
+    bool temporal_history = true;
     Transform camera;
     Vec3 camera_velocity; // physical motion input, not inferred from temporal images
     ViewDeformation world_deformation; // visual-only; simulation visibility volumes remain unchanged

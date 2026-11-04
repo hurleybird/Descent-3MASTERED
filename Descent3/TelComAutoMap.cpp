@@ -20,6 +20,7 @@
 #include "SceneAutomap.h"
 #include "SceneExtraction.h"
 #include "SceneCanvas.h"
+#include "../renderer/SceneView.h"
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
@@ -343,22 +344,25 @@ void TCAMCallback(void)
     if (AM_center_on_player) { TCAMCenterOnPlayer(); AM_center_on_player = 0; }
     if (AM_realign) { AM_pitch = 0; AM_realign = 0; }
     const auto& monitor = Telcom_system.Monitor_coords[MONITOR_MAIN];
-    StartFrame(monitor.left,monitor.top,monitor.right,monitor.bottom);
     static uint64_t sequence = uint64_t(1)<<63;
     const double display_time = FindArg("-scene-automap-telcom-probe") ? .375 : timer_GetTime();
-    const auto frame = PrepareGameAutomap(++sequence,display_time,AM_terrain != 0,AM_ship_model_handle,AM_current_marker);
     const d3scene::Rect viewport{monitor.left,monitor.top,monitor.right-monitor.left,monitor.bottom-monitor.top};
+    const d3scene::Rect local{0,0,viewport.width,viewport.height};
+    const auto frame = PrepareGameAutomap(++sequence,display_time,AM_terrain != 0,AM_ship_model_handle,AM_current_marker,local);
     auto view = MakeGameSceneView(d3scene::ViewKind::Automap,0x4155544f4d415001ull,nullptr,
-        AM_view_pos,-1,AM_view_orient,Render_zoom,false,viewport,{0,0,viewport.width,viewport.height});
+        AM_view_pos,-1,AM_view_orient,Render_zoom,false,local,local);
     view.geometry_inspection = true; view.portal_visibility = false; view.dynamic_lighting = false; view.clear_depth = true;
-    d3scene::renderView(*frame,view);
-    EndFrame();
+    const auto quality = d3scene::configuredViewImageQuality();
+    d3scene::renderViewImages(*frame,{{SceneAutomapImage,view,quality.scale,quality.samples,true}});
+    auto canvas = MakeSceneCanvasView(SceneAutomapImage,viewport,d3scene::ViewTarget::Display,true);
+    canvas.image_inputs.push_back({1,SceneAutomapImage});
+    d3scene::renderView(*frame,canvas);
     rend_SetFiltering(0);
     TCAMDrawMenu();
     rend_FlushTextLayer();
     // Keep the diagnostic warning inside the monitor, not behind its surround.
     auto banner = MakeSceneCanvasView(SceneInspectionBanner,
-        {viewport.x,viewport.y+16,viewport.width,viewport.height-16},d3scene::ViewTarget::Scene,true);
+        {viewport.x,viewport.y+16,viewport.width,viewport.height-16},d3scene::ViewTarget::Display,true);
     d3scene::renderView(*frame,banner);
     TCAMReadControls();
 }

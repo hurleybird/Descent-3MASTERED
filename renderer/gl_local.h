@@ -251,6 +251,9 @@ class GL4Renderer : public IRenderer
 		uint64_t sequence = 0;
 	};
 	std::unordered_map<uint64_t,SceneViewImageGpu> scene_view_images;
+	Framebuffer scene_display_backdrop;
+	ShaderProgram scene_image_compositor;
+	GLint scene_image_gamma = -1, scene_image_origin = -1;
 	void BindSceneImage(const d3scene::ImageAsset&,int unit,bool wrap,bool baked,
 		d3scene::TextureFilter filter = d3scene::TextureFilter::Default);
 	void BindSceneSampler(int unit,bool wrap,bool filter,bool mip);

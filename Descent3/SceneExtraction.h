@@ -42,7 +42,12 @@ d3scene::RoomAssetRef PrepareGameRoomAsset(int number,bool audit_geometry = fals
 void PrepareGameModelInstances(d3scene::FrameData&, const d3scene::Presentation* previous,bool retain_materials = false);
 d3scene::ModelAssetRef PrepareGameModelAsset(int number,bool audit_geometry = false);
 void AuditGameModelPoses(const d3scene::Presentation&);
-void PrepareGameStaticModel(d3scene::FrameData&,int model,const d3scene::Transform&,uint64_t identity,uint64_t collection = 0);
+struct ScenePreviewLighting {
+    d3scene::Vec3 ambient{1,1,1}, direction{0,-1,0};
+    bool unlit = true;
+};
+void PrepareGameStaticModel(d3scene::FrameData&,int model,const d3scene::Transform&,uint64_t identity,uint64_t collection = 0,
+    ScenePreviewLighting lighting = {});
 // Resource dependency history belongs to a publication producer, not whichever
 // world/UI/map frame happened to run most recently on the render thread.
 class GameSceneResources {

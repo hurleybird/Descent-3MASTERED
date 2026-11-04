@@ -1,5 +1,6 @@
 // Descent 3MASTERED - GPL-3.0-or-later
 #include "SceneAutomap.h"
+#include "SceneCanvas.h"
 #include "SceneExtraction.h"
 #include "../renderer/SceneGeometry.h"
 #include "../renderer/SceneCache.h"
@@ -42,7 +43,8 @@ void markerDisk(d3scene::FrameData& data,const vector& p,d3scene::Vec3 color,flo
 }
 }
 
-d3scene::PresentationRef PrepareGameAutomap(uint64_t sequence,double display_time,bool terrain,int ship_model,int selected_marker) {
+d3scene::PresentationRef PrepareGameAutomap(uint64_t sequence,double display_time,bool terrain,int ship_model,int selected_marker,
+    d3scene::Rect image_canvas) {
     const double prepare_begin = timer_GetTime64();
     if (!std::isfinite(display_time)) throw std::invalid_argument("Invalid automap display clock");
     // The map owns its clock and requests only the shared immutable geometry;
@@ -177,6 +179,10 @@ d3scene::PresentationRef PrepareGameAutomap(uint64_t sequence,double display_tim
             selected ? 9+9*pulse : 2.5f+2.5f*pulse);
     }
     PrepareGameInspectionBanner(data);
+    if (image_canvas.width > 0 && image_canvas.height > 0) {
+        int order = 0;
+        PrepareSceneImageQuad(data,SceneAutomapImage,order,image_canvas,1);
+    }
     static GameSceneResources resources;
     resources.prepare(data);
     if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)

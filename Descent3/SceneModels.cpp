@@ -555,7 +555,7 @@ void AuditGameModelPoses(const d3scene::Presentation& frame) {
 }
 
 void PrepareGameStaticModel(d3scene::FrameData& data,int number,const d3scene::Transform& placement,
-    uint64_t identity,uint64_t collection) {
+    uint64_t identity,uint64_t collection,ScenePreviewLighting lighting) {
     if (number < 0 || number >= MAX_POLY_MODELS || !Poly_models[number].used)
         throw std::invalid_argument("Static scene model is unavailable");
     const auto* source = GetPolymodelPointer(number);
@@ -584,7 +584,9 @@ void PrepareGameStaticModel(d3scene::FrameData& data,int number,const d3scene::T
             data.meshes[attachment].model_variant = 0;
         }
         for (const auto polygon : geometry.surface_polygons) {
-            d3scene::SurfaceBinding surface; surface.unlit = true;
+            d3scene::SurfaceBinding surface; surface.unlit = lighting.unlit;
+            surface.ambient_color = lighting.ambient; surface.ambient_direction = lighting.direction;
+            surface.directional_ambient = !lighting.unlit;
             const int material = geometry.polygon_materials[polygon];
             if (material >= 0) surface.texture = model.asset->geometry().textures[material];
             else surface.base_color = geometry.polygon_colors[polygon];

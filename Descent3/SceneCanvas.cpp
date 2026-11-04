@@ -44,6 +44,7 @@ d3scene::View MakeSceneCanvasView(uint64_t collection,d3scene::Rect viewport,
     d3scene::View view;
     view.geometry_inspection = inspection; view.kind = d3scene::ViewKind::Preview;
     view.collection = view.history_key = collection;
+    view.temporal_history = false;
     view.viewport = viewport; view.projection_anchor = {0,0,viewport.width,viewport.height};
     view.target = target; view.ordering = d3scene::ViewOrdering::Compositing;
     view.projection = d3scene::ViewProjection::Orthographic;

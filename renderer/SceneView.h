@@ -4,6 +4,10 @@
 #include <array>
 
 namespace d3scene {
+// Requested raster quality from the renderer's current configuration, not a
+// persisted game preference that can lag an in-place settings transition.
+struct ViewImageQuality { uint32_t scale = 1, samples = 0; };
+ViewImageQuality configuredViewImageQuality();
 
 struct PortalWindow {
     double left = -1, bottom = -1, right = 1, top = 1;

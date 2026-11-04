@@ -29,5 +29,7 @@ struct AutomapFaceSource {
 // Topology/vertex color discontinuities are compiled before any camera query.
 std::array<d3scene::MeshGeometry,9> CompileAutomapGeometry(
     const d3scene::MeshGeometry&,const std::vector<AutomapFaceSource>&);
-d3scene::PresentationRef PrepareGameAutomap(uint64_t sequence,double display_time,bool terrain,int ship_model,int marker);
+constexpr uint64_t SceneAutomapImage = 0x4155544f494d4701ull;
+d3scene::PresentationRef PrepareGameAutomap(uint64_t sequence,double display_time,bool terrain,int ship_model,int marker,
+    d3scene::Rect image_canvas = {});
 d3scene::PresentationRef PrepareAutomapInspection();

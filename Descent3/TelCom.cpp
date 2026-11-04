@@ -48,6 +48,10 @@
 #include "d3music.h"
 #include "gameloop.h"
 #include "SceneExtraction.h"
+#include "SceneCanvas.h"
+#include "../renderer/SceneView.h"
+#include "gamefont.h"
+#include "ui.h"
 #include "args.h"
 
 #define FRAME_RATE	30.0f
@@ -348,7 +352,6 @@ bool TelComShow(bool ingame, bool ShipSelect)
 	Telcom_intelcom = true;
 
 	bool result = false;
-	int old_sm;
 
 	Telcom_exit_to_mainmenu = false;
 
@@ -364,9 +367,22 @@ bool TelComShow(bool ingame, bool ShipSelect)
 		return false;
 	}
 
-	//Set Screen mode
-	old_sm = GetScreenMode();
-	SetScreenMode(SM_MENU);
+	// UI layout is not a renderer mode. Keep world resolution, quality and
+	// window state intact; only the legacy font/cursor adapters need a scope.
+	struct CanvasAdapters {
+		int left, top, right, bottom, zmin, zmax, width, height;
+		bool cursor;
+		CanvasAdapters(const rendering_state& state) : width(state.screen_width),height(state.screen_height),cursor(ui_IsCursorVisible()) {
+			ddio_MouseGetLimits(&left,&top,&right,&bottom,&zmin,&zmax);
+			SelectHUDFont(FIXED_SCREEN_WIDTH,FIXED_SCREEN_HEIGHT);
+			ui_ShowCursor();
+		}
+		~CanvasAdapters() {
+			SelectHUDFont(width,height);
+			ddio_MouseSetLimits(left,top,right,bottom,zmin,zmax);
+			if (!cursor) ui_HideCursor();
+		}
+	} canvas_adapters(incoming_draw_state);
 
 	hotspot_bitmaps = NULL;
 
@@ -408,7 +424,7 @@ bool TelComShow(bool ingame, bool ShipSelect)
 
 	//keep the mouse in view
 	ddio_MouseReset();
-	ddio_MouseSetVCoords(Game_window_w, Game_window_h);
+	ddio_MouseSetVCoords(FIXED_SCREEN_WIDTH,FIXED_SCREEN_HEIGHT);
 
 	//hang out in here until the user presses POWER
 	TelComMain(ingame, ShipSelect);
@@ -426,8 +442,12 @@ telcom_bad_error:
 	// must do this to clear out keyboard events
 	ddio_KeyFlush();
 
-	//reset screen mode
-	SetScreenMode(old_sm);
+	if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() >= 0) {
+		rendering_state outgoing; rend_GetRenderState(&outgoing);
+		if (outgoing.screen_width != incoming_draw_state.screen_width || outgoing.screen_height != incoming_draw_state.screen_height)
+			Error("TelCom changed the renderer extent");
+		AutomatedCaptureLog("scene TelCom preserved renderer extent=%dx%d",outgoing.screen_width,outgoing.screen_height);
+	}
 
 	//reset some states
 	rend_SetZBufferState(1);
@@ -1136,7 +1156,10 @@ void TelcomRenderScreen(bool poweron, bool powerup, ubyte power_effect)
 		frametime = 0;
 	}
 
-	StartFrame(0, 0, Game_window_w, Game_window_h);
+	// TelCom owns its canvas; it must not resolve an unrelated world image or
+	// inherit the world's supersampled depth and post-processing products.
+	if (!rend_BeginDisplayFrame(FIXED_SCREEN_WIDTH,FIXED_SCREEN_HEIGHT)) Error("TelCom display canvas unavailable");
+	StartFrame(0, 0, FIXED_SCREEN_WIDTH, FIXED_SCREEN_HEIGHT);
 
 	if (Telcom_show_glitch)
 	{
@@ -1181,6 +1204,12 @@ void TelcomRenderScreen(bool poweron, bool powerup, ubyte power_effect)
 	if (power_effect_complete && TC_callback && Telcom_system.current_status == TS_MAP && AutomatedCapturePending() &&
 		SceneGeometryInspection() && FindArg("-scene-automap-telcom-probe")) {
 		AutomatedCaptureLog("scene automap TelCom composed");
+		CaptureAutomatedFrameIfRequested();
+		Telcom_system.state = TCS_POWEROFF;
+	}
+	if (power_effect_complete && TC_callback && Telcom_system.current_status == TS_SHIPSELECT && AutomatedCapturePending() &&
+		SceneGeometryInspection() && FindArg("-scene-ship-telcom-probe")) {
+		AutomatedCaptureLog("scene ship TelCom composed index=%d",(AutomatedCaptureFrameIndex()/10)%3);
 		CaptureAutomatedFrameIfRequested();
 		Telcom_system.state = TCS_POWEROFF;
 	}
@@ -1820,10 +1849,10 @@ void TelcomRenderMouse(void)
 		int cur_w = bm_w(TC_cursor, 0);
 		int cur_h = bm_h(TC_cursor, 0);
 
-		if (mx > (Game_window_w - cur_w))
-			u1 = ((float)(Game_window_w - mx)) / ((float)cur_w);
-		if (my > (Game_window_h - cur_h))
-			v1 = ((float)(Game_window_h - my)) / ((float)cur_h);
+		if (mx > (FIXED_SCREEN_WIDTH - cur_w))
+			u1 = ((float)(FIXED_SCREEN_WIDTH - mx)) / ((float)cur_w);
+		if (my > (FIXED_SCREEN_HEIGHT - cur_h))
+			v1 = ((float)(FIXED_SCREEN_HEIGHT - my)) / ((float)cur_h);
 
 		rend_DrawScaledBitmap(mx, my, mx + (int)((float)cur_w * u1), my + (int)((float)cur_h * v1), TC_cursor, u0, v0, u1, v1);
 	}
@@ -3471,9 +3500,11 @@ void TelComSingleShipSelect(tTelComInfo* tcs)
 
 	//set focus to the ship we currently have selected
 	int focus_ship = -1;
+	const bool capture_ship = AutomatedCaptureSuppressesInput() && FindArg("-scene-ship-telcom-probe");
+	const int capture_index = (AutomatedCaptureFrameIndex()/10)%MAX_NUM_SHIPS;
 	for (int j = 0; j < MAX_NUM_SHIPS; j++)
 	{
-		if (SSShips[j].found && SSShips[j].ship_index == Players[Player_num].ship_index)
+		if (SSShips[j].found && (capture_ship ? j == capture_index : SSShips[j].ship_index == Players[Player_num].ship_index))
 		{
 			mprintf((0, "Current Ship: %s\n", Ships[SSShips[j].ship_index].name));
 			focus_ship = SSShips[j].efxnum;
@@ -3597,7 +3628,8 @@ int TCSSCollectInfo(void)
 		if (Ships[i].used)
 		{
 #else
-		if (Ships[i].used && PlayerIsShipAllowed(Player_num, i))
+		if (Ships[i].used && (PlayerIsShipAllowed(Player_num, i) ||
+			(AutomatedCaptureSuppressesInput() && FindArg("-scene-ship-telcom-probe"))))
 		{
 #endif
 			for (j = 0; j < MAX_NUM_SHIPS; j++)
@@ -3690,8 +3722,7 @@ void TCSSButtonCallback(int efxnum)
 
 void TCSSSCallback(void)
 {
-	// Supported bounded UI preview. Keep its immediate model dependency out of
-	// world-scene execution; TelCom's actual map uses its scene-owned producer.
+	// The selector publishes a model image, never immediate geometry into the UI.
 	if (TCShipSelect.ship_model == -1)
 	{
 		//no ship selected yet
@@ -3703,22 +3734,12 @@ void TCSSSCallback(void)
 	viewer_eye.z = -TCShipSelect.cam_dist;
 
 	grtext_Flush();
-	StartFrame(325, 142, 535, 280);
-	g3_StartFrame(&viewer_eye, &viewer_orient, D3_DEFAULT_ZOOM);
-	rend_SetFlatColor(0);
-
-	float normalized_time[MAX_SUBOBJECTS];
-	float light_scalar, size;
+	float size;
 	PageInPolymodel(TCShipSelect.ship_model, OBJ_PLAYER, &size);
 	poly_model* pm = GetPolymodelPointer(TCShipSelect.ship_model);
 	vector view_pos;
-	vector light_vec;
 	matrix view_orient = IDENTITY_MATRIX;
-	matrix final_mat = IDENTITY_MATRIX;
 	matrix rot_mat;
-
-	//	draw model.
-	SetNormalizedTimeAnim(0, normalized_time, pm);
 
 	view_pos = pm->anim_size_offset;
 
@@ -3727,23 +3748,33 @@ void TCSSSCallback(void)
 
 	vm_MatrixMul(&view_orient, &rot_mat, &TCShipSelect.orient);
 	vm_Orthogonalize(&view_orient);
+	if (AutomatedCaptureSuppressesInput() && FindArg("-scene-ship-telcom-probe"))
+		vm_AnglesToMatrix(&view_orient,0,8192,0);
 	TCShipSelect.orient = view_orient;
 
-	light_vec.x = 0.0f; 	light_vec.y = -1.0f; 	light_vec.z = -1.0f;
-	light_scalar = 0.8f;
-	vm_NormalizeVector(&light_vec);
-
-	rend_SetZBufferState(1);
-	rend_SetAlphaType(AT_CONSTANT_TEXTURE);
-	rend_SetAlphaValue(255);
-	rend_SetLighting(LS_NONE);
-	rend_SetColorModel(CM_MONO);
-	rend_SetOverlayType(OT_NONE);
-
-	DrawPolygonModel(&view_pos, &view_orient, TCShipSelect.ship_model, normalized_time, 0, &light_vec, light_scalar, light_scalar, light_scalar);
-
-	g3_EndFrame();
-	EndFrame();
+	constexpr uint64_t image_key = 0x5443534849500001ull;
+	static uint64_t sequence = uint64_t(1)<<62;
+	auto data = d3scene::acquireFrameData();
+	data.sequence = ++sequence; data.scene_lifetime = d3scene::assets().lifetime();
+	data.simulation_time = Gametime; data.paused = true;
+	const auto vector_value = [](const vector& v) { return d3scene::Vec3{v.x,v.y,v.z}; };
+	PrepareGameStaticModel(data,TCShipSelect.ship_model,
+		{vector_value(view_pos),vector_value(view_orient.rvec),vector_value(view_orient.uvec),vector_value(view_orient.fvec)},
+		image_key,0,{{.8f,.8f,.8f},{0,-.70710678f,-.70710678f},false});
+	int order = 0;
+	PrepareSceneImageQuad(data,image_key,order,{0,0,210,138},1);
+	static GameSceneResources resources;
+	resources.prepare(data);
+	const auto frame = d3scene::Presentation::publish(std::move(data));
+	auto camera = MakeGameSceneView(d3scene::ViewKind::Preview,image_key,nullptr,
+		viewer_eye,-1,viewer_orient,D3_DEFAULT_ZOOM,false,{0,0,210,138},{0,0,210,138});
+	camera.geometry_inspection = SceneGeometryInspection();
+	camera.portal_visibility = false; camera.dynamic_lighting = false;
+	const auto quality = d3scene::configuredViewImageQuality();
+	d3scene::renderViewImages(*frame,{{image_key,camera,quality.scale,quality.samples,true}});
+	auto canvas = MakeSceneCanvasView(image_key,{325,142,210,138},d3scene::ViewTarget::Display,SceneGeometryInspection());
+	canvas.image_inputs.push_back({1,image_key});
+	d3scene::renderView(*frame,canvas);
 
 	// Render the name of the selected ship
 	ubyte old_alpha = grtext_GetAlpha();

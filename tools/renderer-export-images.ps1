@@ -1,6 +1,27 @@
 # Exact native screenshot qualification, including the shipped uncompressed TGA
 # writer's 5-bit channels. No tolerance, orientation or alpha exceptions.
 # Subtitle cases separately require their intentional bottom text overlay.
+function Test-RendererDisplayAlphaImage {
+    param([string]$Image,[double]$Gamma)
+    if ($Gamma -le 0) { throw 'Invalid image transfer gamma' }
+    Add-Type -AssemblyName System.Drawing -ErrorAction Stop
+    $bitmap = [Drawing.Bitmap]::new($Image)
+    try {
+        $left = $bitmap.GetPixel(80,90); $right = $bitmap.GetPixel(240,90)
+        $white = [math]::Round(255*[math]::Pow(.25,1/$Gamma))
+        $red = [math]::Round(255*[math]::Pow(.125,1/$Gamma))
+        $blue = [math]::Round(255*[math]::Pow(.25+.75*[math]::Pow(64.0/255,$Gamma),1/$Gamma))
+        $actual = @($left.R,$left.G,$left.B,$left.A,$right.R,$right.G,$right.B,$right.A)
+        $expected = @($white,$white,$blue,255,$red,0,64,255)
+        for ($i=0; $i -lt $actual.Count; ++$i) {
+            if ([math]::Abs($actual[$i]-$expected[$i]) -gt 2) {
+                throw "Display image transfer failed channel $i : $($actual[$i]) expected $($expected[$i]) at gamma $Gamma"
+            }
+        }
+        [ordered]@{gamma=$Gamma; rgba=$actual; expected=$expected}
+    } finally { $bitmap.Dispose() }
+}
+
 function Test-RendererExportImage {
     param([string]$Reference,[string]$Export,[int]$Scale=1,[bool]$Tga=$false,[bool]$Upload1555=$false,[int]$SubtitleTop=-1)
     if (!("RendererExportImageCheck" -as [type])) {
