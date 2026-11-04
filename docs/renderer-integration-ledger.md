@@ -1,5 +1,36 @@
 # Renderer game integration
 
+## November 3: observer source classification and allocation-owned following
+
+Player_object identity alone is not a first-person ship: native observer mode
+reuses that object. Main-view capture now requires OBJ_PLAYER before admitting
+ship-local effects/cockpit policy. Roaming/piggyback observers keep floating
+auxiliary views, not nonexistent embedded monitor regions.
+
+Found a separate pre-existing source ownership defect: piggy_sig was stored but
+ignored by both Player.cpp movement and SceneModels.cpp camera exclusions.
+Both now use GetPlayerObserverTarget, which validates the stored allocation
+generation and rejects missing/dead/dummy targets. On target loss the game
+retains the last observer pose and restores roaming control; it does not call
+the observer-entry routine again or emit its inventory/events twice.
+
+The new observer-routing revision2 uses native enter/exit calls, then deletes
+the followed target and creates another in exactly the same slot. It proves
+the new allocation is NOT followed, roaming control recovers, both monitor
+requests survive, and normal ship/cockpit policy returns.003/006 pass clean and
+SSAA2/MSAA4/AO/bloom/motion/field320. Images inspected; target monitor correctly
+becomes static on deletion. Guided-routing003/006 effects still passes. All8
+ordinary500 clean/exact images remain pixel-identical to aa57954. Root3/3 pass.
+Evidence qual-observer-lifetime-{effects,clean,guided}-20261103 and
+qual-camera-ownership-ordinary-20261103; earlier qual-observer-routing-* tested
+classification before the allocation fix and is not its final qualification.
+Binary F5BBC9EE6CDA5DE1CE57B36E6DDE5113C15EFD0F22CC3E60E4E52BC9719CEFCD.
+
+New camera fixtures are isolated in GameCameraCapture.cpp, explicitly gated by
+active capture and inspection, not embedded in the normal game-loop schedule.
+These are offline rendering/source-lifecycle tests, not multiplayer transport
+acceptance. Release gate/Candidate/Previous/main workspace remain untouched.
+
 ## November 3: guided-camera ownership instead of a stale monitor latch
 
 Removed Guided_owner/Guided_missile_smallview duplicate state. Main camera and

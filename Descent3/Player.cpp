@@ -794,6 +794,17 @@ void SetupPlayerCamera()
 }
 
 
+object* GetPlayerObserverTarget(int slot)
+{
+	if (slot < 0 || slot >= MAX_PLAYERS) return nullptr;
+	const auto& player = Players[slot];
+	if (player.piggy_objnum < 0 || player.piggy_objnum > Highest_object_index) return nullptr;
+	auto* target = &Objects[player.piggy_objnum];
+	if (target->type == OBJ_NONE || target->type == OBJ_DUMMY || (target->flags & OF_DEAD) ||
+		(target->handle & HANDLE_COUNT_MASK) != player.piggy_sig) return nullptr;
+	return target;
+}
+
 // Does actions for the given player slot
 void DoPlayerFrameForOne(int slot)
 {
@@ -809,10 +820,15 @@ void DoPlayerFrameForOne(int slot)
 	// If piggy backing observer, then set position relative to observed object
 	if (obj->type == OBJ_OBSERVER && Players[slot].piggy_objnum != -1)
 	{
-		object* observed = &Objects[Players[slot].piggy_objnum];
-		ObjSetPos(obj, &observed->pos, observed->roomnum, &observed->orient, false);
-
-		obj->mtype.phys_info = observed->mtype.phys_info;
+		if (auto* observed = GetPlayerObserverTarget(slot)) {
+			ObjSetPos(obj, &observed->pos, observed->roomnum, &observed->orient, false);
+			obj->mtype.phys_info = observed->mtype.phys_info;
+		} else {
+			// Stay at the last camera pose and become a roaming observer. Do not
+			// re-enter observer mode (which emits inventory/events a second time).
+			Players[slot].piggy_objnum = -1; Players[slot].piggy_sig = 0;
+			SetObjectControlType(obj, CT_FLYING); obj->movement_type = MT_PHYSICS;
+		}
 	}
 
 	if (obj->type == OBJ_PLAYER || obj->type == OBJ_OBSERVER && obj->id == Player_num)

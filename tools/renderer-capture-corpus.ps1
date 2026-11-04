@@ -50,7 +50,7 @@ param(
     [switch]$HistoryProbe,
     [switch]$DeformationProbe,
     [string]$DemoFile = '',
-    [ValidateSet('ordinary','guided-routing','gameplay-reload','gameplay-roundtrip','fog-residency','ship-preview','image-alpha','image-lifecycle','image-settings','automap-cache','automap-lifecycle','automap-settings','retirement','save-export','save-settings','auxiliary-lifecycle','modal-ui','save-dialog','save-dialog-accept','quicksave','decoded-movie','decoded-movie-paletted','decoded-movie-subtitles','decoded-movie-screenshot','message-consoles','screenshot-normal','screenshot-clean','screenshot-double','screenshot-tga','demo-movie')][string]$Scenario = 'ordinary'
+    [ValidateSet('ordinary','guided-routing','observer-routing','gameplay-reload','gameplay-roundtrip','fog-residency','ship-preview','image-alpha','image-lifecycle','image-settings','automap-cache','automap-lifecycle','automap-settings','retirement','save-export','save-settings','auxiliary-lifecycle','modal-ui','save-dialog','save-dialog-accept','quicksave','decoded-movie','decoded-movie-paletted','decoded-movie-subtitles','decoded-movie-screenshot','message-consoles','screenshot-normal','screenshot-clean','screenshot-double','screenshot-tga','demo-movie')][string]$Scenario = 'ordinary'
 )
 
 # Run only copied installations and copied pilot/save data. Never point Runtime

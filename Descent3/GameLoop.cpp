@@ -65,6 +65,7 @@
 #include "bsp.h"
 #include "gauges.h"
 #include "SmallViews.h"
+#include "GameCameraCapture.h"
 #include "GameRoomCoronas.h"
 #include "newui.h"
 #include "Inventory.h"
@@ -2935,7 +2936,8 @@ static GameMainView CaptureGameMainView()
 	result.world = MakeGameSceneView(d3scene::ViewKind::Main,1,viewer,viewer->pos,viewer->roomnum,
 		viewer->orient,Render_zoom,rear,{x1,y1,x2-x1,y2-y1},{anchor_x,anchor_y,Game_window_w,Game_window_h});
 	result.display_viewport = {Game_window_x,Game_window_y,Game_window_w,Game_window_h};
-	result.player_first_person = viewer == Player_object && !rear;
+	// Observer mode reuses Player_object, but has no ship-local cockpit/effects.
+	result.player_first_person = viewer == Player_object && viewer->type == OBJ_PLAYER && !rear;
 	return result;
 }
 
@@ -3505,54 +3507,15 @@ void GameRenderFrame(void)
 				Terrain_sky.star_color[i] = GR_RGB(255,tint == 1 ? 200 : 255,tint == 2 ? 200 : 255);
 			}
 		}
-		// Bounded hidden fixture: use a real weapon object but hold its motion to
-		// isolate monitor ownership transitions from flight/collision behavior.
-		const bool guided_fixture = FindArg("-scene-guided-routing-probe") && AutomatedCaptureFrameIndex() >= 0;
-		if (guided_fixture) {
-			static int owner = OBJECT_HANDLE_NONE;
-			const int index = AutomatedCaptureFrameIndex();
-			if (index == 0) {
-				ResetSmallViews();
-				const int weapon = FindWeaponName("Guided");
-				const int created = weapon < 0 ? -1 : FireWeaponFromObject(Player_object,weapon,-1,true,false);
-				if (created < 0) Error("Guided routing fixture could not create its weapon");
-				auto& missile = Objects[created];
-				missile.movement_type = MT_NONE; missile.control_type = CT_NONE; missile.lifeleft = 100;
-				Players[Player_num].guided_obj = &missile; owner = missile.handle;
-				CreateSmallView(SVW_LEFT,owner,SVF_CROSSHAIRS,0,0,-1,"Guided");
-			}
-			if (index < 35 && !ObjGet(owner)) Error("Guided routing source retired before fixture completion");
-			if (index == 10) CreateSmallView(SVW_LEFT,Player_object->handle,SVF_POPUP|SVF_REARVIEW,0,0,-1,"Rear popup");
-			if (index == 15) CloseSmallView(SVW_LEFT);
-			if (index == 20) CreateSmallView(SVW_RIGHT,owner,SVF_CROSSHAIRS,0,0,-1,"Guided");
-			if (index == 25) CloseSmallView(SVW_LEFT);
-			if (index == 30) CreateSmallView(SVW_RIGHT,Player_object->handle,SVF_REARVIEW,0,0,-1,"Rear");
-			if (index == 35) ReleaseGuidedMissile(Player_num);
-			const bool in_monitor = index < 10 || (index >= 15 && index < 30);
-			if (GuidedMissileInSmallView() != in_monitor) Error("Guided camera routing disagrees with live monitor ownership");
-		}
+		RunGameCameraCaptureTransitions();
 		const auto main_view = CaptureGameMainView();
-		if (guided_fixture) {
-			const int index = AutomatedCaptureFrameIndex();
-			const bool full = (index >= 10 && index < 15) || (index >= 30 && index < 35);
-			const auto* expected = full ? Players[Player_num].guided_obj : Player_object;
-			if (!expected || main_view.world.camera_owner != uint32_t(expected->handle))
-				Error("Guided routing selected the wrong physical main camera");
-			if (index % 5 == 0) AutomatedCaptureLog("scene guided routing frame=%d small=%d main_guided=%d owner=%u",
-				index,GuidedMissileInSmallView(),full,main_view.world.camera_owner);
-		}
 		if (FindArg("-scene-view-deformation-probe") && AutomatedCapturePending()) {
 			const auto& effect = main_view.world.world_deformation;
 			AutomatedCaptureLog("scene viewer deformation owner=%u displacement=%.6g,%.6g,%.6g seed=%u",
 				main_view.world.camera_owner,effect.displacement.x,effect.displacement.y,effect.displacement.z,effect.seed);
 		}
 		const auto hud_layout = CaptureGameHUDLayout();
-		if (guided_fixture) {
-			const int index = AutomatedCaptureFrameIndex();
-			const bool full = (index >= 10 && index < 15) || (index >= 30 && index < 35);
-			if ((hud_layout.aim == HUDAimMode::Guided) != full)
-				Error("Guided HUD disagrees with the physical main camera");
-		}
+		ValidateGameCameraCapture(main_view,hud_layout);
 		const auto auxiliary_source = CaptureGameAuxiliaryViews(main_view);
 		if (FindArg("-scene-history-export-probe") && AutomatedCaptureFrameIndex() == 20) {
 			const int save_arg = FindArg("-capture-save-output");
@@ -3565,6 +3528,7 @@ void GameRenderFrame(void)
 			PrepareAutomapInspection() : PrepareGamePresentation(true,&main_view,&screen_overlays,&hud_layout);
 		const ModuleSceneScope module_scene(presentation);
 		const auto auxiliary_schedule = PrepareGameAuxiliarySchedule(auxiliary_source,*presentation);
+		ValidateGameCameraCapture(auxiliary_schedule);
 		CommitGameAuxiliaryTimers(auxiliary_schedule);
 		if (FindArg("-scene-auxiliary-replay-probe") && CommitGameAuxiliaryTimers(auxiliary_schedule))
 			Error("Auxiliary display timers advanced twice in one frame");

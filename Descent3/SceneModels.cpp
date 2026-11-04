@@ -257,9 +257,8 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::Presenta
         if (!source) throw std::logic_error("Object changed during presentation preparation");
         owner.visible = source->type != OBJ_DUMMY;
         if (source->type == OBJ_OBSERVER && source->id >= 0 && source->id < MAX_PLAYERS) {
-            const int followed = Players[source->id].piggy_objnum;
-            if (followed >= 0 && followed <= Highest_object_index && Objects[followed].type != OBJ_NONE)
-                owner.camera_hidden_objects.push_back(static_cast<uint32_t>(Objects[followed].handle));
+            if (const auto* followed = GetPlayerObserverTarget(source->id))
+                owner.camera_hidden_objects.push_back(static_cast<uint32_t>(followed->handle));
         }
         if (source->flags & OF_ATTACHED) {
             const auto* parent = ObjGet(source->attach_ultimate_handle);

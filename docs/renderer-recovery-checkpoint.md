@@ -1,5 +1,24 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November 3 — observer camera classification and target generation
+
+Main capture now requires OBJ_PLAYER for player_first_person, not pointer
+equality alone (observer reuses Player_object). Shared GetPlayerObserverTarget
+validates piggy generation; movement and renderer exclusion both consume it.
+Lost/dead/recycled targets restore roaming at last pose without re-entering
+observer gameplay/events. New observer-routing revision2 proves native roam,
+piggyback, delete/same-slot replacement, recovery and return to player.
+003/006 clean/effects pass, guided effects003/006 passes, all8 ordinary500
+clean/exact EXACT to aa57954. Root3/3 pass. Images inspected.
+Evidence qual-observer-lifetime-{effects,clean,guided}-20261103 and
+qual-camera-ownership-ordinary-20261103. Earlier observer-routing captures only
+cover classification, not target lifetime. Current runtime/build hash
+F5BBC9EE6CDA5DE1CE57B36E6DDE5113C15EFD0F22CC3E60E4E52BC9719CEFCD.
+New guided/observer fixture machinery extracted to GameCameraCapture.cpp/h;
+ordinary rendering has no fixture mutation, guards need active capture+inspection.
+No processes active. Only unrelated untracked lib/gitinfo.h to preserve.
+Continue migration; no-probe release gate and protected installations unchanged.
+
 ## November 3 — guided monitor ownership repair
 
 Removed stale guided-camera Boolean/owner latches. Query live slots against

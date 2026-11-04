@@ -8,6 +8,7 @@ SET (MAIN_SOURCES
 		Descent3/SceneAutomap.cpp
 		Descent3/SceneObservations.cpp
 		Descent3/SceneFrame.cpp
+		Descent3/GameCameraCapture.cpp
 		Descent3/GameVisualEffects.cpp
 		Descent3/GameVisualEffects.h
 		Descent3/GameVisualClock.h

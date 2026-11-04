@@ -1,6 +1,13 @@
 {
   "schemaVersion": 1,
   "scenarios": {
+    "observer-routing": {
+      "revision": 2, "minimumFrame": 35, "inspectionRequired": true,
+      "arguments": ["-scene-gl-audit", "-scene-observer-routing-probe", "-capture-series-from", "5", "-capture-series-until", "30", "-capture-series-stride", "5"],
+      "evidenceFrames": [5,10,15,20,25,30],
+      "requiredLog": ["scene observer routing frame=5 observing=1 ship_local=0 cockpit=0", "scene observer routing frame=20 observing=1 ship_local=0 cockpit=0", "scene observer replacement old=.+same_slot=1 followed=0", "scene observer routing frame=30 observing=0 ship_local=1"],
+      "purpose": "Native roaming/piggyback observer transitions and return to player; no ship-local effects or cockpit, both auxiliary cameras remain admitted as floating views. Offline rendering/lifecycle qualification, not multiplayer transport."
+    },
     "guided-routing": {
       "revision": 1, "minimumFrame": 40, "inspectionRequired": true,
       "arguments": ["-scene-gl-audit", "-scene-guided-routing-probe", "-capture-series-from", "5", "-capture-series-until", "35", "-capture-series-stride", "5"],

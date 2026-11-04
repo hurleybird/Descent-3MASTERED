@@ -192,6 +192,9 @@ void PlayerSetHUDNameFOV (int fov);
 // Switches a player object to observer mode
 void PlayerSwitchToObserver (int slot,int observer_mode,int piggy_objnum=0);
 
+// Resolve the followed allocation, not whichever object now occupies its slot.
+object* GetPlayerObserverTarget(int slot);
+
 // Stops a player from observing
 void PlayerStopObserving (int slot);
 
