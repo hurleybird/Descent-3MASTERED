@@ -68,6 +68,25 @@ d3scene::RoomState box(d3scene::SceneAssets& assets,int id,float z) {
 }
 int runFogTests() {
     {
+        using M = d3scene::FogIntegrationMode;
+        check(d3scene::fogFieldWidth() == 320,"Normal fog quality differs from qualified field width");
+        check(d3scene::fogFieldWidth("32") == 32 && d3scene::fogFieldWidth("640") == 640,"Supported field extent rejected");
+        for (const auto invalid : {"","0","31","641","-320","320junk","999999999999999999999"}) {
+            bool bad_width = false;
+            try { d3scene::fogFieldWidth(invalid); } catch (const std::invalid_argument&) { bad_width = true; }
+            check(bad_width,"Invalid field width entered production policy");
+        }
+        check(d3scene::chooseFogIntegration(M::Automatic,true,false) == M::Field,"Capable perspective view did not default to field fog");
+        check(d3scene::chooseFogIntegration(M::Automatic,false,false) == M::Exact,"Automatic fog lost noncompute fallback");
+        check(d3scene::chooseFogIntegration(M::Exact,true,false) == M::Exact,"Explicit exact reference was ignored");
+        check(d3scene::chooseFogIntegration(M::Field,true,false) == M::Field,"Explicit field reference was ignored");
+        check(d3scene::chooseFogIntegration(M::Automatic,true,true) == M::Exact,"Orthographic view used perspective fog field");
+        check(d3scene::chooseFogIntegration(M::Field,false,true) == M::Exact,"Orthographic reference demanded unused compute support");
+        bool rejected = false;
+        try { d3scene::chooseFogIntegration(M::Field,false,false); } catch (const std::invalid_argument&) { rejected = true; }
+        check(rejected,"Explicit unsupported fog field silently changed method");
+    }
+    {
         // A broad, shallow clear connector between fogged rooms. Enabling its
         // authored fog must remove both internal boundaries, including for an
         // eye inside that connector, without changing previously held assets.

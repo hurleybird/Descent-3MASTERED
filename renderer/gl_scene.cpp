@@ -24,6 +24,18 @@
 extern int Last_texel_unit_set;
 
 namespace {
+bool SceneFogFieldEnabled(const d3scene::Camera& camera) {
+    const bool exact = FindArg("-scene-fog-exact") != 0;
+    const bool field = FindArg("-scene-fog-field") != 0;
+    if (exact && field) Error("Choose only one scene fog reference mode");
+    const bool supported = (RendererOpenGLMajorVersion > 4 ||
+        (RendererOpenGLMajorVersion == 4 && RendererOpenGLMinorVersion >= 3)) &&
+        glDispatchCompute && glBindImageTexture && glMemoryBarrier;
+    const auto request = exact ? d3scene::FogIntegrationMode::Exact :
+        (field ? d3scene::FogIntegrationMode::Field : d3scene::FogIntegrationMode::Automatic);
+    return d3scene::chooseFogIntegration(request,supported,camera.projection.orthographic_depth_scale != 0) ==
+        d3scene::FogIntegrationMode::Field;
+}
 const std::string& FogFieldDefinitions() {
     static const std::string text="\n#define SCENE_FOG_TILE_SIDE "+std::to_string(d3scene::FogFieldTileSide)+
         "\n#define SCENE_FOG_HEADER_WORDS "+std::to_string(d3scene::FogFieldHeaderWords)+
@@ -1197,12 +1209,12 @@ void GL4Renderer::PrepareSceneViewTables(const d3scene::PreparedView& prepared) 
         size_t source_fog_nodes = 0,view_fog_nodes = 0;
         if (prepared.view().collection == 0) {
             const auto& volumes = d3scene::fogVolumes(frame.data());
+            const bool field = SceneFogFieldEnabled(demand.camera);
             for (size_t i = 0; i < volumes.size(); ++i) {
                 if (!d3scene::fogMayIntersectView(volumes[i].bounds,demand.camera,optical_frustum)) continue;
                 d3scene::prepareFogViewNodes(volumes[i],demand.camera,optical_frustum,fog_nodes);
                 // Source geometry is immutable. Camera containment belongs to
                 // this view's packed traversal entry, alongside its node range.
-                const bool field=FindArg("-scene-fog-field") && demand.camera.projection.orthographic_depth_scale==0;
                 fog_entries.insert(fog_entries.end(),{int32_t(i),int32_t((fog_record_start+fog_records.size())/4)+(field ? int(d3scene::FogFieldHeaderWords/4) : 0),int32_t(fog_nodes.size()),
                     d3scene::fogWinding(volumes[i],demand.camera.transform.position)});
                 if (field) {
@@ -1527,8 +1539,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     }
     PrepareSceneViewTables(prepared);
     check_scene_error("frame upload");
-    const bool field_fog = FindArg("-scene-fog-field") && scene_view_fog.count &&
-        visibility.camera.projection.orthographic_depth_scale == 0;
+    const bool field_fog = scene_view_fog.count && SceneFogFieldEnabled(visibility.camera);
     const size_t fog_mode = scene_view_fog.count == 0 ? 0 : (field_fog ? 2 : 1);
     const bool particle_shader = std::any_of(passes.begin(),passes.end(),[](const d3scene::ViewPass& pass) {
         return pass.kind == d3scene::ViewPassKind::SoftVolumes;
@@ -1844,8 +1855,8 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         }
         const int width_arg = FindArg("-scene-fog-field-width");
         const char* width_text = width_arg ? GetArg(width_arg+1) : nullptr;
-        const int width = width_text ? std::atoi(width_text) : 160;
-        if (width < 32 || width > 640) Error("Fog field experiment width must be 32..640");
+        if (width_arg && !width_text) Error("Fog field width requires a value");
+        const int width = d3scene::fogFieldWidth(width_text);
         const int height = (std::max)(1,(std::min)(320,int(std::ceil(double(width)*view.viewport.height/view.viewport.width))));
         const auto allocate = [&](GLuint& texture,int depth,GLint format = GL_RGBA32F) {
             if (!texture) glGenTextures(1,&texture);

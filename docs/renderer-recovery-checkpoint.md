@@ -1,5 +1,20 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November 3 — qualified field320 default (supersedes old opt-in notes)
+
+User was explicitly told the qualified fast fog path is becoming default.
+Normal capable perspective views now choosefield320, exact available via
+-scene-fog-exact; automatic noncompute/orthographic fallback remains exact.
+Shared pure policy used in preparation+execution; malformed widths rejected.
+Root3/3 pass. All8 default1500 images EXACT to9198503 explicitfield320; all8
+explicitexact500 EXACT to old exact.001/007 effects default/field pairs EXACT.
+Private runtime/out/default-fog-working.exe hashB8CC4AAC598153135C712CD0FA67FD93FE294AA252BEFF0BF269D12419E09B47.
+Good evidence qual-default320-*,qual-default-policy-*, suffixed20261103.
+EXCLUDE earlierqual-default-fog-* (copy raced linker, prior executable) and
+qual-default-fog-verified-* (interim160-column default; comparison caught it).
+No live processes. Credits unchanged62044.8730600000; last51%included used.
+No-probe gate remains closed. Main/Candidate/Prev unchanged. Continue integration.
+
 ## November 3 — parent UI paint ownership repaired
 
 Continued afterc95b538; save-dialog acceptance found parent thumbnail vanished

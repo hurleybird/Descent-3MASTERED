@@ -13,7 +13,7 @@ param(
     [ValidateSet(0,1,2,4)][int]$Supersampling = 0,
     [ValidateSet(-1,0,2,4,8)][int]$MsaaSamples = -1,
     [ValidateSet('exact','field')][string]$FogMethod = 'exact',
-    [ValidateRange(32,2048)][int]$FogFieldWidth = 320,
+    [ValidateRange(32,640)][int]$FogFieldWidth = 320,
     [switch]$SceneInspection,
     [switch]$VertexLighting,
     [switch]$TerrainProbe,
@@ -331,6 +331,7 @@ try {
         if ($MirrorCameraProbe) { $arguments += '-scene-mirror-camera-probe' }
         if ($ViewImageProbe) { $arguments += '-scene-view-image-probe' }
         if ($FogMethod -eq 'field') { $arguments += @('-scene-fog-field','-scene-fog-field-width',"$FogFieldWidth") }
+        else { $arguments += '-scene-fog-exact' }
         if ($HudProbe) { $arguments += '-scene-hud-probe' }
         if ($HudMessageProbe) { $arguments += '-scene-hud-message-probe' }
         if ($HudSmallProbe) { $arguments += '-scene-hud-small-probe' }

@@ -9,7 +9,24 @@
 #include <limits>
 #include <stdexcept>
 #include <unordered_set>
+#include <cstdlib>
+#include <cerrno>
 namespace d3scene {
+int fogFieldWidth(const char* option) {
+    if (!option) return DefaultFogFieldWidth;
+    char* end = nullptr;
+    errno = 0;
+    const long width = std::strtol(option,&end,10);
+    if (errno == ERANGE || end == option || *end || width < 32 || width > 640)
+        throw std::invalid_argument("Fog field width must be an integer in 32..640");
+    return int(width);
+}
+FogIntegrationMode chooseFogIntegration(FogIntegrationMode request,bool field_supported,bool orthographic) {
+    if (request == FogIntegrationMode::Exact || orthographic) return FogIntegrationMode::Exact;
+    if (field_supported) return FogIntegrationMode::Field;
+    if (request == FogIntegrationMode::Field) throw std::invalid_argument("Requested fog field requires compute support");
+    return FogIntegrationMode::Exact;
+}
 bool fogFieldCommonColor(const std::vector<FogVolume>& volumes,const std::vector<uint32_t>& candidates,Vec3& color) {
     color = {};
     if (candidates.empty()) return false;

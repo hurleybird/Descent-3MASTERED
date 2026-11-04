@@ -3,6 +3,12 @@
 #include "Scene.h"
 namespace d3scene {
 struct Camera;
+enum class FogIntegrationMode { Automatic, Exact, Field };
+constexpr int DefaultFogFieldWidth = 320;
+int fogFieldWidth(const char* option = nullptr);
+// Automatic uses the view field where supported; orthographic views retain
+// boundary integration. An explicitly requested unsupported field is an error.
+FogIntegrationMode chooseFogIntegration(FogIntegrationMode request,bool field_supported,bool orthographic);
 // Conservative storage eligibility, including repeated store-rounding growth.
 // This is an overflow guard, not an image-quality guarantee.
 bool fogFieldFitsHalf(double optical_bound,size_t volume_count);

@@ -1,5 +1,33 @@
 # Renderer game integration
 
+## November 3: qualified fog becomes the normal method
+
+Announced default-policy change: capable perspective views now select the
+qualified320-column view field without a command-line opt-in. Exact boundary
+integration remains available via-scene-fog-exact, and remains the automatic
+fallback for noncompute or orthographic views. Explicit unsupported field
+requests fail rather than silently changing method. One shared selection policy
+controls both traversal-record preparation and execution. No shader/fog-law/
+content-authoring change. The earlier160-column experimental default is gone.
+Width parsing rejects malformed/out-of-range values; supported32..640 agrees
+with the corpus harness. Unit tests cover default, overrides, fallback and widths.
+
+Root3/3 pass. All8 default1500-frame screenshots EXACT to9198503's explicit
+field320 captures. All8 explicit-exact500 images EXACT to prior exact references.
+001/007 SSAA2/MSAA4/AO/bloom/motion60-frame default/explicit-field pairs EXACT;
+001 image inspected. Raw qual-default320-saveg00*-20261103,
+qual-default-policy-exact-reference-20261103 and
+qual-default-policy-effects-saveg00{1,7}-{default,field}-20261103.
+Binary out/default-fog-working.exe SHA256
+B8CC4AAC598153135C712CD0FA67FD93FE294AA252BEFF0BF269D12419E09B47.
+
+EXCLUDED intermediates:qual-default-fog-* used previous binary after a failed
+copy while linking;qual-default-fog-verified-* used the caught160-column default.
+Neither is final-default qualification. No claim of a new performance gain
+against the previously timed field path: this makes that existing path normal.
+The harness still defaults to explicit exact for old experiment reproducibility;
+FogMethod field selects and records field320. Inspection/release gates unchanged.
+
 ## November 3: window-owned custom paint and actual save-dialog acceptance
 
 The new save-dialog-accept fixture exposed a real composition defect: parent
