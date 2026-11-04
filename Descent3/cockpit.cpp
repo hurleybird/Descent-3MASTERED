@@ -31,6 +31,7 @@
 #include "ship.h"
 #include "player.h"
 #include "room.h"
+#include "lighting.h"
 #include "hlsoundlib.h"
 #include "soundload.h"
 #include "sounds.h"
@@ -577,7 +578,6 @@ void StartCockpitShake(float mag, vector* vec)
 //////////////////////////////////////////////////////////////////////////////
 //	renders the cockpit.
 extern float GetTerrainDynamicScalar(vector* pos, int seg);
-extern void GetRoomDynamicScalar(vector* pos, room* rp, float* r, float* g, float* b);
 static void AdvanceCockpitBuffet(float delta)
 {
     if (Cockpit_info.buffet_amp > .04f) {

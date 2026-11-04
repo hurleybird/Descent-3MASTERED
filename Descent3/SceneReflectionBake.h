@@ -32,6 +32,9 @@ struct PrecomputedSpecularFaceSources
 extern std::vector<std::vector<PrecomputedSpecularFaceSources>> Precomputed_specular_sources;
 extern int Precomputed_specular_highest_room;
 void PrecomputeMineSpecularSources();
+int GetPrecomputedMineSpecularSourceCount(int roomnum,int facenum,bool split_match);
+int GetPrecomputedMineSpecularFieldSourceCount(int roomnum,int facenum);
+int GetPrecomputedMineSpecularNormalCount(int roomnum,int facenum);
 uint64_t SceneReflectionBakeRevision();
 inline bool FaceHasSmoothSpecularNormals(face* fp) {
     return fp->special_handle != BAD_SPECIAL_FACE_INDEX &&

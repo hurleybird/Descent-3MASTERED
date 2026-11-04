@@ -29,6 +29,9 @@
 
 #include "room_external.h"
 
+// Build authored mirror-face metadata, including the external room API fields.
+void ConsolidateMineMirrors();
+
 //Sizes for some global arrays
 #define MAX_ROOMS							400 		//max number of rooms in the world
 

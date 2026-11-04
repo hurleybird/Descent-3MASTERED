@@ -28,6 +28,9 @@
 
 #define VOLUME_SPACING	10.0
 
+// Source ambient-light query; does not change renderer state.
+void GetRoomDynamicScalar(vector* pos,room* rp,float* r,float* g,float* b,bool editor_preview = false);
+
 #define INVISIBLE_VOLUME_ELEMENT	0x01
 
 #define MAX_SPECULAR_INCREMENTS	4096

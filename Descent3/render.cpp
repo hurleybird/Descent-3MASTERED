@@ -2257,43 +2257,8 @@ static void SpecularAddPrecomputedSourceSet(SpecularBlock& specblock, const Prec
 		SpecularAddStaticSource(specblock, set.sources[i]);
 }
 
-int GetPrecomputedMineSpecularSourceCount(int roomnum, int facenum, bool split_match)
-{
-	if (roomnum < 0 || roomnum > Precomputed_specular_highest_room ||
-		roomnum >= (int)Precomputed_specular_sources.size())
-		return 0;
-	if (facenum < 0 || facenum >= (int)Precomputed_specular_sources[roomnum].size())
-		return 0;
 
-	const PrecomputedSpecularFaceSources& cached = Precomputed_specular_sources[roomnum][facenum];
-	return split_match ? cached.split.count : cached.exact.count;
-}
 
-int GetPrecomputedMineSpecularFieldSourceCount(int roomnum, int facenum)
-{
-	if (roomnum < 0 || roomnum > Precomputed_specular_highest_room ||
-		roomnum >= (int)Precomputed_specular_sources.size())
-		return 0;
-	if (facenum < 0 || facenum >= (int)Precomputed_specular_sources[roomnum].size())
-		return 0;
-
-	const PrecomputedSpecularFaceSources& cached = Precomputed_specular_sources[roomnum][facenum];
-	int count = cached.field.count;
-	for (const PrecomputedSpecularSourceSet& vertex_set : cached.field_vertices)
-		count = std::max(count, vertex_set.count);
-	return count;
-}
-
-int GetPrecomputedMineSpecularNormalCount(int roomnum, int facenum)
-{
-	if (roomnum < 0 || roomnum > Precomputed_specular_highest_room ||
-		roomnum >= (int)Precomputed_specular_sources.size())
-		return 0;
-	if (facenum < 0 || facenum >= (int)Precomputed_specular_sources[roomnum].size())
-		return 0;
-
-	return (int)Precomputed_specular_sources[roomnum][facenum].normals.size();
-}
 
 static const std::vector<vector>* SpecularGetResolvedNormals(room* rp, int face_index)
 {
@@ -5469,18 +5434,6 @@ static int obj_sort_func(const obj_sort_item* a, const obj_sort_item* b)
 		return 0;
 }
 
-// Simulation/retired-renderer adapter to the canonical immutable-volume sampler.
-// No draw state is changed by an ambient query.
-void GetRoomDynamicScalar(vector* pos, room* rp, float* r, float* g, float* b)
-{
-    const d3scene::VolumeGridView grid{{rp->min_xyz.x,rp->min_xyz.y,rp->min_xyz.z},
-        static_cast<uint32_t>(rp->volume_width),static_cast<uint32_t>(rp->volume_height),
-        static_cast<uint32_t>(rp->volume_depth),static_cast<float>(VOLUME_SPACING),rp->volume_lights};
-    auto color = d3scene::sampleVolume(grid,{pos->x,pos->y,pos->z});
-    const float scalar = rp->volume_lights ? d3scene::roomLightScalar(Gametime,rp->pulse_time,rp->pulse_offset,
-        static_cast<uint32_t>(rp-Rooms),(rp->flags & RF_STROBE) != 0,(rp->flags & RF_FLICKER) != 0,In_editor_mode != 0) : 1;
-    *r = color.x*scalar; *g = color.y*scalar; *b = color.z*scalar;
-}
 
 ubyte Trick_type = 0;
 //Render the objects and viseffects in a room.  Do a simple sort
@@ -6107,54 +6060,6 @@ void SortStates(state_limited_element* state_array, int cellcount)
 	}
 }
 
-// Builds a list of mirror faces for each room and allocs memory accordingly
-void ConsolidateMineMirrors()
-{
-	mprintf((0, "Consolidating mine mirrors!\n"));
-
-	for (int i = 0; i < MAX_ROOMS; i++)
-	{
-		room* rp = &Rooms[i];
-		if (!rp->used)
-			continue;
-		if (rp->mirror_faces_list)
-		{
-			mem_free(rp->mirror_faces_list);
-			rp->mirror_faces_list = NULL;
-			rp->num_mirror_faces = 0;
-		}
-		if (rp->mirror_face == -1)
-			continue;
-
-		// Count the number of faces that have the same texture as the mirror face
-		int num_mirror_faces = 0;
-		for (int t = 0; t < rp->num_faces; t++)
-		{
-			face* fp = &rp->faces[t];
-			if (fp->tmap == rp->faces[rp->mirror_face].tmap)
-				num_mirror_faces++;
-		}
-		if (num_mirror_faces == 0)
-		{
-			// No faces found?  Weird.
-			rp->mirror_face = 0;
-			continue;
-		}
-
-		rp->mirror_faces_list = (ushort*)mem_malloc(num_mirror_faces * sizeof(ushort));
-		ASSERT(rp->mirror_faces_list);
-		rp->num_mirror_faces = num_mirror_faces;
-
-		// Now go through and fill in our list
-		int count = 0;
-		for (int t = 0; t < rp->num_faces; t++)
-		{
-			face* fp = &rp->faces[t];
-			if (fp->tmap == rp->faces[rp->mirror_face].tmap)
-				rp->mirror_faces_list[count++] = t;
-		}
-	}
-}
 
 // RenderBlankScreen
 //	Renders a blank screen, to be used for UI callbacks to prevent Hall of mirrors with mouse cursor

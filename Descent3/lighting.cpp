@@ -20,6 +20,7 @@
 #include "texture.h"
 #include "gametexture.h"
 #include "lighting.h"
+#include "../renderer/SceneLighting.h"
 #include "lightmap.h"
 #include "descent.h"
 #include "game.h"
@@ -38,6 +39,17 @@
 #include "renderer.h"
 #include "terrain.h"
 #include "BOA.h"
+
+void GetRoomDynamicScalar(vector* pos, room* rp, float* r, float* g, float* b,bool editor_preview)
+{
+    const d3scene::VolumeGridView grid{{rp->min_xyz.x,rp->min_xyz.y,rp->min_xyz.z},
+        static_cast<uint32_t>(rp->volume_width),static_cast<uint32_t>(rp->volume_height),
+        static_cast<uint32_t>(rp->volume_depth),static_cast<float>(VOLUME_SPACING),rp->volume_lights};
+    auto color = d3scene::sampleVolume(grid,{pos->x,pos->y,pos->z});
+    const float scalar = rp->volume_lights ? d3scene::roomLightScalar(Gametime,rp->pulse_time,rp->pulse_offset,
+        static_cast<uint32_t>(rp-Rooms),(rp->flags & RF_STROBE) != 0,(rp->flags & RF_FLICKER) != 0,editor_preview) : 1;
+    *r = color.x*scalar; *g = color.y*scalar; *b = color.z*scalar;
+}
 
 #define NUM_DYNAMIC_CLASSES	7
 #define MAX_DYNAMIC_FACES	2000

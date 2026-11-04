@@ -47,7 +47,7 @@
 #include "gametexture.h"
 #include "room.h"
 #include "special_face.h"
-#include "render.h"
+#include "SceneReflectionBake.h"
 #include "gameloop.h"
 #include "SmallViews.h"
 

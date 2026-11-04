@@ -46,6 +46,54 @@
 #endif
 #include "bnode.h"
 
+void ConsolidateMineMirrors()
+{
+	mprintf((0, "Consolidating mine mirrors!\n"));
+
+	for (int i = 0; i < MAX_ROOMS; i++)
+	{
+		room* rp = &Rooms[i];
+		if (!rp->used)
+			continue;
+		if (rp->mirror_faces_list)
+		{
+			mem_free(rp->mirror_faces_list);
+			rp->mirror_faces_list = NULL;
+			rp->num_mirror_faces = 0;
+		}
+		if (rp->mirror_face == -1)
+			continue;
+
+		// Count the number of faces that have the same texture as the mirror face
+		int num_mirror_faces = 0;
+		for (int t = 0; t < rp->num_faces; t++)
+		{
+			face* fp = &rp->faces[t];
+			if (fp->tmap == rp->faces[rp->mirror_face].tmap)
+				num_mirror_faces++;
+		}
+		if (num_mirror_faces == 0)
+		{
+			// No faces found?  Weird.
+			rp->mirror_face = 0;
+			continue;
+		}
+
+		rp->mirror_faces_list = (ushort*)mem_malloc(num_mirror_faces * sizeof(ushort));
+		ASSERT(rp->mirror_faces_list);
+		rp->num_mirror_faces = num_mirror_faces;
+
+		// Now go through and fill in our list
+		int count = 0;
+		for (int t = 0; t < rp->num_faces; t++)
+		{
+			face* fp = &rp->faces[t];
+			if (fp->tmap == rp->faces[rp->mirror_face].tmap)
+				rp->mirror_faces_list[count++] = t;
+		}
+	}
+}
+
 //Global array of rooms
 room Rooms[MAX_ROOMS + MAX_PALETTE_ROOMS];
 room_changes Room_changes[MAX_ROOM_CHANGES];

@@ -45,6 +45,44 @@ d3scene::ReflectionAssetRef PublishRoomReflectionBake(int room,int face,uint32_t
     return published;
 }
 
+int GetPrecomputedMineSpecularSourceCount(int roomnum, int facenum, bool split_match)
+{
+	if (roomnum < 0 || roomnum > Precomputed_specular_highest_room ||
+		roomnum >= (int)Precomputed_specular_sources.size())
+		return 0;
+	if (facenum < 0 || facenum >= (int)Precomputed_specular_sources[roomnum].size())
+		return 0;
+
+	const PrecomputedSpecularFaceSources& cached = Precomputed_specular_sources[roomnum][facenum];
+	return split_match ? cached.split.count : cached.exact.count;
+}
+
+int GetPrecomputedMineSpecularFieldSourceCount(int roomnum, int facenum)
+{
+	if (roomnum < 0 || roomnum > Precomputed_specular_highest_room ||
+		roomnum >= (int)Precomputed_specular_sources.size())
+		return 0;
+	if (facenum < 0 || facenum >= (int)Precomputed_specular_sources[roomnum].size())
+		return 0;
+
+	const PrecomputedSpecularFaceSources& cached = Precomputed_specular_sources[roomnum][facenum];
+	int count = cached.field.count;
+	for (const PrecomputedSpecularSourceSet& vertex_set : cached.field_vertices)
+		count = std::max(count, vertex_set.count);
+	return count;
+}
+
+int GetPrecomputedMineSpecularNormalCount(int roomnum, int facenum)
+{
+	if (roomnum < 0 || roomnum > Precomputed_specular_highest_room ||
+		roomnum >= (int)Precomputed_specular_sources.size())
+		return 0;
+	if (facenum < 0 || facenum >= (int)Precomputed_specular_sources[roomnum].size())
+		return 0;
+
+	return (int)Precomputed_specular_sources[roomnum][facenum].normals.size();
+}
+
 struct SpecularFaceBasis
 {
 	vector center;

@@ -33,6 +33,7 @@
 #include "fireball.h"
 #include "descent.h"
 #include "render.h"
+#include "lighting.h"
 #include "gametexture.h"
 #include "game.h"
 #include "player.h"

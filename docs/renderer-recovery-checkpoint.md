@@ -1,5 +1,28 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November 4 — separate live world data helpers from retired draw module
+
+Moved GetRoomDynamicScalar to lighting.cpp/h, three reflection diagnostic count
+queries to SceneReflectionBake.cpp/h, ConsolidateMineMirrors to room.cpp/h.
+HUD no longer includes render.h for those queries. Ambient query now takes an
+explicit editor_preview=false argument: old implementation secretly read the
+private render.cpp In_editor_mode macro/debug variable. Gameplay behavior same;
+editor callers can explicitly request preview policy. Mirror metadata and room
+external ABI fields preserved. No geometry or draw algorithm changed.
+Root3/3/fullbuild pass after correcting that hidden editor-mode dependency;
+qual-source-world-helpers-20261104 all8 clean60 EXACT startup-gpu-after;
+qual-source-world-diagnostics-20261104 effects/field003/006 pass.
+LatestbinaryD19BDA0FEB8F6307358DC0A826ECE13567C721DEB9CFB5BB455AEC19E44C541C.
+Next audited removal: old deferred-world chain has no live root. render.cpp
+RenderRoomUnsorted/RenderRoom/RenderRoomObjects/CheckToRenderMineObjects plus
+BuildMirroredRoomListSub/BuildMirroredRoomList/RenderMirroredRoom/RenderMirrorRooms/
+RenderRoomOutline only call each other or removed roots. terrainrender.cpp
+RenderTerrain has no callers; only it calls RenderTerrainRooms and
+RenderAllTerrainObjects. These are the only producers of Postrender_list.
+Remove this family and postrender.cpp/h/CMake entries/includes together; keep
+shared source/geometry/math helpers and owned SceneTerrain/ScenePresentation.
+No next-task edits yet. Runtime current, no active game. Continue, not a yield.
+
 ## November 4 — retire obsolete GPU preupload interface
 
 Removed unused preupload entry points from lib/renderer.h, renderer dispatcher,

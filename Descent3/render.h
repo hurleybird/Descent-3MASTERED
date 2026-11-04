@@ -159,9 +159,6 @@ void PostUpdateAllLightGlows ();
 // Resets our light glows to zero
 void ResetLightGlows ();
 
-// Gets the dynamic light value for this position
-void GetRoomDynamicScalar (vector *pos,room *rp,float *r,float *g,float *b);
-
 // Sorts our texture states using the quicksort algorithm
 void SortStates (state_limited_element *state_array,int cellcount);
 
@@ -197,17 +194,11 @@ void RenderSpecularFacesFlat(room *rp);
 // Renders fog faces for a room
 void RenderFogFaces(room *rp, bool suppress_ao = true);
 
-// Builds a list of mirror faces for each room and allocs memory accordingly
-void ConsolidateMineMirrors();
-
 //Builds static meshes for all level geometry
 void MeshRooms();
 
 // Precomputes per-face borrowed specular sources after level geometry is loaded.
 void PrecomputeMineSpecularSources();
-int GetPrecomputedMineSpecularSourceCount(int roomnum, int facenum, bool split_match);
-int GetPrecomputedMineSpecularFieldSourceCount(int roomnum, int facenum);
-int GetPrecomputedMineSpecularNormalCount(int roomnum, int facenum);
 
 extern int Num_specular_faces_to_render, Num_real_specular_faces_to_render,
 	Num_fog_faces_to_render;
