@@ -53,12 +53,9 @@
 //	cockpit FX modifiers
 #define MAX_BUFFET_STRENGTH 0.75f
 #define BUFFET_PERIOD 0.25f
-#define COCKPIT_SHIFT_DELTA 0.02f
 #define COCKPIT_DISPLAY_CENTER_THRESHOLD 0.25f
 #define COCKPIT_DISPLAY_WIDTH_THRESHOLD 0.20f
-constexpr int COCKPIT_MOTION_OBJECT_HANDLE = 0x20000000;
 static uint64_t Cockpit_presentation_epoch = 0;
-static constexpr bool COCKPIT_PIXEL_MOTION_ENABLED = false;
 struct tCockpitCfgInfo
 {
 	char modelname[PSFILENAME_LEN];
@@ -88,7 +85,6 @@ struct tCockpitInfo
 	float buffet_wave;						// current sin angle of buffet 
 	float buffet_time;						// current position in buffet wave along time axis.
 	vector display_adjust_unit[MAX_SUBOBJECTS];	// cockpit-space offset per 1.0 display spread unit.
-	vector display_adjust_scaled[MAX_SUBOBJECTS];
 	int display_adjust_count;
 	bool display_adjust_available;
 
@@ -96,30 +92,11 @@ struct tCockpitInfo
 };
 
 static tCockpitInfo Cockpit_info;
-struct tCockpitPostPostSnapshot
-{
-	bool valid;
-	int frame_count;
-	vector view_pos;
-	matrix view_tmat;
-	vector light_vec;
-	float light_scalar_r;
-	float light_scalar_g;
-	float light_scalar_b;
-	float normalized_time[MAX_SUBOBJECTS];
-	bool display_adjust_active;
-	float display_spread;
-};
-static tCockpitPostPostSnapshot Cockpit_post_post_snapshot = {};
 float KeyframeAnimateCockpit(float delta);
 //	loads cockpit. model_name = NULL, then will not load in model name.
 void LoadCockpitInfo(const char* ckt_file, tCockpitCfgInfo* info);
 static void BuildCockpitDisplayAdjustments();
-static void ApplyCockpitDisplayAdjustments(float display_spread);
 static float GetCockpitDisplaySpread();
-static vector CockpitRootVectorToSubmodelParent(poly_model* pm, int submodel, vector root_vec);
-static void BeginCockpitMotionObject(vector* pos, matrix* orient);
-static void EndCockpitMotionObject();
 
 static float CockpitSubmodelCenterX(poly_model* pm, int submodel)
 {
@@ -129,23 +106,7 @@ static float CockpitSubmodelCenterX(poly_model* pm, int submodel)
 	return x;
 }
 
-static void BeginCockpitMotionObject(vector* pos, matrix* orient)
-{
-	if (!COCKPIT_PIXEL_MOTION_ENABLED)
-		return;
 
-	PolymodelMotionBeginObject(COCKPIT_MOTION_OBJECT_HANDLE, pos, orient);
-	rend_BeginMotionObject(COCKPIT_MOTION_OBJECT_HANDLE);
-}
-
-static void EndCockpitMotionObject()
-{
-	if (!COCKPIT_PIXEL_MOTION_ENABLED)
-		return;
-
-	rend_EndMotionObject();
-	PolymodelMotionEndObject();
-}
 
 static int CockpitSideFromCenter(float x, float threshold)
 {
@@ -195,16 +156,6 @@ static bool CockpitSubmodelShouldRenderPostPost(poly_model* pm, int submodel)
 	return CockpitSubmodelUsesTransparentMaterial(pm, submodel);
 }
 
-static void CockpitSetTransparentArmFaceFilter(bool enabled)
-{
-	if (!enabled || !Cockpit_alt_mode || Cockpit_info.transparent_arm_mask == 0)
-	{
-		PolymodelSetCockpitTransparentFaceFilter(-1, 0, false);
-		return;
-	}
-
-	PolymodelSetCockpitTransparentFaceFilter(Cockpit_info.model_num, Cockpit_info.transparent_arm_mask, true);
-}
 
 static void BuildCockpitDisplayAdjustments()
 {
@@ -215,7 +166,6 @@ static void BuildCockpitDisplayAdjustments()
 	for (int i = 0; i < MAX_SUBOBJECTS; i++)
 	{
 		vm_MakeZero(&Cockpit_info.display_adjust_unit[i]);
-		vm_MakeZero(&Cockpit_info.display_adjust_scaled[i]);
 	}
 
 	if (!pm || pm->n_models <= 0)
@@ -292,37 +242,7 @@ static void BuildCockpitDisplayAdjustments()
 	Cockpit_info.display_adjust_count = count;
 }
 
-static vector CockpitRootVectorToSubmodelParent(poly_model* pm, int submodel, vector root_vec)
-{
-	int ancestry[MAX_SUBOBJECTS];
-	int ancestry_count = 0;
-	int parent = pm->submodel[submodel].parent;
 
-	for (int mn = parent; mn >= 0 && ancestry_count < MAX_SUBOBJECTS; mn = pm->submodel[mn].parent)
-		ancestry[ancestry_count++] = mn;
-
-	for (int i = ancestry_count - 1; i >= 0; i--)
-	{
-		matrix m;
-		angvec* angs = &pm->submodel[ancestry[i]].angs;
-		vm_AnglesToMatrix(&m, angs->p, angs->h, angs->b);
-		root_vec = root_vec * m;
-	}
-
-	return root_vec;
-}
-
-static void ApplyCockpitDisplayAdjustments(float display_spread)
-{
-	for (int i = 0; i < Cockpit_info.display_adjust_count; i++)
-	{
-		vector cockpit_delta = Cockpit_info.display_adjust_unit[i] * display_spread;
-		Cockpit_info.display_adjust_scaled[i] =
-			CockpitRootVectorToSubmodelParent(Cockpit_info.model, i, cockpit_delta);
-	}
-	PolymodelSetSubmodelOffsetAdjustments(Cockpit_info.model_num, Cockpit_info.display_adjust_scaled,
-		Cockpit_info.display_adjust_count);
-}
 
 static float GetCockpitDisplaySpread()
 {
@@ -448,7 +368,6 @@ void InitCockpit(int ship_index)
 	Cockpit_info.nonlayered_mask = 0x00000000;
 	Cockpit_info.post_post_mask = 0x00000000;
 	Cockpit_info.transparent_arm_mask = 0x00000000;
-	Cockpit_post_post_snapshot.valid = false;
 	for (i = 0; i < Cockpit_info.model->n_models; i++)
 	{
 		if ((Cockpit_info.model->submodel[i].flags & SOF_VIEWER) || (Cockpit_info.model->submodel[i].flags & SOF_MONITOR_MASK))
@@ -488,7 +407,6 @@ void FreeCockpit()
 	Cockpit_info.display_adjust_available = false;
 	Cockpit_info.post_post_mask = 0;
 	Cockpit_info.transparent_arm_mask = 0;
-	Cockpit_post_post_snapshot.valid = false;
 	//	free ship specific stuff for hud-cockpit shared.
 	bm_FreeBitmap(HUD_resources.invpulse_bmp);
 	bm_FreeBitmap(HUD_resources.afterburn_bmp);
@@ -679,148 +597,9 @@ static void AdvanceCockpitBuffet(float delta)
     }
 }
 
-void RenderCockpit()
-{
-	object* player_obj = &Objects[Players[Player_num].objnum];
-	physics_info* player_phys = &player_obj->mtype.phys_info;
-	vector view_pos, light_vec;
-	matrix view_tmat;
-	float view_z, view_y, view_x, keyframe;
-	float light_scalar_r, light_scalar_g, light_scalar_b;
-	float normalized_time[MAX_SUBOBJECTS];
-	bool gauge_reset = false;
-	//	draw cockpit depending on current state
-	if (Cockpit_info.state == COCKPIT_STATE_DORMANT || Cockpit_info.model_num == -1)
-		return;
-	//	position cockpit correctly.
-	bsp_info* viewer_subobj = CockpitGetMonitorSubmodel(SOF_VIEWER);
-	if (!viewer_subobj) 
-	{
-		mprintf((0, "Cockpit missing viewer!\n"));
-		return;
-	}
-	view_z = viewer_subobj->offset.z - Cockpit_info.buffet_vec.z * Cockpit_info.buffet_amp * Cockpit_info.buffet_wave * 1.1f;
-	view_y = viewer_subobj->offset.y + Cockpit_info.buffet_vec.y * Cockpit_info.buffet_amp * Cockpit_info.buffet_wave;
-	view_x = viewer_subobj->offset.x + Cockpit_info.buffet_vec.x * Cockpit_info.buffet_amp * Cockpit_info.buffet_wave;
-	//@@	if (player_phys->rotthrust.x !=0.0f || player_phys->rotthrust.y != 0.0f) {
-	//@@		gauge_reset = true;
-	//@@		view_x += (player_phys->rotthrust.y*COCKPIT_SHIFT_DELTA/player_phys->full_rotthrust);
-	//@@		view_y -= (player_phys->rotthrust.x*COCKPIT_SHIFT_DELTA/player_phys->full_rotthrust);
-	//@@	}
-	//	create new orientation, so the cockpit should be facing the viewer
-	view_tmat = Viewer_object->orient;
-	view_pos = (view_tmat.fvec * view_z) + (view_tmat.uvec * view_y) + (view_tmat.rvec * view_x) + Viewer_object->pos;
-	view_tmat.fvec = -view_tmat.fvec;
-	view_tmat.rvec = -view_tmat.rvec;
-	//	lighting.
-	light_vec = -Viewer_object->orient.uvec;
-	if (OBJECT_OUTSIDE(player_obj))
-	{
-		float light_scalar = GetTerrainDynamicScalar(&player_obj->pos, CELLNUM(player_obj->roomnum));
-		light_scalar_r = light_scalar;
-		light_scalar_g = light_scalar;
-		light_scalar_b = light_scalar;
-	}
-	else
-	{
-		GetRoomDynamicScalar(&player_obj->pos, &Rooms[player_obj->roomnum], &light_scalar_r, &light_scalar_g, &light_scalar_b);
-	}
-	if (light_scalar_r < 0.1f)
-		light_scalar_r = 0.1f;
-	if (light_scalar_g < 0.1f)
-		light_scalar_g = 0.1f;
-	if (light_scalar_b < 0.1f)
-		light_scalar_b = 0.1f;
-	// Samir, I moved this from the DrawPolygonModel call below -JL
-	light_scalar_r *= .8f;
-	light_scalar_g *= .8f;
-	light_scalar_b *= .8f;
-
-	if (player_obj->effect_info)
-	{
-		light_scalar_r = std::min(1.0f, light_scalar_r + (player_obj->effect_info->dynamic_red));
-		light_scalar_g = std::min(1.0f, light_scalar_g + (player_obj->effect_info->dynamic_green));
-		light_scalar_b = std::min(1.0f, light_scalar_b + (player_obj->effect_info->dynamic_blue));
-	}
-	if (Players[player_obj->id].flags & PLAYER_FLAGS_HEADLIGHT)
-	{
-		light_scalar_r = 1.0;
-		light_scalar_g = 1.0;
-		light_scalar_b = 1.0;
-	}
-
-	// animate and draw
-	keyframe = KeyframeAnimateCockpit(Frametime);
-	SetNormalizedTimeAnim(keyframe, normalized_time, Cockpit_info.model);
-
-	bool display_adjust_active = false;
-	float display_spread = Cockpit_alt_mode ? GetCockpitDisplaySpread() : 0.0f;
-	if (display_spread > 0.0001f && Cockpit_info.display_adjust_available)
-	{
-		SetModelAnglesAndPos(Cockpit_info.model, normalized_time);
-		ApplyCockpitDisplayAdjustments(display_spread);
-		display_adjust_active = true;
-	}
-
-	//	must put after animation.
-	AdvanceCockpitBuffet(Frametime);
-
-	Cockpit_post_post_snapshot.valid = true;
-	Cockpit_post_post_snapshot.frame_count = FrameCount;
-	Cockpit_post_post_snapshot.view_pos = view_pos;
-	Cockpit_post_post_snapshot.view_tmat = view_tmat;
-	Cockpit_post_post_snapshot.light_vec = light_vec;
-	Cockpit_post_post_snapshot.light_scalar_r = light_scalar_r;
-	Cockpit_post_post_snapshot.light_scalar_g = light_scalar_g;
-	Cockpit_post_post_snapshot.light_scalar_b = light_scalar_b;
-	memcpy(Cockpit_post_post_snapshot.normalized_time, normalized_time, sizeof(normalized_time));
-	Cockpit_post_post_snapshot.display_adjust_active = display_adjust_active;
-	Cockpit_post_post_snapshot.display_spread = display_spread;
-
-	if (Cockpit_alt_mode)
-	{
-		RenderGaugeMonitorSurfaces(&view_pos, &view_tmat, normalized_time,
-			(Cockpit_info.animating || Cockpit_info.resized), gauge_reset);
-	}
-
-	//	draws lower z cockpit, and monitor glares after gauge renderering
-	rend_SetZBufferWriteMask(1);
-	rend_SetZBufferState(1);
-	{
-		renderer_3d_draw_call_scope cockpit_draw_scope(RENDERER_DRAW_CALL_3D_COCKPIT);
-		BeginCockpitMotionObject(&view_pos, &view_tmat);
-		PolymodelSetCockpitBatching(true);
-		CockpitSetTransparentArmFaceFilter(true);
-		DrawPolygonModel(&view_pos, &view_tmat, Cockpit_info.model_num, normalized_time, 0, &light_vec, light_scalar_r, light_scalar_g, light_scalar_b, Cockpit_info.nonlayered_mask, 0, 1);
-		CockpitSetTransparentArmFaceFilter(false);
-		PolymodelSetCockpitBatching(false);
-	}
-	rend_SetBloomSuppression(1.0f);
-	rend_SetZBufferState(0);
-	RenderGauges(&view_pos, &view_tmat, normalized_time, (Cockpit_info.animating || Cockpit_info.resized), gauge_reset);
-	rend_SetBloomSuppression(0.0f);
-	rend_SetZBufferWriteMask(1);
-	rend_SetZBufferState(1);
-	{
-		renderer_3d_draw_call_scope cockpit_draw_scope(RENDERER_DRAW_CALL_3D_COCKPIT);
-		PolymodelSetCockpitBatching(true);
-		CockpitSetTransparentArmFaceFilter(true);
-		DrawPolygonModel(&view_pos, &view_tmat, Cockpit_info.model_num, normalized_time, 0, &light_vec, light_scalar_r, light_scalar_g, light_scalar_b, Cockpit_info.layered_mask, 0, 1);
-		CockpitSetTransparentArmFaceFilter(false);
-		PolymodelSetCockpitBatching(false);
-	}
-	EndCockpitMotionObject();
-	rend_SetZBufferState(0);
-
-	if (display_adjust_active)
-		PolymodelClearSubmodelOffsetAdjustments();
-
-	Cockpit_info.resized = false;
-}
 
 // Publish the authored cockpit through the same model/pose contract as world
 // models. It has no fake gameplay owner and uses camera-local coordinates.
-// Geometry inspection deliberately does not claim gauge or HUD completion.
 void PrepareGameCockpit(d3scene::FrameData& frame, bool advance,const d3scene::FrameData* previous,bool retain_materials)
 {
     if (Cockpit_info.model_num < 0 || !Cockpit_info.model || !Player_object) return;
@@ -969,44 +748,7 @@ void PrepareGameCockpit(d3scene::FrameData& frame, bool advance,const d3scene::F
     PrepareGameCockpitGauges(frame,transforms,placement,Cockpit_info.animating);
 }
 
-bool CockpitHasPostPostElements()
-{
-	return Cockpit_info.model_num > -1 && Cockpit_info.post_post_mask != 0;
-}
 
-void RenderCockpitPostPost()
-{
-	if (!CockpitHasPostPostElements() || !Cockpit_post_post_snapshot.valid ||
-		(Cockpit_post_post_snapshot.frame_count != FrameCount &&
-		 Cockpit_post_post_snapshot.frame_count + 1 != FrameCount))
-	{
-		return;
-	}
-
-	if (Cockpit_post_post_snapshot.display_adjust_active)
-		ApplyCockpitDisplayAdjustments(Cockpit_post_post_snapshot.display_spread);
-
-	rend_SetZBufferWriteMask(0);
-	rend_SetZBufferState(0);
-	{
-		renderer_3d_draw_call_scope cockpit_draw_scope(RENDERER_DRAW_CALL_3D_COCKPIT);
-		PolymodelSetCockpitBatching(true);
-		CockpitSetTransparentArmFaceFilter(true);
-		DrawPolygonModel(&Cockpit_post_post_snapshot.view_pos, &Cockpit_post_post_snapshot.view_tmat,
-			Cockpit_info.model_num, Cockpit_post_post_snapshot.normalized_time, 0,
-			&Cockpit_post_post_snapshot.light_vec,
-			Cockpit_post_post_snapshot.light_scalar_r,
-			Cockpit_post_post_snapshot.light_scalar_g,
-			Cockpit_post_post_snapshot.light_scalar_b,
-			Cockpit_info.post_post_mask, 0, 1);
-		CockpitSetTransparentArmFaceFilter(false);
-		PolymodelSetCockpitBatching(false);
-	}
-	rend_SetZBufferWriteMask(1);
-
-	if (Cockpit_post_post_snapshot.display_adjust_active)
-		PolymodelClearSubmodelOffsetAdjustments();
-}
 
 //////////////////////////////////////////////////////////////////////////////
 //	

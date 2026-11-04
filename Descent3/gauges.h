@@ -35,15 +35,6 @@ void InitGauges(tStatMask gauge_mask);
 //	deinitializes cockpit gauges
 void CloseGauges();
 
-//	renders gauges
-void RenderGauges(vector *cockpit_pos, matrix *cockpit_mat, float *normalized_times, bool moving,bool reset=false);
-
-//	renders primary/secondary cockpit monitor surfaces before cockpit geometry
-void RenderGaugeMonitorSurfaces(vector *cockpit_pos, matrix *cockpit_mat, float *normalized_times, bool moving,bool reset=false);
-
-//	flags certain gauges to be modified next frame.
-void FlagGaugesModified(tStatMask mask_modified);
-
 //	sets gauges as functional
 void FlagGaugesFunctional(tStatMask mask);
 

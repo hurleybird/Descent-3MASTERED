@@ -1,5 +1,22 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November 4 — retire unreachable cockpit/gauge execution
+
+Removed RenderCockpit/RenderCockpitPostPost and private snapshot, motion hooks,
+shared-model offset mutation helpers; removed their exclusively called legacy
+gauge draw chain, per-quad batch storage and projected-vertex caches. About1176
+source lines removed. Owned PrepareGameCockpit/PrepareGameCockpitGauges unchanged;
+authored geometry, animation/buffet advancement and monitor functionality remain.
+Root3/3 and fullbuild pass. qual-cockpit-retirement-20261103 all8 ordinary500 EXACT
+53b2d9e; qual-cockpit-retirement-cinematic-20261104 effects/field003/006 all8PNG
+EXACT prior renderer-contract cinematic.003frame210 inspected with rear monitor.
+Binary1BA04693442A2341C0E48DEFCFEEB553BD104FD7EC4BD5EC0E9EEE8997597B94.
+Next upstream cleanup: model/newstyle.cpp cockpit batch/filter switches and
+model/polymodel.cpp submodel-offset globals now have no setters called anywhere.
+Remove those dead switches and branches, keep generic legacy model path required
+by remaining callers/oracles. No next-task edits yet. No performance win claimed
+for dead-code deletion. Keep working; no protected installs changed.
+
 ## November 3 — renderer contract no longer carries migration bypasses
 
 Removed PendingDomain/pending_domains, Presentation::requireExecutable and
