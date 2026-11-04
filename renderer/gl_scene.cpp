@@ -922,12 +922,14 @@ void GL4Renderer::PrepareSceneViewTables(const d3scene::PreparedView& prepared) 
         };
         bool rebuild_reflections = false;
         if (new_frame) {
+        PERF_MARKER_SCOPE("Scene.Upload.MeshRetirement");
         scene_meshes.releaseExpired([&](SceneMeshGpu& mesh) { ReleaseSceneMesh(mesh); });
         }
         // A publication with no field dependencies must not replace the
         // resident immutable field table with an empty one. This applies to
         // any field-free content, not a HUD/camera-kind exception.
         if (new_frame && frame.data().has_reflection_fields) {
+        PERF_MARKER_SCOPE("Scene.Upload.ReflectionDependencies");
         scene_reflection_dependencies.begin();
         scene_reflection_dependencies.addValue(0); // initialize the empty GPU buffer once
         for (const auto& room : frame.data().rooms) collectTable(room.surfaces);
@@ -941,7 +943,15 @@ void GL4Renderer::PrepareSceneViewTables(const d3scene::PreparedView& prepared) 
         // Stable frame addresses do not require clearing the whole level for
         // every view. Every demanded entry is fully assigned below (or copied
         // from a complete retained room table); unseen entries are never read.
-        scene_surface_ranges.resize(frame.data().compiled_surface_count);
+        // These are execution scratch, not the current publication's inventory.
+        // Shrinking for a small overlay makes the next world view reconstruct
+        // every level entry despite unchanged capacity. Retain the high-water
+        // size until scene retirement; all demanded entries are assigned below.
+        {
+            PERF_MARKER_SCOPE("Scene.Upload.SurfaceStorage");
+            if (scene_surface_ranges.size() < frame.data().compiled_surface_count)
+                scene_surface_ranges.resize(frame.data().compiled_surface_count);
+        }
         const auto reflection = [&](const d3scene::SurfaceBinding& surface) {
             SceneReflectionRanges reflection_ranges{};
             if (surface.reflection && surface.specular_strength > 0) {
@@ -978,6 +988,7 @@ void GL4Renderer::PrepareSceneViewTables(const d3scene::PreparedView& prepared) 
         // Reflection data is asset-owned, not view-owned. A HUD or mirror view
         // must not evict the main view's immutable fields every frame.
         if (rebuild_reflections) {
+            PERF_MARKER_SCOPE("Scene.Upload.ReflectionRebuild");
             for (const auto& room : frame.data().rooms) for (const auto& surface : room.surfaces) reflection(surface);
             for (const auto& surface : frame.data().terrain.materials) reflection(surface);
             for (const auto& mesh : frame.data().meshes) reflection(mesh.surface);
@@ -1001,6 +1012,7 @@ void GL4Renderer::PrepareSceneViewTables(const d3scene::PreparedView& prepared) 
             ranges.uv = ElementRange(start,static_cast<uint32_t>(uvs.size())-start);
         };
         const std::vector<uint32_t> no_lights;
+        PerfMarkersBegin("Scene.Upload.RoomTables");
         for (const auto room_index : visible_rooms) {
             const auto& room = frame.data().rooms[room_index];
             if (scene_room_bindings.size() <= size_t(room.number)) scene_room_bindings.resize(size_t(room.number)+1);
@@ -1032,6 +1044,8 @@ void GL4Renderer::PrepareSceneViewTables(const d3scene::PreparedView& prepared) 
             }
         }
         const auto& terrain = frame.data().terrain;
+        PerfMarkersEnd("Scene.Upload.RoomTables");
+        PerfMarkersBegin("Scene.Upload.TerrainTables");
         for (const auto& key : visible_terrain) {
             const auto p = key.first,b = key.second;
             const auto& patch = terrain.patches[p];
@@ -1041,6 +1055,8 @@ void GL4Renderer::PrepareSceneViewTables(const d3scene::PreparedView& prepared) 
             else add(surface,index,surface.light_indices);
         }
         d3scene::LightCandidateRange last_mesh_candidates;
+        PerfMarkersEnd("Scene.Upload.TerrainTables");
+        PerfMarkersBegin("Scene.Upload.MeshTables");
         ElementRange last_mesh_lights;
         bool mesh_candidates_uploaded = false;
         for (const auto mesh_index : visible_meshes) {
@@ -1062,7 +1078,10 @@ void GL4Renderer::PrepareSceneViewTables(const d3scene::PreparedView& prepared) 
                 scene_surface_ranges[mesh.surface.compiled_index].texture_uv = ElementRange(start,static_cast<uint32_t>(uvs.size())-start);
             }
         }
-        scene_part_ranges.resize(frame.data().compiled_part_count);
+        if (scene_part_ranges.size() < frame.data().compiled_part_count)
+            scene_part_ranges.resize(frame.data().compiled_part_count);
+        PerfMarkersEnd("Scene.Upload.MeshTables");
+        PerfMarkersBegin("Scene.Upload.ModelTables");
         for (const auto& key : visible_models) {
           const auto& object = frame.data().model_instances[key.first];
           const auto& model = frame.resolvedModel(key.first,key.second);
@@ -1092,6 +1111,7 @@ void GL4Renderer::PrepareSceneViewTables(const d3scene::PreparedView& prepared) 
             }
           }
         }
+        PerfMarkersEnd("Scene.Upload.ModelTables");
         PerfMarkersEnd("Scene.Upload.Tables");
         PerfMarkersBegin("Scene.Upload.Positions");
         static thread_local std::vector<d3scene::PositionPair> positions;
@@ -1193,7 +1213,7 @@ void GL4Renderer::PrepareSceneViewTables(const d3scene::PreparedView& prepared) 
         if (new_frame) scene_frame_owner = frame.shared_from_this();
         PerfMarkersEnd("Scene.Upload.GLBuffers");
         if (AutomatedCapturePending()) AutomatedCaptureLog("profile upload bindings=%u positions=%u uvs=%u influences=%u reflection_rebuild=%d frame_constants=%d",
-            unsigned(scene_surface_ranges.size()),unsigned(positions.size()),unsigned(uvs.size()),unsigned(indices.size()),rebuild_reflections,new_frame);
+            unsigned(frame.data().compiled_surface_count),unsigned(positions.size()),unsigned(uvs.size()),unsigned(indices.size()),rebuild_reflections,new_frame);
     }
     BindSceneTables();
 }

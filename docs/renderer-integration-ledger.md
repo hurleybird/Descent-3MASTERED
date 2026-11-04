@@ -1496,3 +1496,28 @@ exit (including affinity/setup failure). Defaults are unchanged. Pinned field
 005/007 captures at500frames match the earlier field captures exactly; forced
 one-second timeout correctly reports failure and leaves no game process.
 Evidence: qual-corpus-pinned-20261028 and qual-corpus-timeout-20261028.
+
+## Execution scratch high-water storage (November 3)
+
+World and small overlay publications shared execution scratch. Resizing its
+logical vector length down for an overlay made the next world reconstruct all
+compiled surface/part entries, even though capacity survived and only demanded
+entries were read. Retain high-water size until scene retirement instead. Every
+demanded entry is still fully assigned; diagnostics report the publication count,
+not scratch length. Added scoped table-phase markers to distinguish this cost
+from actual visible model/room lighting work.
+
+Dense007 scoped table preparation0.2802->0.0317ms, upload preparation0.3495->
+0.0951ms (sequential marked profiles, not whole-frame claims). Unmarked CPU2,
+uncapped field320 ABBA1500frames, median400..1199, before A/B then after A/B:
+0001.882/1.874 versus1.979/1.637ms (variable; no reliable claim),
+0050.946/1.025 versus0.772/0.780ms (~21% reduction),
+0071.658/1.636 versus1.460/1.422ms (~12.5% reduction). GPU unchanged.
+Evidence perf-highwater-* and profile-scratch-highwater-007-20261103; discard
+profile-table-owners-007-20261103 (overlapped build); use its final-labelled rerun.
+
+All eight ordinary500-frame images exactly match the prior accepted exact-mode
+corpus. Root contracts3/3 pass. Image, automap, auxiliary lifecycle003/006 and
+image quality transitions003/006 pass, including GL/retirement audits. Evidence
+qual-scratch-highwater-20261103 and qual-highwater-*-20261103. This does not yet
+establish universal superiority to the reconstructed pre-rewrite renderer.
