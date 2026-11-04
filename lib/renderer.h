@@ -862,10 +862,7 @@ char *rend_GetErrorMessage ();
 // Sets the error message string
 void rend_SetErrorMessage (char *str);
 
-// Preuploads a bitmap to the card
-void rend_PreUploadTextureToCard (int,int);
 void rend_UpdateBitmapTextureRegion(int handle, int x, int y, int width, int height);
-void rend_FreePreUploadedTexture (int,int);
 
 // Returns 1 if there is mid video memory, 2 if there is low vid memory, or 0 if there is large vid memory
 int rend_LowVidMem ();

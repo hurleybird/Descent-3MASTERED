@@ -1214,23 +1214,6 @@ void rend_SetErrorMessage(char* str)
 	strcpy(Renderer_error_message, str);
 }
 
-// Preuploads a bitmap to the card
-void rend_PreUploadTextureToCard(int a, int b)
-{
-	if (!Renderer_initted)
-		return;
-
-	renderer_inst->PreUploadTextureToCard(a, b);
-}
-
-void rend_FreePreUploadedTexture(int a, int b)
-{
-	if (!Renderer_initted)
-		return;
-
-	renderer_inst->FreePreUploadedTexture(a, b);
-}
-
 void rend_UpdateBitmapTextureRegion(int handle, int x, int y, int width, int height)
 {
 	if (!Renderer_initted)

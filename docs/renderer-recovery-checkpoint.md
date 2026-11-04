@@ -1,5 +1,21 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November 4 — retire obsolete GPU preupload interface
+
+Removed unused preupload entry points from lib/renderer.h, renderer dispatcher,
+IRenderer and GL4Renderer. Removed the empty GL4 FreePreUploadedTexture method
+and its sole live lightmap-info caller; actual lm_FreeLightmap remains, scene
+images own their data/lifetime. Historical renderer/ref sources untouched.
+Root3/3/fullbuild pass; qual-residency-api-roundtrip-20261104 effects/field003
+flight/fire/save/reload passes and all8PNG EXACT prior startup-gpu-roundtrip.
+Latestbinary1AF25A16C6B161D5D20D51F99EE1FBAA064008E5EEF1D6CC49EB44D486CE1D45.
+Next: isolate live source/game helpers still in old render.cpp before deleting
+more world execution. GetRoomDynamicScalar belongs with source lighting; three
+GetPrecomputedMineSpecular*Count queries belong with SceneReflectionBake; mirror
+metadata consolidation belongs with room data. Keep room_external ABI fields/
+metadata even if new renderer does not consume the old mirror list (external
+modules can). No next-task edits made yet. Runtime latest, no game active.
+
 ## November 4 — source paging no longer preuploads legacy GPU assets
 
 Removed bitmap/lightmap GPU preuploads from PageInLevelTexture/PageInAllData;

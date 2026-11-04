@@ -158,9 +158,6 @@ public:
 
 	//IMAGES
 	
-	// Preuploads a bitmap to the card
-	virtual void PreUploadTextureToCard(int, int) = 0;
-	virtual void FreePreUploadedTexture(int, int) = 0;
 	virtual void UpdateBitmapTextureRegion(int, int, int, int, int) {}
 
 	// Clears the texture cache

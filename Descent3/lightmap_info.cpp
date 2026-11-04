@@ -165,8 +165,6 @@ void FreeLightmapInfo(int handle)
 
 	if (LightmapInfo[handle].used == 0)
 	{
-		if (!Dedicated_server)
-			rend_FreePreUploadedTexture(LightmapInfo[handle].lm_handle, MAP_TYPE_LIGHTMAP);
 		lm_FreeLightmap(LightmapInfo[handle].lm_handle);
 
 		Free_lmi_list[--Num_of_lightmap_info] = handle;
