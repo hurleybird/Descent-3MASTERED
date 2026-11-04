@@ -1,6 +1,33 @@
 # Exact native screenshot qualification, including the shipped uncompressed TGA
 # writer's 5-bit channels. No tolerance, orientation or alpha exceptions.
 # Subtitle cases separately require their intentional bottom text overlay.
+function Compare-RendererImageRegion {
+    param([string]$Reference,[string]$Export,[int[]]$Region)
+    if ($Region.Count -ne 4 -or $Region[0] -lt 0 -or $Region[1] -lt 0 -or $Region[2] -le 0 -or $Region[3] -le 0) {
+        throw 'Invalid image comparison rectangle'
+    }
+    Add-Type -AssemblyName System.Drawing -ErrorAction Stop
+    $a = [Drawing.Bitmap]::new($Reference)
+    try {
+        $b = [Drawing.Bitmap]::new($Export)
+        try {
+            $right = $Region[0]+$Region[2]; $bottom = $Region[1]+$Region[3]
+            if ($right -gt $a.Width -or $right -gt $b.Width -or $bottom -gt $a.Height -or $bottom -gt $b.Height) {
+                throw 'Image comparison rectangle exceeds image extent'
+            }
+            $mismatches = 0; $populated = 0
+            for ($y=$Region[1]; $y -lt $bottom; ++$y) {
+                for ($x=$Region[0]; $x -lt $right; ++$x) {
+                    $color = $a.GetPixel($x,$y)
+                    if ($color.R+$color.G+$color.B -gt 0) { ++$populated }
+                    if ($color.ToArgb() -ne $b.GetPixel($x,$y).ToArgb()) { ++$mismatches }
+                }
+            }
+            [ordered]@{region=$Region; mismatches=$mismatches; populated=$populated}
+        } finally { $b.Dispose() }
+    } finally { $a.Dispose() }
+}
+
 function Test-RendererDisplayAlphaImage {
     param([string]$Image,[double]$Gamma)
     if ($Gamma -le 0) { throw 'Invalid image transfer gamma' }

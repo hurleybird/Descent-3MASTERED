@@ -1,6 +1,14 @@
 {
   "schemaVersion": 1,
   "scenarios": {
+    "save-dialog-accept": {
+      "revision": 1, "minimumFrame": 22, "inspectionRequired": true,
+      "previewInput": "saveg000", "dialogSaveSlot": 0, "uiExport": true,
+      "preservedUiRegion": [560,240,160,60],
+      "arguments": ["-capture-save-dialog-output", "{ui-output}", "-capture-save-dialog-accept", "-scene-save-image-audit", "-scene-independent-export-audit", "-scene-gl-audit"],
+      "requiredLog": ["scene UI capture result step=0", "scene UI capture result step=1", "scene UI capture result step=2", "native save dialog accepted slot=0 output=", "scene save thumbnail decoded width=160 height=120 mismatches=0 transparent=0", "scene save thumbnail simulation state unchanged"],
+      "purpose": "Paint and accept the real occupied-slot, description and overwrite dialogs, save into copied slot000, then resume; export all three modal compositions and verify live-display preservation."
+    },
     "gameplay-roundtrip": {
       "revision": 1, "minimumFrame": 120, "inspectionRequired": true, "reloadWorld": true,
       "quickSaveSlot": 3,
@@ -196,7 +204,7 @@
       "arguments": ["-capture-save-dialog-output", "{ui-output}"],
       "requiredLog": ["scene save dialog preview painted frames=5 slot=0", "scene UI export saved output="],
       "uiExport": true,
-      "purpose": "Real save dialog over a presented world, including its deferred native thumbnail preview/cursor paint, then cancel and resume. Does not accept a slot or write a save."
+      "purpose": "Real save dialog over a presented world, including its window-owned native thumbnail preview and cursor, then cancel and resume. Does not accept a slot or write a save."
     },
     "modal-ui": {
       "revision": 1,

@@ -50,7 +50,7 @@ param(
     [switch]$HistoryProbe,
     [switch]$DeformationProbe,
     [string]$DemoFile = '',
-    [ValidateSet('ordinary','gameplay-reload','gameplay-roundtrip','fog-residency','ship-preview','image-alpha','image-lifecycle','image-settings','automap-cache','automap-lifecycle','automap-settings','retirement','save-export','save-settings','auxiliary-lifecycle','modal-ui','save-dialog','quicksave','decoded-movie','decoded-movie-paletted','decoded-movie-subtitles','decoded-movie-screenshot','message-consoles','screenshot-normal','screenshot-clean','screenshot-double','screenshot-tga','demo-movie')][string]$Scenario = 'ordinary'
+    [ValidateSet('ordinary','gameplay-reload','gameplay-roundtrip','fog-residency','ship-preview','image-alpha','image-lifecycle','image-settings','automap-cache','automap-lifecycle','automap-settings','retirement','save-export','save-settings','auxiliary-lifecycle','modal-ui','save-dialog','save-dialog-accept','quicksave','decoded-movie','decoded-movie-paletted','decoded-movie-subtitles','decoded-movie-screenshot','message-consoles','screenshot-normal','screenshot-clean','screenshot-double','screenshot-tga','demo-movie')][string]$Scenario = 'ordinary'
 )
 
 # Run only copied installations and copied pilot/save data. Never point Runtime
@@ -506,20 +506,34 @@ try {
                 }
             }
         }
-        if ($scenarioSpec.quickSaveSlot -ne $null) {
+        if ($scenarioSpec.quickSaveSlot -ne $null -or $scenarioSpec.dialogSaveSlot -ne $null) {
+            $writtenSavePath = if ($scenarioSpec.dialogSaveSlot -ne $null) { $previewPath } else { $savePath }
             $audit = [regex]::Matches($logText,'scene save thumbnail simulation state unchanged frame=\d+ evidence=(.+)')
             if ($audit.Count -ne 1) { $scenarioValidated = $false }
             else {
                 $prefix = $audit[0].Groups[1].Value.Trim()
-                if ($prefix -ine ($savePath+'.audit1')) { throw 'Quicksave evidence escaped copied input slot' }
+                if ($prefix -ine ($writtenSavePath+'.audit1')) { throw 'Save evidence escaped copied input slot' }
                 foreach ($kind in @('live-before','live-after','thumbnail','world')) {
                     Copy-Item -LiteralPath ($prefix+".$kind.png") -Destination ($nativeSave+".audit1.$kind.png")
                 }
-                Copy-Item -LiteralPath $savePath -Destination $nativeSave
-                $scenarioValidated = $scenarioValidated -and (Get-FileHash -LiteralPath $savePath).Hash -ne $launchInputHash
+                Copy-Item -LiteralPath $writtenSavePath -Destination $nativeSave
+                $originalHash = if ($scenarioSpec.dialogSaveSlot -ne $null) { $manifest.preview_input_hash } else { $launchInputHash }
+                $scenarioValidated = $scenarioValidated -and (Get-FileHash -LiteralPath $writtenSavePath).Hash -ne $originalHash
+            }
+            if ($scenarioSpec.dialogSaveSlot -ne $null) {
+                foreach ($step in @(1,2)) {
+                    $image = $uiImage+".step$step.png"
+                    $scenarioValidated = $scenarioValidated -and (Test-Path -LiteralPath $image)
+                    if (Test-Path -LiteralPath $image) {
+                        . (Join-Path $PSScriptRoot 'renderer-export-images.ps1')
+                        $region = Compare-RendererImageRegion -Reference $uiImage -Export $image -Region $scenarioSpec.preservedUiRegion
+                        $scenarioValidated = $scenarioValidated -and $region.mismatches -eq 0 -and $region.populated -gt 0
+                        $exports += [ordered]@{modal_step=$step; image=$image; preserved_preview=$region}
+                    }
+                }
             }
         }
-        if ($Scenario -in @('save-export','save-settings','quicksave','gameplay-roundtrip')) {
+        if ($Scenario -in @('save-export','save-settings','quicksave','gameplay-roundtrip','save-dialog-accept')) {
             $pairs = @(Get-ChildItem -LiteralPath $outputPath -Filter "$save.native.audit*.live-before.png")
             $minimumPairs = if ($Scenario -eq 'save-export') { 2 } else { 1 }
             $scenarioValidated = $scenarioValidated -and $pairs.Count -ge $minimumPairs -and (Test-Path -LiteralPath $nativeSave)

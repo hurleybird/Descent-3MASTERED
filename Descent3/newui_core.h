@@ -94,6 +94,10 @@ int DoUI();
 void ui_RequestForceQuit();
 void ui_ClearForceQuitRequest();
 void ui_RequestScreenshotAndForceQuit(const char* filename);
+// Capture-only modal result sequence. Every result follows five fully painted
+// frames and an exported image; callers must finish the complete sequence.
+void ui_BeginCaptureResults(const char* filename,const int* results,unsigned count);
+void ui_EndCaptureResults();
 
 // does one frame of UI input (returns result.)
 void DoUIFrame();

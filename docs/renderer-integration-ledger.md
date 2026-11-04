@@ -1,5 +1,35 @@
 # Renderer game integration
 
+## November 3: window-owned custom paint and actual save-dialog acceptance
+
+The new save-dialog-accept fixture exposed a real composition defect: parent
+thumbnail paint lived after newuiTiledWindow::DoUIFrame, so it disappeared while
+the nested description/overwrite dialogs ran their own loops. Moved that custom
+content into newuiTiledWindow::OnDraw, beneath widgets and higher windows.
+Removed deferred modal-end state, late cursor redraw and duplicate export
+completion. The UI traversal now owns all window paint and exports once.
+
+Capture-only result sequences wait five completed UI frames per step, export,
+then supply the native modal result. The save fixture selects occupied copied
+slot000, accepts its existing description, confirms overwrite and runs actual
+SaveGameState. This qualifies result handling/rendering, NOT physical keyboard
+typing/clicks. No input injection or visible/background-window activation.
+
+Root3/3 pass.003/006 effects accept,003 clean accept,003 cancel and options
+pass. First parent dialog image EXACT before/after. A9600-pixel unobscured
+thumbnail region had9035 nonblack pixels missing in each nested modal before
+the fix and ZERO mismatches after; the harness now enforces that nonvacuous
+pixel proof. Description and overwrite captures inspected. Native thumbnail
+decode and before/after-save live-display checks pass; history20/21/22 stays
+valid. The new dialog-written save reloads successfully and was captured.
+Raw qual-window-paint-accept-{effects,strict-clean,strict-effects}-20261103,
+qual-window-paint-{cancel,options}-20261103,qual-dialog-saved-reload-20261103.
+Before-fix evidence qual-save-dialog-accept-effects-20261103.
+
+Hosted contract and full game-integration jobs are green throughc95b538,
+not merely the earlier standalone contracts. Release/no-probe and broader
+manual/multiplayer acceptance remain open. Candidate/Previous untouched.
+
 ## November 3: native gameplay reload qualification
 
 Follow-up gameplay-roundtrip composes the real QuickSaveGame caller atframe20

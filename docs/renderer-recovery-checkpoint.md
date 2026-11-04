@@ -1,5 +1,23 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November 3 — parent UI paint ownership repaired
+
+Continued afterc95b538; save-dialog acceptance found parent thumbnail vanished
+under description/overwrite dialogs. Moved custom callback into tiled window
+OnDraw. Removed modal-end deferral, late cursor repaint and duplicate frame
+export completion. First dialog image EXACT; nested preview9035 missing pixels
+before,0after. Capture-only planned result sequence exercises actual slot0,
+existing description acceptance and overwrite path; no physical UI input.
+Strict named scenario copies slot000 fromseeds, checks native save image/live
+display, changed save hash and preserved nonblack preview region.003/006effects,
+003clean, cancel/options pass. Dialog-written native save reloads successfully.
+Root3/3 pass; hosted contracts AND game-integration green throughc95b538.
+Current private runtime/out/ui-window-paint-working.exe is this implementation.
+No game/helpers running. Main/Candidate/Prev/desktop unchanged. Credits unchanged.
+Next: continue remaining integration/release qualification, not more speculative
+GPU variants. GPU deficits remain recorded; all8 CPU baselines beat reconstructed
+pre-rewrite. No-probe gate remains closed, shadows still out of scope.
+
 ## November 3 — native gameplay reload checkpoint
 
 Continuing, not finished. Latest native gameplay-reload fixture passes all8

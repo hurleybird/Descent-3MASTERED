@@ -252,6 +252,7 @@ void SaveGameDialog()
 	tSaveGamePreviewData preview_data;
 	const int capture_arg = FindArg("-capture-save-dialog-output");
 	if (capture_arg) preview_data.capture_output = GetArg(capture_arg+1);
+	const bool capture_accept = capture_arg && FindArg("-capture-save-dialog-accept");
 	newuiTiledWindow wnd;
 	newuiSheet* sheet;
 	int i, res;
@@ -358,6 +359,12 @@ void SaveGameDialog()
 
 	wnd.SetData(&preview_data);
 	wnd.SetOnDrawCB(SaveGamePreviewDialogCB);
+	if (capture_accept) {
+		if (!occupied_slot[0]) Error("Save acceptance capture requires a copied occupied slot zero");
+		const int results[] = {SAVE_HOTSPOT_ID,UID_OK,UID_OK};
+		ui_BeginCaptureResults(preview_data.capture_output,results,3);
+		preview_data.capture_output = nullptr;
+	}
 
 	//Mouse clicks from gameplay will be read by the dialog without this flush
 	ddio_MouseQueueFlush();
@@ -421,6 +428,7 @@ void SaveGameDialog()
 						DoMessageBox("", TXT_SAVEGAMEFAILED, MSGBOX_OK);
 					}
 					else {
+						if (capture_accept) AutomatedCaptureLog("native save dialog accepted slot=%d output=%s",slot,pathname);
 						AddHUDMessage(TXT_QUICKSAVE);
 						res = UID_CANCEL;
 						Quicksave_game_slot = slot;
@@ -437,6 +445,7 @@ void SaveGameDialog()
 
 	wnd.Close();
 	wnd.Destroy();
+	if (capture_accept) ui_EndCaptureResults();
 }
 
 

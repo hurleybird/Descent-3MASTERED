@@ -36,8 +36,8 @@
 
 #include <string.h>
 #include <stdarg.h>
-
-extern void ui_DoCursor();
+#include <string>
+#include <vector>
 
 static void newui_DrawSliderFill(int l, int t, int r, int b, float percent_full)
 {
@@ -570,23 +570,53 @@ void newuiCore_ReleaseBitmaps()
 
 // does a UI loop
 static const char* UI_screenshot_and_quit_filename = NULL;
-static bool UI_defer_modal_frame_end = false;
-static bool UI_deferred_modal_frame = false;
+static std::string UI_capture_result_filename;
+static std::vector<int> UI_capture_results;
+static unsigned UI_capture_result_index = 0, UI_capture_result_frames = 0;
+
+void ui_BeginCaptureResults(const char* filename,const int* results,unsigned count)
+{
+	if (AutomatedCaptureFrameIndex() < 0 || !filename || !*filename || !results || !count ||
+		count > 16 || !UI_capture_results.empty() || UI_screenshot_and_quit_filename)
+		Error("Invalid or overlapping modal capture sequence");
+	UI_capture_result_filename = filename;
+	UI_capture_results.assign(results,results+count);
+	UI_capture_result_index = UI_capture_result_frames = 0;
+}
+
+void ui_EndCaptureResults()
+{
+	const bool complete = UI_capture_result_index == UI_capture_results.size();
+	UI_capture_results.clear(); UI_capture_result_filename.clear();
+	UI_capture_result_index = UI_capture_result_frames = 0;
+	if (!complete) Error("Modal capture sequence ended before all results were consumed");
+}
 
 // Export the current UI producer's completed composition, not whichever scene
-// target the renderer happened to bind. Deferred modal paint must finish first.
+// target the renderer happened to bind. Window paint, gadgets and cursor have
+// all completed through the same UI traversal before this boundary.
 static void PublishUIFrameForReadback()
 {
-	if (UI_deferred_modal_frame) Error("UI export requested before deferred painting completed");
 	rend_FlushTextLayer();
 	if (!rend_IsPostPresentFramePending() && !rend_BeginPostPresentFrame())
 		Error("UI export has no composed display image");
 }
 
-// A tiled window may still own late preview/cursor painting after ui_DoFrame.
-// Only its completion boundary may export that frame or request capture exit.
+// Export and deliver capture results once, after the complete UI traversal.
 static void CompleteUIFrameExports()
 {
+	if (UI_capture_result_index < UI_capture_results.size() && ++UI_capture_result_frames == 5) {
+		if (UI_screenshot_and_quit_filename || UI_frame_result != -1)
+			Error("Modal capture received an unexpected interactive result");
+		PublishUIFrameForReadback();
+		const auto filename = UI_capture_result_filename+(UI_capture_result_index ?
+			".step"+std::to_string(UI_capture_result_index)+".png" : "");
+		if (!rend_SaveScreenshotPNG(filename.c_str())) Error("Modal result capture export failed");
+		UI_frame_result = UI_capture_results[UI_capture_result_index];
+		AutomatedCaptureLog("scene UI capture result step=%u result=%d output=%s",
+			UI_capture_result_index,UI_frame_result,filename.c_str());
+		++UI_capture_result_index; UI_capture_result_frames = 0;
+	}
 	if (UI_screenshot_and_quit_filename) {
 		PublishUIFrameForReadback();
 		if (!rend_SaveScreenshotPNG(UI_screenshot_and_quit_filename))
@@ -691,16 +721,10 @@ void DoUIFrame()
 		DebugBlockPrint("UM");
 		UI_frame_result = ui_DoFrame();
 		DebugBlockPrint("UN");
-		if (modal_ui_frame)
-		{
-			if (UI_defer_modal_frame_end)
-				UI_deferred_modal_frame = true;
-			else
-				rend_EndModalUIFrame();
-		}
+		if (modal_ui_frame) rend_EndModalUIFrame();
 
 	}
-	if (!UI_defer_modal_frame_end) CompleteUIFrameExports();
+	CompleteUIFrameExports();
 }
 
 
@@ -5396,26 +5420,10 @@ int newuiTiledWindow::DoUI()
 		DebugBlockPrint("UA");
 
 		Descent->defer();
-		UI_defer_modal_frame_end = m_draw_cb != NULL;
 		DoUIFrame();
-		UI_defer_modal_frame_end = false;
 		if (m_onframe_cb)
 			(*m_onframe_cb)(this, m_data);
 		
-		if (m_draw_cb)
-		{
-			ui_StartDraw(m_X, m_Y, m_X + m_W, m_Y + m_H);
-			(*m_draw_cb)(this, m_data);
-			ui_EndDraw();
-			rend_FlushTextLayer();
-			ui_DoCursor();
-		}
-		if (UI_deferred_modal_frame)
-		{
-			UI_deferred_modal_frame = false;
-			rend_EndModalUIFrame();
-		}
-		CompleteUIFrameExports();
 		DebugBlockPrint("UZ");
 		rend_Flip();
 	}
@@ -5555,6 +5563,9 @@ void newuiTiledWindow::OnDraw()
 	// do title
 	UITextItem text(MONITOR15_NEWUI_FONT, m_title, NEWUI_MONITORFONT_COLOR);
 	text.draw(NEWUI_TILED_TITLE_X, NEWUI_TILED_TITLE_Y);
+	// Custom content belongs to this window's paint, including when another
+	// modal window is above it. Gadgets and higher windows follow normally.
+	if (m_draw_cb) (*m_draw_cb)(this,m_data);
 }
 
 
