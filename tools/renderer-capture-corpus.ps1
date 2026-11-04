@@ -50,7 +50,7 @@ param(
     [switch]$HistoryProbe,
     [switch]$DeformationProbe,
     [string]$DemoFile = '',
-    [ValidateSet('ordinary','gameplay-reload','fog-residency','ship-preview','image-alpha','image-lifecycle','image-settings','automap-cache','automap-lifecycle','automap-settings','retirement','save-export','save-settings','auxiliary-lifecycle','modal-ui','save-dialog','quicksave','decoded-movie','decoded-movie-paletted','decoded-movie-subtitles','decoded-movie-screenshot','message-consoles','screenshot-normal','screenshot-clean','screenshot-double','screenshot-tga','demo-movie')][string]$Scenario = 'ordinary'
+    [ValidateSet('ordinary','gameplay-reload','gameplay-roundtrip','fog-residency','ship-preview','image-alpha','image-lifecycle','image-settings','automap-cache','automap-lifecycle','automap-settings','retirement','save-export','save-settings','auxiliary-lifecycle','modal-ui','save-dialog','quicksave','decoded-movie','decoded-movie-paletted','decoded-movie-subtitles','decoded-movie-screenshot','message-consoles','screenshot-normal','screenshot-clean','screenshot-double','screenshot-tga','demo-movie')][string]$Scenario = 'ordinary'
 )
 
 # Run only copied installations and copied pilot/save data. Never point Runtime
@@ -76,6 +76,9 @@ if ($ReloadSave -and (!$scenarioSpec.reloadWorld -or $ReloadSave -notmatch '^sav
     throw 'ReloadSave requires a gameplay-reload scenario and a corpus save name'
 }
 if ($scenarioSpec.quickSaveSlot -ne $null -and ($Saves.Count -ne 1 -or $Saves[0] -ne ('saveg{0:D3}' -f [int]$scenarioSpec.quickSaveSlot))) { throw 'Quicksave scenario must load its explicitly copied target slot' }
+if ($scenarioSpec.quickSaveSlot -ne $null -and $ReloadSave -and $ReloadSave -ne $Saves[0]) {
+    throw 'Quicksave roundtrip must reload its newly saved copied slot'
+}
 foreach ($pattern in $scenarioSpec.requiredLog) { [void][regex]::new($pattern) }
 if ($scenarioSpec.subtitleAsset -and $scenarioSpec.subtitleAsset -notmatch '^[a-zA-Z0-9_-]+\.msb$') { throw 'Invalid subtitle fixture asset' }
 if ($scenarioSpec.inspectionRequired -and !$SceneInspection) { throw 'Scenario requires explicit scene inspection' }
@@ -503,7 +506,7 @@ try {
                 }
             }
         }
-        if ($Scenario -eq 'quicksave') {
+        if ($scenarioSpec.quickSaveSlot -ne $null) {
             $audit = [regex]::Matches($logText,'scene save thumbnail simulation state unchanged frame=\d+ evidence=(.+)')
             if ($audit.Count -ne 1) { $scenarioValidated = $false }
             else {
@@ -513,9 +516,10 @@ try {
                     Copy-Item -LiteralPath ($prefix+".$kind.png") -Destination ($nativeSave+".audit1.$kind.png")
                 }
                 Copy-Item -LiteralPath $savePath -Destination $nativeSave
+                $scenarioValidated = $scenarioValidated -and (Get-FileHash -LiteralPath $savePath).Hash -ne $launchInputHash
             }
         }
-        if ($Scenario -in @('save-export','save-settings','quicksave')) {
+        if ($Scenario -in @('save-export','save-settings','quicksave','gameplay-roundtrip')) {
             $pairs = @(Get-ChildItem -LiteralPath $outputPath -Filter "$save.native.audit*.live-before.png")
             $minimumPairs = if ($Scenario -eq 'save-export') { 2 } else { 1 }
             $scenarioValidated = $scenarioValidated -and $pairs.Count -ge $minimumPairs -and (Test-Path -LiteralPath $nativeSave)

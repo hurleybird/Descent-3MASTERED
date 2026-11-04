@@ -2,6 +2,16 @@
 
 ## November 3: native gameplay reload qualification
 
+Follow-up gameplay-roundtrip composes the real QuickSaveGame caller atframe20
+with flight/fire through45 and native reload60, against copied slot003 only.
+Both clean1x/MSAA0/motion and SSAA2/MSAA4/AO/bloom/motion, field320, pass.
+The saved input hash changes; native thumbnail decode matches; independent
+before/after-save display hashes agree; camera history20/21 remains valid,
+60 invalid,61 recovered. Captured in-flight napalm and reduced ammunition are
+restored, visually inspected. Raw qual-gameplay-roundtrip-{effects,clean}-20261103.
+Harness copies the saved native file and four audit images into the run output.
+No engine changes needed beyond the checked lifetime/readback work below.
+
 Added gameplay-reload to the tracked corpus: real capture controls fly/fire
 throughframe45, native load-game state machine reloads at60, captures59/60/61
 and120. No injected renderer geometry. All8 same-save runs pass SSAA2/MSAA4,

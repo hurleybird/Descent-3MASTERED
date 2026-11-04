@@ -11,9 +11,16 @@ old nonzero lifetime retired before new upload, camera history valid59,
 invalid60, recovered61. GPU readback confirms no valid motion across reset.
 Raw qual-gameplay-reload-effects-20261103 and qual-gameplay-transition-to*-20261103.
 Private runtime/out/reload-audit-working.exe is this build; no helper processes.
-Root3/3 pass. Next useful bounded case: native quicksave during actual flight/
-fire, then same-process reload of that newly saved state (existing capture
-quicksave caller atframe19 and reload at60 can compose without new game hooks).
+Root3/3 pass. Follow-up gameplay-roundtrip now PASSES on003 clean and effects
+profiles with motion/field320. Real quicksave20 during flight/fire, continue,
+reload newly saved state60; input hash changes, thumbnail/live display checks
+pass, history remains valid20/21 then resets60/recovers61. Restored napalm and
+ammunition visually inspected. Raw qual-gameplay-roundtrip-{effects,clean}-20261103.
+Next bounded UI acceptance gap: existing save-dialog fixture only paints and
+cancels; actual slot selection, description acceptance and overwrite confirmation
+remain unqualified. Inspect existing UI screenshot/force-quit mechanism and
+DoEditDialog/DoMessageBox before introducing any test automation. No edits to
+those engine/UI files yet. No-probe gate remains intentionally closed.
 No shadows, Candidate changes, mouse capture, cleanup deletes or credits.
 
 ## November 3 — fog GPU residency fixes the larger CPU regression
