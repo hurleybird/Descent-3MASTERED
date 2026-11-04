@@ -5,8 +5,21 @@
 #include "renderer.h"
 #include "config.h"
 #include "game.h"
+#include "terrain.h"
+#include "dedicated_server.h"
 #include <cstring>
 #include <stdexcept>
+
+void PageInHighResolutionSky()
+{
+	if (Dedicated_server || !Render_hires_skies || !Terrain_sky.textured)
+		return;
+
+	const int fallback_bitmap = GetTextureBitmap(Terrain_sky.dome_texture, 0);
+	// Resolve the source replacement now; owned scene images upload it on demand.
+	GetHighResolutionSkyBitmap(Terrain_sky.dome_texture, fallback_bitmap);
+}
+
 // Mutable module ABI table; ownership is game appearance, not object drawing.
 ddgr_color Player_colors[] = { GR_RGB(255,0,0),GR_RGB(0,32,255),GR_RGB(0,255,0),GR_RGB(255,255,0),GR_RGB(32,64,96),
 GR_RGB(255,0,255),GR_RGB(255,128,0),GR_RGB(128,128,0),GR_RGB(0,128,0),GR_RGB(0,32,128),

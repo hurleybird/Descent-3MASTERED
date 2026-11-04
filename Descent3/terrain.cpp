@@ -54,6 +54,9 @@ int Num_terrain_render_clip_planes = 0;
 terrain_tex_segment Terrain_tex_seg[TERRAIN_TEX_WIDTH * TERRAIN_TEX_DEPTH];
 terrain_sky Terrain_sky;
 
+// Scene visibility feedback used to admit weather effects.
+float Last_terrain_render_time = -1;
+
 #if (!defined(RELEASE) || defined(NEWEDITOR))
 // first object to render after cell has been rendered (only used for SW renderer)
 short Terrain_seg_render_objs[TERRAIN_WIDTH * TERRAIN_DEPTH];

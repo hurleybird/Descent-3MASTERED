@@ -1,5 +1,17 @@
 # Renderer migration checkpoint
 
+## November 4: old terrain renderer retired
+
+Removed the unreachable terrain draw/view-search subsystem and its startup,
+backend-selection and per-frame LOD hooks (4216 net source lines). Retained
+physics/AI queries verbatim, source sky loading and weather visibility feedback.
+Full build and three root tests pass. Eight saved scenes and eight gameplay
+roundtrip images match their preceding references exactly. Exterior fixtures
+match below row 13; sparse top-edge differences also occur across repeated
+captures and are recorded, not waived as exact. See recovery checkpoint for
+binary hash and evidence. No new steady-frame performance claim. Migration
+acceptance and broader gameplay qualification remain incomplete.
+
 ## Continuation: foreground schedule, shared HUD policy and module frame scope
 
 Foreground phase/order is now owned and compiled at publication. The game loop

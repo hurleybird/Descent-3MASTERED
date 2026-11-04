@@ -652,7 +652,6 @@ void LoadGameSettings()
 	Render_preferred_state.pixel_motion_blur_samples = 9;
 	Render_preferred_state.afterburner_fov_multiplier = 0.08f;
 	Render_preferred_state.afterburner_pixel_blur_multiplier = 2.0f;
-	Terrain_renderer_mode = TERRAIN_RENDERER_RETAINED;
 	Hud_text_scale = 1.0f;
 
 
@@ -1127,7 +1126,6 @@ void LoadGameSettings()
 		Wooting_analog_enabled = false;
 	Database->read_int("MissileView",&Missile_camera_window);
 	Database->read("MirrorSurfaces",&Detail_settings.Mirrored_surfaces);
-	Terrain_renderer_mode = TERRAIN_RENDERER_RETAINED;
 
 //@@	// Base missile camera if in wrong window
 //@@	if (Missile_camera_window==SVW_CENTER)

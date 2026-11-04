@@ -293,7 +293,6 @@ SET (MAIN_SOURCES
 		Descent3/TelcomEffectsRender.cpp
 		Descent3/TelComGoals.cpp
 		Descent3/terrain.cpp
-		Descent3/terrainrender.cpp
 		Descent3/TerrainSearch.cpp
 		Descent3/trigger.cpp
 		Descent3/vclip.cpp

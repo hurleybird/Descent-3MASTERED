@@ -1,5 +1,46 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November 4 — terrain draw retirement; user-requested stopping milestone
+
+User requested stopping at the next natural milestone after usage reset. Stop
+after recording/pushing this checkpoint; do not start another migration step.
+
+Deleted terrainrender.cpp and its CMake entry. TerrainSearch.cpp now contains
+only the four existing physics/AI spatial queries, verified verbatim against
+the preceding commit. Moved high-resolution sky source paging to
+SceneMaterialBindings.cpp and Last_terrain_render_time to terrain.cpp; weather
+admission and SceneFrame visibility feedback remain intact. Removed obsolete
+terrain backend selectors/resets and per-frame walking-object LOD delta writes
+and restoration. Removed corresponding dead declarations. Net 4216 source
+lines removed, recoverable in Git. No owned scene drawing changes.
+
+Full build/root 3/3 tests pass. qual-terrain-retirement-20261104: all eight
+clean60 saves EXACT qual-world-queue-retirement-20261104.
+qual-terrain-retirement-roundtrip-20261104: effects/field003120 flight/fire,
+quicksave/reload passes, all eight PNGs EXACT qual-residency-api-roundtrip.
+Inspected saved-scene and exterior images directly.
+
+Additional exterior terrain fixtures (003/006 effects/field60), compared with
+the older legacy-startup-timed.exe migration checkpoint, differ at 14/71 pixels,
+all within top rows 1..12. Current-build repeated captures differ by 0/82 pixels
+in those same top rows. Do NOT call these exterior images fully exact or assign
+the small differences to this deletion without further evidence. No visible
+terrain difference observed. Evidence: qual-terrain-exterior-{before,after,
+repeat}-20261104. This is a diagnostic camera fixture, not outdoor flight.
+
+Latest binary/runtime SHA256:
+E41CCB2557D5BE0ED2ED5E98D5AA743D071EC0AC5E876F0F54F0A66AC8E906D4.
+Runtime restored to latest after comparison. Candidate/Previous Candidate/main
+repo untouched; lib/gitinfo.h still untracked/preserved. No game left running.
+
+Remaining: old render.cpp room draw helpers and shared terrain draw scratch /
+LOD-generation data still need caller/lifetime retirement; do not remove
+World_point_buffer while old room helpers reference it. Broader gameplay,
+mission/multiplayer/replay qualification and GPU regressions remain. No-probe
+acceptance guards remain; no shadows. This cleanup is not a newly measured
+steady-frame speedup. Prior startup removal measurements remain scoped only
+to the removed startup work, not end-to-end loading or steady frametimes.
+
 ## November 4 — retire old deferred-world subsystem
 
 Removed old room/mirror traversal/draw dispatch and terrain room/object/main

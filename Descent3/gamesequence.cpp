@@ -368,7 +368,6 @@ bool SimpleStartLevel(char* level_name)
 
 bool StartNewGame()
 {
-	TerrainRenderer_ResetLevelState();
 
 	SetCurrentLevel(Current_mission.cur_level);
 
@@ -501,7 +500,6 @@ void StartLevel()
 {
 	extern void RestoreCameraRearviews();		// gameloop.cpp
 
-	TerrainRenderer_ResetLevelState();
 
 	//Init time
 	Gametime = 0.0f;

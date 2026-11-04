@@ -2768,7 +2768,6 @@ int LoadLevel(char* filename, void (*cb_fn)(const char*, int, int))
 			goto end_loadlevel;
 		}
 
-		TerrainRenderer_ResetLevelState();
 
 		//Get rid of old mine
 		FreeAllRooms();

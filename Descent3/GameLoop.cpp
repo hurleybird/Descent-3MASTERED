@@ -4448,9 +4448,6 @@ void GameFrame(void)
 	Sound_system.EndSoundFrame();
 	DoDestroyedLightsForFrame();
 
-	// Clear lod stuff
-	ClearLODOffs();
-
 	static int fvi_graph_id = -2;
 	if (fvi_graph_id == -2)
 		fvi_graph_id = DebugGraph_Add(0, 1000, "FVI Calls");

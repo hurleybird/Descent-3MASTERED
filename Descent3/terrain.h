@@ -105,13 +105,6 @@ struct terrain_tex_segment
 	short tex_index;
 };
 
-// Data for LOD shutoff code
-struct lodoff
-{
-	int cellnum;
-	float save_delta[MAX_TERRAIN_LOD];
-};
-
 // Data for the sky spherical map
 struct terrain_sky
 {
@@ -194,7 +187,6 @@ extern terrain_normals *TerrainNormals[MAX_TERRAIN_LOD];
 extern ubyte Terrain_occlusion_map[256][32];
 extern int Terrain_occlusion_checksum;
 
-extern int Check_terrain_portal;
 extern int Terrain_checksum;
 extern unsigned int Terrain_render_revision;
 void TerrainRenderDataChanged();
@@ -202,26 +194,12 @@ void TerrainRenderDataChanged();
 // Our lighting maps for the terrain, one for each quadrant (starting at lower left)
 extern int TerrainLightmaps[4];
 
-extern int GlobalTransCount,TotalDepth;
 extern int TerrainEdgeTest[MAX_TERRAIN_LOD][16];
 
 extern terrain_render_info Terrain_list[];	
-extern ushort TS_FrameCount;
 
 extern float VisibleTerrainZ;
 extern float Terrain_average_height;	
-
-extern float Clip_scale_left,Clip_scale_right,Clip_scale_top,Clip_scale_bot;
-extern ubyte Terrain_from_mine;
-
-enum terrain_renderer_mode
-{
-	TERRAIN_RENDERER_LEGACY,
-	TERRAIN_RENDERER_RETAINED
-};
-
-extern int Terrain_renderer_mode;
-void TerrainRenderer_ResetLevelState();
 
 extern float Last_terrain_render_time;
 
@@ -255,15 +233,10 @@ extern terrain_sky Terrain_sky;
 
 extern int Terrain_LOD_engine_off;
 
-extern float Terrain_texture_distance;	// how far we should texture before going to flat shad
-
 extern ubyte TerrainJoinMap[];
 extern float *TerrainDeltaBlocks[];
 extern ubyte *Terrain_max_height_int[];
 extern ubyte *Terrain_min_height_int[];
-extern ubyte Fast_terrain;
-extern ubyte Flat_terrain;
-extern ubyte Show_invisible_terrain;
 
 extern int Camera_direction,Sort_direction;
 
@@ -294,18 +267,13 @@ extern void InitTerrain();
 // Called whenever a new level is initted
 extern void ResetTerrain(int force=0);
 
-extern int GetVisibleTerrain(vector *,matrix *);
-extern void DisplayTerrainList (int,bool from_automap=0);
-extern int CheckToRenderSky (int);
 void PageInHighResolutionSky();
 
-void GetPreRotatedPoint(g3Point*,int,int,int);
 void GenerateTerrainLight ();
 
 void BuildMinMaxTerrain();
 void BuildTerrainNormals();
 
-int DrawTerrainTriangles (int n);
 int LoadPCXTerrain(char *);
 
 // Given a position, returns the terrain segment that that position is in/over
@@ -336,18 +304,12 @@ void BuildNormalForTerrainSegment (int n);
 void BuildLightingNormalForSegment (int n);
 
 
-// Gets a prerotated point that does not fall exactly on one of our 255 height values
-void GetSpecialRotatedPoint(g3Point *dest,int x,int z,float yvalue);
-
 // Takes our light angle and fills in the appropriate values in the lightsource vector
 void GenerateLightSource ();
 
 // Returns the terrain segment index of the farthest point that mine segment "mine_seg"
 // touches.  Based on Camera_direction
 int GetFurthestMineSegment (int mine_seg);
-
-//codes a point for visibility in the window passed to RenderTerrain()
-ubyte CodeTerrainPoint(g3Point *p);
 
 // Generates info for the LOD engine...must be called after the geometry changes
 void GenerateLODDeltas ();
@@ -360,12 +322,6 @@ void MakePinchBitmap (int dest_bm,int src_bm);
 
 // Gets the dynamic light value for this position
 float GetTerrainDynamicScalar (vector *pos,int seg);
-
-// Shuts off LOD for a given cell
-void TurnOffLODForCell (int cellnum);
-
-// Restores the terrain deltas to their original state
-void ClearLODOffs ();
 
 // Gets the checksum for this terrain
 int GetTerrainGeometryChecksum ();

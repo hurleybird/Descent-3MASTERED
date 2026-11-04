@@ -2088,10 +2088,6 @@ void ObjDoFrame(object* obj)
 //	}
 //#endif _DEBUG
 
-	// if this object is walking/rolling on the terrain, make it not LOD at that point
-	if (obj->movement_type == MT_WALKING && (obj->flags & OF_RENDERED) && OBJECT_OUTSIDE(obj))
-		TurnOffLODForCell(CELLNUM(obj->roomnum));
-
 	//#ifdef _DEBUG
 	//	if(Physics_player_verbose)
 	//	{ 
