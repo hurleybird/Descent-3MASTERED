@@ -1521,3 +1521,28 @@ corpus. Root contracts3/3 pass. Image, automap, auxiliary lifecycle003/006 and
 image quality transitions003/006 pass, including GL/retirement audits. Evidence
 qual-scratch-highwater-20261103 and qual-highwater-*-20261103. This does not yet
 establish universal superiority to the reconstructed pre-rewrite renderer.
+
+## Independent-image alpha transport (November 3)
+
+Added an explicit transparent-background request; opaque black remains the default.
+Accumulated images use premultiplied composition, including RGB at zero coverage
+from additive effects, and apply consumer opacity once. No extra varying slot.
+The contract rejects fog/depth-dependent use of this canvas-image blend mode.
+This is a prerequisite for independent TelCom previews, not their migration.
+Existing opaque images did not demonstrate a double-alpha fault: their clear
+alpha was one. Do not describe this change as proof that existing previews broke.
+
+Root contracts3/3 pass. GPU readback verifies half-transparent white and additive
+red composited over blue at half consumer opacity: RGBA64,64,255,255 and
+32,0,255,255 (two-byte tolerance), including SSAA1/2/4 with MSAA4. Evidence
+qual-image-alpha-fixed-{1,2,4}-20261103. Retirement and five quality transitions
+pass003/006 in qual-image-alpha-{retirement,settings}-20261103. All eight ordinary
+500-frame images in qual-image-alpha-world-20261103 match qual-scratch-highwater
+exactly. Inspected4x003 screenshot: existing world-image inset remains intact.
+First qual-image-alpha1 attempt failed because transparent clear policy was
+missing; fixed before all above runs. No gameplay/release qualification claimed.
+
+Rejected experiment: per-producer FrameStorage snapshot pools preserved all eight
+images but provided no meaningful CPU benefit.005 after .744/.756 versus before
+.747/.755ms;007 after1.574/1.495 versus before1.550/1.519ms. Removed fully before
+alpha work. Evidence perf-producer-storage-* and qual-producer-storage-20261103.

@@ -210,7 +210,7 @@ public:
 	GLuint DepthTextureForRead();
 	GLuint ColorTextureRaw() const;
 	GLuint DepthTextureRaw() const;
-	void ClearAll();
+	void ClearAll(bool transparent = false);
 
 	GLuint Handle() const
 	{

@@ -61,6 +61,9 @@ struct SceneQuadStyle {
 };
 void PrepareSceneQuad(d3scene::FrameData&,uint64_t collection,int32_t& next_order,
     d3scene::Rect rectangle,const SceneQuadStyle&);
+// Independently rendered images contain accumulated (premultiplied) coverage.
+void PrepareSceneImageQuad(d3scene::FrameData&,uint64_t collection,int32_t& next_order,
+    d3scene::Rect rectangle,uint64_t image_slot,float opacity = 1);
 struct FrameScreenBlend;
 void PrepareFrameBlendCanvas(d3scene::FrameData&,uint64_t collection,d3scene::Rect viewport,
     const std::vector<FrameScreenBlend>&,bool inspection);

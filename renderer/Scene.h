@@ -281,7 +281,7 @@ private:
 };
 
 enum class RenderLayer : uint8_t { Background, World };
-enum class BlendMode : uint8_t { Solid, Alpha, Additive, Multiply };
+enum class BlendMode : uint8_t { Solid, Alpha, Additive, Multiply, PremultipliedAlpha };
 enum class DepthMode : uint8_t { Automatic, ReadWrite, ReadOnly, Disabled };
 enum class TextureAlpha : uint8_t { Ignore, Cutout, Continuous };
 enum class TextureFilter : uint8_t { Default, Nearest, Linear };
@@ -902,6 +902,9 @@ struct ViewImageRequest {
     // Raster quality only: the published color image always has viewport size.
     // Reduction completes before consumers/readback can access the image.
     uint32_t scale = 1, samples = 0;
+    // Opaque black preserves the established image contract. Transparent
+    // producers retain accumulated coverage and require premultiplied blending.
+    bool transparent_background = false;
 };
 void validateViewImage(const ViewImageRequest&);
 // Produces an independently owned color/depth image. It cannot publish the

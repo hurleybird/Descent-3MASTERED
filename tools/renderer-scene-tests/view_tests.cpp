@@ -590,11 +590,13 @@ int runSceneViewTests() {
                 later.images()[0].producer().view().camera.position.x == 100,
                 "Prepared producer borrowed later camera/frame state");
             const auto copied = compiled;
+            check(!compiled.images()[0].transparentBackground(),"Existing images lost their opaque background default");
             for (uint32_t scale : {1u,2u,4u}) {
                 auto scaled = requests;
-                for (auto& request : scaled) request.scale = scale;
+                for (auto& request : scaled) { request.scale = scale; request.transparent_background = true; }
                 const auto plan = prepareViewImages(*later_frame,scaled);
                 for (const auto& product : plan.images()) {
+                    check(product.transparentBackground(),"Image plan discarded transparent background policy");
                     const auto logical = product.publishedExtent(), raster = product.rasterExtent();
                     check(logical.width == uint32_t(product.producer().view().viewport.width) &&
                         logical.height == uint32_t(product.producer().view().viewport.height) &&

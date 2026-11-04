@@ -96,7 +96,8 @@ layout(std140) uniform SceneDrawBlock { vec4 draw_params[23]; uvec4 draw_identit
 #define soft_depth_range (draw_params[16].w)
 #define unlit (int(draw_params[17].x))
 #define fog_enabled (int(draw_params[17].y))
-#define fog_additive (int(draw_params[17].z))
+#define fog_additive (int(draw_params[17].z) == 1 ? 1 : 0)
+#define premultiplied_material (int(draw_params[17].z) == 2)
 #define multiply_material (int(draw_params[17].w))
 #define fog_exterior (int(draw_params[18].x))
 #define use_texture (int(draw_params[18].y))
@@ -479,6 +480,9 @@ void main() {
     vec2 scene_pixel = gl_FragCoord.xy;
 #endif
     vec4 base=use_texture != 0 ? texture(colortexture,material_uv) : vec4(base_color,1);
+    // Image RGB already includes texture coverage. Apply only this draw's
+    // opacity; the blend operation supplies ONE, not SRC_ALPHA.
+    if (premultiplied_material) base.rgb *= vertex_alpha*material_alpha;
     base.a=(use_texture_alpha != 0 ? base.a : 1.0)*vertex_alpha*material_alpha;
     if (raster_stripe.x > 0.0) {
         float row = mod(floor(gl_FragCoord.y+raster_stripe.y),raster_stripe.x);
@@ -1329,7 +1333,7 @@ void GL4Renderer::RenderViewImage(const d3scene::PreparedViewImage& product) {
             image.buffer.RequestedSamples() != product.samples();
         if (reallocated) image.history.clear();
         image.buffer.Update(extent.width,extent.height,product.samples());
-        image.buffer.ClearAll();
+        image.buffer.ClearAll(product.transparentBackground());
         const auto raster = d3scene::rasterViewport(view.viewport,image.buffer.Height(),product.scale());
         const auto coverage = view.coverage.width ?
             d3scene::rasterViewport(view.coverage,image.buffer.Height(),product.scale()) : d3scene::Rect{};
@@ -1982,7 +1986,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         record[66] = float(static_cast<unsigned>(surface.occlusion_class));
         record[67] = float(view.soft_particles && policy.layer == d3scene::RenderLayer::World ? surface.soft_depth_range : 0);
         record[69] = float(policy.medium_transport);
-        record[70] = float(policy.blend == d3scene::BlendMode::Additive);
+        record[70] = policy.blend == d3scene::BlendMode::PremultipliedAlpha ? 2.f : float(policy.blend == d3scene::BlendMode::Additive);
         record[71] = float(policy.blend == d3scene::BlendMode::Multiply);
         const bool exterior = item.terrain || (item.model ? exteriorRoom(presentation.data().model_instances[item.model_instance_index].room) :
             (item.mesh ? exteriorRoom(presentation.data().meshes[item.mesh_index].room) : presentation.data().rooms[item.room_index].exterior));
@@ -2445,6 +2449,7 @@ void main() {
             glEnablei(GL_BLEND,0);
             if (policy.blend == d3scene::BlendMode::Multiply) glBlendFuncSeparatei(0,GL_DST_COLOR,GL_ZERO,GL_ZERO,GL_ONE);
             else if (policy.blend == d3scene::BlendMode::Additive) glBlendFuncSeparatei(0,GL_SRC_ALPHA,GL_ONE,GL_ZERO,GL_ONE);
+            else if (policy.blend == d3scene::BlendMode::PremultipliedAlpha) glBlendFuncSeparatei(0,GL_ONE,GL_ONE_MINUS_SRC_ALPHA,GL_ONE,GL_ONE_MINUS_SRC_ALPHA);
             else glBlendFuncSeparatei(0,GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA,GL_ONE,GL_ONE_MINUS_SRC_ALPHA);
         } else glDisablei(GL_BLEND,0);
         // Metadata belongs to the solid depth sample. Blended radiance changes

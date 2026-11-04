@@ -148,14 +148,16 @@ class PreparedViewImage {
     PreparedView producer_;
     uint64_t image_;
     uint32_t scale_, samples_;
-    PreparedViewImage(PreparedView producer,uint64_t image,uint32_t scale,uint32_t samples) :
-        producer_(std::move(producer)),image_(image),scale_(scale),samples_(samples) {}
+    bool transparent_background_;
+    PreparedViewImage(PreparedView producer,uint64_t image,uint32_t scale,uint32_t samples,bool transparent) :
+        producer_(std::move(producer)),image_(image),scale_(scale),samples_(samples),transparent_background_(transparent) {}
     friend PreparedImagePlan prepareViewImages(const Presentation&,const std::vector<ViewImageRequest>&);
 public:
     const PreparedView& producer() const { return producer_; }
     uint64_t image() const { return image_; }
     uint32_t scale() const { return scale_; }
     uint32_t samples() const { return samples_; }
+    bool transparentBackground() const { return transparent_background_; }
     ImageExtent publishedExtent() const {
         const auto& viewport = producer_.view().viewport;
         return {uint32_t(viewport.width),uint32_t(viewport.height)};

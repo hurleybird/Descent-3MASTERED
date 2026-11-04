@@ -704,18 +704,28 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance,const GameMainView
         }
     }
     if (SceneGeometryInspection() && FindArg("-scene-view-image-probe")) {
-        int order = 0; SceneQuadStyle style; style.uv_min = {0,1}; style.uv_max = {1,0};
-        PrepareSceneQuad(data,SceneViewImageProbe,order,{16,72,320,180},style);
-        data.meshes.back().surface.view_image_slot = 1;
-        if (FindArg("-scene-cross-publication-image-probe")) data.meshes.back().surface.texture_alpha = false;
+        int order = 0;
+        PrepareSceneImageQuad(data,SceneViewImageProbe,order,{16,72,320,180},1);
+        if (FindArg("-scene-cross-publication-image-probe")) {
+            data.meshes.back().surface.texture_alpha = false;
+            data.meshes.back().surface.blend = d3scene::BlendMode::Alpha;
+        }
         d3scene::PreparedForeground foreground; foreground.identity = SceneViewImageProbe; foreground.order = 30;
         if (FindArg("-scene-cross-publication-image-probe")) foreground.phase = d3scene::ForegroundPhase::FinalOverlay;
         foreground.layer.display_views.push_back(MakeSceneCanvasView(SceneViewImageProbe,{0,0,Max_window_w,Max_window_h},
             d3scene::ViewTarget::Display,true));
         foreground.layer.display_views.back().image_inputs.push_back({1,SceneViewImageProbe+1});
         data.foregrounds.push_back(std::move(foreground));
-        PrepareSceneQuad(data,SceneViewImageProbe+1,order,{0,0,320,180},style);
-        data.meshes.back().surface.view_image_slot = 1;
+        PrepareSceneImageQuad(data,SceneViewImageProbe+1,order,{0,0,320,180},1);
+        if (FindArg("-scene-image-alpha-audit")) {
+            SceneQuadStyle source; source.alpha = .5f;
+            PrepareSceneQuad(data,SceneViewImageProbe+3,order,{0,0,160,180},source);
+            source.alpha = .25f; source.color = {1,0,0}; source.additive = true;
+            PrepareSceneQuad(data,SceneViewImageProbe+3,order,{160,0,160,180},source);
+            SceneQuadStyle background; background.color = {0,0,1};
+            PrepareSceneQuad(data,SceneViewImageProbe+4,order,{0,0,320,180},background);
+            PrepareSceneImageQuad(data,SceneViewImageProbe+4,order,{0,0,320,180},1,.5f);
+        }
     }
     if (SceneGeometryInspection() && FindArg("-scene-standalone-model-probe") && Player_object) {
         const auto owner = uint32_t(Player_object->handle);
@@ -1114,6 +1124,19 @@ void RenderGameSceneView(const d3scene::Presentation& frame, d3scene::View view,
         // Deliberately reversed producer order: the graph, not caller order,
         // owns the dependency from this canvas image to the scene image.
         planar.images.push_back(std::move(copy)); planar.images.push_back(std::move(image));
+        if (FindArg("-scene-image-alpha-audit")) {
+            d3scene::ViewImageRequest source;
+            source.image = SceneViewImageProbe+2;
+            source.view = MakeSceneCanvasView(SceneViewImageProbe+3,{0,0,320,180},d3scene::ViewTarget::Scene,true);
+            source.scale = Render_preferred_state.supersampling_factor;
+            source.samples = Render_preferred_state.msaa_samples;
+            source.transparent_background = true;
+            d3scene::ViewImageRequest composite;
+            composite.image = SceneViewImageProbe+4;
+            composite.view = MakeSceneCanvasView(SceneViewImageProbe+4,{0,0,320,180},d3scene::ViewTarget::Scene,true);
+            composite.view.image_inputs.push_back({1,source.image});
+            planar.images.push_back(std::move(composite)); planar.images.push_back(std::move(source));
+        }
     }
     const auto producers = d3scene::prepareViewImages(frame,planar.images);
     // Game-side planning consumes the exact prepared camera/apertures. GPU
@@ -1137,6 +1160,20 @@ void RenderGameSceneView(const d3scene::Presentation& frame, d3scene::View view,
                 throw std::logic_error("Independent image published raster rather than logical dimensions");
         }
         AutomatedCaptureLog("scene view image logical readback verified size=320x180");
+        if (FindArg("-scene-image-alpha-audit")) {
+            const auto pixels = d3scene::readViewImage(frame,SceneViewImageProbe+4);
+            const auto check = [&](unsigned x,std::array<int,4> expected) {
+                const auto offset = (90*pixels.width+x)*4;
+                AutomatedCaptureLog("scene image alpha sample x=%u rgba=%u,%u,%u,%u",x,
+                    unsigned(pixels.pixels.at(offset)),unsigned(pixels.pixels.at(offset+1)),
+                    unsigned(pixels.pixels.at(offset+2)),unsigned(pixels.pixels.at(offset+3)));
+                for (size_t channel = 0; channel < 4; ++channel)
+                    if (std::abs(int(pixels.pixels.at(offset+channel))-expected[channel]) > 2)
+                        throw std::logic_error("Independent image coverage was multiplied twice or additive radiance was lost");
+            };
+            check(80,{{64,64,255,255}}); check(240,{{32,0,255,255}});
+            AutomatedCaptureLog("scene image alpha composition verified alpha and additive with half opacity");
+        }
     }
     if (FindArg("-scene-observation-probe") && (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)) {
         for (const auto& image : producers.images()) if (image.producer().view().kind == d3scene::ViewKind::Mirror) {

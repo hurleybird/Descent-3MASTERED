@@ -243,7 +243,11 @@ void validateSurface(const SurfaceBinding& surface) {
         (surface.unlit && surface.blend != BlendMode::Solid && surface.layer == RenderLayer::World)),
         "Depth offset requires an unlit translucent world effect");
     require(surface.blend == BlendMode::Solid || surface.blend == BlendMode::Alpha || surface.blend == BlendMode::Additive ||
-        surface.blend == BlendMode::Multiply,"Invalid material blend mode");
+        surface.blend == BlendMode::Multiply || surface.blend == BlendMode::PremultipliedAlpha,"Invalid material blend mode");
+    require(surface.blend != BlendMode::PremultipliedAlpha ||
+        (surface.view_image_slot && surface.texture_alpha && surface.unlit && !surface.medium_transport &&
+         surface.depth == DepthMode::Disabled && surface.soft_depth_range == 0 && surface.raster_stripe.x == 0),
+        "Premultiplied composition requires a depth-independent view image");
     require(surface.layer == RenderLayer::World || surface.layer == RenderLayer::Background,"Invalid material layer");
     require(surface.depth == DepthMode::Automatic || surface.depth == DepthMode::ReadWrite ||
         surface.depth == DepthMode::ReadOnly || surface.depth == DepthMode::Disabled,"Invalid material depth policy");
@@ -626,6 +630,9 @@ MaterialPolicy materialPolicy(const SurfaceBinding& surface, bool vertex_alpha) 
     }
     const bool fractional = vertex_alpha || surface.alpha < 1 || result.texture_alpha == TextureAlpha::Continuous || surface.soft_depth_range > 0;
     result.blend = surface.blend != BlendMode::Solid ? surface.blend : fractional ? BlendMode::Alpha : BlendMode::Solid;
+    // An accumulated image may contain additive RGB at zero coverage. Do not
+    // discard it using a straight-alpha texture's cutout threshold.
+    if (result.blend == BlendMode::PremultipliedAlpha) result.alpha_cutoff = 0;
     result.depth = surface.depth != DepthMode::Automatic ? surface.depth :
         surface.layer == RenderLayer::Background ? DepthMode::Disabled :
         result.blended() ? DepthMode::ReadOnly : DepthMode::ReadWrite;

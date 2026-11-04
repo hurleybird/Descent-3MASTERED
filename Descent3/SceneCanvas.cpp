@@ -76,6 +76,17 @@ void PrepareSceneQuad(d3scene::FrameData& frame,uint64_t collection,int32_t& nex
     frame.meshes.push_back(std::move(quad));
 }
 
+void PrepareSceneImageQuad(d3scene::FrameData& frame,uint64_t collection,int32_t& next_order,
+    d3scene::Rect rectangle,uint64_t image_slot,float opacity) {
+    if (!image_slot) throw std::invalid_argument("Canvas image requires an input slot");
+    if (rectangle.width <= 0 || rectangle.height <= 0) return;
+    SceneQuadStyle style; style.uv_min = {0,1}; style.uv_max = {1,0}; style.alpha = opacity;
+    PrepareSceneQuad(frame,collection,next_order,rectangle,style);
+    auto& surface = frame.meshes.back().surface;
+    surface.view_image_slot = image_slot;
+    surface.blend = d3scene::BlendMode::PremultipliedAlpha;
+}
+
 void PrepareFrameBlendCanvas(d3scene::FrameData& frame,uint64_t collection,d3scene::Rect viewport,
     const std::vector<FrameScreenBlend>& blends,bool inspection) {
     if (blends.empty()) return;

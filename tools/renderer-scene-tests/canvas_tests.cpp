@@ -162,6 +162,23 @@ int runCanvasTests() {
         try { d3scene::Presentation::freeze(invalid); } catch (const std::invalid_argument&) { rejected_filter = true; }
         check(rejected_filter,"Unknown image sampling policy accepted");
     }
+    {
+        d3scene::FrameData image;
+        image.sequence = 1; image.scene_lifetime = d3scene::assets().lifetime();
+        int image_order = 0;
+        PrepareSceneImageQuad(image,9,image_order,{0,0,64,64},1,.5f);
+        const auto frame = d3scene::Presentation::freeze(image);
+        const auto& material = frame->data().meshes[0].surface.material;
+        check(material.blend == d3scene::BlendMode::PremultipliedAlpha && material.alpha_cutoff == 0 &&
+            !material.testsDepth() && !material.medium_transport,
+            "Rendered image composition lost associated coverage or discarded zero-alpha emission");
+        check(image.meshes[0].texture_uvs[0].y == 1 && image.meshes[0].surface.alpha == .5f,
+            "Image canvas lost vertical origin or consumer opacity");
+        image.meshes[0].surface.medium_transport = true;
+        bool rejected_image = false;
+        try { d3scene::Presentation::freeze(image); } catch (const std::invalid_argument&) { rejected_image = true; }
+        check(rejected_image,"Composed image accepted a second medium transport");
+    }
     const auto canvas = MakeSceneCanvasView(7,{20,30,800,600},d3scene::ViewTarget::Display,true);
     check(canvas.viewport.x == 20 && canvas.projection_anchor.x == 0 && canvas.collection == 7 &&
         canvas.ordering == d3scene::ViewOrdering::Compositing && canvas.camera.up.y == -1,

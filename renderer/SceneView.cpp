@@ -76,7 +76,7 @@ PreparedImagePlan prepareViewImages(const Presentation& frame,const std::vector<
     result.images_.reserve(requests.size());
     for (const auto index : order) {
         const auto& request = requests[index];
-        result.images_.push_back(PreparedViewImage(prepareView(frame,request.view),request.image,request.scale,request.samples));
+        result.images_.push_back(PreparedViewImage(prepareView(frame,request.view),request.image,request.scale,request.samples,request.transparent_background));
     }
     return result;
 }

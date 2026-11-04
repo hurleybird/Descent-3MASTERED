@@ -1,5 +1,30 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November 3 — execution scratch and independent-image alpha
+
+Active worktree/branch unchanged. bdb35ab pushed: execution scratch retains its
+high-water size until retirement rather than shrinking for overlays. Dense007
+table preparation .2802 -> .0317ms; whole-frame pinned ABBA averages improve
+about21% in005 and12.5% in007,000 variable. All eight ordinary images unchanged.
+These are improvements over the preceding migration checkpoint, not universal
+wins over the reconstructed legacy comparator. See integration ledger.
+
+Rejected separate producer snapshot pools: tested and completely removed; no
+repeatable CPU improvement. Evidence perf-producer-storage-*20261103.
+
+Next checkpoint adds explicit optional transparent independent-image backgrounds
+and premultiplied image composition. Existing images retain opaque-black defaults.
+Pixel audits verify partial coverage, additive RGB at zero coverage and consumer
+opacity, with SSAA1/2/4 and MSAA4. Retirement and quality transitions003/006 pass;
+all eight ordinary500-frame screenshots remain pixel-identical. No TelCom entry
+point has been migrated by this prerequisite. TelCom display/scene color transfer,
+independent map/model producers and no-probe gameplay qualification remain work.
+
+Private runtime integration-runtime-20261022 contains the alpha checkpoint build.
+Candidate, Previous Candidate and main workspace untouched. All captures hidden;
+no game process remained after qualification. lib/gitinfo.h remains untracked.
+
+
 ## October 27 — resumed original task after Sol continuation
 
 Active worktree remains renderer-rearchitecture, branch codex/renderer-rearchitecture.

@@ -510,7 +510,7 @@ void Framebuffer::ClearAlphaToZero()
 	MarkColorDirty();
 }
 
-void Framebuffer::ClearAll()
+void Framebuffer::ClearAll(bool transparent)
 {
 	if (m_name == 0)
 		return;
@@ -535,7 +535,7 @@ void Framebuffer::ClearAll()
 		glDisable(GL_SCISSOR_TEST);
 	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	glDepthMask(GL_TRUE);
-	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+	glClearColor(0.0f, 0.0f, 0.0f, transparent ? 0.0f : 1.0f);
 	glClearDepth(1.0);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
