@@ -1,5 +1,32 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November 4 — source paging no longer preuploads legacy GPU assets
+
+Removed bitmap/lightmap GPU preuploads from PageInLevelTexture/PageInAllData;
+removed legacy terrain precache and effect-atlas upload APIs. High-res sky still
+resolves source replacement, without old GPU upload. TouchTexture, source paging,
+bitmap metadata and CPU atlas construction remain; scene publication owns GPU
+images/terrain. Native UI still lazily uploads its legacy bitmap cache.
+Temporary timed baseline out/legacy-startup-timed.exe SHA706BB8AC7283BBB3EB689939B60BC80559C2DF611916993D5ACDDA1391D42AC2.
+qual-startup-gpu-before-20261104 logs aggregate19k–177k preupload CALLS (mostly
+cache hits, NOT that many transfers),14–28ms timed upload/atlas/terrain work per
+save-load sequence (two PageInAllData calls). Timers removed from final source.
+Root3/3/fullbuild pass; qual-startup-gpu-before/after all8 clean60 EXACT.
+qual-startup-gpu-roundtrip effects/field003 all8PNG EXACT prior precache-roundtrip;
+qual-startup-gpu-ui003/006 passes;003world/UI EXACT owned-preview-options, UI
+image inspected. LatestbinaryFD4C6D670A7319A16556C667B28367F337BE93C054DEB49772EB546DE7EF92ED.
+ABBA first10frame work sums (not total load time), beforeA/afterA/afterB/beforeB:
+000274.5/325/283.8/300.4;001211.4/227.8/214.5/235.1;
+002299.6/330.6/291.5/291.2;003394.3/390.7/355.4/394.8;
+004116.7/121.1/116/112.4;005306.8/332.7/290.6/285.3;
+006128/137.2/130.5/125.3;007309.5/286.8/331.7/331.6.
+Raw qual-startup-gpu-{before,after,after-b,before-b}-20261104. No precise
+end-to-end loading or steady-frame speedup claimed; cold-frame noise substantial.
+Latest runtime restored after baseline rerun, no game active. Usage68%, credits
+unchanged62044.8730600000. Continue: unused PreUploadTextureToCard interface can
+now be retired; FreePreUploadedTexture is separately called by lightmap release
+but GL4 implementation is empty. Shared/live source helpers still need audit.
+
 ## November 4 — delete retired world execution roots
 
 Removed unused RetiredMineMigrationSource, PostRender and its private sorting/

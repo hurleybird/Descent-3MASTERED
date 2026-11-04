@@ -133,14 +133,8 @@ void PageInHighResolutionSky()
 		return;
 
 	const int fallback_bitmap = GetTextureBitmap(Terrain_sky.dome_texture, 0);
-	const int bitmap_handle =
-		GetHighResolutionSkyBitmap(Terrain_sky.dome_texture, fallback_bitmap);
-	if (bitmap_handle != fallback_bitmap &&
-		bitmap_handle != BAD_BITMAP_HANDLE &&
-		GameBitmaps[bitmap_handle].cache_slot == -1)
-	{
-		rend_PreUploadTextureToCard(bitmap_handle, MAP_TYPE_BITMAP);
-	}
+	// Resolve the source replacement now; owned scene images upload it on demand.
+	GetHighResolutionSkyBitmap(Terrain_sky.dome_texture, fallback_bitmap);
 }
 
 // Last time terrain was rendered
@@ -1207,34 +1201,6 @@ void TerrainRenderer_ResetLevelState()
 	memset(rooms_to_render, 0, sizeof(rooms_to_render));
 }
 
-void TerrainRenderer_PrecacheLevel()
-{
-	EnsureTerrainRetainedRendererGeneration();
-	Terrain_renderer_mode = TERRAIN_RENDERER_RETAINED;
-	if (!TerrainRetainedCanRender(false, true) ||
-		!EnsureTerrainRetainedResources())
-		return;
-
-	// None of this work depends on the current camera. Build and upload the
-	// compact retained cell stream and texture arrays while the loading screen
-	// is active so the first outdoor frame performs no terrain allocation.
-	EnsureTerrainRetainedFullDrawWork();
-	if (Terrain_retained_cell_inputs.empty())
-		return;
-	if (!EnsureTerrainRetainedLightmapArray() ||
-		!EnsureTerrainRetainedBaseTextureArray())
-	{
-		return;
-	}
-
-	UploadTerrainRetainedInputBuffer();
-	EnsureTerrainPipelinesReady();
-
-	glActiveTexture(GL_TEXTURE0);
-	rendTEMP_ClearShaderBinding();
-	rend_ClearBoundTextures();
-	rendTEMP_UnbindVertexBuffer();
-}
 
 // Checks to see if this object can even be seen from our current viewpoint
 // By shooting rays to it

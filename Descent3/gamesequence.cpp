@@ -667,8 +667,6 @@ void StartLevel()
 	LoadLevelText(Current_mission.levels[Current_mission.cur_level - 1].filename);
 
 	Gametime = 0.0f;
-	if (!Dedicated_server)
-		TerrainRenderer_PrecacheLevel();
 
 	//Start the clock
 	InitFrameTime();
@@ -1351,7 +1349,7 @@ void PageInLevelTexture(int id)
 
 	TouchTexture(id);
 
-	// Upload all these textures to the card
+	// Page source pixels and metadata; scene publication owns GPU residency.
 	if (GameTextures[id].flags & TF_ANIMATED)
 	{
 		vclip* vc = &GameVClips[GameTextures[id].bm_handle];
@@ -1362,8 +1360,6 @@ void PageInLevelTexture(int id)
 			else
 				GameBitmaps[vc->frames[i]].flags &= ~BF_COMPRESSABLE;
 
-			if (!Dedicated_server && GameBitmaps[vc->frames[i]].cache_slot == -1)
-				rend_PreUploadTextureToCard(vc->frames[i], MAP_TYPE_BITMAP);
 		}
 	}
 	else
@@ -1373,8 +1369,6 @@ void PageInLevelTexture(int id)
 		else
 			GameBitmaps[GameTextures[id].bm_handle].flags &= ~BF_COMPRESSABLE;
 
-		if (!Dedicated_server && GameBitmaps[GameTextures[id].bm_handle].cache_slot == -1)
-			rend_PreUploadTextureToCard(GameTextures[id].bm_handle, MAP_TYPE_BITMAP);
 	}
 
 
@@ -1760,22 +1754,6 @@ void PageInAllData()
 
 	LoadLevelProgress(LOAD_PROGRESS_PAGING_DATA, PAGED_IN_CALC);
 
-	if (!Dedicated_server && UseHardware && !NoLightmaps)
-	{
-		if (LightmapInfo)
-		{
-			for (i = 0; i < MAX_LIGHTMAP_INFOS; i++)
-			{
-				if (LightmapInfo[i].used && LightmapInfo[i].type != LMI_DYNAMIC)
-				{
-					if (GameLightmaps[LightmapInfo[i].lm_handle].cache_slot == -1)
-					{
-						rend_PreUploadTextureToCard(LightmapInfo[i].lm_handle, MAP_TYPE_LIGHTMAP);
-					}
-				}
-			}
-		}
-	}
 
 	// Get static fireballs
 	for (i = 0; i < NUM_FIREBALLS; i++)
@@ -1852,6 +1830,5 @@ void PageInAllData()
 			continue;
 		}
 	}
-	VisEffectUploadPrewarmedAtlases();
 	LoadLevelProgress(LOAD_PROGRESS_PREPARE, 0);
 }

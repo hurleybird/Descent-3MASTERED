@@ -2191,17 +2191,6 @@ void VisEffectPrewarmTexture(int texture_handle)
 	}
 }
 
-void VisEffectUploadPrewarmedAtlases()
-{
-	for (VisFireballSharedAtlas& atlas : VisFireball_shared_atlases)
-	{
-		if (atlas.valid && !atlas.failed && atlas.atlas_handle > BAD_BITMAP_HANDLE &&
-			GameBitmaps[atlas.atlas_handle].used)
-		{
-			rend_PreUploadTextureToCard(atlas.atlas_handle, MAP_TYPE_BITMAP);
-		}
-	}
-}
 
 static void VisEffectApplyBatchUVs(VisFireballBatchItem& item, float u0, float v0, float u1, float v1)
 {

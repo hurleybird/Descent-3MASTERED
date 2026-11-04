@@ -91,7 +91,6 @@ void DrawEnhancedSnowParticlesBatched();
 void FlushVisEffectBatches();
 void ForceFlushVisEffectBatches();
 void VisEffectPrewarmTexture(int texture_handle);
-void VisEffectUploadPrewarmedAtlases();
 
 // Creates a some sparks that go in random directions
 void CreateRandomSparks (int num_sparks,vector *pos,int roomnum,int which_index=-1,float force_scalar=1);

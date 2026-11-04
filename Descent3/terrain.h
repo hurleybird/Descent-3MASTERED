@@ -222,7 +222,6 @@ enum terrain_renderer_mode
 
 extern int Terrain_renderer_mode;
 void TerrainRenderer_ResetLevelState();
-void TerrainRenderer_PrecacheLevel();
 
 extern float Last_terrain_render_time;
 
