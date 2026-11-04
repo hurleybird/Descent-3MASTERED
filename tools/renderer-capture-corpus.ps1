@@ -49,7 +49,7 @@ param(
     [switch]$HistoryProbe,
     [switch]$DeformationProbe,
     [string]$DemoFile = '',
-    [ValidateSet('ordinary','ship-preview','image-alpha','image-lifecycle','image-settings','automap-cache','automap-lifecycle','automap-settings','retirement','save-export','save-settings','auxiliary-lifecycle','modal-ui','save-dialog','quicksave','decoded-movie','decoded-movie-paletted','decoded-movie-subtitles','decoded-movie-screenshot','message-consoles','screenshot-normal','screenshot-clean','screenshot-double','screenshot-tga','demo-movie')][string]$Scenario = 'ordinary'
+    [ValidateSet('ordinary','fog-residency','ship-preview','image-alpha','image-lifecycle','image-settings','automap-cache','automap-lifecycle','automap-settings','retirement','save-export','save-settings','auxiliary-lifecycle','modal-ui','save-dialog','quicksave','decoded-movie','decoded-movie-paletted','decoded-movie-subtitles','decoded-movie-screenshot','message-consoles','screenshot-normal','screenshot-clean','screenshot-double','screenshot-tga','demo-movie')][string]$Scenario = 'ordinary'
 )
 
 # Run only copied installations and copied pilot/save data. Never point Runtime
@@ -375,6 +375,11 @@ try {
         $scenarioValidated = $true
         foreach ($pattern in $scenarioSpec.requiredLog) {
             $scenarioValidated = $scenarioValidated -and ($logText -match $pattern)
+        }
+        if ($scenarioSpec.fogResidency) {
+            $uploads = [regex]::Matches($logText,'scene fog asset upload lifetime=\d+ revision=\d+')
+            $duplicates = @($uploads | Group-Object Value | Where-Object Count -gt 1)
+            $scenarioValidated = $scenarioValidated -and $uploads.Count -ge 2 -and $duplicates.Count -eq 0
         }
         if ($scenarioSpec.movieInput) {
             $scenarioValidated = $scenarioValidated -and $logText.Contains('scene decoded movie renderer configuration unchanged') -and

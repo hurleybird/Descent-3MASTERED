@@ -204,7 +204,12 @@ class GL4Renderer : public IRenderer
 	struct SceneReflectionRanges { ElementRange sources, normals, field; };
 	std::unordered_map<uint64_t, SceneReflectionRanges> scene_reflection_assets;
 	d3scene::RetainedDependencies<uint64_t> scene_reflection_dependencies;
-	GLuint scene_fog_buffer = 0, scene_fog_texture = 0;
+	struct SceneFogGpu {
+		GLuint buffer = 0, texture = 0;
+		void Destroy();
+	};
+	d3scene::SceneGpuCache<d3scene::FogAsset,SceneFogGpu> scene_fog_assets;
+	SceneFogGpu scene_empty_fog;
 	GLuint scene_fog_nodes_texture = 0; // float view of the shared per-view influence stream
 	struct FogFieldProgram { ShaderProgram shader; GLint range = -1; };
 	std::array<FogFieldProgram,4> scene_fog_field_programs;
@@ -215,7 +220,6 @@ class GL4Renderer : public IRenderer
 	uint32_t scene_fog_tile_words = 0, scene_fog_tile_max_stride = 0;
 	GLenum scene_fog_field_format = GL_RGBA32F;
 	int scene_fog_field_width = 0, scene_fog_field_height = 0;
-	d3scene::AssetId scene_fog_id;
 	struct SceneDepthSnapshot {
 		GLuint texture = 0, framebuffer = 0;
 		int width = 0, height = 0;

@@ -1,6 +1,12 @@
 {
   "schemaVersion": 1,
   "scenarios": {
+    "fog-residency": {
+      "revision": 1, "minimumFrame": 60, "inspectionRequired": true,
+      "arguments": ["-scene-gl-audit"], "fogResidency": true,
+      "requiredLog": ["scene fog asset upload lifetime=[1-9]", "scene view collection=\\d+ target=1"],
+      "purpose": "Steady world and UI views upload each immutable fog revision once, including the empty resource; clear canvases cannot evict world boundary geometry."
+    },
     "ship-preview": {
       "revision": 1, "minimumFrame": 50, "inspectionRequired": true,
       "arguments": ["-scene-ship-telcom-probe", "-scene-gl-audit", "-capture-series-from", "30", "-capture-series-until", "40", "-capture-series-stride", "10"],

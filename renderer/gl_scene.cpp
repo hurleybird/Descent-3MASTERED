@@ -690,6 +690,11 @@ void GL4Renderer::SceneDepthSnapshot::Destroy() {
     if (framebuffer) glDeleteFramebuffers(1,&framebuffer);
     texture = framebuffer = 0; width = height = 0;
 }
+void GL4Renderer::SceneFogGpu::Destroy() {
+    if (texture) glDeleteTextures(1,&texture);
+    if (buffer) glDeleteBuffers(1,&buffer);
+    texture = buffer = 0;
+}
 void GL4Renderer::RetireScene() {
     const auto lifetime = scene_asset_lifetime;
     const auto pages = scene_geometry_pages.size(), images = scene_images.size(), views = scene_view_images.size();
@@ -697,7 +702,8 @@ void GL4Renderer::RetireScene() {
     if (scene_asset_lifetime || !scene_geometry_pages.empty() || !scene_images.empty() ||
         !scene_view_images.empty() || scene_view_history.size() || !scene_depth_snapshots.empty() ||
         !scene_rooms.empty() || !scene_models.empty() || !scene_terrain.empty() || scene_meshes.size() ||
-        !scene_frame_owner.expired() || scene_draw_buffer || scene_view_buffer || scene_fog_texture)
+        !scene_frame_owner.expired() || scene_draw_buffer || scene_view_buffer || scene_fog_assets.size() ||
+        scene_empty_fog.texture || scene_empty_fog.buffer)
         Error("Scene retirement left live world resources");
     AutomatedCaptureLog("scene retirement gpu lifetime=%llu pages=%u images=%u views=%u remaining=0",
         lifetime,unsigned(pages),unsigned(images),unsigned(views));
@@ -729,9 +735,8 @@ void GL4Renderer::DestroySceneResources() {
         if (page.buffer) glDeleteBuffers(1,&page.buffer);
     }
     scene_geometry_pages.clear(); scene_geometry_allocator.clear();
-    if (scene_fog_buffer) glDeleteBuffers(1,&scene_fog_buffer);
-    if (scene_fog_texture) glDeleteTextures(1,&scene_fog_texture);
-    scene_fog_buffer = scene_fog_texture = 0;
+    scene_fog_assets.clear([](SceneFogGpu& fog) { fog.Destroy(); });
+    scene_empty_fog.Destroy();
     if (scene_fog_nodes_texture) glDeleteTextures(1,&scene_fog_nodes_texture);
     scene_fog_nodes_texture = 0;
     if (scene_fog_field_texture) glDeleteTextures(1,&scene_fog_field_texture);
@@ -742,7 +747,6 @@ void GL4Renderer::DestroySceneResources() {
     if (scene_fog_tile_buffer) glDeleteBuffers(1,&scene_fog_tile_buffer);
     scene_fog_tile_buffer=0; scene_fog_tile_capacity=0;
     scene_fog_tile_words=scene_fog_tile_max_stride=0;
-    scene_fog_id = {};
     scene_view_fog = {}; scene_view_fog_volumes.clear();
     for (auto& depth : scene_depth_snapshots) depth.second.Destroy();
     scene_depth_snapshots.clear();
@@ -950,6 +954,7 @@ void GL4Renderer::PrepareSceneViewTables(const d3scene::PreparedView& prepared) 
         if (new_frame) {
         PERF_MARKER_SCOPE("Scene.Upload.MeshRetirement");
         scene_meshes.releaseExpired([&](SceneMeshGpu& mesh) { ReleaseSceneMesh(mesh); });
+        scene_fog_assets.releaseExpired([](SceneFogGpu& fog) { fog.Destroy(); });
         }
         // A publication with no field dependencies must not replace the
         // resident immutable field table with an empty one. This applies to
@@ -1670,11 +1675,14 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     glUniform1i(scene_uniforms.scene_occlusion_enabled,0);
     const auto& fog_volumes = d3scene::fogVolumes(presentation.data());
     const auto fog_id = presentation.data().fog ? presentation.data().fog->id() : d3scene::AssetId{};
-    const bool new_fog_buffer = !scene_fog_buffer;
-    const bool upload_fog = new_fog_buffer || scene_fog_id != fog_id;
-    if (!scene_fog_buffer) { glGenBuffers(1,&scene_fog_buffer); glGenTextures(1,&scene_fog_texture); }
-    glBindBuffer(GL_TEXTURE_BUFFER,scene_fog_buffer);
-    if (upload_fog) {
+    // Boundary records belong to the immutable fog asset, not the last view.
+    // Clear UI and auxiliary publications must not replace the world's data.
+    // Per-view candidates, clip origin and optical fields remain independent.
+    auto& fog_gpu = presentation.data().fog ? scene_fog_assets.get(presentation.data().fog) : scene_empty_fog;
+    if (!fog_gpu.buffer) {
+    PERF_MARKER_SCOPE("Scene.Upload.FogAsset");
+    glGenBuffers(1,&fog_gpu.buffer); glGenTextures(1,&fog_gpu.texture);
+    glBindBuffer(GL_TEXTURE_BUFFER,fog_gpu.buffer);
     std::vector<float> fog(fog_volumes.size()*12,0);
     for (size_t index = 0; index < fog_volumes.size(); ++index) {
         const auto& volume = fog_volumes[index];
@@ -1694,7 +1702,11 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     }
     if (fog.empty()) fog.resize(4,0);
     glBufferData(GL_TEXTURE_BUFFER,fog.size()*sizeof(float),fog.data(),GL_STATIC_DRAW);
-    scene_fog_id = fog_id;
+    glActiveTexture(GL_TEXTURE6); glBindTexture(GL_TEXTURE_BUFFER,fog_gpu.texture);
+    glTexBuffer(GL_TEXTURE_BUFFER,GL_RGBA32F,fog_gpu.buffer);
+    AutomatedCaptureLog("scene fog asset upload lifetime=%llu revision=%llu bytes=%u",
+        static_cast<unsigned long long>(fog_id.lifetime),static_cast<unsigned long long>(fog_id.revision),
+        unsigned(fog.size()*sizeof(float)));
     }
     // Normal execution never patches camera state into the geometry buffer.
     // Revisit containment only for this explicit boundary diagnostic.
@@ -1753,8 +1765,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
             }
         }
     }
-    glActiveTexture(GL_TEXTURE6); glBindTexture(GL_TEXTURE_BUFFER,scene_fog_texture);
-    if (new_fog_buffer) glTexBuffer(GL_TEXTURE_BUFFER,GL_RGBA32F,scene_fog_buffer);
+    glActiveTexture(GL_TEXTURE6); glBindTexture(GL_TEXTURE_BUFFER,fog_gpu.texture);
     const auto& exterior_fog = presentation.data().exterior_fog;
     struct ViewRecord { std::array<float,64> values{}; std::array<uint32_t,4> deformer_keys{}; std::array<int32_t,4> options{}; } view_record;
     static_assert(sizeof(ViewRecord) == 18*16,"Scene view std140 layout mismatch");
@@ -2137,7 +2148,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         const auto estimate = ao.Evaluate(inputs,ao_preferences);
         if (!estimate.ao_texture) Error("Scheduled occlusion estimate is missing");
         BindSceneTables();
-        glActiveTexture(GL_TEXTURE6); glBindTexture(GL_TEXTURE_BUFFER,scene_fog_texture);
+        glActiveTexture(GL_TEXTURE6); glBindTexture(GL_TEXTURE_BUFFER,fog_gpu.texture);
         glActiveTexture(GL_TEXTURE7); glBindTexture(GL_TEXTURE_2D,depth_for_sampling);
         GL_BindFramebufferTexture(estimate.ao_texture,11,GL_LINEAR);
         scene_shader.Use();
@@ -2244,7 +2255,7 @@ void main() {
         // Image-space resolve owns its own bindings. Resume the scene pipeline
         // explicitly, including buffer textures used by both shader stages.
         BindSceneTables();
-        glActiveTexture(GL_TEXTURE6); glBindTexture(GL_TEXTURE_BUFFER,scene_fog_texture);
+        glActiveTexture(GL_TEXTURE6); glBindTexture(GL_TEXTURE_BUFFER,fog_gpu.texture);
         glActiveTexture(GL_TEXTURE7); glBindTexture(GL_TEXTURE_2D,depth_for_sampling);
         scene_shader.Use();
         glDepthFunc(GL_LEQUAL);

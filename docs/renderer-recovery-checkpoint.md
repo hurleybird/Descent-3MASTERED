@@ -1,5 +1,42 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November 3 — fog GPU residency fixes the larger CPU regression
+
+Continue working; user explicitly said not to stop unfinished. External sampling
+after092ae0d found ExecuteSceneView fog packing/upload dominating many samples:
+one global scene_fog_id/buffer was overwritten by clear UI publications, then
+the next world view repacked/reuploaded the whole immutable boundary mesh.
+Replaced that storage with existing SceneGpuCache<FogAsset,SceneFogGpu>, keyed by
+lifetime/revision and weak ownership, plus a separate empty resource. Per-view
+candidates/containment/optical fields remain per-view. Expired assets and scene
+retirement delete buffers/textures; AO/particle restores bind the selected asset.
+No shader, geometry, fog law, precision or sampling change.007 now uploads its
+566000-byte geometry once in1500frames, rather than alternating with UI's16bytes.
+
+Root3/3 pass. All8 ordinary500 images EXACT to092ae0d. Image/auxiliary retirement
+003/006 pass; SSAA2/MSAA4/AO/bloom/motion field captures003/006 also EXACT to the
+parent. New fog-residency scenario asserts each revision uploads once across
+steady world/UI views;003/007 pass. Evidence qual-fog-asset-* and
+qual-fog-residency-20261103. Sampler exited normally, no game left running.
+Sampler output cpu-resource-interface-stack007-20261103.txt, NOT timing evidence.
+
+Fresh per-save old/new/new/old1500-frame comparison (CPU2,720p1x/MSAA0,noAO/noBloom,
+medians400..1199) beats reconstructed pre-rewrite on CPU in ALL8 saves. Mean of
+the two medians old→new ms:0002.466→1.3588;0012.1343→1.1083;0022.6143→1.6345;
+0031.8255→1.5148;004.9088→.482;0051.0645→.927;006.9958→.669;0071.461→1.1465.
+Gains13–48%. GPU still loses000/001/006/007, wins002/003/004/005. Do not sum CPU/GPU.
+Comparator is still reconstructed bfb59647 IPO with verified SHA256 A6286E9...DA4,
+not the deleted original. New field320 versus old fog and headlight differences
+mean NOT strict visual parity. Raw perf-fog-asset-vslegacy-saveg*-{old-a,new-a,
+new-b,old-b}-20261103. Runtime restored to out/fog-asset-working.exe.
+
+Next: investigate the GPU deficits without losing the CPU wins.006 has no fog
+and reflection-heavy opaque/late passes;001/007 spend heavily in translucent fog.
+One avenue to investigate (NOT implemented): the monolithic material shader
+retains authored-reflection varyings on simpler/unlit draws. Existing uniforms
+already use a shared view UBO; do not repeat the rejected canvas-fusion experiment.
+No new shader implementation yet. Candidate/Prev/main workspace untouched.
+
 ## November 3 — resource requirements belong to their producer
 
 Continuing, not finished: user explicitly said not to stop while work remains.

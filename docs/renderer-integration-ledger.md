@@ -1637,3 +1637,43 @@ CPU work_ms:007 gains about5–6.5%,005 about2–3.5%;000 has timing drift and n
 confident gain. GPU unchanged (~.52/.143/.52). Three1500-frame benchmark images
 also exactly match. Evidence perf-interface-* and perf-interface-reverse-*.
 No claim that all baselines now beat pre-rewrite; substantial CPU work remains.
+
+### November 3 — immutable fog GPU asset ownership
+
+External stack sampling identified per-view fog repacking/upload, not another
+model-pose bottleneck. The single global fog id/storage switched world→empty UI
+→world every frame. Replaced it with existing revision/lifetime-keyed SceneGpuCache
+and weak CPU owners, plus one empty resource. All view-dependent candidate/node
+streams and optical fields remain unchanged. Context retirement and expired-asset
+collection destroy both handles; AO and particle consumers restore the selected
+asset texture. No shader or optical-quality change.007's566000-byte boundary data
+uploads once across1500frames. Diagnostic sample output
+cpu-resource-interface-stack007-20261103.txt is not timing evidence.
+
+Root3/3 pass. All8 ordinary500 images EXACT to092ae0d; image and auxiliary
+retirement003/006 pass with remaining=0. SSAA2/MSAA4/AO/bloom/motion field captures
+003/006 EXACT to parent. New fog-residency runtime scenario asserts no repeated
+upload of a lifetime/revision across world/UI views;003/007 pass. Evidence
+qual-fog-asset-{world,lifecycle,auxiliary,effects-parent,effects-new}-20261103 and
+qual-fog-residency-20261103. No installed copy/Candidate changes.
+
+Fresh pinnedCPU2 uncapped720p1x/noMSAA/noAO/noBloom,1500frames, medians400..1199.
+Per-save run order oldA/newA/newB/oldB; old is reconstructed bfb59647 IPO
+(SHA256 A6286E9315A60F3C93B3A764C93A808B8FA385924ADDFACE1B573433374F3DA4).
+New uses field320, old legacy fog; unified headlight also differs, so no strict
+visual-equivalence claim. Each cell is CPU/GPU ms; do not add the two.
+
+| Save | Old A | New A | New B | Old B | CPU improvement |
+| --- | --- | --- | --- | --- | --- |
+|000|2.4125/.321|1.3635/.509|1.3540/.506|2.5195/.317|44.9%|
+|001|2.4030/.7125|1.1270/.929|1.0895/.934|1.8655/.6545|48.1%|
+|002|2.6725/1.2245|1.6450/.482|1.6240/.482|2.5560/1.1585|37.5%|
+|003|1.8170/.5735|1.5030/.420|1.5265/.422|1.8340/.577|17.0%|
+|004|.9065/.353|.4850/.164|.4790/.163|.9110/.350|47.0%|
+|005|1.0660/.239|.9200/.137|.9340/.137|1.0630/.239|12.9%|
+|006|.9470/.327|.6715/.670|.6665/.670|1.0445/.329|32.8%|
+|007|1.4545/.400|1.1615/.515|1.1315/.515|1.4675/.401|21.5%|
+
+Raw perf-fog-asset-vslegacy-saveg*-{old-a,new-a,new-b,old-b}-20261103. The CPU
+milestone is achieved in this paired corpus, not an overall renderer-completion
+claim. GPU still regresses000/001/006/007 and no-probe gameplay acceptance remains.
