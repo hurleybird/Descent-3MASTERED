@@ -1,5 +1,21 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November 4 — remove retired model cockpit state
+
+Removed setter APIs/global cockpit batching/filter switches and their nine
+per-face checks, cockpit-only batcher pointers/branches and submodel-offset
+overrides. Last callers were removed in f0acad3. Generic legacy model rendering
+and pure EvaluateModelPose/ComposeModelPose remain; no new fallback introduced.
+Root3/3 and fullbuild pass; all8 ordinary500 qual-model-state-retirement-20261104
+EXACT f0acad3. qual-model-state-roundtrip-20261104 effects/field003 native
+flight/fire-quicksave-reload passes; final image inspected, no old-image parity
+claim for this roundtrip run. Binary4136A8B303352CB6BA84CFD7830BF128F0E5C605F588246DE31B216FE5C36616.
+No active game. Usage64%, credits unchanged62044.8730600000. Keep working.
+Next audit: render.cpp RetiredMineMigrationSource and postrender.cpp PostRender
+have no callers. Shared live lighting/reflection/game helpers prevent deleting
+whole files blindly. Map those dependencies before retiring old world execution.
+No edits to next task yet. Protected installs, no-probe game guard unchanged.
+
 ## November 4 — retire unreachable cockpit/gauge execution
 
 Removed RenderCockpit/RenderCockpitPostPost and private snapshot, motion hooks,

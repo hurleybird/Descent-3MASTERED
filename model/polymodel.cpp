@@ -76,9 +76,6 @@ static std::unordered_map<int, PolymodelMotionHistory> Polymodel_motion_history;
 static PolymodelMotionHistory *Polymodel_motion_active_history = nullptr;
 static bool Polymodel_motion_active = false;
 static uint32_t Polymodel_motion_frame = 0;
-static int Polymodel_submodel_adjust_model = -1;
-static int Polymodel_submodel_adjust_count = 0;
-static vector Polymodel_submodel_adjustments[MAX_SUBOBJECTS];
 
 void PolymodelMotionStartFrame()
 {
@@ -322,41 +319,9 @@ void PolymodelMotionSetObjectPoint(g3Point *point, const vector *world_pos)
 	point->p3_motion_prev_world_valid = 1;
 }
 
-void PolymodelSetSubmodelOffsetAdjustments(int model_num, const vector *offsets, int count)
-{
-	Polymodel_submodel_adjust_model = model_num;
-	Polymodel_submodel_adjust_count = std::min(count, MAX_SUBOBJECTS);
-	for (int i = 0; i < Polymodel_submodel_adjust_count; i++)
-		Polymodel_submodel_adjustments[i] = offsets[i];
-}
 
-void PolymodelClearSubmodelOffsetAdjustments()
-{
-	Polymodel_submodel_adjust_model = -1;
-	Polymodel_submodel_adjust_count = 0;
-}
 
-static void ApplyPolymodelSubmodelOffsetAdjustments(poly_model *pm)
-{
-	if (!pm || pm->id != Polymodel_submodel_adjust_model)
-		return;
 
-	int count = std::min(pm->n_models, Polymodel_submodel_adjust_count);
-	for (int i = 0; i < count; i++)
-		pm->submodel[i].mod_pos += Polymodel_submodel_adjustments[i];
-}
-
-static void SetModelAnglesAndAdjustedPos(poly_model *pm, float *normalized_time, uint subobj_flags)
-{
-	// Explicit submodel offsets can affect ancestors excluded by a masked draw.
-	// Rebuild the complete hierarchy so a preceding point query or partial draw
-	// cannot leave an old additive adjustment behind for those ancestors.
-	if (pm && pm->id == Polymodel_submodel_adjust_model)
-		SetModelAnglesAndPos(pm, normalized_time);
-	else
-		SetModelAnglesAndPos(pm, normalized_time, subobj_flags);
-	ApplyPolymodelSubmodelOffsetAdjustments(pm);
-}
 
 #ifdef _DEBUG
 //Flag to draw an outline around the faces
@@ -2619,7 +2584,7 @@ void DrawPolygonModel(vector *pos,matrix *orient,int model_num,float *normalized
 
 	StartLightInstance(pos,orient);
 	
-	SetModelAnglesAndAdjustedPos(po, normalized_time, f_render_sub);
+	SetModelAnglesAndPos(po, normalized_time, f_render_sub);
 	const bool transient_motion_transform = PolymodelMotionBeginTransientTransform(pos, orient);
 	PolymodelMotionCaptureCurrent(po, pos, orient);
 	PolymodelPerfAddDrawModelSetup(draw_model_start_time);
@@ -2717,7 +2682,7 @@ void DrawPolygonModel(vector *pos,matrix *orient,int model_num,float *normalized
 	StartLightInstance(pos,orient);
 
 	po=&Poly_models[model_num];
-	SetModelAnglesAndAdjustedPos(po, normalized_time, f_render_sub);
+	SetModelAnglesAndPos(po, normalized_time, f_render_sub);
 	const bool transient_motion_transform = PolymodelMotionBeginTransientTransform(pos, orient);
 	PolymodelMotionCaptureCurrent(po, pos, orient);
 	PolymodelPerfAddDrawModelSetup(draw_model_start_time);
@@ -2803,7 +2768,7 @@ void DrawPolygonModel(vector *pos,matrix *orient,int model_num,float *normalized
 	StartLightInstance (pos,orient);
 	
 	po=&Poly_models[model_num];
-	SetModelAnglesAndAdjustedPos(po, normalized_time, f_render_sub);
+	SetModelAnglesAndPos(po, normalized_time, f_render_sub);
 	const bool transient_motion_transform = PolymodelMotionBeginTransientTransform(pos, orient);
 	PolymodelMotionCaptureCurrent(po, pos, orient);
 	PolymodelPerfAddDrawModelSetup(draw_model_start_time);
@@ -2960,10 +2925,6 @@ void GetPolyModelPointInWorld(vector* dest, poly_model* model, vector* position,
     ASSERT(!(model->flags & PMF_NOT_RESIDENT));
     if (!model->new_style) return;
     auto pose = EvaluateModelPose(*model, normalized_time, Gametime);
-    // Apply existing caller-supplied offsets to this instance value only.
-    if (model->id == Polymodel_submodel_adjust_model)
-        for (int i = 0; i < std::min(pose.count, Polymodel_submodel_adjust_count); ++i)
-            pose.submodels[i].translation += Polymodel_submodel_adjustments[i];
     const auto transforms = ComposeModelPose(*model, pose);
     ASSERT(submodel >= 0 && submodel < transforms.count);
     if (submodel < 0 || submodel >= transforms.count) return;
