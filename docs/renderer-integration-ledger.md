@@ -1,5 +1,47 @@
 # Renderer game integration
 
+## November 3: opt-in source-owned native draw attribution
+
+Owned execution no longer attributes detailed statistics through the mutable
+legacy current-category latch. Mesh/model publishers carry a small DrawPurpose
+for text/cockpit/gauges; view preparation distinguishes room, terrain, model,
+effect and orthographic canvas. Execution consumes compiled packet attribution.
+One counter increment per native draw, including MultiDraw: mixed sources become
+Other (mixed text/canvas becomes Canvas), without changing batch compatibility.
+An explicit renderer counter overload does not mutate legacy compatibility state.
+
+Detailed attribution is requested by immutable FrameData, sampled at the game
+resource boundary from the real setting or the capture fixture. Ordinary frames
+skip classification/merging. Initial unconditional instrumentation regressed CPU
+and was revised before checkpoint. The first metadata placement also grew hot
+records; tags now occupy existing padding. Verified MSVCx64 sizes againsta8be1f5:
+PreparedMesh752, ModelInstance264, FrameData616 bytes, unchanged (initial760/272).
+
+Root3/3 pass with pure classification/mixed-batch tests and publication validation.
+All8 ordinary500 images EXACT before the final instrumentation-only gating/packing;
+final006/0071500-frame before/after pairs also EXACT. Final003/006 effects
+diagnostic captures pass sum invariants and nonzero room/cockpit/gauge/font
+checks.003 reports2363native draws: room580,objects72,cockpit48,gauges15,effects1372,
+canvas6,text247,post23.006reports469. These are actual capped diagnostic scenes,
+not a new performance baseline; do not infer a font bottleneck from the old
+all-Other display. Images inspected.
+
+PinnedCPU2/no-markers/1500frames, median400..1199, clean720p/defaultfield320:
+
+|save|beforeA CPU/GPU|afterA|afterB|beforeB|
+|---|---|---|---|---|
+|006|.632/.670|.626/.669|.725/.669|.663/.669|
+|007|1.262/.514|1.2345/.515|1.140/.5135|1.093/.5135|
+
+GPU stable; noisy CPU shows no claimed speedup (006pair averages remain4.3%
+apart,007about.8%). Initial unconditional runs are perf-attribution-*; qualified
+revised runs perf-attribution-packed-*, all suffixed20261103. Before binary
+321F2DD4F0BB4509AE7D29222B1CD38181EFEA72797E436F30832796723E0CEB;
+finalA915F8C6FD2C9CB84EB73F6A6D70643F166F22FEA6E6F10C82BB1E5B014007FC.
+Evidence qual-attribution-packed-20261103 and qual-draw-attribution-ordinary-20261103.
+Native diagnostic-only totals are truthful; generic counters remain low-cost
+when detail is not requested. No release gate or protected installation changes.
+
 ## November 3: retire dead HUD orchestration, recover omitted diagnostics
 
 Caller audit after7f049c2 found no live references to RenderHUDFrame,

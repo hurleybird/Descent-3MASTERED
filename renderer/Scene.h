@@ -407,6 +407,8 @@ struct MeshViewStyle {
     // cameras; the attached source camera remains fully visible.
     Vec3 directional_opacity;
 };
+// Submission attribution only; never affects visibility, materials or batching.
+enum class DrawPurpose : uint8_t { Geometry, Text, Cockpit, Gauge };
 struct PreparedMesh {
     ViewDeformationResponse deformation_response{0,0};
     MeshAssetRef asset;
@@ -443,6 +445,7 @@ struct PreparedMesh {
     int32_t receiver_polygon = -1; // optional room-surface visibility dependency (decals)
     uint32_t owner = 0;
     bool has_owner = false; // same allocation-generation identity as ObjectState
+    DrawPurpose draw_purpose = DrawPurpose::Geometry; // uses existing flag padding
     uint64_t model_instance = 0; // optional dependency on a prepared model, not a game object
     int32_t model_part = -1; // sprite position is local to this part; its basis remains camera-local
     int32_t model_variant = -1;
@@ -781,6 +784,7 @@ struct ModelInstance {
     MeshViewStyle primary_view_style;
     uint32_t owner = 0;
     bool has_owner = false, visible = true;
+    DrawPurpose draw_purpose = DrawPurpose::Geometry; // uses existing flag padding
     int32_t room = -1;
     Transform current, previous;
     bool has_previous = false;
@@ -1020,6 +1024,7 @@ struct FrameData {
     float delta_time = 0;
     bool paused = false;
     bool observation_inputs_prepared = false;
+    bool draw_statistics = false; // opt-in detailed native-submission attribution
     Vec3 player_control_delta; // realized player-controlled translation, not camera motion
     float afterburner_factor = 0;
     LightingQuality lighting_quality = LightingQuality::Pixel;

@@ -180,7 +180,7 @@ class GL4Renderer : public IRenderer
 	GLuint scene_draw_buffer = 0;
     GLuint scene_view_buffer = 0;
 	size_t scene_draw_record_bytes = 0;
-	struct SceneDrawPacket { const d3scene::SurfaceBinding* binding; GLuint vao; ElementRange range; d3scene::MaterialPolicy policy; GLuint index_buffer = 0; ElementRange indices; GLint base_vertex = 0; };
+	struct SceneDrawPacket { const d3scene::SurfaceBinding* binding; GLuint vao; ElementRange range; d3scene::MaterialPolicy policy; GLuint index_buffer = 0; ElementRange indices; GLint base_vertex = 0; d3scene::DrawAttribution attribution = d3scene::DrawAttribution::Other; };
 	std::vector<SceneDrawPacket> scene_draw_packets;
 	std::vector<float> scene_draw_records;
 	GLuint scene_influence_buffer = 0, scene_influence_texture = 0;

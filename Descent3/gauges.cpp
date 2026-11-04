@@ -173,6 +173,7 @@ void PrepareGameCockpitGauges(d3scene::FrameData& frame,const ModelTransforms& t
         bool texture_alpha,float u0,float v0,float u1,float v1) {
         d3scene::PreparedMesh mesh;
         mesh.asset = asset; mesh.collection = SceneCockpitGauges;
+        mesh.draw_purpose = d3scene::DrawPurpose::Gauge;
         mesh.vertices.assign(points.begin(),points.end());
         auto& surface = mesh.surface;
         surface.composition_order = order++;
@@ -233,6 +234,7 @@ void PrepareGameCockpitGauges(d3scene::FrameData& frame,const ModelTransforms& t
                 append(expanded,BAD_BITMAP_HANDLE,.2f*.7f,false,false,0,0,1,1);
                 auto& backing = frame.meshes.back();
                 backing.collection = SceneCockpitMonitorBacking;
+                backing.draw_purpose = d3scene::DrawPurpose::Gauge;
                 backing.surface.bitmap = -1; backing.surface.base_color = {0,0,0};
                 backing.surface.raster_stripe = {3.f*ConfigNormalizeSupersamplingFactor(Render_preferred_state.supersampling_factor),
                     static_cast<float>(frame.simulation_time)*14,.5f};

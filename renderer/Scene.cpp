@@ -1013,6 +1013,7 @@ PresentationRef Presentation::complete(FrameData data) {
             "Invalid primitive view opacity axis");
     };
     for (const auto& mesh : data.meshes) {
+        require(mesh.draw_purpose <= DrawPurpose::Gauge,"Invalid mesh draw attribution");
         require(mesh.raster_domain == RasterDomain::Surface || mesh.raster_domain == RasterDomain::SoftVolume,
             "Invalid prepared mesh raster domain");
         require(mesh.asset && mesh.asset->id().lifetime == data.scene_lifetime,"Stale generic mesh");
@@ -1179,6 +1180,7 @@ PresentationRef Presentation::complete(FrameData data) {
         require(finite(transform),"Invalid composed model transform");
     size_t model_end = 0;
     for (auto& object : data.model_instances) {
+        require(object.draw_purpose <= DrawPurpose::Gauge,"Invalid model draw attribution");
         require(std::isfinite(object.deformation_response.vertices) && object.deformation_response.vertices >= 0 &&
             std::isfinite(object.deformation_response.translation) && object.deformation_response.translation >= 0,
             "Invalid model deformation response");

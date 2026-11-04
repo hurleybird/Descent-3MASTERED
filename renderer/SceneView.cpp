@@ -13,6 +13,23 @@
 #include <thread>
 
 namespace d3scene {
+DrawAttribution mergeDrawAttribution(DrawAttribution a,DrawAttribution b) {
+    if (a == b) return a;
+    const auto canvas = [](DrawAttribution kind) { return kind == DrawAttribution::Canvas || kind == DrawAttribution::Text; };
+    return canvas(a) && canvas(b) ? DrawAttribution::Canvas : DrawAttribution::Other;
+}
+DrawAttribution attributeDraw(const FrameData& frame,const View& view,const VisibleSurface& item) {
+    const auto purpose = item.mesh ? frame.meshes[item.mesh_index].draw_purpose :
+        item.model ? frame.model_instances[item.model_instance_index].draw_purpose : DrawPurpose::Geometry;
+    if (purpose == DrawPurpose::Text) return DrawAttribution::Text;
+    if (purpose == DrawPurpose::Gauge) return DrawAttribution::Gauge;
+    if (purpose == DrawPurpose::Cockpit) return DrawAttribution::Cockpit;
+    if (view.projection == ViewProjection::Orthographic) return DrawAttribution::Canvas;
+    if (item.terrain) return DrawAttribution::Terrain;
+    if (item.model) return DrawAttribution::Model;
+    if (item.mesh) return DrawAttribution::Effect;
+    return DrawAttribution::Room;
+}
 struct ViewStoragePool {
     struct Buffers {
         std::vector<VisibleSurface> surfaces;

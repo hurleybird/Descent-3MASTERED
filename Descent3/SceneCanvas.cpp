@@ -248,6 +248,7 @@ void PrepareSceneText(d3scene::FrameData& frame,uint64_t collection,int32_t& nex
                 if (!run.vertices.empty() && (run.surface.bitmap != glyph.bitmap || run.vertices.size() == 128*4 ||
                     old.x != color.x || old.y != color.y || old.z != color.z)) flush();
                 if (run.vertices.empty()) {
+                    run.draw_purpose = d3scene::DrawPurpose::Text;
                     run.collection = collection;
                     auto& surface = run.surface;
                     if (!cacheable) surface.composition_order = next_order++;

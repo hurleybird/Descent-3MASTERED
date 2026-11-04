@@ -1462,6 +1462,7 @@ void GL4Renderer::EnsureSceneLifetime(const d3scene::Presentation& presentation)
 d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedView& prepared,const SceneRasterTarget& target) {
     PERF_MARKER_SCOPE("Scene.ExecuteView");
     const auto& presentation = prepared.frame();
+    const bool detailed_statistics = presentation.data().draw_statistics;
     const auto& view = prepared.view();
     if (!view.geometry_inspection)
         Error("Scene executor migration incomplete: only explicit geometry inspection is currently supported.");
@@ -2136,7 +2137,8 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
             if (!record[pair.first]) record[pair.second] = 0;
 
         packets[item_index] = {binding,gpu.vao,range,policy,
-            item.model_material_group ? gpu.material_indices : 0,material_indices,GLint(gpu.vertices.offset)};
+            item.model_material_group ? gpu.material_indices : 0,material_indices,GLint(gpu.vertices.offset),
+            detailed_statistics ? d3scene::attributeDraw(presentation.data(),view,item) : d3scene::DrawAttribution::Other};
     }
     if (!scene_draw_buffer) glGenBuffers(1,&scene_draw_buffer);
     glBindBuffer(GL_UNIFORM_BUFFER,scene_draw_buffer);
@@ -2582,8 +2584,12 @@ void main() {
         previous_raster = raster_key; raster_bound = true;
         }
         if (packet.vao != previous_vao) { glBindVertexArray(packet.vao); previous_vao = packet.vao; }
+        auto attribution = packet.attribution;
         uint32_t end = item_index+1;
-        while (end < pass.end && compatible(item_index,end)) ++end;
+        while (end < pass.end && compatible(item_index,end)) {
+            if (detailed_statistics) attribution = d3scene::mergeDrawAttribution(attribution,packets[end].attribution);
+            ++end;
+        }
         if (packet.index_buffer) {
             glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,packet.index_buffer);
             glDrawElementsBaseVertex(GL_TRIANGLES,packet.indices.count,GL_UNSIGNED_INT,
@@ -2601,7 +2607,25 @@ void main() {
             glMultiDrawArrays(GL_TRIANGLES,draw_starts.data(),draw_counts.data(),GLsizei(draw_starts.size()));
             item_index = end-1;
         }
-        rend_RecordDrawCall(RENDERER_DRAW_CALL_3D);
+        // One count per native submission, even when MultiDraw joins several
+        // sources. Attribution never splits a batch or mutates compatibility state.
+        using Attribution = d3scene::DrawAttribution;
+        if (!detailed_statistics) rend_RecordDrawCall(RENDERER_DRAW_CALL_3D);
+        else if (attribution == Attribution::Text) rend_RecordDrawCall(RENDERER_DRAW_CALL_FONT);
+        else if (attribution == Attribution::Canvas) rend_RecordDrawCall(RENDERER_DRAW_CALL_2D);
+        else {
+            renderer_draw_call_3d_category source = RENDERER_DRAW_CALL_3D_OTHER;
+            switch (attribution) {
+            case Attribution::Room: source = RENDERER_DRAW_CALL_3D_ROOM; break;
+            case Attribution::Terrain: source = RENDERER_DRAW_CALL_3D_TERRAIN; break;
+            case Attribution::Model: source = RENDERER_DRAW_CALL_3D_OBJECT; break;
+            case Attribution::Cockpit: source = RENDERER_DRAW_CALL_3D_COCKPIT; break;
+            case Attribution::Gauge: source = RENDERER_DRAW_CALL_3D_GAUGE; break;
+            case Attribution::Effect: source = RENDERER_DRAW_CALL_3D_EFFECT; break;
+            default: break;
+            }
+            rend_RecordDrawCall(RENDERER_DRAW_CALL_3D,source);
+        }
       }
       // Image-space consumers and the remaining canvas adapter own their
       // texture policies. Scene samplers must not override those policies.

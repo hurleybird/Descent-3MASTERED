@@ -1,5 +1,27 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November 3 — opt-in native draw attribution
+
+Published purpose tags for text/cockpit/gauges, pure room/terrain/model/effect/
+canvas classifier, packet-owned native submission counters (no mutable category
+latch). MultiDraw counting preserves batches. Detailed work only if FrameData
+draw_statistics requested. Unconditional first version regressed and is NOT final.
+Moved tags into padding: sizeofMesh752/Model264/Frame616 unchanged froma8be1f5.
+Root3/3; all8 ordinary500 EXACT; final006/0071500pixel pairs EXACT; finaleffects
+diagnostics003/006 pass counts/sum invariants, images inspected.0032363draws,
+1372effects,247text;006469draws. Not primarily a hidden glyph explosion.
+FinalA915F8C6FD2C9CB84EB73F6A6D70643F166F22FEA6E6F10C82BB1E5B014007FC.
+ABBA perf-attribution-packed-*20261103: GPUstable(.669/.514); CPUnoisy/no win
+claimed,006before .632/.663 after .626/.725;007before1.262/1.093 after1.2345/1.140.
+Latest runtime restored, no game active. out/hud-attribution-before.exe is321F...
+froma8be1f5; tiny out/attribution-size* artifacts verified layout. No deletions.
+NEXT audit: pending_domains/geometry_inspection are migration permission bits,
+not data validation; every publication is permanently labelled unprepared and
+GPU draws require bypass. Consider removing this temporary renderer contract
+while KEEPING the separate game-level no-probe acceptance gate; do not equate
+schema cleanup with gameplay qualification. No edits made to this next task yet.
+Preserve unrelated lib/gitinfo.h, main/Candidate/Previous untouched. Keep working.
+
 ## November 3 — dead HUD removed; omitted diagnostics published
 
 Removed unreachable primary/aux/preHUD orchestration and dead HUDItems/list/

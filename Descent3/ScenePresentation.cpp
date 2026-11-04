@@ -552,6 +552,8 @@ d3scene::PresentationRef GameSceneResources::publish(d3scene::FrameData data) {
     return frame;
 }
 void GameSceneResources::prepare(d3scene::FrameData& data) {
+    data.draw_statistics = Render_draw_call_stats || (SceneGeometryInspection() &&
+        AutomatedCaptureFrameIndex() >= 0 && FindArg("-scene-hud-diagnostics-probe"));
     PERF_MARKER_SCOPE("Scene.PrepareResources");
     if (data.scene_lifetime != d3scene::assets().lifetime())
         throw std::invalid_argument("Resource producer belongs to a retired scene");

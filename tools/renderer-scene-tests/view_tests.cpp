@@ -48,6 +48,33 @@ void appendRoom(d3scene::SceneAssets& assets,d3scene::FrameData& data,d3scene::M
 
 int runSceneViewTests() {
     {
+        using Kind = d3scene::DrawAttribution;
+        using Purpose = d3scene::DrawPurpose;
+        d3scene::FrameData frame; frame.meshes.emplace_back(); frame.model_instances.emplace_back();
+        auto request = view(); d3scene::VisibleSurface item;
+        check(d3scene::attributeDraw(frame,request,item) == Kind::Room,"Room draw lost source attribution");
+        item.terrain = true;
+        check(d3scene::attributeDraw(frame,request,item) == Kind::Terrain,"Terrain draw lost source attribution");
+        item.terrain = false; item.model = true;
+        check(d3scene::attributeDraw(frame,request,item) == Kind::Model,"Model draw lost source attribution");
+        frame.model_instances[0].draw_purpose = Purpose::Cockpit;
+        check(d3scene::attributeDraw(frame,request,item) == Kind::Cockpit,"Cockpit draw inherited object category");
+        item.model = false; item.mesh = true;
+        check(d3scene::attributeDraw(frame,request,item) == Kind::Effect,"World primitive lost effect attribution");
+        frame.meshes[0].draw_purpose = Purpose::Gauge;
+        check(d3scene::attributeDraw(frame,request,item) == Kind::Gauge,"Gauge draw lost source attribution");
+        frame.meshes[0].draw_purpose = Purpose::Text;
+        check(d3scene::attributeDraw(frame,request,item) == Kind::Text,"Perspective text lost font attribution");
+        request.projection = d3scene::ViewProjection::Orthographic;
+        check(d3scene::attributeDraw(frame,request,item) == Kind::Text,"Canvas text inherited generic geometry category");
+        frame.meshes[0].draw_purpose = Purpose::Geometry;
+        check(d3scene::attributeDraw(frame,request,item) == Kind::Canvas,"Canvas draw inherited world effect category");
+        check(d3scene::mergeDrawAttribution(Kind::Text,Kind::Text) == Kind::Text &&
+            d3scene::mergeDrawAttribution(Kind::Text,Kind::Canvas) == Kind::Canvas &&
+            d3scene::mergeDrawAttribution(Kind::Room,Kind::Effect) == Kind::Other,
+            "Mixed native batch was attributed to an arbitrary first source");
+    }
+    {
         using namespace d3scene;
         auto camera = view(); camera.attached_camera = true; camera.camera_owner = 42;
         MeshViewStyle style; style.camera_owner = 42; style.match = CameraMatch::Only; style.forward_only = true;

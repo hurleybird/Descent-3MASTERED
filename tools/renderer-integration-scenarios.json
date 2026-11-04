@@ -2,9 +2,9 @@
   "schemaVersion": 1,
   "scenarios": {
     "hud-diagnostics": {
-      "revision": 1, "minimumFrame": 60, "inspectionRequired": true,
+      "revision": 2, "minimumFrame": 60, "inspectionRequired": true,
       "arguments": ["-scene-gl-audit", "-scene-hud-diagnostics-probe"],
-      "requiredLog": ["scene HUD diagnostics fps=1 vrr=1 draws=1 face=1 motion=1 meshes=[1-9]"],
+      "requiredLog": ["scene HUD diagnostics fps=1 vrr=1 draws=1 face=1 motion=1 meshes=[1-9]", "scene HUD draw attribution total=[1-9].*room=[1-9].*cockpit=[1-9].*gauges=[1-9].*text=[1-9]"],
       "purpose": "Owned FPS/VRR/draw-count/face/motion diagnostic text from real source queries. Override request admission only, never persisted preferences or diagnostic values. Motion can legitimately report no sample."
     },
     "cinematic-transition": {

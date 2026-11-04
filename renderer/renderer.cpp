@@ -233,16 +233,20 @@ void rend_GetStatistics(tRendererStats* stats)
 
 void rend_RecordDrawCall(renderer_draw_call_category category)
 {
+	rend_RecordDrawCall(category,Renderer_current_3d_draw_call_category);
+}
+
+void rend_RecordDrawCall(renderer_draw_call_category category,renderer_draw_call_3d_category source)
+{
 	if (category < 0 || category >= RENDERER_DRAW_CALL_CATEGORY_COUNT)
 		return;
 
 	Renderer_current_draw_call_stats.total++;
 	Renderer_current_draw_call_stats.category[category]++;
 	if (category == RENDERER_DRAW_CALL_3D &&
-		Renderer_current_3d_draw_call_category >= 0 &&
-		Renderer_current_3d_draw_call_category < RENDERER_DRAW_CALL_3D_CATEGORY_COUNT)
+		source >= 0 && source < RENDERER_DRAW_CALL_3D_CATEGORY_COUNT)
 	{
-		Renderer_current_draw_call_stats.category_3d[Renderer_current_3d_draw_call_category]++;
+		Renderer_current_draw_call_stats.category_3d[source]++;
 	}
 }
 

@@ -1466,6 +1466,18 @@ void PrepareGameHUDDiagnostics(d3scene::FrameData& frame,const HUDCanvasLayout& 
     if (draws) {
         renderer_draw_call_stats stats{}; rend_GetDrawCallStats(&stats);
         HUDRenderDrawCallStats(sink,stats);
+        if (AutomatedCapturePending()) {
+            uint32_t total = 0,geometry = 0;
+            for (const auto count : stats.category) total += count;
+            for (const auto count : stats.category_3d) geometry += count;
+            if (total != stats.total || geometry != stats.category[RENDERER_DRAW_CALL_3D])
+                Error("Draw attribution totals do not describe native submissions");
+            AutomatedCaptureLog("scene HUD draw attribution total=%u room=%u terrain=%u objects=%u cockpit=%u gauges=%u effects=%u canvas=%u text=%u",
+                total,stats.category_3d[RENDERER_DRAW_CALL_3D_ROOM],stats.category_3d[RENDERER_DRAW_CALL_3D_TERRAIN],
+                stats.category_3d[RENDERER_DRAW_CALL_3D_OBJECT],stats.category_3d[RENDERER_DRAW_CALL_3D_COCKPIT],
+                stats.category_3d[RENDERER_DRAW_CALL_3D_GAUGE],stats.category_3d[RENDERER_DRAW_CALL_3D_EFFECT],
+                stats.category[RENDERER_DRAW_CALL_2D],stats.category[RENDERER_DRAW_CALL_FONT]);
+        }
     }
     if (face) HUDRenderFaceProbe(sink);
     if (motion) HUDRenderMotionVectorDebugSample(sink);

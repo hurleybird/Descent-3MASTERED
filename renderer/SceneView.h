@@ -97,6 +97,9 @@ struct ViewQueryStats {
     uint32_t rooms_considered = 0, surfaces_considered = 0;
     uint32_t surfaces_backfacing = 0, surfaces_outside = 0;
 };
+enum class DrawAttribution : uint8_t { Other, Room, Terrain, Model, Cockpit, Gauge, Effect, Canvas, Text };
+DrawAttribution attributeDraw(const FrameData&,const View&,const VisibleSurface&);
+DrawAttribution mergeDrawAttribution(DrawAttribution,DrawAttribution);
 struct ViewStoragePool;
 struct ViewGeometryDemand {
     // Source inventory order, independent of the depth-sorted draw list.

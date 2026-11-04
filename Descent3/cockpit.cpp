@@ -891,6 +891,7 @@ void PrepareGameCockpit(d3scene::FrameData& frame, bool advance,const d3scene::F
         if (!masks[layer]) continue;
         d3scene::ModelInstance instance;
         instance.identity = instance.collection = collections[layer];
+        instance.draw_purpose = d3scene::DrawPurpose::Cockpit;
         instance.current = instance.previous = placement;
         d3scene::PreparedModel prepared; prepared.asset = asset;
         prepared.deferred_pose = true; prepared.composed_pose = composed_range;
