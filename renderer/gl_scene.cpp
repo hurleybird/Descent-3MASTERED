@@ -1424,7 +1424,7 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::PreparedVi
 }
 void GL4Renderer::EnsureSceneLifetime(const d3scene::Presentation& presentation) {
     if (scene_asset_lifetime != presentation.data().scene_lifetime) {
-        DestroySceneResources();
+        RetireScene();
         scene_asset_lifetime = presentation.data().scene_lifetime;
     }
 }
@@ -2206,9 +2206,10 @@ void main() {
             capture_frame >= 20 && capture_frame <= 22;
         const bool deformation_probe = FindArg("-scene-view-deformation-probe") &&
             ((capture_frame >= 20 && capture_frame <= 22) || AutomatedCapturePending());
+        const bool reload_probe = FindArg("-capture-reloadgame") && AutomatedCapturePending();
         if (writes_motion &&
             (capture_frame == 0 || capture_frame == 30 || capture_frame == 31 || capture_frame == 59 ||
-                export_history_probe || deformation_probe || retirement_probe ||
+                export_history_probe || deformation_probe || retirement_probe || reload_probe ||
                 (FindArg("-scene-resource-probe") && capture_frame >= 10 && capture_frame <= 51 && capture_frame % 10 <= 1))) {
             if (export_history_probe && !history.previous_valid)
                 Error("Independent save publication reset the main camera history");

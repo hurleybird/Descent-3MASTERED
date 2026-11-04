@@ -1,5 +1,29 @@
 # Renderer game integration
 
+## November 3: native gameplay reload qualification
+
+Added gameplay-reload to the tracked corpus: real capture controls fly/fire
+throughframe45, native load-game state machine reloads at60, captures59/60/61
+and120. No injected renderer geometry. All8 same-save runs pass SSAA2/MSAA4,
+AO/bloom/motion/field320. Also002->006 and003->006 pass that effects profile;
+006->007 passes native1x/MSAA0/motion/field320. Raw qual-gameplay-reload-effects-
+20261103 and qual-gameplay-transition-to{006,007}-20261103.
+
+EnsureSceneLifetime now uses the same checked RetireScene contract as explicit
+retirement, rather than bypassing its invariant checks. Harness proves the
+retired nonzero lifetime precedes first upload of a distinct lifetime after
+reload. Capture-only motion readback now includes reload evidence frames:
+history59 valid,60 invalid with no valid motion pixels,61 valid again.003
+and007 also contain actual model velocity pixels after recovery. Effects
+pending=0 and no GL errors in the corpus. Inspected003/006 pre/post-reload and
+006->007 captures. Source/current controls, HUD, lighting and scene replacement
+are visibly present. Root3/3 pass. ReloadSave optionally selects another copied
+corpus save; both save/count hashes are captured, never load seeds directly.
+
+This closes the bounded automatic flight/fire/native-reload acceptance case,
+not manual gameplay, mission-completion transitions, multiplayer or the whole
+release gate. Candidate/Previous/main workspace unchanged.
+
 ## November 3: rejected reflection-interface specialization
 
 After9198503, tested a view-local reflection-field requirement collected during

@@ -3,6 +3,7 @@ param(
     [Parameter(Mandatory=$true)][string]$Seeds,
     [Parameter(Mandatory=$true)][string]$Output,
     [string[]]$Saves = @('saveg000','saveg001','saveg002','saveg003','saveg004','saveg005','saveg006','saveg007'),
+    [string]$ReloadSave = '',
     [int]$Frame = 60,
     [uint32]$Seed = 12345,
     [int]$TimeoutSeconds = 120,
@@ -49,7 +50,7 @@ param(
     [switch]$HistoryProbe,
     [switch]$DeformationProbe,
     [string]$DemoFile = '',
-    [ValidateSet('ordinary','fog-residency','ship-preview','image-alpha','image-lifecycle','image-settings','automap-cache','automap-lifecycle','automap-settings','retirement','save-export','save-settings','auxiliary-lifecycle','modal-ui','save-dialog','quicksave','decoded-movie','decoded-movie-paletted','decoded-movie-subtitles','decoded-movie-screenshot','message-consoles','screenshot-normal','screenshot-clean','screenshot-double','screenshot-tga','demo-movie')][string]$Scenario = 'ordinary'
+    [ValidateSet('ordinary','gameplay-reload','fog-residency','ship-preview','image-alpha','image-lifecycle','image-settings','automap-cache','automap-lifecycle','automap-settings','retirement','save-export','save-settings','auxiliary-lifecycle','modal-ui','save-dialog','quicksave','decoded-movie','decoded-movie-paletted','decoded-movie-subtitles','decoded-movie-screenshot','message-consoles','screenshot-normal','screenshot-clean','screenshot-double','screenshot-tga','demo-movie')][string]$Scenario = 'ordinary'
 )
 
 # Run only copied installations and copied pilot/save data. Never point Runtime
@@ -71,6 +72,9 @@ if ($inputIsDemo) {
 if ($TimeoutSeconds -lt 1) { throw 'Capture timeout must be positive' }
 if ($RenderThreadCpu -ge [Environment]::ProcessorCount) { throw 'Diagnostic CPU index is unavailable' }
 foreach ($save in $Saves) { if ($save -notmatch '^saveg\d{3}$') { throw "Invalid save name: $save" } }
+if ($ReloadSave -and (!$scenarioSpec.reloadWorld -or $ReloadSave -notmatch '^saveg\d{3}$')) {
+    throw 'ReloadSave requires a gameplay-reload scenario and a corpus save name'
+}
 if ($scenarioSpec.quickSaveSlot -ne $null -and ($Saves.Count -ne 1 -or $Saves[0] -ne ('saveg{0:D3}' -f [int]$scenarioSpec.quickSaveSlot))) { throw 'Quicksave scenario must load its explicitly copied target slot' }
 foreach ($pattern in $scenarioSpec.requiredLog) { [void][regex]::new($pattern) }
 if ($scenarioSpec.subtitleAsset -and $scenarioSpec.subtitleAsset -notmatch '^[a-zA-Z0-9_-]+\.msb$') { throw 'Invalid subtitle fixture asset' }
@@ -274,6 +278,18 @@ try {
             Copy-Item -LiteralPath (Join-Path $seedPath "savegame\$save.cnt") -Destination "$savePath.cnt"
         }
         $png = Join-Path $outputPath "$save.png"
+        $reloadPath = $savePath
+        if ($ReloadSave -and $ReloadSave -ne $save) {
+            $reloadPath = Join-Path $runtimePath "savegame\$ReloadSave"
+            foreach ($suffix in @('','.cnt')) {
+                $destination = $reloadPath+$suffix
+                if ((Test-Path -LiteralPath $destination) -and
+                    ((Get-Item -LiteralPath $destination -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+                    throw "Mutable reload destination is a reparse point: $destination"
+                }
+                Copy-Item -LiteralPath (Join-Path $seedPath ("savegame\$ReloadSave"+$suffix)) -Destination $destination
+            }
+        }
         $log = Join-Path $outputPath "$save.log"
         $env:DESCENT3MASTERED_CAPTURE_LOG = $log
         $env:DESCENT3MASTERED_FRAME_PERF_LOG = Join-Path $outputPath "$save.frames.tsv"
@@ -336,7 +352,7 @@ try {
             Copy-Item -LiteralPath (Join-Path $PSScriptRoot ('renderer-scene-tests/assets/'+$scenarioSpec.subtitleAsset)) -Destination $subtitleInput
         }
         foreach ($argument in $scenarioSpec.arguments) {
-            $value = $argument.Replace('{save-output}',$nativeSave).Replace('{ui-output}',$uiImage).Replace('{movie-until}',[string]($Frame-1)).Replace('{subtitle-input}',$subtitleInput)
+            $value = $argument.Replace('{reload-input}',$reloadPath).Replace('{save-output}',$nativeSave).Replace('{ui-output}',$uiImage).Replace('{movie-until}',[string]($Frame-1)).Replace('{subtitle-input}',$subtitleInput)
             if ($value -match '\s') { $value = '"'+$value+'"' }
             $arguments += $value
         }
@@ -347,6 +363,8 @@ try {
         [ordered]@{scenario=$Scenario; revision=$scenarioSpec.revision
             executable=(Get-FileHash -LiteralPath $exe).Hash
             save_hash=$launchInputHash
+            reload_hash=$(if ($scenarioSpec.reloadWorld) { (Get-FileHash -LiteralPath $reloadPath).Hash } else { $null })
+            reload_count_hash=$(if ($scenarioSpec.reloadWorld) { (Get-FileHash -LiteralPath "$reloadPath.cnt").Hash } else { $null })
             count_hash=$(if (!$inputIsDemo) { (Get-FileHash -LiteralPath "$savePath.cnt").Hash } else { $null })
             arguments=$arguments; started_utc=[DateTime]::UtcNow.ToString('o')
         } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $outputPath "$save.launch.json") -Encoding UTF8
@@ -380,6 +398,18 @@ try {
             $uploads = [regex]::Matches($logText,'scene fog asset upload lifetime=\d+ revision=\d+')
             $duplicates = @($uploads | Group-Object Value | Where-Object Count -gt 1)
             $scenarioValidated = $scenarioValidated -and $uploads.Count -ge 2 -and $duplicates.Count -eq 0
+        }
+        if ($scenarioSpec.reloadWorld) {
+            # A successful exit alone does not prove the old GPU residency was
+            # retired before the reloaded scene first became executable.
+            $transition = [regex]::Match($logText,'(?s)scheduled reload frame=60 path=.*?scene retirement gpu lifetime=([1-9]\d*).*?remaining=0.*?scene fog asset upload lifetime=([1-9]\d*)')
+            $scenarioValidated = $scenarioValidated -and $transition.Success -and
+                $transition.Groups[1].Value -ne $transition.Groups[2].Value
+            if ($MotionBlur) {
+                foreach ($history in @('59 camera_history=1','60 camera_history=0','61 camera_history=1')) {
+                    $scenarioValidated = $scenarioValidated -and $logText.Contains("scene motion frame=$history ")
+                }
+            }
         }
         if ($scenarioSpec.movieInput) {
             $scenarioValidated = $scenarioValidated -and $logText.Contains('scene decoded movie renderer configuration unchanged') -and

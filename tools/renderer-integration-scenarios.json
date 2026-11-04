@@ -1,6 +1,13 @@
 {
   "schemaVersion": 1,
   "scenarios": {
+    "gameplay-reload": {
+      "revision": 1, "minimumFrame": 120, "inspectionRequired": true, "reloadWorld": true,
+      "arguments": ["-scene-gl-audit", "-capture-forward", "-capture-forward-until", "45", "-capture-fire-primary", "-capture-fire-until", "45", "-capture-reloadgame", "{reload-input}", "-capture-reload-frame", "60", "-capture-series-from", "59", "-capture-series-until", "61"],
+      "evidenceFrames": [59,60,61],
+      "requiredLog": ["armed frame=.*forward=1.*primary=1", "scheduled reload frame=60 path=", "scene retirement gpu lifetime=[1-9].*remaining=0", "scene retirement game lifetime=[1-9].*remaining=0"],
+      "purpose": "Hidden native flight and weapon controls, then actual same-process save reload through the game state machine; capture both sides of scene teardown and reconstruction without injecting renderer content."
+    },
     "fog-residency": {
       "revision": 1, "minimumFrame": 60, "inspectionRequired": true,
       "arguments": ["-scene-gl-audit"], "fogResidency": true,

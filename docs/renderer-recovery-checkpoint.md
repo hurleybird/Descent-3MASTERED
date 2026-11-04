@@ -1,5 +1,21 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November 3 — native gameplay reload checkpoint
+
+Continuing, not finished. Latest native gameplay-reload fixture passes all8
+saves atSSAA2/MSAA4/AO/bloom/motion/field320; real flight/fire then native reload
+at60, captures59/60/61/120. Also002/003->006 effects and006->007 clean/motion
+cross-save transitions pass. GPU lifetime retirement now uses the same checked
+contract at EnsureSceneLifetime; no rendering/lighting change. Harness asserts
+old nonzero lifetime retired before new upload, camera history valid59,
+invalid60, recovered61. GPU readback confirms no valid motion across reset.
+Raw qual-gameplay-reload-effects-20261103 and qual-gameplay-transition-to*-20261103.
+Private runtime/out/reload-audit-working.exe is this build; no helper processes.
+Root3/3 pass. Next useful bounded case: native quicksave during actual flight/
+fire, then same-process reload of that newly saved state (existing capture
+quicksave caller atframe19 and reload at60 can compose without new game hooks).
+No shadows, Candidate changes, mouse capture, cleanup deletes or credits.
+
 ## November 3 — fog GPU residency fixes the larger CPU regression
 
 Continue working; user explicitly said not to stop unfinished. External sampling
