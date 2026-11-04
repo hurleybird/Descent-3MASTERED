@@ -1,5 +1,23 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November 4 — remove live duplicate legacy level precache
+
+StartLevel still called RetainedPolymodelPrecache for all paged models and
+RetainedRoomPrecacheAll, allocating/uploading old geometry and lightmap arrays
+before owned scene publication. Removed that stage and includes. Source content
+PageInAllData remains. Separate scene assets do not consume these old caches.
+Measured temporary baseline timers (not retained in source): model/room ms by
+save000..007:5.259/24.063,4.051/16.398,4.299/25.269,5.114/27.378,
+2.016/3.427,4.069/23.262,1.948/4.029,5.224/24.968. About5–32ms startup,
+NOT a frame-time claim. Timed baseline out/legacy-precache-timed.exe SHA
+E2737C0B25B98ED9874CED90477CAE7D6ECEAEF0C7A8F698A724702EEBC5DAA4.
+Root3/3/fullbuild pass. qual-precache-before/after-20261104 all8 clean60 EXACT;
+old retained-room lightmap upload log absent afterward. qual-precache-roundtrip
+-20261104 effects/field003 passes; all8PNG EXACT qual-model-state-roundtrip.
+LatestbinaryDCED9FDAE435AC241B23F8D58B22B1ADF3E71A40A09EC96F2B493E4A3F134FE2.
+No game active. Next: continue retiring dormant world execution roots and their
+now-unused precache APIs, preserving shared source/game helpers. No edits yet.
+
 ## November 4 — remove retired model cockpit state
 
 Removed setter APIs/global cockpit batching/filter switches and their nine

@@ -54,7 +54,6 @@
 #include "TelCom.h"
 #include "scorch.h"
 #include "render.h"
-#include "retained_room.h"
 #include "SceneExtraction.h"
 #include "renderer.h"
 #include "stringtable.h"
@@ -88,7 +87,6 @@
 #include "vclip.h"
 #include "bsp.h"
 #include "vibeinterface.h"
-#include "../model/retained_polymodel.h"
 
 #include "args.h"
 void ResetHudMessages(void);
@@ -513,15 +511,6 @@ void StartLevel()
 
 	//Get the data for this level
 	PageInAllData();
-	if (!Dedicated_server)
-	{
-		for (int model_num = 0; model_num < MAX_POLY_MODELS; model_num++)
-		{
-			if (Models_to_free[model_num])
-				RetainedPolymodelPrecache(model_num);
-		}
-		RetainedRoomPrecacheAll(Render_preferred_state.per_pixel_lighting);
-	}
 
 	// TEMP HACK 
 	if (rend_SupportsBumpmapping())

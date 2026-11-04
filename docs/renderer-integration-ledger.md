@@ -1,5 +1,22 @@
 # Renderer game integration
 
+## November 4: remove legacy dependencies and unreachable execution
+
+Removed the per-view geometry_inspection/pending_domains renderer bypass
+contract; real publication validation and separate game qualification guards
+remain. Removed unreachable cockpit/gauge draw orchestration and its model-layer
+batch/filter/offset switches (roughly1,300 source lines). Owned preparation and
+authored geometry unchanged; eight-scene and cinematic transition images EXACT.
+
+Found and removed a LIVE old-renderer dependency: StartLevel still precached
+legacy room/model buffers and lightmap arrays before owned scene preparation.
+Temporary timing measured about5–32ms per load across eight saves, not a frame
+cost. Source paging remains; owned assets are independent. Root3/3/fullbuild
+pass; qual-precache-before/after-20261104 all eight60-frame captures EXACT;
+qual-precache-roundtrip-20261104 flight/fire/save/reload and all eightPNG EXACT
+prior model-state-roundtrip. Old lightmap-array upload log is absent afterward.
+No protected installs changed; no-probe gameplay guard and shadow deferral remain.
+
 ## November 3: opt-in source-owned native draw attribution
 
 Owned execution no longer attributes detailed statistics through the mutable
