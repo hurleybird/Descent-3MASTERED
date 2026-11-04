@@ -1516,9 +1516,12 @@ void validateView(const View& view) {
     require(view.ordering == ViewOrdering::Depth || view.ordering == ViewOrdering::Compositing, "Invalid view ordering");
     require(view.ordering != ViewOrdering::Compositing || (view.kind != ViewKind::Main && view.feedback == NoFeedback),
         "Compositing views cannot own main-world products or gameplay feedback");
-    require(view.target == ViewTarget::Scene || view.target == ViewTarget::Display, "Invalid view target");
-    require(view.target != ViewTarget::Display || (view.kind != ViewKind::Main && view.feedback == NoFeedback),
+    require(view.target == ViewTarget::Scene || view.target == ViewTarget::Display || view.target == ViewTarget::ModalUI, "Invalid view target");
+    require(view.target == ViewTarget::Scene || (view.kind != ViewKind::Main && view.feedback == NoFeedback),
         "Display views cannot own main-world products or gameplay feedback");
+    require(view.target != ViewTarget::ModalUI || (view.projection == ViewProjection::Orthographic &&
+        view.ordering == ViewOrdering::Compositing && !view.clear_depth),
+        "Modal UI is a color-only compositing canvas");
     require(view.history_key != 0, "View has no history identity");
     require(view.excluded_surfaces.empty() || view.feedback == NoFeedback,
         "Selected geometry requires separately qualified gameplay feedback");

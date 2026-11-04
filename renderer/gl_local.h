@@ -257,15 +257,38 @@ class GL4Renderer : public IRenderer
 	std::unordered_map<uint64_t,SceneViewImageGpu> scene_view_images;
 	Framebuffer scene_display_backdrop;
 	ShaderProgram scene_image_compositor;
-	GLint scene_image_gamma = -1, scene_image_origin = -1;
+	GLint scene_image_gamma = -1, scene_image_origin = -1, scene_image_encoded_overlay = -1;
 	void BindSceneImage(const d3scene::ImageAsset&,int unit,bool wrap,bool baked,
 		d3scene::TextureFilter filter = d3scene::TextureFilter::Default);
 	void BindSceneSampler(int unit,bool wrap,bool filter,bool mip);
 	void DestroySceneResources();
 	void EnsureSceneLifetime(const d3scene::Presentation&);
-	enum class SceneOutputRole { MainWorld, SceneLayer, Display, Image };
+	enum class SceneOutputRole { MainWorld, SceneLayer, Display, Image, ModalUI };
+	// Non-owning raster attachment view. Color-only canvases do not acquire
+	// world depth/MSAA storage merely to use the owned scene executor.
+	struct SceneColorTarget {
+		GLuint name; uint32_t width,height,samples;
+		Framebuffer* depth_owner;
+		SceneColorTarget(Framebuffer& source) : name(source.Handle()),width(source.Width()),height(source.Height()),
+			samples(source.Samples()),depth_owner(&source) {}
+		SceneColorTarget(ColorFramebuffer& source) : name(source.Handle()),width(source.Width()),height(source.Height()),
+			samples(0),depth_owner(nullptr) {}
+		GLuint Handle() const { return name; }
+		uint32_t Width() const { return width; }
+		uint32_t Height() const { return height; }
+		uint32_t Samples() const { return samples; }
+		void MarkColorDirty() const { if (depth_owner) depth_owner->MarkColorDirty(); }
+		void MarkDepthDirty() const {
+			if (!depth_owner) throw std::logic_error("Color-only target has no depth storage");
+			depth_owner->MarkDepthDirty();
+		}
+		GLuint DepthTextureForRead() const {
+			if (!depth_owner) throw std::logic_error("Color-only target has no depth storage");
+			return depth_owner->DepthTextureForRead();
+		}
+	};
 	struct SceneRasterTarget {
-		Framebuffer& framebuffer;
+		SceneColorTarget framebuffer;
 		d3scene::Rect raster;
 		SceneOutputRole role;
 		SceneDepthSnapshot& depth;

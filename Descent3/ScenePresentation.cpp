@@ -573,6 +573,32 @@ void GameSceneResources::prepare(d3scene::FrameData& data) {
     d3scene::prepareTerrainPatches(data.terrain);
 }
 
+void RenderGameModelImage(GameSceneResources& resources,const GameModelImage& request) {
+    if (!request.identity || request.destination.width <= 0 || request.destination.height <= 0 ||
+        !std::isfinite(request.time) || request.time < 0)
+        throw std::invalid_argument("Invalid UI model image request");
+    auto data = d3scene::acquireFrameData();
+    data.sequence = AllocateGamePresentationSequence(); data.scene_lifetime = d3scene::assets().lifetime();
+    data.simulation_time = request.time; data.paused = true;
+    PrepareGameStaticModel(data,request.model,request.placement,request.identity,0,request.lighting,request.custom_texture);
+    const d3scene::Rect local{0,0,request.destination.width,request.destination.height};
+    int order = 0;
+    PrepareSceneImageQuad(data,request.identity,order,local,1);
+    resources.prepare(data);
+    const auto frame = resources.publish(std::move(data));
+    const vector eye{request.eye.x,request.eye.y,request.eye.z};
+    const matrix orientation = IDENTITY_MATRIX;
+    auto camera = MakeGameSceneView(d3scene::ViewKind::Preview,request.identity,nullptr,
+        eye,-1,orientation,D3_DEFAULT_ZOOM,false,local,local);
+    camera.geometry_inspection = SceneGeometryInspection();
+    camera.portal_visibility = false; camera.dynamic_lighting = false;
+    const auto quality = d3scene::configuredViewImageQuality();
+    d3scene::renderViewImages(*frame,{{request.identity,camera,quality.scale,quality.samples,true}});
+    auto canvas = MakeSceneCanvasView(request.identity,request.destination,request.target,SceneGeometryInspection());
+    canvas.image_inputs.push_back({1,request.identity});
+    d3scene::renderView(*frame,canvas);
+}
+
 void PrepareGameInspectionBanner(d3scene::FrameData& data) {
     if (!SceneGeometryInspection()) return;
     SceneTextStyle style; style.font = HUD_FONT; style.color = {1,220/255.f,80/255.f}; style.additive = true;

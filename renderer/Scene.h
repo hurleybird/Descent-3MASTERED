@@ -828,7 +828,7 @@ class Presentation;
 using PresentationRef = std::shared_ptr<const Presentation>;
 
 enum class ViewKind { Main, Auxiliary, Mirror, SaveThumbnail, Automap, Preview };
-enum class ViewTarget { Scene, Display };
+enum class ViewTarget { Scene, Display, ModalUI };
 enum class ViewOrdering { Depth, Compositing };
 enum class ViewProjection { Perspective, Orthographic };
 enum class FogPathOrigin { Camera, ClipPlane };

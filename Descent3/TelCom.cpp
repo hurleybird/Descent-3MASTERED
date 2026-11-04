@@ -3752,29 +3752,15 @@ void TCSSSCallback(void)
 		vm_AnglesToMatrix(&view_orient,0,8192,0);
 	TCShipSelect.orient = view_orient;
 
-	constexpr uint64_t image_key = 0x5443534849500001ull;
-	static uint64_t sequence = uint64_t(1)<<62;
-	auto data = d3scene::acquireFrameData();
-	data.sequence = ++sequence; data.scene_lifetime = d3scene::assets().lifetime();
-	data.simulation_time = Gametime; data.paused = true;
+	GameModelImage image;
+	image.identity = 0x5443534849500001ull; image.model = TCShipSelect.ship_model;
+	image.time = Gametime;
 	const auto vector_value = [](const vector& v) { return d3scene::Vec3{v.x,v.y,v.z}; };
-	PrepareGameStaticModel(data,TCShipSelect.ship_model,
-		{vector_value(view_pos),vector_value(view_orient.rvec),vector_value(view_orient.uvec),vector_value(view_orient.fvec)},
-		image_key,0,{{.8f,.8f,.8f},{0,-.70710678f,-.70710678f},false});
-	int order = 0;
-	PrepareSceneImageQuad(data,image_key,order,{0,0,210,138},1);
+	image.placement = {vector_value(view_pos),vector_value(view_orient.rvec),vector_value(view_orient.uvec),vector_value(view_orient.fvec)};
+	image.eye = vector_value(viewer_eye); image.destination = {325,142,210,138};
+	image.lighting = {{.8f,.8f,.8f},{0,-.70710678f,-.70710678f},false};
 	static GameSceneResources resources;
-	resources.prepare(data);
-	const auto frame = resources.publish(std::move(data));
-	auto camera = MakeGameSceneView(d3scene::ViewKind::Preview,image_key,nullptr,
-		viewer_eye,-1,viewer_orient,D3_DEFAULT_ZOOM,false,{0,0,210,138},{0,0,210,138});
-	camera.geometry_inspection = SceneGeometryInspection();
-	camera.portal_visibility = false; camera.dynamic_lighting = false;
-	const auto quality = d3scene::configuredViewImageQuality();
-	d3scene::renderViewImages(*frame,{{image_key,camera,quality.scale,quality.samples,true}});
-	auto canvas = MakeSceneCanvasView(image_key,{325,142,210,138},d3scene::ViewTarget::Display,SceneGeometryInspection());
-	canvas.image_inputs.push_back({1,image_key});
-	d3scene::renderView(*frame,canvas);
+	RenderGameModelImage(resources,image);
 
 	// Render the name of the selected ship
 	ubyte old_alpha = grtext_GetAlpha();

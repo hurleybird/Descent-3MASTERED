@@ -1,5 +1,22 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November 3 — owned pilot preview and shared model-image producer
+
+Pilot UI3DWindow migrated off DrawPolygonModel/G3 to shared RenderGameModelImage
+also used by TelCom. Explicit color-only ModalUI target, unified standalone/
+gameplay window canvas (preserved480-line menu layout), premultiplied encoded
+UI composition. Native static/animated custom logos share one UI-clock sample,
+8FPS; cancellation restores texture metadata before freeing temporary assets.
+Tracked fixture generator/capture harness, no saved-pilot mutations.
+Root3/3, all8 ordinary500 EXACT to04f363f, three TelCom ships EXACT to prior
+4x/MSAA4; options and matched nested-save exports EXACT. Pilot images inspected.
+Animated phases differ353ship pixels; static1x/noMSAA also passes. Runtime hash
+8200BD232A38EA5C3937D96AA2B0417D114343252AB410722F62AEB7F64DB765.
+Evidence qual-owned-preview-* and qual-pilot-tracked-*20261103. GPU sanity
+007/.52ms,006/.67ms stable; CPU1.34/.71 single-run not paired qualification.
+No active game. Preserve unrelated lib/gitinfo.h. Credits unchanged;58% used.
+Continue remaining acceptance/migration; no-probe gate/protected installs unchanged.
+
 ## November 3 — observer camera classification and target generation
 
 Main capture now requires OBJ_PLAYER for player_first_person, not pointer

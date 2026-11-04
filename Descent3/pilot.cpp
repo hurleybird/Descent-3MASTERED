@@ -56,6 +56,9 @@
 #include "dedicated_server.h"
 #include "init.h"
 #include "gameloop.h"
+#include "SceneExtraction.h"
+#include <cmath>
+#include <cstdlib>
 #include "args.h"
 #include "multi_instance.h"
 #include "pilot_lock.h"
@@ -2242,7 +2245,6 @@ private:
 	void DrawBorder(void);
 	bool animated;
 	int bm_handle;
-	float start_time;
 	UIText text;
 	bool created;
 };
@@ -2255,14 +2257,14 @@ struct tShipPos
 	matrix last_frame;
 	float cam_dist;
 	float last_time;
-	bool texture_changed;
+	float epoch, presentation_time;
 	int texture_type;
 	int texture_id;
 	int bm_handle;
 	void Init()
 	{
 		vm_AnglesToMatrix(&last_frame, 0, (65535 / 2), 0);
-		last_time = timer_GetTime();
+		epoch = last_time = timer_GetTime(); presentation_time = 0;
 		texture_id = Players[0].custom_texture_handle;
 		bm_handle = -1;
 	}
@@ -2272,6 +2274,29 @@ tShipPos ship_pos;
 int ship_model = -1;
 char custom_texture[_MAX_PATH];
 UIBmpWindow* bmpwindow;
+
+static void SampleShipPreviewFrame(newuiTiledWindow*,void*)
+{
+	const float now = timer_GetTime();
+	ship_pos.presentation_time = (std::max)(0.f,now-ship_pos.epoch);
+	matrix rotation, orientation;
+	vm_AnglesToMatrix(&rotation,0,(now-ship_pos.last_time)*(65535/360)*30,0);
+	vm_MatrixMul(&orientation,&rotation,&ship_pos.last_frame);
+	vm_Orthogonalize(&orientation);
+	if (Pilot_capture_output && FindArg("-capture-pilot-ship")) {
+		const int argument = FindArg("-capture-pilot-time");
+		ship_pos.presentation_time = 0;
+		if (argument) {
+			const char* text = GetArg(argument+1); char* end = nullptr;
+			const double time = text ? std::strtod(text,&end) : -1;
+			if (!text || end == text || *end || !std::isfinite(time) || time < 0 || time > 60)
+				Error("Invalid pilot preview capture time");
+			ship_pos.presentation_time = float(time);
+		}
+		vm_AnglesToMatrix(&orientation,-8192,8192,0);
+	}
+	ship_pos.last_frame = orientation; ship_pos.last_time = now;
+}
 
 struct tShipListInfo
 {
@@ -2606,7 +2631,7 @@ bool ImportGraphic(char* pathname, char* newfile)
 //	Updates the listbox that contains the custom textures. Make sure all double-pointer arguments passes in
 //	are set to NULL is they don't have memory allocated for them yet, because if they're not null this function
 //	will try to free up their memory
-bool UpdateGraphicsListbox(tCustomListInfo* cust_bmps, newuiListBox* lb, char* selected_name)
+bool UpdateGraphicsListbox(tCustomListInfo* cust_bmps, newuiListBox* lb, const char* selected_name)
 {
 	ASSERT(lb);
 	lb->RemoveAll();
@@ -3047,8 +3072,10 @@ bool PltSelectShip(pilot* Pilot)
 
 	int old_bmhandle;
 	int old_flags;
+	float old_speed;
+	const char* selected_logo = nullptr;
 	bool exit_menu = false;
-	bool ret;
+	bool ret = false;
 
 	//	pre-initialize all variables
 	cust_bmps.Init();
@@ -3063,9 +3090,11 @@ bool PltSelectShip(pilot* Pilot)
 	custom_texture[0] = '\0';
 	old_bmhandle = GameTextures[ship_pos.texture_id].bm_handle;
 	old_flags = GameTextures[ship_pos.texture_id].flags;
+	old_speed = GameTextures[ship_pos.texture_id].speed;
 
 	//	create UIWindow
 	window.Create(TXT_MULTISELECTSHIP, 0, 0, PSSELECT_WND_W, PSSELECT_WND_H);
+	window.SetOnDrawCB(SampleShipPreviewFrame);
 	sheet = window.GetSheet();
 
 	sheet->NewGroup(TXT_DEFAULTMSHIPS, 0, 0);
@@ -3211,7 +3240,13 @@ bool PltSelectShip(pilot* Pilot)
 
 	DoWaitMessage(true);
 
-	if (!UpdateGraphicsListbox(&cust_bmps, custom_list, pshiplogo))
+	selected_logo = pshiplogo;
+	if (Pilot_capture_output && FindArg("-capture-pilot-logo")) {
+		selected_logo = GetArg(FindArg("-capture-pilot-logo")+1);
+		if (!selected_logo || !*selected_logo || strchr(selected_logo,'/') || strchr(selected_logo,'\\'))
+			Error("Pilot logo capture requires a private graphics filename");
+	}
+	if (!UpdateGraphicsListbox(&cust_bmps, custom_list, selected_logo))
 		goto ship_id_err;
 
 	i = ship_list->GetCurrentIndex();
@@ -3588,6 +3623,11 @@ bool PltSelectShip(pilot* Pilot)
 
 ship_id_err:
 	Pilot_capture_ship_active = false;
+	if (!ret) {
+		GameTextures[ship_pos.texture_id].bm_handle = old_bmhandle;
+		GameTextures[ship_pos.texture_id].flags = old_flags;
+		GameTextures[ship_pos.texture_id].speed = old_speed;
+	}
 
 	//no use for this since stream files will stop
 	//Sound_system.StopAllSounds();
@@ -3661,7 +3701,7 @@ void CustomCallBack(int c)
 			bm_FreeBitmap(ship_pos.bm_handle);
 		ship_pos.bm_handle = -1;
 	}
-	ship_pos.texture_changed = true;
+	ship_pos.epoch = timer_GetTime(); ship_pos.presentation_time = 0;
 
 	if (c == 0)
 	{
@@ -3694,6 +3734,8 @@ void CustomCallBack(int c)
 			GameTextures[ship_pos.texture_id].flags |= TF_TEXTURE_64;
 
 			GameTextures[ship_pos.texture_id].bm_handle = ship_pos.bm_handle;
+			if (ship_pos.texture_type)
+				GameTextures[ship_pos.texture_id].speed = GameVClips[ship_pos.bm_handle].num_frames/8.f;
 
 			bmpwindow->SetInfo(ship_pos.texture_type ? true : false, ship_pos.bm_handle);
 
@@ -3861,94 +3903,37 @@ void ShipSelectDeleteTaunt(pilot* Pilot, tCustomListInfo* cust_snds, newuiComboB
 void UI3DWindow::OnDraw()
 {
 	AudioStream::Frame();
-	// Supported UI-only model consumer, not a gameplay-world fallback. Its
-	// rotation/custom-logo state belongs to this menu window's OnDraw cadence.
-	if (ship_model == -1)
-	{
-		mprintf((0, "Shipmodel is -1\n"));
-		return;
-	}
-
+	if (ship_model == -1) return;
 	if (Pilot_capture_output && FindArg("-capture-pilot-ship"))
-		AutomatedCaptureLog("scene UI ship preview model=%d texture=%d",ship_model,ship_pos.texture_id);
-	static polymodel_effect pefx;
+		AutomatedCaptureLog("scene UI ship preview model=%d texture=%d owned=1",ship_model,ship_pos.texture_id);
+	float size;
+	PageInPolymodel(ship_model,OBJ_PLAYER,&size);
+	const auto* model = GetPolymodelPointer(ship_model);
+	const auto& orientation = ship_pos.last_frame;
 
-	vector viewer_eye = { 0,0,0 };
-	matrix viewer_orient = IDENTITY_MATRIX;
-	viewer_eye.z = -ship_pos.cam_dist;
-
-	//	3d start frame
-		//@@@@@StartFrame(m_X,m_Y,m_X+m_W-1,m_Y+m_H-1);
-	g3_StartFrame(&viewer_eye, &viewer_orient, D3_DEFAULT_ZOOM);
-	rend_SetFlatColor(0);
-
-	float normalized_time[MAX_SUBOBJECTS];
-	float light_scalar, size;
-	PageInPolymodel(ship_model, OBJ_PLAYER, &size);
-	poly_model* pm = GetPolymodelPointer(ship_model);
-	vector view_pos;
-	vector light_vec;
-	matrix view_orient = IDENTITY_MATRIX;
-	matrix rot_mat = IDENTITY_MATRIX;
-	matrix final_mat = IDENTITY_MATRIX;
-
-	//	draw model.
-	SetNormalizedTimeAnim(0, normalized_time, pm);
-
-	view_pos = pm->anim_size_offset;
-
-	//move 30 degrees a sec
-	float new_time = timer_GetTime();
-
-	vm_AnglesToMatrix(&rot_mat, 0, (new_time - ship_pos.last_time) * (65535 / 360) * 30, 0);
-	vm_MatrixMul(&view_orient, &rot_mat, &ship_pos.last_frame);
-	vm_Orthogonalize(&view_orient);
-	ship_pos.last_frame = view_orient;
-
-
-	light_vec.x = 0.0f; 	light_vec.y = -1.0f; 	light_vec.z = -1.0f;
-	light_scalar = 0.8f;
-	vm_NormalizeVector(&light_vec);
-
-	rend_SetZBufferState(1);
-	rend_SetAlphaType(AT_CONSTANT_TEXTURE);
-	rend_SetAlphaValue(255);
-	rend_SetLighting(LS_NONE);
-	rend_SetColorModel(CM_MONO);
-	rend_SetOverlayType(OT_NONE);
-
-	if (ship_pos.bm_handle > BAD_BITMAP_HANDLE)
-	{
-		if (ship_pos.texture_changed)
-		{
-			memset(&pefx, 0, sizeof(pefx));
-			pefx.custom_texture = ship_pos.texture_id;
-			pefx.type = PEF_CUSTOM_TEXTURE;
-			ship_pos.texture_changed = false;
-		}
-
-		SetPolymodelEffect(&pefx);
-
-		DrawPolygonModel(&view_pos, &view_orient, ship_model, normalized_time, 0, &light_vec, light_scalar, light_scalar, light_scalar, 0xFFFFFFFF, 1);
-	}
-	else
-	{
-		DrawPolygonModel(&view_pos, &view_orient, ship_model, normalized_time, 0, &light_vec, light_scalar, light_scalar, light_scalar);
-	}
-
-	g3_EndFrame();
-	//@@@@@@@@@@@EndFrame();
-
+	GameModelImage image;
+	image.identity = 0x50494c4f54534801ull; image.model = ship_model;
+	image.custom_texture = ship_pos.bm_handle > BAD_BITMAP_HANDLE ? ship_pos.texture_id : -1;
+	image.time = ship_pos.presentation_time; // one UI-clock sample shared with the logo tile
+	const auto value = [](const vector& v) { return d3scene::Vec3{v.x,v.y,v.z}; };
+	image.placement = {value(model->anim_size_offset),value(orientation.rvec),value(orientation.uvec),value(orientation.fvec)};
+	image.eye = {0,0,-ship_pos.cam_dist};
+	image.destination = {m_Wnd->X()+m_X,m_Wnd->Y()+m_Y,m_W,m_H};
+	image.target = d3scene::ViewTarget::ModalUI;
+	image.lighting = {{.8f,.8f,.8f},{0,-.70710678f,-.70710678f},false};
+	static GameSceneResources resources;
+	grtext_Flush();
+	if (Pilot_capture_output && image.custom_texture >= 0)
+		AutomatedCaptureLog("scene UI ship logo time=%.6f bitmap=%d",float(image.time),
+			GetTextureBitmapAtTime(image.custom_texture,0,float(image.time)));
+	RenderGameModelImage(resources,image);
 	UIStatic::OnDraw();
-
-	ship_pos.last_time = new_time;
 }
 
 UIBmpWindow::UIBmpWindow()
 {
 	animated = false;
 	bm_handle = -1;
-	start_time = timer_GetTime();
 	created = false;
 }
 
@@ -3960,7 +3945,6 @@ void UIBmpWindow::SetInfo(bool anim, int handle)
 {
 	animated = anim;
 	bm_handle = handle;
-	start_time = timer_GetTime();
 }
 
 void UIBmpWindow::DrawBorder(void)
@@ -3999,14 +3983,7 @@ void UIBmpWindow::OnDraw(void)
 
 	if (animated)
 	{
-		vclip* vc = &GameVClips[bm_handle];
-
-		float elapsed_time = timer_GetTime() - start_time;
-		float interval = 1.0f / 10.0f;
-		int frames_elapsed = (int)(elapsed_time / interval);
-
-		int frame = frames_elapsed % vc->num_frames;
-		bmh = vc->frames[frame];
+		bmh = GetTextureBitmapAtTime(ship_pos.texture_id,0,ship_pos.presentation_time);
 	}
 	else
 	{

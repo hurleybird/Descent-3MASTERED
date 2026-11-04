@@ -554,7 +554,7 @@ void AuditGameModelPoses(const d3scene::Presentation& frame) {
 }
 
 void PrepareGameStaticModel(d3scene::FrameData& data,int number,const d3scene::Transform& placement,
-    uint64_t identity,uint64_t collection,ScenePreviewLighting lighting) {
+    uint64_t identity,uint64_t collection,ScenePreviewLighting lighting,int custom_texture) {
     if (number < 0 || number >= MAX_POLY_MODELS || !Poly_models[number].used)
         throw std::invalid_argument("Static scene model is unavailable");
     const auto* source = GetPolymodelPointer(number);
@@ -566,7 +566,7 @@ void PrepareGameStaticModel(d3scene::FrameData& data,int number,const d3scene::T
     const auto& animation = *model.asset->geometry().animation;
     const auto pose = EvaluateModelPose(animation,nullptr,static_cast<float>(data.simulation_time));
     const auto transforms = ComposeModelPose(animation,pose);
-    const auto roles = ResolveSceneModelRoles(*model.asset,0xffffffffu,false);
+    const auto roles = ResolveSceneModelRoles(*model.asset,0xffffffffu,custom_texture >= 0);
     for (size_t index = 0; index < model.asset->geometry().parts.size(); ++index) {
         const auto& geometry = model.asset->geometry().parts[index];
         d3scene::PreparedModelPart part;
@@ -589,6 +589,8 @@ void PrepareGameStaticModel(d3scene::FrameData& data,int number,const d3scene::T
             const int material = geometry.polygon_materials[polygon];
             if (material >= 0) surface.texture = model.asset->geometry().textures[material];
             else surface.base_color = geometry.polygon_colors[polygon];
+            if ((geometry.authored_flags & SOF_CUSTOM) && custom_texture >= 0 && surface.texture >= 0)
+                surface.texture = custom_texture;
             part.surfaces.push_back(std::move(surface));
         }
         model.parts.push_back(std::move(part));

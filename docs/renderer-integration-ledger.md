@@ -1,5 +1,39 @@
 # Renderer game integration
 
+## November 3: shared owned UI model images and custom-logo clock
+
+Pilot customization no longer invokes DrawPolygonModel or mutates G3/raster
+state. It and TelCom consume RenderGameModelImage: explicit model, placement,
+camera, time, lighting, image identity and destination, with caller-owned
+resource publication. Custom subobjects use the same authored-role/material
+translation as world models. Both animated-logo tile and model sample one
+window-owned time at the native eight frames/second. Cancellation restores
+texture metadata before freeing the temporary logo, including capture exit.
+
+Standalone and gameplay windows now own the same color-only modal canvas.
+Its logical height preserves the producer's 480-line menu layout and caps
+gameplay at720. SceneColorTarget describes color-only versus depth-owning
+attachments without allocating world depth/MRT storage for UI. ModalUI is an
+explicit orthographic/compositing target; invalid depth/camera requests fail.
+Linear premultiplied model images are encoded before composition into the
+premultiplied display-color UI canvas; existing Display composition is unchanged.
+
+Root3/3 pass. All8 ordinary500 clean/exact captures exactly match04f363f;
+TelCom's three ships match the previous4x/MSAA4 reference exactly. Options and
+matched nested-save dialogs/thumbnail/live-image exports remain identical.
+New tracked private pilot harness and native static/animated logo fixtures
+verify saved pilot hashes unchanged, GL audit, actual model publication and
+two fixed animation phases. Visually inspected;353 changed ship-region pixels
+between phases, not merely a changed logo tile. Static logo also passes1x/noMSAA.
+Evidence qual-owned-preview-*, qual-pilot-tracked-* (20261103), binary
+8200BD232A38EA5C3937D96AA2B0417D114343252AB410722F62AEB7F64DB765.
+
+Single pinned1500-frame sanity runs007/006: approximately1.34/.52 and.71/.67ms
+CPU/GPU, respectively; GPU cost is stable against previous measurements.
+CPU007 varied above the earlier1.15ms runs: this is not a new paired performance
+qualification or a claimed speedup. Physical interaction and release gates
+remain open. Protected installations and saved user pilots untouched.
+
 ## November 3: observer source classification and allocation-owned following
 
 Player_object identity alone is not a first-person ship: native observer mode
@@ -1179,9 +1213,9 @@ presentations remain immutable and use the owned scene executor.
 
 | Live caller | Retained dependency and composition contract |
 | --- | --- |
-| newui_core.cpp BeginGameplayModalUIFrame/DoUI | Immediate 2D into the dedicated modal UI framebuffer, composed over the resolved display. Preserve aspect, scaling, input mapping and close/resume. |
-| TelCom.cpp TelcomRender/TCSSSCallback | Immediate shell and bounded ship-selection model preview. Its automap viewport is the scene-owned map producer, not legacy world rendering. |
-| pilot.cpp UI3DWindow::OnDraw | Bounded immediate ship/custom-logo preview with native material/custom texture and UI-time rotation. Unavailable model returns before starting a G3 frame. |
+| newui_core.cpp BeginWindowCanvasFrame/DoUI | Immediate 2D into the dedicated color-only modal UI framebuffer in both menu and gameplay, composed over the resolved display. Preserve aspect, scaling, input mapping and close/resume. |
+| TelCom.cpp TelcomRender/TCSSSCallback | Immediate shell; ship preview and automap are scene-owned image producers, not legacy model/world rendering. |
+| pilot.cpp UI3DWindow::OnDraw | Scene-owned ship/custom-logo image into the window canvas, with explicit UI time shared with the animated-logo tile. No legacy model/G3 draw. |
 | movie/d3movie.cpp CallbackShowFrame | Decoded mutable bitmap upload and immediate 2D scaling. bm_MarkChanged publishes each decoded frame's source revision. No world history/observations. |
 | GameLoop.cpp GameDrawPostPresentFrame | Message consoles only, after resolved world/owned foregrounds. No old cockpit snapshot or late-effect replay. |
 | multi_dll_mgr.cpp exported drawing API | Live shipped module canvases capture typed scene-owned drawing/view requests during publication; outside that interval the declared UI compatibility API remains callable. Preserve ABI. |

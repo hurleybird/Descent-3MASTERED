@@ -312,6 +312,7 @@ bool particleDepthEdge(vec2 pixel) {
 const std::string SceneImageFragmentShader = std::string(SceneLightingShader) + R"GLSL(
 uniform sampler2D colortexture, image_display_backdrop;
 uniform float image_display_gamma;
+uniform bool image_encoded_overlay;
 uniform ivec2 image_display_origin;
 in vec4 normal_alpha, texture_coordinates;
 in vec4 surface_payload[3];
@@ -322,6 +323,15 @@ void main() {
     source.rgb *= opacity*color_modulation*surface_payload[2].yzw*lighting_modulation;
     source.a *= opacity;
     vec4 backdrop = texelFetch(image_display_backdrop,ivec2(gl_FragCoord.xy)-image_display_origin,0);
+    if (image_encoded_overlay) {
+        // Modal storage is premultiplied display color, not a resolved linear
+        // scene. Encode straight source radiance before coverage composition.
+        vec3 encoded = source.a > 0.0 ?
+            pow(max(source.rgb/source.a,vec3(0)),vec3(image_display_gamma))*source.a :
+            pow(max(source.rgb,vec3(0)),vec3(image_display_gamma));
+        color = vec4(encoded+backdrop.rgb*(1.0-source.a),source.a+backdrop.a*(1.0-source.a));
+        return;
+    }
     vec3 linear_backdrop = pow(max(backdrop.rgb,vec3(0)),vec3(1.0/image_display_gamma));
     color = vec4(pow(max(source.rgb+linear_backdrop*(1.0-source.a),vec3(0)),vec3(image_display_gamma)),
         source.a+backdrop.a*(1.0-source.a));
@@ -1420,6 +1430,15 @@ d3scene::VisibilityReport GL4Renderer::RenderSceneView(const d3scene::PreparedVi
     const auto& presentation = prepared.frame();
     const auto& view = prepared.view();
     EnsureSceneLifetime(presentation);
+    if (view.target == d3scene::ViewTarget::ModalUI) {
+        if (!framebuffer_ok || !modal_ui_frame_active || cockpit_scene_frame_active)
+            Error("Modal scene canvas requires an active modal UI owner");
+        const auto& area = view.viewport;
+        const d3scene::Rect raster{ScaledX(area.x),FramebufferHeight()-ScaledY(area.y+area.height),
+            ScaledW(area.width),ScaledH(area.height)};
+        return ExecuteSceneView(prepared,{modal_ui_framebuffer,raster,SceneOutputRole::ModalUI,
+            scene_depth_snapshots[{view.kind,view.history_key}],scene_view_history});
+    }
     const bool display_target = view.target == d3scene::ViewTarget::Display;
     if (!framebuffer_ok || modal_ui_frame_active ||
         (display_target && (!display_image.composing() || cockpit_scene_frame_active)) ||
@@ -2472,7 +2491,7 @@ void main() {
             glActiveTexture(GL_TEXTURE0+unit); glBindTexture(GL_TEXTURE_2D,texture);
             return found->second;
         };
-        const bool display_image_composition = target.role == SceneOutputRole::Display &&
+        const bool display_image_composition = (target.role == SceneOutputRole::Display || target.role == SceneOutputRole::ModalUI) &&
             policy.blend == d3scene::BlendMode::PremultipliedAlpha;
         if (display_image_composition) {
             if (!scene_image_compositor.Handle()) {
@@ -2489,6 +2508,7 @@ void main() {
                 glUniform1i(scene_image_compositor.FindUniform("image_display_backdrop"),15);
                 scene_image_gamma = scene_image_compositor.FindUniform("image_display_gamma");
                 scene_image_origin = scene_image_compositor.FindUniform("image_display_origin");
+                scene_image_encoded_overlay = scene_image_compositor.FindUniform("image_encoded_overlay");
             }
             if (AutomatedCapturePending() && FindArg("-scene-image-alpha-audit"))
                 AutomatedCaptureLog("scene display image transfer frame=%d gamma=%.6f",AutomatedCaptureFrameIndex(),
@@ -2526,6 +2546,7 @@ void main() {
             scene_image_compositor.Use();
             glUniform1f(scene_image_gamma,OpenGL_preferred_state.gamma != 0 ? 1.f/OpenGL_preferred_state.gamma : 1.f);
             glUniform2i(scene_image_origin,raster.x,raster.y);
+            glUniform1i(scene_image_encoded_overlay,target.role == SceneOutputRole::ModalUI);
         } else scene_shader.Use();
         glBindBufferRange(GL_UNIFORM_BUFFER,7,scene_draw_buffer,item_index*record_bytes,24*16);
         const bool cull = item.terrain || item.model_material_group || (item.mesh && !surface.two_sided);

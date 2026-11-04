@@ -47,7 +47,7 @@ struct ScenePreviewLighting {
     bool unlit = true;
 };
 void PrepareGameStaticModel(d3scene::FrameData&,int model,const d3scene::Transform&,uint64_t identity,uint64_t collection = 0,
-    ScenePreviewLighting lighting = {});
+    ScenePreviewLighting lighting = {},int custom_texture = -1);
 // Resource dependency history belongs to a publication producer, not whichever
 // world/UI/map frame happened to run most recently on the render thread.
 class GameSceneResources {
@@ -60,6 +60,19 @@ public:
     void prepare(d3scene::FrameData&);
     d3scene::PresentationRef publish(d3scene::FrameData);
 };
+// A UI-owned model producer has its own time, material selection and image.
+// It never borrows the gameplay clock or emits immediate world geometry.
+struct GameModelImage {
+    int model = -1, custom_texture = -1;
+    uint64_t identity = 0;
+    double time = 0;
+    d3scene::Transform placement;
+    d3scene::Vec3 eye;
+    d3scene::Rect destination;
+    d3scene::ViewTarget target = d3scene::ViewTarget::Display;
+    ScenePreviewLighting lighting;
+};
+void RenderGameModelImage(GameSceneResources&,const GameModelImage&);
 void PrepareGameInspectionBanner(d3scene::FrameData&);
 void PrepareGameDisplayLabels(d3scene::FrameData&,d3scene::Rect display);
 void PrepareGameSceneLights(d3scene::FrameData&);

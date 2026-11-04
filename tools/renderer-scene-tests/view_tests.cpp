@@ -861,6 +861,19 @@ int runSceneViewTests() {
         rejected = false;
         try { d3scene::validateView(request); } catch (const std::invalid_argument&) { rejected = true; }
         check(rejected,"Display preview accepted gameplay feedback");
+        request.feedback = d3scene::NoFeedback;
+        request.target = d3scene::ViewTarget::ModalUI;
+        rejected = false;
+        try { d3scene::validateView(request); } catch (const std::invalid_argument&) { rejected = true; }
+        check(rejected,"Modal UI accepted a perspective depth view");
+        request.projection = d3scene::ViewProjection::Orthographic;
+        request.ordering = d3scene::ViewOrdering::Compositing;
+        request.collection = 90;
+        request.orthographic_depth = {-1,1};
+        d3scene::validateView(request);
+        request.clear_depth = true; rejected = false;
+        try { d3scene::validateView(request); } catch (const std::invalid_argument&) { rejected = true; }
+        check(rejected,"Modal UI accepted a depth clear");
     }
     {
         d3scene::ForegroundLayer layer;

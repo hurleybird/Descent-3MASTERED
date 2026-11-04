@@ -497,11 +497,14 @@ extern bool Multi_bail_ui_menu;
 
 void SimpleUICallback();
 
-static bool BeginGameplayModalUIFrame()
+static bool BeginWindowCanvasFrame()
 {
-	return GetFunctionMode() == GAME_MODE && GetScreenMode() == SM_GAME &&
-		ui_HasOpenWindows() &&
-		rend_BeginModalUIFrame(MODAL_UI_REFERENCE_HEIGHT);
+	// Window ownership is independent of whether the backdrop is gameplay or
+	// the main menu. Both use the same display-resolution, color-only canvas.
+	// Never enlarge the logical layout beyond its producer (the standalone
+	// menus use a 480-line canvas); higher-resolution gameplay uses the 720 cap.
+	return ui_HasOpenWindows() &&
+		rend_BeginModalUIFrame((std::min)(MODAL_UI_REFERENCE_HEIGHT,Max_window_h));
 }
 
 
@@ -702,7 +705,7 @@ void DoUIFrame()
 			return;
 		DebugBlockPrint("UL");
 
-		const bool modal_ui_frame = BeginGameplayModalUIFrame();
+		const bool modal_ui_frame = BeginWindowCanvasFrame();
 
 		if (GetFunctionMode() == MENU_MODE) 
 		{
@@ -740,7 +743,7 @@ void DoUIFrameWithoutInput()
 		if (UI_callback)
 			(*UI_callback)();
 
-		const bool modal_ui_frame = BeginGameplayModalUIFrame();
+		const bool modal_ui_frame = BeginWindowCanvasFrame();
 
 		if (GetFunctionMode() == MENU_MODE)
 		{
@@ -786,6 +789,8 @@ void (*GetUICallback())()
 
 void SimpleUICallback()
 {
+	if (!rend_BeginDisplayFrame(Max_window_w,Max_window_h))
+		Error("UI backdrop display frame unavailable");
 	StartFrame(0, 0, Max_window_w, Max_window_h);
 	rend_ClearScreen(GR_BLACK);
 	EndFrame();
