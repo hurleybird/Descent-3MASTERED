@@ -85,6 +85,13 @@ ForegroundLayer::~ForegroundLayer() {
     scene_views.clear(); display_views.clear();
     scene_views.swap(buffers.scene); display_views.swap(buffers.display);
 }
+// An immutable resource contract follows the retained material inventory.
+struct FrameImageInterface {
+    std::vector<std::shared_ptr<const std::vector<RoomSurfaces::ImageDependency>>> requirements;
+    // Resource requirements are independent of transient sprite bindings and
+    // pixel revisions. Only fields validated by publication enter this union.
+    std::vector<std::tuple<uint32_t,bool,ImageFormat>> values;
+};
 // Compilation storage follows the snapshot lifetime, just like its input
 // arrays. Recycle only after the last reader releases the presentation.
 struct FrameCompilationStorage {
@@ -819,6 +826,7 @@ FrameData::~FrameData() {
     const auto pool = std::move(storage_pool_);
     if (!pool || pool->publisher != std::this_thread::get_id() || pool->count == pool->spare.size()) return;
     FrameData clean;
+    clean.image_interface = std::move(image_interface);
     const auto reclaim = [](auto& source,auto& destination) {
         source.clear(); destination.swap(source);
     };
@@ -937,6 +945,8 @@ PresentationRef Presentation::complete(FrameData data) {
     // The compiled hash index validates uniqueness and serves every lookup;
     // canonicalizing producer order would sort the same inventory every frame.
     require(data.images.size() < UINT32_MAX/2,"Too many frame images");
+    const auto prior_interface = data.image_interface;
+    std::shared_ptr<FrameImageInterface> edited_interface;
     size_t image_capacity = 1;
     while (image_capacity < data.images.size()*2) image_capacity *= 2;
     auto& image_slots = storage->image_slots_; image_slots.assign(image_capacity,0);
@@ -945,22 +955,32 @@ PresentationRef Presentation::complete(FrameData data) {
         require(!slot,"Duplicate frame image slot");
         slot = uint32_t(i+1);
     }
+    const auto editInterface = [&]() -> FrameImageInterface& {
+        if (!edited_interface) {
+            edited_interface = std::make_shared<FrameImageInterface>();
+            if (prior_interface) edited_interface->requirements = prior_interface->requirements;
+        }
+        return *edited_interface;
+    };
     const auto validateImage = [&](uint32_t binding) -> const ImageAsset* {
         if (!binding) return nullptr;
         const auto index = image_slots[imageSlot(data.images,image_slots,binding)];
         require(index != 0,"Missing frame image binding");
         return data.images[index-1].asset.get();
     };
-    const auto validateDependency = [&](const RoomSurfaces::ImageDependency& dependency) {
-        const auto* image = validateImage(dependency.binding);
-        require(!image || !dependency.classify_alpha || image->format() == dependency.format,"Image format changed without material recompilation");
-    };
-    // Sealed tables already contain compact requirements, not per-face data.
-    // Validation is an indexed membership/format check, not a sorted union.
-    // Walk those requirements directly: no cross-producer cache, sorting, or
-    // retained material owners, and every publication checks its actual images.
+    size_t requirement_cursor = 0;
+    // Compile a shared resource requirement once, not once for every instance
+    // using it. Actual frame images are still checked against the union below.
     const auto validateDependencies = [&](const auto& dependencies) {
-        if (dependencies) for (const auto& dependency : *dependencies) validateDependency(dependency);
+        if (!dependencies || dependencies->empty()) return;
+        const bool retained = prior_interface && requirement_cursor < prior_interface->requirements.size() &&
+            prior_interface->requirements[requirement_cursor] == dependencies;
+        if (!retained) {
+            auto& requirements = editInterface().requirements;
+            if (requirement_cursor < requirements.size()) requirements[requirement_cursor] = dependencies;
+            else requirements.push_back(dependencies);
+        }
+        ++requirement_cursor;
     };
     for (auto index : data.light_candidate_indices)
         require(index < data.lights.size(),"Candidate table references missing emitter");
@@ -1440,6 +1460,27 @@ PresentationRef Presentation::complete(FrameData data) {
     prepared->storage_->resolved_models_.reserve(resolved_index);
     prepared->storage_->resolved_parts_.reserve(prepared->data_.compiled_part_count);
     prepared->storage_->resolved_model_indices_.assign(resolved_index,UINT32_MAX);
+    if (edited_interface || !prior_interface || prior_interface->requirements.size() != requirement_cursor) {
+        auto& compiled = editInterface(); compiled.requirements.resize(requirement_cursor);
+        for (const auto& list : compiled.requirements) for (const auto& dependency : *list)
+            compiled.values.emplace_back(dependency.binding,dependency.classify_alpha,
+                dependency.classify_alpha ? dependency.format : ImageFormat::ARGB1555);
+        std::sort(compiled.values.begin(),compiled.values.end());
+        compiled.values.erase(std::unique(compiled.values.begin(),compiled.values.end()),compiled.values.end());
+    }
+    const auto& requirements = edited_interface ? edited_interface->values : prior_interface->values;
+    for (const auto& dependency : requirements) {
+        // data has moved into prepared; use its owned image table here.
+        const auto binding = std::get<0>(dependency);
+        if (!binding) continue;
+        const auto& bindings = prepared->data_.images;
+        const auto& slots = prepared->storage_->image_slots_;
+        const auto index = slots[imageSlot(bindings,slots,binding)];
+        require(index != 0,"Missing frame image binding");
+        require(!std::get<1>(dependency) || bindings[index-1].asset->format() == std::get<2>(dependency),
+            "Image format changed without material recompilation");
+    }
+    prepared->data_.image_interface = edited_interface ? std::move(edited_interface) : prior_interface;
     return prepared;
 }
 void Presentation::requireExecutable() const {

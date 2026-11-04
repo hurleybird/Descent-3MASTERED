@@ -188,7 +188,7 @@ d3scene::PresentationRef PrepareGameAutomap(uint64_t sequence,double display_tim
     if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
         AutomatedCaptureLog("scene automap prepared rooms=%u meshes=%u terrain=%d models=%u",unsigned(room_count),
             unsigned(data.meshes.size()),terrain,unsigned(data.model_instances.size()));
-    const auto result = d3scene::Presentation::publish(std::move(data));
+    const auto result = resources.publish(std::move(data));
     if (FindArg("-scene-automap-telcom-probe"))
         AutomatedCaptureLog("scene automap CPU prepare_ms=%.6f rebuilt_rooms=%u audited_rooms=%u",
             (timer_GetTime64()-prepare_begin)*1000,rebuilt,audited);

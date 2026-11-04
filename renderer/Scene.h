@@ -990,6 +990,7 @@ template<class T> struct ModelRange {
     T& at(size_t index) const { if (index >= count) throw std::out_of_range("Model variant"); return first[index]; }
 };
 struct FrameStoragePool;
+struct FrameImageInterface;
 struct FrameCompilationStorage;
 // Derived execution data borrows part ranges owned by its presentation. It is
 // not a mutable material-authoring table and never detaches ModelParts to pose it.
@@ -1117,6 +1118,11 @@ struct FrameData {
     // never own a pixel revision that would invalidate their material storage.
     struct ImageBinding { uint32_t binding; ImageAssetRef asset; };
     std::vector<ImageBinding> images;
+    // Optional immutable union of retained material requirements. Producers
+    // may carry it from their previous snapshot; publication verifies its
+    // source lists, then checks the union against current images. Owns only
+    // metadata, never pixel revisions or game state.
+    std::shared_ptr<const FrameImageInterface> image_interface;
     std::vector<CameraPerturbation> camera_perturbations;
     TerrainState terrain;
     std::vector<PreparedMesh> meshes;

@@ -3765,7 +3765,7 @@ void TCSSSCallback(void)
 	PrepareSceneImageQuad(data,image_key,order,{0,0,210,138},1);
 	static GameSceneResources resources;
 	resources.prepare(data);
-	const auto frame = d3scene::Presentation::publish(std::move(data));
+	const auto frame = resources.publish(std::move(data));
 	auto camera = MakeGameSceneView(d3scene::ViewKind::Preview,image_key,nullptr,
 		viewer_eye,-1,viewer_orient,D3_DEFAULT_ZOOM,false,{0,0,210,138},{0,0,210,138});
 	camera.geometry_inspection = SceneGeometryInspection();

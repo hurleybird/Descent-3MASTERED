@@ -1,5 +1,39 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November 3 — resource requirements belong to their producer
+
+Continuing, not finished: user explicitly said not to stop while work remains.
+Added an immutable union of sealed material image requirements, carried by
+GameSceneResources through publication. World/UI/map/ship/corona producers own
+their resource history independently of recycled frame workspaces. Current
+images still receive lifetime/uniqueness checks and the union is validated
+against their actual formats each frame. Metadata only is retained, not pixels
+or scene assets; edited requirement lists produce a new owned union.
+
+Dense007 now checks374 unique retained requirements instead of4191 repetitions.
+Rejected intermediate experiments cached the whole image interface in recycled
+workspace (world got UI's9-image table) and then producer history (transient
+sprite bindings change the full419-image interface). Neither is shipped. The
+final cache is of material requirements, not a claim that images never change.
+Temporary per-model markers and publication timing instrumentation were removed.
+
+Root3/3 pass. All8 ordinary500-frame images exactly match a366053 in
+qual-resource-interface-world-20261103. image-lifecycle, image-settings and
+actual three-ship4x/MSAA4 captures pass in qual-resource-interface-{lifecycle,
+settings,ships}-20261103. Tests cover held pixels, changing transient bindings,
+reordering, missing/duplicate bindings, format changes, edited sealed lists,
+and recovery after rejection. Candidate/Prev Candidate/main workspace untouched.
+
+Two serial ABBA orders against a366053 (NOT pre-rewrite), pinnedCPU2,720p1x,
+field320/noAO/noBloom,1500frames medians400..1199:007 roughly5–6.5% CPU gain;
+005 roughly2–3.5%;000 noisy/no confident gain. GPU unchanged. Evidence:
+perf-interface-{new-a,old-a,old-b,new-b}-saveg*-20261103 and
+perf-interface-reverse-{old-a,new-a,new-b,old-b}-saveg*-20261103.
+Private runtime holds out/resource-interface-working.exe. No game left running.
+This does NOT close the dense CPU deficit versus reconstructed pre-rewrite.
+Continue investigating larger whole-scene preparation and view execution costs.
+Included usage last45%used, credit balance unchanged62044.8730600000.
+
 ## November 3 — TelCom owns its canvas and preview images
 
 TelCom no longer changes renderer resolution/mode or draws its map/ship geometry

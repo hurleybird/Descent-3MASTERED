@@ -58,6 +58,7 @@ public:
     GameSceneResources(const GameSceneResources&) = delete;
     GameSceneResources& operator=(const GameSceneResources&) = delete;
     void prepare(d3scene::FrameData&);
+    d3scene::PresentationRef publish(d3scene::FrameData);
 };
 void PrepareGameInspectionBanner(d3scene::FrameData&);
 void PrepareGameDisplayLabels(d3scene::FrameData&,d3scene::Rect display);

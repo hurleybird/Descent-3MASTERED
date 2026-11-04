@@ -346,6 +346,62 @@ int runSceneImageTests() {
         "Pixel update detached stable surface storage");
     check(first->image(44).pixels(0)[0] == 7 && second->image(44).pixels(0)[0] == 99,
         "Frame image revisions did not preserve held-frame isolation");
+    {
+        // Exercise recycled compilation proofs, not only fresh freeze copies.
+        // Pixel revisions may change while binding identities/formats stay put.
+        auto resource_interface = second->data().image_interface;
+        const auto input = [&] {
+            auto data = acquireFrameData();
+            data.sequence = 3; data.scene_lifetime = assets.lifetime();
+            data.rooms = second->data().rooms;
+            data.images = {{44,updated_pixels},{55,truecolor}};
+            data.image_interface = resource_interface;
+            return data;
+        };
+        const auto prime = [&] {
+            auto data = input();
+            const auto published = Presentation::publish(std::move(data));
+            check(published->image(44).pixels(0)[0] == 99,"Recycled publication lost current image pixels");
+            resource_interface = published->data().image_interface;
+        };
+        for (unsigned i = 0; i < 8; ++i) {
+            prime();
+            auto data = input(); data.images[0].asset = truecolor;
+            const auto published = Presentation::publish(std::move(data));
+            check(published->image(44).pixels(0)[0] == 7,"Stable image layout reused stale content");
+            check(published->data().image_interface == resource_interface,
+                "Content-only changes rebuilt the immutable resource interface");
+        }
+        prime();
+        auto transient = input(); transient.images[1] = {77,image};
+        { const auto published = Presentation::publish(std::move(transient));
+          check(published->data().image_interface == resource_interface && published->image(77).id() == image->id(),
+              "Transient bindings invalidated unrelated retained material requirements"); }
+        prime();
+        auto reordered = input(); std::reverse(reordered.images.begin(),reordered.images.end());
+        { const auto published = Presentation::publish(std::move(reordered));
+          check(published->image(44).pixels(0)[0] == 99 && published->image(55).pixels(0)[0] == 7,
+              "Reordered image interface reused old image ordinals"); }
+        prime();
+        auto absent = input(); absent.images.erase(absent.images.begin());
+        rejects([&] { Presentation::publish(std::move(absent)); });
+        prime();
+        auto reclassified = input(); reclassified.images[0].asset = image;
+        rejects([&] { Presentation::publish(std::move(reclassified)); });
+        prime();
+        auto repeated = input(); repeated.images[1].binding = 44;
+        rejects([&] { Presentation::publish(std::move(repeated)); });
+        // A different sealed list must be checked even with the same image
+        // interface. Owning the old list prevents pointer-reuse false proofs.
+        auto changed = input(); changed.rooms[0].surfaces[0].color_image = 99;
+        changed.images.push_back({99,truecolor});
+        const auto changed_template = Presentation::publish(std::move(changed));
+        prime();
+        auto edited = input(); edited.rooms = changed_template->data().rooms;
+        rejects([&] { Presentation::publish(std::move(edited)); });
+        prime();
+        check(first->image(44).pixels(0)[0] == 7,"Recycled resource proofs altered a held snapshot");
+    }
     auto missing = second->data(); missing.images.clear();
     rejects([&] { Presentation::freeze(missing); });
     auto duplicate = second->data(); duplicate.images.push_back({44,updated_pixels});

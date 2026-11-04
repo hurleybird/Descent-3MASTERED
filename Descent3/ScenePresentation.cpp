@@ -536,7 +536,21 @@ void resolveMaterial(d3scene::SurfaceBinding& surface, MaterialResolution& resol
 }
 }
 
-struct GameSceneResources::State { ImageDependencies dependencies; };
+struct GameSceneResources::State {
+    ImageDependencies dependencies;
+    std::shared_ptr<const d3scene::FrameImageInterface> image_interface;
+};
+d3scene::PresentationRef GameSceneResources::publish(d3scene::FrameData data) {
+    if (data.scene_lifetime != d3scene::assets().lifetime())
+        throw std::invalid_argument("Resource publication belongs to a retired scene");
+    const auto state = state_.acquire(d3scene::assets());
+    // Resource-interface history belongs to its producer, not whichever
+    // world/UI publication last released a reusable workspace.
+    data.image_interface = state->image_interface;
+    auto frame = d3scene::Presentation::publish(std::move(data));
+    state->image_interface = frame->data().image_interface;
+    return frame;
+}
 void GameSceneResources::prepare(d3scene::FrameData& data) {
     PERF_MARKER_SCOPE("Scene.PrepareResources");
     if (data.scene_lifetime != d3scene::assets().lifetime())
@@ -819,7 +833,7 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance,const GameMainView
         data.sky_enabled = false;
     }
     // No domain is declared complete by a diagnostic subset of its consumers.
-    auto prepared = [&] { PERF_MARKER_SCOPE("Scene.Freeze"); return d3scene::Presentation::publish(std::move(data)); }();
+    auto prepared = [&] { PERF_MARKER_SCOPE("Scene.Freeze"); return resources.publish(std::move(data)); }();
     if (FindArg("-scene-geometry-revision-audit")) AuditGameModelPoses(*prepared);
     logPreparedModels(*prepared);
     if (ps_rand_get_state() != simulation_random)
@@ -903,7 +917,7 @@ d3scene::PresentationRef PrepareGameOverlayPresentation(const d3scene::Presentat
         foreground.layer.display_views.push_back(MakeSceneCanvasView(collection,layout.display,d3scene::ViewTarget::Display,true));
         data.foregrounds.push_back(std::move(foreground));
     }
-    return d3scene::Presentation::publish(std::move(data));
+    return resources.publish(std::move(data));
 }
 
 void RenderGameSceneView(const d3scene::Presentation& frame, d3scene::View view,

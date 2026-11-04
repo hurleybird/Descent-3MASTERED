@@ -1604,3 +1604,36 @@ versus old legacy fog; headlight response differs. Comparator is the reconstruct
 bfb59647 IPO binary, SHA256 A6286E9315A60F3C93B3A764C93A808B8FA385924ADDFACE1B573433374F3DA4,
 not the deleted frozen original.005 wins about10%CPU,000 near parity,007 remains
 about23% slower; GPU wins005 and loses000/007. Runtime restored after serial swaps.
+
+### November 3 — retained resource requirements, not repeated instance validation
+
+FrameImageInterface now owns the immutable union of sealed material image
+requirements. GameSceneResources::publish carries that contract per producer;
+recycled frame workspaces do not define resource history. Publication compares
+the exact owned source lists, rebuilds only after edits, and validates unique
+requirements against this frame's actual image lookup/formats. Images still
+have lifetime and duplicate checks. Dynamic/unsealed surfaces keep direct
+validation. No cached pixels, borrowed table pointers, or trusted-invalid flags.
+
+Dense007 retained requirements reduce4191→374. Initial whole-image-layout cache
+experiments failed (interleaved UI workspace; then transient sprite bindings),
+and were replaced, not layered underneath. Temporary timing code removed.
+Root3/3 pass; tests cover content-only reuse and held-frame isolation, transient
+bindings, reorder/removal/duplicates, changed formats, new sealed requirements,
+and failed-publication recovery. All8 world500-frame captures exactly match
+a366053. Runtime image lifecycle/settings and actual3ship4x/MSAA4 also pass:
+qual-resource-interface-{world,lifecycle,settings,ships}-20261103.
+
+PinnedCPU2 uncapped720p1x field320/noAO/noBloom; medians400..1199 of1500:
+comparison below is a366053, not the pre-rewrite renderer.
+
+| Save | New A | Checkpoint A | Checkpoint B | New B | Reverse checkpoint A | Reverse new A | Reverse new B | Reverse checkpoint B |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+|000|2.0955|2.1670|2.0390|1.8840|2.1385|2.1395|2.0795|2.0350|
+|005|.9340|.9870|.9770|.9610|1.0180|.9840|.9485|.9640|
+|007|1.7845|1.7740|1.7805|1.5960|1.8355|1.7085|1.7425|1.8535|
+
+CPU work_ms:007 gains about5–6.5%,005 about2–3.5%;000 has timing drift and no
+confident gain. GPU unchanged (~.52/.143/.52). Three1500-frame benchmark images
+also exactly match. Evidence perf-interface-* and perf-interface-reverse-*.
+No claim that all baselines now beat pre-rewrite; substantial CPU work remains.

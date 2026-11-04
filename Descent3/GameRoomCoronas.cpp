@@ -207,7 +207,7 @@ void CaptureGameRoomCoronaView(const d3scene::PreparedView& main) {
     if (draws) {
         static GameSceneResources resources;
         resources.prepare(output);
-        Published = d3scene::Presentation::publish(std::move(output));
+        Published = resources.publish(std::move(output));
     }
     else Published.reset();
     if (AutomatedCapturePending()) AutomatedCaptureLog("scene room coronas authored=%u rays=%u visible=%u retained=%u draws=%u fast=%d",
