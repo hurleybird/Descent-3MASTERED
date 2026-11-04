@@ -1,5 +1,20 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November 4 — delete retired world execution roots
+
+Removed unused RetiredMineMigrationSource, PostRender and its private sorting/
+type-label helpers; removed now-unused room/model precache and room-lightmap
+ensure APIs and their state.615lines removed. Shared source/game helpers and
+remaining legacy draw references remain pending caller audit, not declared done.
+Root3/3/fullbuild pass; qual-retired-world-roots-20261104 all8 clean60 EXACT
+qual-precache-after. Latestbinary9DCA7E53EFC65D69F92441F7C52AC0A3002592EABB796DC73EC0A2901EDD7349.
+Next LIVE startup audit found TerrainRenderer_PrecacheLevel still uploads old
+terrain streams/arrays/shaders, and PageInLevelTexture/PageInAllData still upload
+all legacy bitmap/lightmap textures. New SceneTerrain/gl_scene use none of the
+old Terrain_retained/EnsureTerrainRetained state; ScenePresentation images read
+bm_data/lm_data into owned assets, not legacy cache_slot. Inspect source paging
+and VisEffect atlas dependencies before removing GPU preuploads. No edits yet.
+
 ## November 4 — remove live duplicate legacy level precache
 
 StartLevel still called RetainedPolymodelPrecache for all paged models and

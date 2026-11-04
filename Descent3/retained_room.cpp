@@ -68,8 +68,6 @@ static RetainedWorldCache Retained_world_cache;
 static bool Retained_room_base_batch_active = false;
 static std::array<RetainedRoomDeformation, MAX_ROOMS> Retained_room_deformations;
 static std::array<RetainedRoomTransform, MAX_ROOMS> Retained_room_transforms;
-static std::vector<int> Retained_room_lightmap_handles;
-static uint32_t Retained_room_lightmap_attempt_generation = 0;
 
 static void InvalidateRetainedWorldCache()
 {
@@ -502,69 +500,7 @@ static RetainedRoomCache* GetRetainedRoom(room* rp)
 	return &cache;
 }
 
-void RetainedRoomPrecacheAll(bool include_specular)
-{
-	if (!UseHardware || StateLimited || NoLightmaps)
-		return;
 
-	RegisterRetainedRoomReleaseCallback();
-	std::vector<ubyte> seen_lightmaps(MAX_LIGHTMAPS, 0);
-	std::vector<int> lightmap_handles;
-	for (int roomnum = 0; roomnum <= Highest_room_index; roomnum++)
-	{
-		room* rp = &Rooms[roomnum];
-		if (!rp->used)
-			continue;
-		for (int facenum = 0; facenum < rp->num_faces; facenum++)
-		{
-			const face& fp = rp->faces[facenum];
-			if (!RoomFaceUsesLightmap(const_cast<face*>(&fp)))
-				continue;
-			const int lightmap_handle = LightmapInfo[fp.lmi_handle].lm_handle;
-			if (lightmap_handle >= 0 && lightmap_handle < MAX_LIGHTMAPS &&
-				!seen_lightmaps[lightmap_handle])
-			{
-				seen_lightmaps[lightmap_handle] = 1;
-				lightmap_handles.push_back(lightmap_handle);
-			}
-		}
-	}
-	Retained_room_lightmap_handles = lightmap_handles;
-	Retained_room_lightmap_attempt_generation = rend_GetGeneration();
-	rend_PrepareRetainedRoomLightmaps(lightmap_handles.data(),
-		(int)lightmap_handles.size());
-	for (int roomnum = 0; roomnum <= Highest_room_index; roomnum++)
-	{
-		room* rp = &Rooms[roomnum];
-		if (!rp->used)
-			continue;
-
-		GetRetainedRoom(rp);
-	}
-	BuildRetainedWorldCache(include_specular);
-
-	// The last upload leaves its VAO and index buffer bound. Restore the
-	// renderer's streaming vertex state before level startup continues.
-	rendTEMP_UnbindVertexBuffer();
-}
-
-void RetainedRoomEnsureLightmaps()
-{
-	if (Retained_room_lightmap_handles.empty())
-		return;
-	if (rend_RetainedRoomLightmapsReady())
-	{
-		rend_RefreshRetainedRoomLightmaps();
-		return;
-	}
-
-	const uint32_t generation = rend_GetGeneration();
-	if (Retained_room_lightmap_attempt_generation == generation)
-		return;
-	Retained_room_lightmap_attempt_generation = generation;
-	rend_PrepareRetainedRoomLightmaps(Retained_room_lightmap_handles.data(),
-		(int)Retained_room_lightmap_handles.size());
-}
 
 bool RetainedRoomCanDrawBaseFace(room* rp, int facenum)
 {
