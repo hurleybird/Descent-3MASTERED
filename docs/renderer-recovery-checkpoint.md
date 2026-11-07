@@ -2,6 +2,18 @@
 
 ## November 6 — fog portal admission qualified
 
+Latest investigation after e10e169: effects001/007 still trail reconstructedold
+4.7395/3.3025 versus3.212/2.822ms. Native particles slower; disabling edge repair
+much faster but invalid quality. Cached R8 edge mask and planar-edge predicate
+both tested/rejected, ALL source removed. Current production rebuilt/root3/3.
+RenderDoc1.29 hidden capture/replay now works and exposes AMD hardware counters.
+One89MB rdoc-gpu001_frame1500.rdc plus bounded JSON reports in verificationroot;
+see GPU investigation doc. Millions of rejected particle invocations; another
+large target is full-resolution post-protection RGBA8 MSAA resolve (~.41ms) and
+bloom threshold (~.24ms,38MBfetch). No profiler process/game remains running.
+Next investigate mask resource/consumer contract; preserve quality and use
+matched captures. No sparse masks/edge heuristics retained. Candidate untouched.
+
 Follow-up: fresh old/new clean corpus now wins6/8 GPU scenes;001 .737→.809 and
 007 .403→.515 still regress. Per-draw timestamps localize late cost to particle
 sprites. Removing lighting/specular machinery only saves~10% of those passes;

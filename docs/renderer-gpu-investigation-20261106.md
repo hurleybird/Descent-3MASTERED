@@ -283,3 +283,64 @@ between groups (fog-roof-{group,row}-20261106). Odd311-wide field with full
 precision is exact (fog-odd-*). All controls use the capture-only
 -scene-fog-row-group-reference flag; ordinary execution uses8x4. Small but
 repeatable gain, not a solution to all remaining dense-scene overhead.
+
+### Effects scaling and particle edge repair
+
+gpu-fx-{new,old}-saveg{001,007}-20261106, same1500-frame median window,
+720p output,2xSSAA,4MSAA,AO,bloom,motion blur. Current0014.7395ms versus old
+3.212;0073.3025 versus2.822. Effect implementations differ; not strict visual
+equivalence. New particle passes cost1.61968/.63652ms on the capture frame.
+Native-particle reference is slower: total4.830/3.557, passes2.0514/.88004.
+Disabling edge repair (INVALID quality reference) drops totals3.426/2.9445,
+passes .65044/.31364. Evidence gpu-native-fx-* and gpu-noedge-fx-*.
+
+Tested once-per-view R8 edge classification as an explicit schedule product.
+It preserved every pixel but costs~.066ms itself. Mask/reference totals
+0014.6505/4.6825 and0073.318/3.306; too small/inconsistent to justify a new
+resource/pass. Evidence gpu-edge-{mask,ref}-*. Removed the complete experiment,
+including schedule/tests/resources. Do not revive it as an established win.
+
+Next diagnostic: the old edge predicate compares depth range, so even one
+steep planar surface may trigger expensive full-resolution repair. A planar
+depth residual test can distinguish such gradients from discontinuities.
+This changes reconstruction choices and requires native-reference quality and
+temporal checks, not just timing. No appearance change accepted from this yet.
+
+Planar residual probe rejected: matched0014.4585→4.3265ms,0073.298→3.303.
+001 mean RGB error against native worsens .2992→.3235, peak4→5;007 essentially
+unchanged. Evidence gpu-plane-{control,planar}-*. Probe source removed and
+production rebuilt/root3/3 passed. Boundary audits show001 rooms26/27 and007
+room81 are non-convex; do not substitute a same-room uniform-fog shortcut.
+
+## RenderDoc hardware-counter investigation
+
+Installed RenderDoc1.29, hidden embedded-Python capture/replay, AMD RX6600.
+One89MB capture: C:/tmp/D3RendererVerification/rdoc-gpu001_frame1500.rdc.
+This is RenderDoc's present number1500, NOT the earlier game-frame1500 baseline.
+Replay timings/counters identify work; they are not ordinary-frame medians.
+rdoc-counters.json has counter descriptions, rdoc-counter-values.json values,
+rdoc-actions.json actions, rdoc-events.json resources, rdoc-shaders.json sources.
+26 counters collected across replay; don't add busy-cycle counters or treat
+separate collections as perfectly synchronized. Helpers are out/rdoc_*.py.
+
+Main scene has AO overscan2740x1542,4MSAA, logical1370x771. Selected events:
+-163 fog integration: ~.14ms,58880 CS invocations,6.78MB writes,0 LDS bank
+ conflicts. Memory-unit busy337022cycles vs349845CSbusy; memory stalls14918.
+ This does not prove external-memory bandwidth saturation.
+-1245 AO sampling: ~.34ms,1056270 pixel invocations; texture unit busy,
+ low memory stalls. Output RG16F1370x771.
+-2359 nearest-depth resolve: ~.22ms,4225080 invocations,12.32MB fetched,
+16.92MB written, substantial memory stalls. Output depth only.
+-2653 particle repair: ~.10ms,3558829 pixel invocations,484700 samples passed,
+16.39MB fetched.2668:~.07ms,3483703 invocations,ZERO passing samples,
+15.12MB fetched. Pixel export stalls are zero; repeated shader-side rejection
+ and sampling are real work, not just blend-output bandwidth.
+-2858 post-protection mask MSAA resolve:~.41ms, output RGBA8 full scene extent.
+-2902 bloom threshold:~.24ms,263725 invocations,38.03MB fetched and high
+ memory stalls; shader performs13 thresholded taps, each consulting protection,
+ depth, and alpha-occlusion inputs. Protection remains full SSAA resolution.
+
+Next evidence-led targets: protection-mask format/resolve and its consumption,
+and reducing particle repair invocations rather than another per-pixel cache.
+No new source experiment retained from this investigation yet. Capture helper
+and replay processes exited; no game/mouse capture left running.
