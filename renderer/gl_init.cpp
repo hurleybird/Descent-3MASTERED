@@ -886,7 +886,6 @@ void GL4Renderer::Close()
 	if (framebuffer_ok)
 		CloseFramebuffer();
 
-	DestroyLegacyDrawDefaults();
 	DestroyPersistentDrawBuffer();
 	glFinish();
 

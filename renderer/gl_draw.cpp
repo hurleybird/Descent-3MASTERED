@@ -40,40 +40,6 @@ constexpr int MIN_VERTS_PER_BUFFER = 65536;
 constexpr float PIXEL_MOTION_BLUR_REFERENCE_FRAME_TIME = 1.0f / 60.0f;
 constexpr unsigned int GL4_MOTION_OBJECT_LEGACY_BLUR_MASK = 0x80000000u;
 constexpr GLuint GL4_PER_PIXEL_LIGHTMAP_BINDING = 6;
-constexpr GLuint GL4_RETAINED_DRAW_BINDING = 5;
-
-struct alignas(16) GL4RetainedDrawBlock
-{
-	float transform[16];
-	float modelview[16];
-	float current_world[16];
-	float previous_world[16];
-	float base_color_depth_bias[4];
-	float uv_offset_uv2_scale[4];
-	float legacy_view_position[4];
-	float legacy_view_right[4];
-	float legacy_view_up[4];
-	float legacy_view_forward[4];
-	float legacy_viewport[4];
-	float alpha_effect[4];
-	float fog_plane_depth[4];
-	float specular_view_scalar[4];
-	float specular_light_range[4];
-	float deform_direction_far_clip[4];
-	float custom_clip_point[4];
-	float custom_clip_plane[4];
-	float custom_clip_scale[4];
-	float phong_direction[4];
-	int32_t modes0[4];
-	int32_t modes1[4];
-	int32_t modes2[4];
-	int32_t modes3[4];
-	uint32_t deform_seed[4];
-};
-
-static_assert(sizeof(GL4RetainedDrawBlock) == 592,
-	"RetainedDrawBlock must match the std140 shader declaration");
-
 struct GL4FramebufferBindingState
 {
 	GLuint draw = 0;
@@ -912,29 +878,6 @@ void GL4Renderer::DestroyPersistentDrawBuffer()
 	}
 }
 
-// Native/UI shaders share RetainedDrawBlock in its zero/default mode.
-// Owned scene draws use independent bindings 7 and 8.
-void GL4Renderer::InitLegacyDrawDefaults()
-{
-	DestroyLegacyDrawDefaults();
-	const GL4RetainedDrawBlock defaults = {};
-	glGenBuffers(1, &legacy_draw_defaults_buffer);
-	glBindBuffer(GL_UNIFORM_BUFFER, legacy_draw_defaults_buffer);
-	glBufferData(GL_UNIFORM_BUFFER, sizeof(defaults), &defaults, GL_STATIC_DRAW);
-	glBindBufferBase(GL_UNIFORM_BUFFER, GL4_RETAINED_DRAW_BINDING,
-		legacy_draw_defaults_buffer);
-	glBindBuffer(GL_UNIFORM_BUFFER, 0);
-}
-
-void GL4Renderer::DestroyLegacyDrawDefaults()
-{
-	if (legacy_draw_defaults_buffer != 0)
-	{
-		glDeleteBuffers(1, &legacy_draw_defaults_buffer);
-		legacy_draw_defaults_buffer = 0;
-	}
-}
-
 void GL4Renderer::WaitForPersistentDrawBufferSync(GLsync& sync)
 {
 	if (sync == nullptr)
@@ -1583,7 +1526,6 @@ void GL4Renderer::SetDrawDefaults()
 	}
 
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
-	InitLegacyDrawDefaults();
 }
 
 GLuint GL4Renderer::PrepareSoftParticleDepthTexture()

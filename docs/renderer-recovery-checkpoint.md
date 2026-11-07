@@ -1,5 +1,21 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November 6 — native shaders no longer support retained geometry
+
+Removed dead retained vertex transforms/deformation/clipping, effect-alpha and
+lightmap-array/SSBO branches. Native vertex shader now about75lines rather than
+460. Removed RetainedDrawBlock entirely, its 592-byte temporary default buffer,
+and seven unused sampler bindings. Native immediate behavior and owned scene
+shaders unchanged. Build/root3/3 pass. Binary
+2624A02A32E25F2BAA758EFBA3101EDF4F49B18BA1F4EFC9A220EF5587C4258A;
+HOG3524C6A189CE9CC0E484FA01AB3BA05197D439EE7BAB12A6EDECA79C4F237706.
+qual-native-shader-corpus-20261106 all8 EXACT legacy-fog corpus; effects003/006/007
+EXACT legacy-fog-after. ModalUI:003 matches legacy-fog-ui-repeat, other3PNG match
+legacy-fog-ui (same known VIDEO-label variation in its first003 reference).
+Next: retire old dynamic-lightmap software renderer/source APIs. Its root is
+already RetiredApplyLightingToWorld; preserve live destructible-light mutation,
+BlendLightingEdges, volume queries and Float_to_ubyte table behavior exactly.
+
 ## November 6 — legacy room-fog pipeline retired
 
 Removed unused SetRoomFogState/Overlay, entry-map shader/cache/portal buffer,

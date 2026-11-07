@@ -638,9 +638,6 @@ private:
 	void UseDrawVAO();
 	bool InitPersistentDrawBuffer(size_t size);
 	void DestroyPersistentDrawBuffer();
-	GLuint legacy_draw_defaults_buffer = 0;
-	void InitLegacyDrawDefaults();
-	void DestroyLegacyDrawDefaults();
 	void ResetPersistentDrawBufferSyncs();
 	void AddPersistentDrawBufferSyncsForOffset(GLuint offset);
 	void WaitForPersistentDrawBufferSync(GLsync& sync);

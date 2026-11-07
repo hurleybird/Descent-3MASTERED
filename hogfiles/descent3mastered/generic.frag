@@ -43,48 +43,6 @@ uniform int ao_capture_weight_mode;
 uniform int post_mask_blend_mode;
 uniform int fast_additive_bitmap;
 
-layout(std140, binding = 5) uniform RetainedDrawBlock
-{
-	mat4 retained_transform;
-	mat4 retained_modelview;
-	mat4 retained_current_world;
-	mat4 retained_previous_world;
-	vec4 retained_base_color_depth_bias;
-	vec4 retained_uv_offset_uv2_scale;
-	vec4 retained_legacy_view_position_packed;
-	vec4 retained_legacy_view_right_packed;
-	vec4 retained_legacy_view_up_packed;
-	vec4 retained_legacy_view_forward_packed;
-	vec4 retained_legacy_viewport_packed;
-	vec4 retained_alpha_effect_packed;
-	vec4 retained_fog_plane_depth;
-	vec4 retained_specular_view_scalar;
-	vec4 retained_specular_light_range;
-	vec4 retained_deform_direction_far_clip;
-	vec4 retained_custom_clip_point_packed;
-	vec4 retained_custom_clip_plane_packed;
-	vec4 retained_custom_clip_scale_packed;
-	vec4 retained_phong_direction_packed;
-	ivec4 retained_modes0;
-	ivec4 retained_modes1;
-	ivec4 retained_modes2;
-	ivec4 retained_modes3;
-	uvec4 retained_deform_seed_packed;
-};
-
-#define retained_mode retained_modes0.x
-#define retained_effect_mode retained_modes1.y
-#define retained_per_pixel_specular_payload retained_modes3.x
-#define fast_retained_room_base retained_modes3.y
-#define retained_room_lightmap_arrays retained_modes3.z
-#define retained_dynamic_lightmaps retained_modes3.w
-uniform sampler2DArray retained_room_lightmaps_2;
-uniform sampler2DArray retained_room_lightmaps_4;
-uniform sampler2DArray retained_room_lightmaps_8;
-uniform sampler2DArray retained_room_lightmaps_16;
-uniform sampler2DArray retained_room_lightmaps_32;
-uniform sampler2DArray retained_room_lightmaps_64;
-uniform sampler2DArray retained_room_lightmaps_128;
 uniform int cockpit_backing_enabled;
 uniform float cockpit_backing_alpha;
 uniform float cockpit_backing_darkness;
@@ -104,24 +62,13 @@ uniform sampler2D soft_particle_depth;
 uniform vec2 soft_particle_screen_size;
 uniform float soft_particle_depth_range;
 
-layout(std430, binding = 6) readonly buffer PerPixelLightmapBuffer
-{
-	int retained_dynamic_lookup[65536];
-	vec4 retained_dynamic_lights[];
-};
-
 // Legacy depth fog blend: 0 base, 1 additive, 3 destination multiply.
 uniform int fog_composite_mode;
 
 in vec4 outcolor;
-noperspective in float out_retained_effect_alpha;
 in vec4 outnormal;
 in vec4 out_motion_world_position;
 in vec4 out_motion_previous_world_position;
-flat in int out_retained_lightmap_handle;
-flat in int out_retained_ao_class;
-flat in int out_retained_lightmap_info;
-flat in vec3 out_retained_face_normal;
 #if defined(USE_SPECULAR)
 in vec4 out_field_specular_centers[4];
 in vec4 out_field_specular_colors[4];
@@ -131,21 +78,6 @@ in float out_field_specular_perspective_scale;
 #if defined(USE_LIGHTMAP)
 vec4 SampleLegacyLightmap(vec2 uv)
 {
-	if (retained_room_lightmap_arrays != 0)
-	{
-		if (out_retained_lightmap_handle < 0)
-			return vec4(1.0);
-		int bucket = (out_retained_lightmap_handle >> 16) & 0x7f;
-		float layer = float(out_retained_lightmap_handle & 0x0000ffff);
-		vec3 array_uv = vec3(uv, layer);
-		if (bucket == 0) return texture(retained_room_lightmaps_2, array_uv);
-		if (bucket == 1) return texture(retained_room_lightmaps_4, array_uv);
-		if (bucket == 2) return texture(retained_room_lightmaps_8, array_uv);
-		if (bucket == 3) return texture(retained_room_lightmaps_16, array_uv);
-		if (bucket == 4) return texture(retained_room_lightmaps_32, array_uv);
-		if (bucket == 5) return texture(retained_room_lightmaps_64, array_uv);
-		return texture(retained_room_lightmaps_128, array_uv);
-	}
 	return texture(lightmaptexture, uv);
 }
 #endif
@@ -294,19 +226,13 @@ vec4 ApplyPhongLighting(vec4 source_color)
 
 vec3 ApplyDynamicLightmapLighting(vec3 lightmap_color)
 {
-	int retained_lookup = 0;
-	if (retained_dynamic_lightmaps != 0 && out_retained_lightmap_info >= 0)
-		retained_lookup = retained_dynamic_lookup[out_retained_lightmap_info];
-	int retained_count = retained_lookup & 15;
-	int light_count = retained_count > 0 ? retained_count : dynamic_light_count;
+	int light_count = dynamic_light_count;
 	if (light_count == 0)
 		return lightmap_color;
 
 	vec3 world_position = outnormal.xyz / max(outnormal.w, 0.0001);
-	vec3 face_normal = retained_count > 0 ? normalize(out_retained_face_normal) :
-		normalize(dynamic_face_normal);
+	vec3 face_normal = normalize(dynamic_face_normal);
 	vec3 dynamic_color = vec3(0.0);
-	int retained_entry = (retained_lookup >> 4) - 1;
 
 	for (int i = 0; i < 8; i++)
 	{
@@ -320,20 +246,6 @@ vec3 ApplyDynamicLightmapLighting(vec3 lightmap_color)
 		vec3 stored_direction = dynamic_light_directions[i];
 		float stored_dot_range = dynamic_light_dot_ranges[i];
 		bool directional = dynamic_light_directional[i] != 0;
-		if (retained_count > 0)
-		{
-			int light_base = (retained_entry * 8 + i) * 3;
-			vec4 position_radius = retained_dynamic_lights[light_base];
-			vec4 color_falloff = retained_dynamic_lights[light_base + 1];
-			vec4 direction_dot = retained_dynamic_lights[light_base + 2];
-			light_position = position_radius.xyz;
-			radius = position_radius.w;
-			light_color = color_falloff.xyz;
-			falloff = color_falloff.w;
-			stored_direction = direction_dot.xyz;
-			stored_dot_range = direction_dot.w;
-			directional = direction_dot.w > -1.5;
-		}
 
 		vec3 light_delta = world_position - light_position;
 		radius = max(radius, 0.0001);
@@ -538,46 +450,6 @@ void main()
 		return;
 	}
 	#endif
-	#if defined(USE_TEXTURING)
-	if (fast_retained_room_base != 0)
-	{
-		vec4 base_color = texture(colortexture, outuv.xy / outuv.z);
-		#if defined(USE_LIGHTMAP)
-			vec4 lightmap_color = SampleLegacyLightmap(outuv2.xy / outuv2.z);
-			lightmap_color.rgb = ApplyDynamicLightmapLighting(lightmap_color.rgb);
-			color = base_color * lightmap_color * outcolor;
-		#else
-			color = base_color * outcolor;
-		#endif
-		float bloom_mask = 0.0;
-		#if defined(USE_FOG)
-			float fog_start = clamp(1.0 - (1.0 / max(fog.start_dist, 0.0001)), 0.0, 1.0);
-			float fog_end = clamp(1.0 - (1.0 / max(fog.end_dist, 0.0001)), 0.0, 1.0);
-			float fog_depth = clamp(-outpt.z, 0.0, 1.0);
-			float mag = clamp((fog_depth - fog_start) /
-				max(fog_end - fog_start, 0.0001), 0.0, 1.0);
-			color.rgb = mix(color.rgb, fog.color.rgb, mag);
-			bloom_mask = mag;
-		#endif
-		float coverage = clamp(color.a, 0.0, 1.0);
-		if (texture_bloom_protection > 0.0 && texture_bloom_range > 0.0)
-		{
-			float view_distance = SoftParticleEyeDepth(gl_FragCoord.z);
-			float distance_weight = 1.0 - smoothstep(texture_bloom_range * 0.5,
-				texture_bloom_range, view_distance);
-			float protection_coverage = texture_bloom_opaque_coverage != 0 ?
-				1.0 : coverage;
-			bloom_mask = max(bloom_mask, texture_bloom_protection *
-				distance_weight * protection_coverage);
-		}
-		int room_ao_class = retained_room_lightmap_arrays != 0 ?
-			out_retained_ao_class : ao_class_value;
-		float retained_ao_mask = ao_suppression * coverage;
-		post_mask = vec4(retained_ao_mask, bloom_mask, 0.0,
-			float(clamp(room_ao_class, 0, 255)) / 255.0);
-		return;
-	}
-	#endif
 	if (motion_vector_mode == 2)
 	{
 		motion_object_id = motion_vector_object_id;
@@ -609,8 +481,6 @@ void main()
 		}
 	}
 	vec4 vertex_color = ApplyPhongLighting(outcolor);
-	if (retained_effect_mode != 0)
-		vertex_color.a = out_retained_effect_alpha;
 	if (ao_capture_weight_mode != 0)
 	{
 		float ao_weight = clamp(ao_weight_value * (1.0 - ao_suppression), 0.0, 1.0);

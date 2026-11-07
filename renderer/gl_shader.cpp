@@ -745,18 +745,6 @@ void ShaderProgram::CreateCommonBindings(int bindindex)
 	if (index != -1)
 		glUniform1i(index, 2); //Set to GL_TEXTURE2
 
-	const char* room_lightmap_arrays[7] = {
-		"retained_room_lightmaps_2", "retained_room_lightmaps_4",
-		"retained_room_lightmaps_8", "retained_room_lightmaps_16",
-		"retained_room_lightmaps_32", "retained_room_lightmaps_64",
-		"retained_room_lightmaps_128" };
-	for (int array_index = 0; array_index < 7; array_index++)
-	{
-		index = glGetUniformLocation(m_name, room_lightmap_arrays[array_index]);
-		if (index != -1)
-			glUniform1i(index, 3 + array_index);
-	}
-
 	//Find CommonBlock
 	GLuint uboindex = glGetUniformBlockIndex(m_name, "CommonBlock");
 	if (uboindex != GL_INVALID_INDEX)
