@@ -663,3 +663,63 @@ GL audit; image-settings transitions pass. No CPU/GPU readback on normal path.
 Early rejection of fully fogged surfaces was considered but ruled out for the
 target scenes: producer optical upper bounds are .915366 for001 and .105906
 for007 (no fully opaque interior fog). No speculative early-fog code added.
+
+## November7: rejected follow-up probes
+
+Sparse fog event-bin initialization (two-word validity mask) preserved images
+but made field compute slower: .145080 to .153280ms in001. Skipping entirely
+empty volumes still lost (.144360 to .149400ms). Both source probes removed.
+
+Direct SSBO light reads preserved images but lost against texture-buffer reads.
+lightstore rounds001:3.495/3.706 and3.475/3.499ms reference/probe;
+007:2.863/2.8785 and2.851/2.878. Removed the probe completely.
+
+Early light-radius/cone rejection before remaining record reads and powers also
+preserved images but lost: lightreject0013.487/3.496,3.486/3.5015;
+0072.860/2.865,2.851/2.865. Removed completely. Avoid inferring speed from
+fewer source operations: branch/code-generation costs matter on this GPU.
+
+The existing full-resolution particle reference remains materially slower:
+nativeparticle001 split/direct3.469/4.1985 and3.476/4.198;
+0072.852/3.153 and2.849/3.152. The reduced layer and edge repair earn their
+cost here. This is not an image-equivalence claim for direct-vs-reconstructed
+particles, nor permission to lower particle quality further.
+
+Scalar-only fog sampling specialization saved only2–7us; removed rather than
+adding program variants for a negligible gain. Explicit level-zero fog sampling
+was neutral/slightly worse; removed. All paired images exact.
+
+Fresh depthrefresh baseline comparison, old/current rounded GPU milliseconds:
+001 native.63/.74, SSAA2/MSAA0 1.32/1.65, full3.15/3.46;
+007 native.40/.49, SSAA2/MSAA0 .89/1.16, full2.81/2.84. Still no victory.
+
+Shader ablation (INVALID appearance; diagnostic only), shadercost-*:
+001 reference3.471, omit dynamic specular3.467, static specular3.457,
+dynamic diffuse3.340, fragment fog sampling2.913.
+007 reference2.854, omit dynamic specular2.852, static specular2.847,
+dynamic diffuse2.740, fragment fog sampling2.486.
+Fog field construction remained enabled in the last ablation; these numbers
+isolate its fragment consumers, not total fog cost. All ablation source removed.
+Specular loop fusion has little upside in these scenes; focus on fog/diffuse.
+
+Tiled projected boundary reuse for exact surface refinement was tested using
+the same per-view bitsets as field construction (SSBO binding3, explicit view
+ownership). fogtilesurface images exact but round2 reference/probe001
+3.465/3.485,0072.845/2.870ms. Direct tiled integration (no field sampling or
+integration dispatch) was much worse: fogtileexact round2 0013.506/4.3635,
+0072.830/3.2515. Removed both implementations and their bindings. These were
+measured alternatives, not accepted renderer changes.
+
+## November7: defer geometric fog-ray setup until needed
+
+Field sampling needs projected position, not normalized ray/clip-plane path or
+inverse-direction bounds data. Construct the latter only for sharp-edge
+refinement or exterior fog. Same arithmetic, same exterior/interior blend order.
+foglazyray paired0013.457→3.434 and3.470→3.4395;
+0072.838→2.823 and2.8445→2.828ms. Four paired images exact. Production change
+is a direct shader refactor, no extra shader variants/resources. Root3/3;
+lazyray-fx all8 pixel-identical to depthspec-fx; lazyray-aux003/006 pass.
+
+Explicit two-texel column interpolation was separately rejected: first-round
+fogfetch0013.451→3.485,0072.835→2.848ms. It also changed2916/668 pixels through
+interpolation rounding; no quality or timing benefit claimed. Source removed.

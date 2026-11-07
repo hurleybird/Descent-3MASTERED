@@ -1,5 +1,55 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November7 — latest: deferred fog-ray setup qualified
+
+Moved geometric ray/clip/bounds setup after field sampling, guarded by
+refinement or exterior fog. Same arithmetic and blend order. foglazyray paired
+0013.457/3.434 and3.470/3.4395;0072.838/2.823 and2.8445/2.828ms.
+All four paired images exact. Production shader directly refactored; temporary
+source-rewriting probe removed. Root3/3, lazyray-fx all8 exact against depthspec-fx;
+lazyray-aux003/006 runs pass. No active game/build after these tests.
+
+Explicit column texelFetch interpolation lost (fogfetch0013.451/3.485,
+0072.835/2.848 first round); removed. No sampling quality change accepted.
+Next candidate: field consumer uses four trilinear 3D lookups but only needs
+linear interpolation along depth within each column. Test a 2D column-stripe
+layout, preserving all samples and hardware linear interpolation. This might
+reduce texture-filter throughput cost; NOT yet implemented/proven. Must retain
+proper 2D/3D binding ownership and audit odd field dimensions and visual output.
+Baseline victory still outstanding; continue, do not yield at this checkpoint.
+
+## November7 — continuing GPU baseline pursuit, explicit fog-column fetch probe
+
+Accepted HEAD87272d5 remains pushed. Main/Candidates/lib/gitinfo.h untouched.
+Rejected and removed sparse fog event bins, SSBO light storage, early light
+rejection. Details appended to renderer-gpu-investigation-20261106.md.
+Scalar-only fog sampler compilation saved merely2–7us; removed, not worth
+adding cache variants. All those light/scalar paired images were exact.
+Full-resolution particle reference loses~.73ms001/.30ms007; retain split layer.
+
+Fresh gpu-mx-*-depthrefresh-20261107 old/current GPU medians approximately:
+001 native .63/.74, SSAA2/MSAA0 1.32/1.65, full3.15/3.46;
+007 native .40/.49, SSAA2/MSAA0 .89/1.16, full2.81/2.84.
+No victory yet. User explicitly requires continuation, not checkpoint yield.
+Surface exports already gate on consumers; not an unconditional-work bug.
+
+Explicit LOD was neutral; removed. Shader ablation localizes meaningful cost
+to fragment fog sampling (~.56ms001/.37ms007), dynamic diffuse~.12ms, NOT
+specular. Removed all ablation code. Reusing compute fog tiles for surface
+refinement lost20–25us; direct tiled integration replacing the field lost
+~.85ms001/.42ms007. Both tiled probes removed completely, including bindings.
+
+Current uncommitted source probe ONLY gl_scene.cpp: capture-only
+-scene-fog-fetch-probe samples each column via two texelFetch plus mix instead
+of a trilinear texture lookup. Same slices/columns/refinement; interpolation
+rounding differs, so NOT assumed image-exact. profile-ao-eligibility.ps1 Tag
+fogfetch, ReferenceFlag empty, ProbeFlag flag above. Build/profiling may be
+active: inspect processes before any new build/game. Reference default remains
+trilinear. Profile session70655 was running at this checkpoint. Compare both
+performance and pixel deltas before adopting anything. No accepted code yet
+this continuation; rejected experiments are documented, not accumulated.
+Latest usage34% consumed, credits unchanged62044.8730600000; check periodically.
+
 ## November7 — latest: fixed sample-count resolve qualified
 
 Nearest-surface resolve now compiles actual2/4/8 samples. Framebuffer owns3

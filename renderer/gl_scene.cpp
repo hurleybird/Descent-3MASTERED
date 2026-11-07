@@ -409,24 +409,6 @@ vec3 applySceneFog(vec3 radiance,out float transmission) {
     vec3 delta = world_position-eye;
     float distance = length(delta);
     if (distance < 1.e-6) return radiance;
-    vec3 direction = delta/distance;
-    // One ray setup for every boundary node; parallel axes never divide by zero.
-    bvec3 parallel = lessThan(abs(direction),vec3(1.e-8));
-    vec3 inverse_direction = 1.0/vec3(parallel.x ? 1.0 : direction.x,
-        parallel.y ? 1.0 : direction.y,parallel.z ? 1.0 : direction.z);
-    float start = 0.0;
-    float origin_side = dot(vec4(eye,1),fog_path_plane);
-    if (origin_side < 0.0) {
-        float advance = dot(direction,fog_path_plane.xyz);
-        start = advance > 0.0 ? min(distance,-origin_side/advance) : distance;
-    }
-    float interval = distance-start;
-    float forward_scale = max(0.0,dot(direction,camera_forward));
-    if (fog_exterior != 0) {
-        float amount = clamp((interval*forward_scale-exterior_fog_range.x)/(exterior_fog_range.y-exterior_fog_range.x),0.0,1.0);
-        transmission *= 1.0-amount;
-        radiance = mix(radiance,multiply_material != 0 ? vec3(1) : (fog_additive != 0 ? vec3(0) : exterior_fog_color),amount);
-    }
     float optical_depth = 0.0;
     vec3 weighted_color = vec3(0);
     bool refine_fog = true;
@@ -473,6 +455,27 @@ vec3 applySceneFog(vec3 radiance,out float transmission) {
         optical_depth = integrated.a; weighted_color = integrated.rgb;
     }
 #endif
+    // The field already contains the optical path. Construct a geometric ray
+    // only for edge refinement or the separate exterior medium.
+    if (refine_fog || fog_exterior != 0) {
+    vec3 direction = delta/distance;
+    // One ray setup for every boundary node; parallel axes never divide by zero.
+    bvec3 parallel = lessThan(abs(direction),vec3(1.e-8));
+    vec3 inverse_direction = 1.0/vec3(parallel.x ? 1.0 : direction.x,
+        parallel.y ? 1.0 : direction.y,parallel.z ? 1.0 : direction.z);
+    float start = 0.0;
+    float origin_side = dot(vec4(eye,1),fog_path_plane);
+    if (origin_side < 0.0) {
+        float advance = dot(direction,fog_path_plane.xyz);
+        start = advance > 0.0 ? min(distance,-origin_side/advance) : distance;
+    }
+    float interval = distance-start;
+    float forward_scale = max(0.0,dot(direction,camera_forward));
+    if (fog_exterior != 0) {
+        float amount = clamp((interval*forward_scale-exterior_fog_range.x)/(exterior_fog_range.y-exterior_fog_range.x),0.0,1.0);
+        transmission *= 1.0-amount;
+        radiance = mix(radiance,multiply_material != 0 ? vec3(1) : (fog_additive != 0 ? vec3(0) : exterior_fog_color),amount);
+    }
 #if SCENE_FOG_MODE != 0
     if (refine_fog) {
     optical_depth = 0.0; weighted_color = vec3(0);
@@ -510,6 +513,7 @@ vec3 applySceneFog(vec3 radiance,out float transmission) {
     }
     }
 #endif
+    }
     if (optical_depth > 0.0) {
         radiance = mix(radiance,multiply_material != 0 ? vec3(1) : (fog_additive != 0 ? vec3(0) : weighted_color/optical_depth),clamp(optical_depth,0.0,1.0));
         transmission *= 1.0-clamp(optical_depth,0.0,1.0);
