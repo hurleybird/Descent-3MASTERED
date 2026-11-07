@@ -180,3 +180,56 @@ Next investigation should move column occupancy/work ownership upstream so
 empty columns don't require dense writes, while dense views don't pay sparse
 sampling overhead. Do not hardcode save numbers, lower field resolution, or
 drop refinement. No new fog representation has been qualified or shipped.
+
+## Upstream correction: portal admission for room-owned fog
+
+Fog previously used frustum/AABB admission alone. Geometry already computes a
+conservative portal-visible room set; fog ignored it. Diagnostic visibility
+captures showed every candidate in save000 belonged to hidden rooms. Save001
+also admitted a hidden two-room, differently colored volume. Entire connected
+volumes now require at least one portal-visible member room. Unknown, unowned,
+or incomplete room metadata stays admitted. No boundary faces are clipped away.
+
+1500-frame runs, median GPU over frames400..1199,720p,1x,noMSAA/AO/bloom:
+
+| Scene | Frustum-only | Portal admission |
+|---|---:|---:|
+| 000 | .504 | .167 |
+| 001 | .929 | .813 |
+| 007 | .513 | .513 |
+
+Evidence perf-fog-portals-savegNNN-{control,enabled}-20261106.000/007 pixel-exact;
+001 field differs slightly as its range shrinks833.975 to122.049 and becomes
+single-color R16F. Against exact fog, mean RGB error improves .369 to .150 code
+values; pixels exceeding2 codes fall .305% to .0243%. Exact fog before/after
+admission is pixel-identical. Capture-only -scene-fog-all-volumes-reference
+keeps this independent comparison available without changing normal behavior.
+
+Verification: root3/3 tests; seven admission cases added. All8 clean exact
+captures match qual-view-inputs-clean-20261106. All8 effects captures pass;
+000/003/004/005/006 exact,001/002/007 small field-range differences (peak3/3/2).
+Matched exact/reference effects captures001/002/007 all pixel-identical:
+fog-admit-savegNNN-{exact,ref,field}-fx-20261106.
+
+Moving roof fixture,1920x1080,2xSSAA,4MSAA,AO/bloom,frames150..153,continuous
+ceiling source183<-184: exact/reference all four images pixel-identical.
+Field final-frame mean error against exact improves .203 to .163 codes;
+pixels exceeding2 codes fall .00627% to .00149%, peak3 either way. Inspected
+the headlight-on result; no visible new boundary defect. Evidence
+fog-admit-roof-{field,fieldref,exact,ref}-20261106. This is not exhaustive
+temporal qualification. Auxiliary lifecycle003/006 with motion blur is exact
+against qual-view-inputs-auxiliary-20261106; gameplay roundtrip003 all8 images
+exact against qual-view-inputs-roundtrip-20261106. Evidence fog-admit-aux-mb and
+fog-admit-trip-20261106. The earlier aux run omitted motion blur and is NOT a
+matched comparison.
+
+An intermediate sparse tile-coverage experiment improved000 .510 to .403ms
+but needed new sampler/storage/variants. Discarded: portal admission is simpler
+and removes the entire unnecessary field, reaching .167ms. No sparse sampling,
+lower resolution, reduced refinement, or per-scene rule is retained.
+
+One failed capture used an output filename longer than the game's99-character
+argument limit; exclude qual-fog-admission-saveg001-exact-reference-effects
+from evidence. Short-path reruns above succeeded. Candidate/Previous Candidate
+remain untouched. Dense001/007 still need GPU investigation; these results do
+not establish a win over the pre-rewrite renderer on every scene/settings.

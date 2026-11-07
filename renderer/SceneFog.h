@@ -3,6 +3,7 @@
 #include "Scene.h"
 namespace d3scene {
 struct Camera;
+struct PortalVisibility;
 enum class FogIntegrationMode { Automatic, Exact, Field };
 constexpr int DefaultFogFieldWidth = 320;
 int fogFieldWidth(const char* option = nullptr);
@@ -14,6 +15,9 @@ FogIntegrationMode chooseFogIntegration(FogIntegrationMode request,bool field_su
 bool fogFieldFitsHalf(double optical_bound,size_t volume_count);
 // Exact common-color factorization; densities may differ. False leaves color zero.
 bool fogFieldCommonColor(const std::vector<FogVolume>&,const std::vector<uint32_t>& candidates,Vec3& color);
+// Room-owned media use the same conservative portal admission as geometry.
+// Missing/unowned room metadata stays admitted; visible faces are not required.
+bool fogMayReachView(const FogVolume&,const Presentation&,const PortalVisibility&);
 // Fog integrates camera-to-surface rays, not just the geometry clipping range.
 // Never apply the geometry near plane or mirror plane to optical candidates.
 bool fogMayIntersectView(const Bounds&,const Camera&,bool perspective);

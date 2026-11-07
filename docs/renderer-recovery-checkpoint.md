@@ -1,5 +1,22 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November 6 — fog portal admission qualified
+
+Room-owned fog now uses existing conservative portal visibility before node
+preparation, field allocation, color factorization, and integration. Unknown
+metadata admits conservatively; connected volumes retain their full boundary.
+GPU000 .504→.167ms;001 .929→.813;007 unchanged .513. Root3/3 pass, seven new
+admission checks. Exact all8 corpus matches; exact effects001/002/007 and moving
+roof150..153 all pixel-identical to all-volumes reference. Sampled field changes
+slightly with tighter ranges, closer to exact on measured001/roof. Auxiliary
+003/006 and gameplay-roundtrip003 match prior captures. See latest section of
+renderer-gpu-investigation-20261106.md for evidence and caveats. Sparse coverage
+experiments discarded, no new field representation or quality reduction.
+Private runtime contains this candidate. Untracked lib/gitinfo.h preserved.
+Next: fresh matched old/new GPU corpus, then remaining dense-fog late-pass cost.
+Do not mistake GPU elapsed time for utilization or claim all baselines beaten.
+Output capture paths must fit99 characters; use short names. No active games.
+
 ## November 6 — view image-input ownership fixed and verified
 
 Follow-up: crossing audit shows000 only2233/57600 columns intersect any fog

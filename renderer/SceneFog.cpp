@@ -38,6 +38,15 @@ bool fogFieldCommonColor(const std::vector<FogVolume>& volumes,const std::vector
     color = first;
     return true;
 }
+bool fogMayReachView(const FogVolume& volume,const Presentation& frame,const PortalVisibility& visibility) {
+    if (volume.rooms.empty()) return true;
+    for (int room : volume.rooms) {
+        const auto* found = frame.roomIndices().find(room);
+        if (!found || found->second >= visibility.rooms.size() || visibility.rooms[found->second].visible)
+            return true;
+    }
+    return false;
+}
 bool fogFieldFitsHalf(double optical_bound,size_t volume_count) {
     if (!std::isfinite(optical_bound) || optical_bound < 0) return false;
     return optical_bound*std::pow(1.0+1.0/1024.0,double(volume_count)) < 32768;

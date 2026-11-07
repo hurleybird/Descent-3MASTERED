@@ -1219,8 +1219,12 @@ void GL4Renderer::PrepareSceneViewTables(const d3scene::PreparedView& prepared) 
         if (prepared.view().collection == 0) {
             const auto& volumes = d3scene::fogVolumes(frame.data());
             const bool field = SceneFogFieldEnabled(demand.camera);
+            // Capture-only reference for validating admission independently of
+            // field range/precision changes. Normal views always use portals.
+            const bool all_volumes = AutomatedCaptureFrameIndex() >= 0 && FindArg("-scene-fog-all-volumes-reference");
             for (size_t i = 0; i < volumes.size(); ++i) {
-                if (!d3scene::fogMayIntersectView(volumes[i].bounds,demand.camera,optical_frustum)) continue;
+                if ((!all_volumes && !d3scene::fogMayReachView(volumes[i],frame,demand.spatial)) ||
+                    !d3scene::fogMayIntersectView(volumes[i].bounds,demand.camera,optical_frustum)) continue;
                 d3scene::prepareFogViewNodes(volumes[i],demand.camera,optical_frustum,fog_nodes);
                 // Source geometry is immutable. Camera containment belongs to
                 // this view's packed traversal entry, alongside its node range.

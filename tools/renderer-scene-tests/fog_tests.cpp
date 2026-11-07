@@ -148,6 +148,29 @@ int runFogTests() {
     }
     {
         using namespace d3scene;
+        SceneAssets assets;
+        FrameData data; data.sequence=1; data.scene_lifetime=assets.lifetime();
+        data.rooms={box(assets,10,2),box(assets,20,4)};
+        data.fog=assets.publishFog(data.rooms);
+        const auto frame=Presentation::freeze(data);
+        PortalVisibility visibility; visibility.rooms.resize(2);
+        FogVolume volume; volume.rooms={10,20};
+        check(!fogMayReachView(volume,*frame,visibility),"Hidden rooms admitted a fog volume");
+        visibility.rooms[1].visible=true;
+        check(fogMayReachView(volume,*frame,visibility),"Visible member of connected fog was rejected");
+        volume.rooms={10};
+        check(!fogMayReachView(volume,*frame,visibility),"Unrelated visible room admitted hidden fog");
+        visibility.rooms[0].visible=true;
+        check(fogMayReachView(volume,*frame,visibility),"Visible room without a face requirement lost its fog");
+        visibility.rooms.clear();
+        check(fogMayReachView(volume,*frame,visibility),"Missing visibility metadata rejected fog");
+        visibility.rooms.resize(2); volume.rooms={99};
+        check(fogMayReachView(volume,*frame,visibility),"Unknown room membership rejected fog");
+        volume.rooms.clear();
+        check(fogMayReachView(volume,*frame,visibility),"Unowned medium was portal-culled");
+    }
+    {
+        using namespace d3scene;
         View request; request.history_key = 1; request.viewport = request.projection_anchor = {0,0,800,600};
         request.has_clip_plane = true; request.clip_plane = {{0,0,1},-4};
         auto camera = prepareCamera(request);
