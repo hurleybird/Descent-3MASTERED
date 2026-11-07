@@ -647,3 +647,19 @@ Paired images exact. Capture-only scene-general-volume-reference and
 scene-general-opaque-reference keep the comparisons reproducible.
 Final root3/3, volspec-fx all8 exact vs unlit-final-fx; volspec-msaa0 all8 exact
 vs single-fx-new; aux003/006 exact vs st-composite-aux; image-settings passes.
+
+## November7: specialize nearest-surface resolve by sample count
+
+Compile the existing loop with the actual2/4/8 sample count. Same strict-less
+tie rule and winning depth/identity/velocity; no precision or storage change.
+Framebuffer caches three programs because SwapStorage may change its sample
+count without destroying shader ownership. Surface-record resource recreation
+already resets its own program. Reference: scene-dynamic-samples-reference.
+depthspec-{1,2}-{reference,eligible}-*0013.559→3.471 and3.518→3.4615;
+0072.881→2.831 and2.881→2.830ms. All four images exact.
+Final root3/3; depthspec-fx all8 exact vs volspec-fx; MSAA2/8 pairs exact with
+GL audit; image-settings transitions pass. No CPU/GPU readback on normal path.
+
+Early rejection of fully fogged surfaces was considered but ruled out for the
+target scenes: producer optical upper bounds are .915366 for001 and .105906
+for007 (no fully opaque interior fog). No speculative early-fog code added.

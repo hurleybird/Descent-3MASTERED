@@ -571,7 +571,7 @@ void Framebuffer::Destroy()
 {
 	glDeleteFramebuffers(1, &m_name);
 	glDeleteFramebuffers(1, &m_subname);
-	m_depth_resolve_shader.Destroy();
+	for (auto& shader : m_depth_resolve_shaders) shader.Destroy();
 	m_depth_copy_shader.Destroy();
 	m_stencil = m_requested_stencil = false;
 	if (m_samples >= 2) glDeleteRenderbuffers(1,&m_colorname);
@@ -636,9 +636,11 @@ struct SampleResolveScope {
 
 void Framebuffer::ResolveDepth() {
     SampleResolveScope scope;
+    auto& m_depth_resolve_shader = m_depth_resolve_shaders[m_samples == 8 ? 2 : m_samples == 4 ? 1 : 0];
     if (!m_depth_resolve_shader.Handle()) {
         extern const char* blitVertexSrc;
-        const auto fragment = std::string(d3scene::SampleResolveGlsl)+R"GLSL(
+        const bool dynamic_samples = FindArg("-capture-frame") && FindArg("-scene-dynamic-samples-reference");
+        const auto fragment = d3scene::sampleResolveGlsl(dynamic_samples ? 0 : m_samples)+R"GLSL(
 uniform sampler2DMS source_depth;
 void main() {
     ivec2 pixel = ivec2(gl_FragCoord.xy);
@@ -1150,7 +1152,8 @@ void SceneSurfaceResources::Resolve(GLuint source_framebuffer, GLuint output_dep
     if (type != GL_TEXTURE || depth == 0) Error("Motion resolve requires the scene's multisample depth texture");
     if (!resolve_shader.Handle()) {
         extern const char* blitVertexSrc;
-        const auto fragment = std::string(d3scene::SampleResolveGlsl)+
+        const bool dynamic_samples = FindArg("-capture-frame") && FindArg("-scene-dynamic-samples-reference");
+        const auto fragment = d3scene::sampleResolveGlsl(dynamic_samples ? 0 : samples)+
             (samples >= 2 ? "\n#define MULTISAMPLE\n" : "\n")+R"GLSL(
 #ifdef MULTISAMPLE
 uniform sampler2DMS source_depth, source_velocity;

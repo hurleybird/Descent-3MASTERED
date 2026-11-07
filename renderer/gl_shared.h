@@ -161,7 +161,9 @@ class Framebuffer
 	uint32_t	m_requested_samples;
 	GLint m_color_format = GL_RGBA16F;
 	bool m_stencil = false, m_requested_stencil = false;
-	ShaderProgram m_depth_resolve_shader, m_depth_copy_shader;
+	// Storage swaps may change sample count without destroying this owner.
+	std::array<ShaderProgram,3> m_depth_resolve_shaders;
+	ShaderProgram m_depth_copy_shader;
 	//Track whether the MSAA->sub resolve is up to date. Each MSAA resolve blit
 	//costs W*H*samples of bandwidth, and multiple post-process stages can ask
 	//for the resolved depth/color in a single frame. We skip the blit when the

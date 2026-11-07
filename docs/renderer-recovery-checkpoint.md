@@ -1,5 +1,19 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November7 — latest: fixed sample-count resolve qualified
+
+Nearest-surface resolve now compiles actual2/4/8 samples. Framebuffer owns3
+count-keyed programs, safe across SwapStorage. Paired dense57–88us better,
+00750–51us better; four benchmark images exact. All8 effects exact; MSAA2/8
+GL-audited pairs exact; image-settings and root3/3 pass. Runtime current.
+Next evidence-led candidate: fog compute zeros128 shared floats per ray/volume,
+then reads those event bins even when only a handful receive crossings. Test a
+two-word per-ray validity mask, initialize bins on first crossing, read only
+valid bins. Preserve event/addition order and all64 output slices. This is NOT
+the earlier rejected sparse output-field/validity-plane experiment.
+Do not stop: user requested persistence until baseline victory, still unproven.
+No running games/builds/replays. Main/Candidates/lib/gitinfo.h untouched.
+
 ## November7 — latest: continuing UNTIL baseline victory
 
 User explicitly renewed persistence: "Continue until we have the victory vs baseline."
