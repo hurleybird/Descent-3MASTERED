@@ -2,6 +2,14 @@
 
 ## November 6 — view image-input ownership fixed and verified
 
+Follow-up: crossing audit shows000 only2233/57600 columns intersect any fog
+volume AABB;001/007 all57600. Bulk texture clear is slower and rejected.
+Sparse validity-plane experiment improves000 .503→.419ms, but regresses001
+.932→.986 and007 .516→.540.000 exact;001/007 each1pixel difference due normalized
+depth coordinates. All probe code removed. Full evidence and next investigation
+in renderer-gpu-investigation-20261106.md. Production change remains binding
+ownership plus its capture guard; no fog quality or representation change.
+
 ExecuteSceneView resets its eight 2D image input slots once before submission;
 materials/snapshots/AO/compositing subsequently bind their declared inputs.
 Buffer tables and the freshly generated 3D fog field stay intact. Capture-only

@@ -130,3 +130,53 @@ those are NOT fresh paired baselines in this investigation.
 
 Instancing is not justified as the next response to the mirror regression:
 the same draw submissions reached .201ms once their binding hazard was removed.
+
+## Follow-up after production binding fix 4e75b3b
+
+The binding correction and capture-only input/output alias check are now
+implemented. See the recovery checkpoint for image/lifecycle verification.
+The following fog experiments were diagnostic only; all probe code was removed.
+
+Workgroups8/16/32/64 retained every image pixel but provided no consistent win.
+Evidence perf-fog-lanesN-savegNNN-20261106. Increasing storage from16 to32 bits
+raised field integration000 .218→.362ms and001 .219→.333ms; scalar007 stayed
+.117→.118ms (capture-frame timings). Evidence perf-fog-full-storage-*.
+
+Instrumented crossing counts, diag-fog-events-savegNNN-20261106, 60 frames:
+
+| Scene | Columns | Columns intersecting any volume AABB | Boundary crossings | Maximum crossings/column |
+|---|---:|---:|---:|---:|
+| 000 | 57600 | 2233 | 3614 | 14 |
+| 001 | 57600 | 57600 | 89964 | 5 |
+| 007 | 57600 | 57600 | 74122 | 9 |
+
+The counter probes use GPU atomics; their timings are NOT performance evidence.
+For000, roughly96% of columns cannot contribute volume fog, yet the normal
+kernel serially writes all65 prefix texels for each of these empty columns.
+Exterior fog is separate and is not omitted by this classification.
+
+Two measured alternatives, normal-shading1500-frame runs, same800-frame median:
+
+| Scene | Normal | Bulk clear + omit empty-column stores | Validity-plane sparse columns |
+|---|---:|---:|---:|
+| 000 | .503 | .6715 | .419 |
+| 001 | .932 | 1.167 | .986 |
+| 007 | .516 | .585 | .540 |
+
+Bulk clear used glClearTexImage with the texture-update barrier. The operation
+is already available through the loader. The API and barrier semantics were
+checked against https://registry.khronos.org/OpenGL/extensions/ARB/ARB_clear_texture.txt.
+It preserved all pixels but lost performance; discard, don't promote.
+Evidence perf-fog-bulk-clear-savegNNN-20261106. Field timing includes the clear.
+
+The sparse experiment retained64 integration slices and exact boundary
+refinement, appended one validity plane, skipped empty-column prefix writes,
+and masked invalid columns during the four-tap field sample.000 remained
+pixel-exact;001/007 each differed at one pixel (normalization changes when the
+physical depth is66 instead of65). More importantly, the read-side cost regressed
+dense fields. Evidence perf-fog-sparse-savegNNN-20261106. Not accepted as default.
+
+Next investigation should move column occupancy/work ownership upstream so
+empty columns don't require dense writes, while dense views don't pay sparse
+sampling overhead. Do not hardcode save numbers, lower field resolution, or
+drop refinement. No new fog representation has been qualified or shipped.
