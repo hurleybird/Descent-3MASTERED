@@ -1,5 +1,18 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November7 — latest: single-sample SSAA repair accelerated
+
+Framebuffer optional stencil now works with MSAA off. CopyDepthRegionTo handles
+packed raster depth→D32F snapshot/export conversion inside existing copy; MSAA
+resolved/plain D32F retain blits. No opaque snapshot feedback alias.
+Paired/reversed0012.331→1.755/1.754ms;0071.419→1.189/1.414→1.197ms.
+Less-particle-heavy000neutral,00233us better,006neutral. All images exact.
+All8 no-MSAA effects, aux003/006, trip003 all8PNG, SSAA4, all8 MSAA4 exact;
+dynamic image-settings and root3/3 passed. Private runtime current.
+Next: refresh bounded RenderDoc capture/counters after optimizations. Use only
+duration+PS invocation counters, NOT SamplesPassed (observer effect below).
+No games/build/replays running at this checkpoint. Main/Candidates untouched.
+
 ## November7 — latest: depth resolve reuse, feature matrix complete
 
 SceneSamples GLSL returns winning depth with index; consumers no longer fetch

@@ -2350,11 +2350,10 @@ void main() {
         if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) Error("Scene opaque-depth snapshot is incomplete");
         // All depth consumers share nearest-surface sample selection. A raw
         // MSAA depth blit can choose a different sample from motion/identity.
-        output.DepthTextureForRead();
-        glBindFramebuffer(GL_DRAW_FRAMEBUFFER,depth.framebuffer);
         const GLboolean scissor = glIsEnabled(GL_SCISSOR_TEST);
         glDisable(GL_SCISSOR_TEST);
-        glBlitFramebuffer(viewport[0],viewport[1],viewport[0]+viewport[2],viewport[1]+viewport[3],0,0,viewport[2],viewport[3],GL_DEPTH_BUFFER_BIT,GL_NEAREST);
+        if (!output.depth_owner) Error("Opaque-depth snapshot has no source storage");
+        output.depth_owner->CopyDepthRegionTo(depth.framebuffer,viewport[0],viewport[1],viewport[2],viewport[3],0,0,viewport[2],viewport[3]);
         if (scissor) glEnable(GL_SCISSOR_TEST);
         depth_for_sampling = depth.texture;
         }

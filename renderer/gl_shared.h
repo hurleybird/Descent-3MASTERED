@@ -161,7 +161,7 @@ class Framebuffer
 	uint32_t	m_requested_samples;
 	GLint m_color_format = GL_RGBA16F;
 	bool m_stencil = false, m_requested_stencil = false;
-	ShaderProgram m_depth_resolve_shader;
+	ShaderProgram m_depth_resolve_shader, m_depth_copy_shader;
 	//Track whether the MSAA->sub resolve is up to date. Each MSAA resolve blit
 	//costs W*H*samples of bandwidth, and multiple post-process stages can ask
 	//for the resolved depth/color in a single frame. We skip the blit when the
@@ -179,9 +179,9 @@ public:
 	// Transfer complete framebuffer storage between compositor roles without
 	// copying pixels. Resolve shaders are context-owned and storage-independent.
 	void SwapStorage(Framebuffer& other);
-	// Optional transient coverage on the multisampled raster target. Resolved
+	// Optional transient coverage on the raster target. Exported
 	// depth remains D32F; no stencil data is exported to image-space consumers.
-	void Update(int width, int height, int msaa_samples, GLint color_format = GL_RGBA16F, bool multisample_stencil = false);
+	void Update(int width, int height, int msaa_samples, GLint color_format = GL_RGBA16F, bool stencil = false);
 	bool HasStencil() const { return m_stencil; }
 	void Destroy();
 	//Mark the resolved sub framebuffer as stale. Call after writing to the MSAA
@@ -198,6 +198,8 @@ public:
 	//Blits the depth buffer to the target framebuffer with nearest-neighbor scaling.
 	//Resolves multisampling first if needed.
 	void BlitDepthTo(GLuint target, unsigned int x, unsigned int y, unsigned int w, unsigned int h);
+	// Export D32F depth, including conversion from packed raster depth/stencil.
+	void CopyDepthRegionTo(GLuint target, int sx, int sy, int sw, int sh, int x, int y, int w, int h);
 	//Blits to the target framebuffer using a draw. Bind desired shader before calling.
 	//Will set current read framebuffer to m_name. Will not trash viewport.
 	void BlitTo(GLuint target, unsigned int x, unsigned int y, unsigned int w, unsigned int h, bool linear_filter = false);

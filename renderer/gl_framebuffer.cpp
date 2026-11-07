@@ -305,7 +305,7 @@ static void ClearFramebufferAllocationErrors()
 	}
 }
 
-void Framebuffer::Update(int width, int height, int msaa_samples, GLint color_format, bool multisample_stencil)
+void Framebuffer::Update(int width, int height, int msaa_samples, GLint color_format, bool stencil)
 {
 	if (width <= 0 || height <= 0)
 	{
@@ -316,7 +316,7 @@ void Framebuffer::Update(int width, int height, int msaa_samples, GLint color_fo
 	msaa_samples = GL_GetSupportedMsaaSamples(msaa_samples);
 
 	if (width == m_width && height == m_height && (uint32_t)msaa_samples == m_requested_samples &&
-		m_color_format == color_format && m_requested_stencil == multisample_stencil && m_name != 0)
+		m_color_format == color_format && m_requested_stencil == stencil && m_name != 0)
 		return;
 
 	int attempts[4] = { 0, 0, 0, 0 };
@@ -340,8 +340,8 @@ void Framebuffer::Update(int width, int height, int msaa_samples, GLint color_fo
 		int samples = attempts[i];
 		glBindFramebuffer(GL_FRAMEBUFFER, 0);
 		Destroy();
-		bool allocated = Allocate(width,height,samples,color_format,multisample_stencil && samples >= 2);
-		if (!allocated && multisample_stencil && samples >= 2) {
+		bool allocated = Allocate(width,height,samples,color_format,stencil);
+		if (!allocated && stencil) {
 			// Coverage acceleration is optional: never reduce MSAA quality just
 			// because this device rejects the wider depth/stencil attachment.
 			ClearFramebufferAllocationErrors(); Destroy();
@@ -350,7 +350,7 @@ void Framebuffer::Update(int width, int height, int msaa_samples, GLint color_fo
 		if (allocated)
 		{
 			m_requested_samples = msaa_samples;
-			m_requested_stencil = multisample_stencil;
+			m_requested_stencil = stencil;
 			if (samples != msaa_samples)
 				mprintf((0, "Framebuffer::Update: falling back from %dx MSAA to %dx MSAA for %dx%d framebuffer.\n",
 					msaa_samples, samples, width, height));
@@ -410,7 +410,7 @@ bool Framebuffer::Allocate(int width, int height, int msaa_samples, GLint color_
 	glGenFramebuffers(1, &m_name);
 
 	GLenum textureType = msaa ? GL_TEXTURE_2D_MULTISAMPLE : GL_TEXTURE_2D;
-	m_stencil = msaa && stencil;
+	m_stencil = stencil;
 
 	if (msaa)
 	{
@@ -466,7 +466,9 @@ bool Framebuffer::Allocate(int width, int height, int msaa_samples, GLint color_
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
 		glBindTexture(GL_TEXTURE_2D, m_depthname);
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT32F, width, height, 0, GL_DEPTH_COMPONENT, GL_UNSIGNED_BYTE, nullptr);
+		glTexImage2D(GL_TEXTURE_2D, 0, stencil ? GL_DEPTH32F_STENCIL8 : GL_DEPTH_COMPONENT32F, width, height, 0,
+			stencil ? GL_DEPTH_STENCIL : GL_DEPTH_COMPONENT,
+			stencil ? GL_FLOAT_32_UNSIGNED_INT_24_8_REV : GL_FLOAT, nullptr);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	}
@@ -570,6 +572,7 @@ void Framebuffer::Destroy()
 	glDeleteFramebuffers(1, &m_name);
 	glDeleteFramebuffers(1, &m_subname);
 	m_depth_resolve_shader.Destroy();
+	m_depth_copy_shader.Destroy();
 	m_stencil = m_requested_stencil = false;
 	if (m_samples >= 2) glDeleteRenderbuffers(1,&m_colorname);
 	else glDeleteTextures(1, &m_colorname);
@@ -590,13 +593,15 @@ namespace {
 // set of GL bindings it owns so all callers see the same pass state afterward.
 struct SampleResolveScope {
     GLint read, draw, viewport[4], vao, active, textures[3], textures_2d[3], depth_function;
-    GLboolean depth, depth_mask, cull, scissor, blend[2], color_mask[2][4];
+    GLboolean depth, depth_mask, cull, scissor, stencil, clip, blend[2], color_mask[2][4];
     ShaderProgram* shader;
     SampleResolveScope() : shader(ShaderProgram::Current()) {
         glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING,&read); glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING,&draw);
         glGetIntegerv(GL_VIEWPORT,viewport); glGetIntegerv(GL_VERTEX_ARRAY_BINDING,&vao);
         glGetIntegerv(GL_ACTIVE_TEXTURE,&active); glGetIntegerv(GL_DEPTH_FUNC,&depth_function);
         depth = glIsEnabled(GL_DEPTH_TEST); cull = glIsEnabled(GL_CULL_FACE); scissor = glIsEnabled(GL_SCISSOR_TEST);
+        stencil = glIsEnabled(GL_STENCIL_TEST); clip = glIsEnabled(GL_CLIP_DISTANCE0);
+        glDisable(GL_STENCIL_TEST); glDisable(GL_CLIP_DISTANCE0);
         glGetBooleanv(GL_DEPTH_WRITEMASK,&depth_mask);
         for (int i = 0; i < 3; ++i) {
             glActiveTexture(GL_TEXTURE0+i); glGetIntegerv(GL_TEXTURE_BINDING_2D_MULTISAMPLE,&textures[i]);
@@ -614,6 +619,7 @@ struct SampleResolveScope {
         glViewport(viewport[0],viewport[1],viewport[2],viewport[3]); glBindVertexArray(vao);
         glDepthFunc(depth_function); glDepthMask(depth_mask);
         GL_SetEnabledState(GL_DEPTH_TEST,depth); GL_SetEnabledState(GL_CULL_FACE,cull); GL_SetEnabledState(GL_SCISSOR_TEST,scissor);
+        GL_SetEnabledState(GL_STENCIL_TEST,stencil); GL_SetEnabledState(GL_CLIP_DISTANCE0,clip);
         for (int i = 0; i < 2; ++i) {
             if (blend[i]) glEnablei(GL_BLEND,i); else glDisablei(GL_BLEND,i);
             glColorMaski(i,color_mask[i][0],color_mask[i][1],color_mask[i][2],color_mask[i][3]);
@@ -729,10 +735,7 @@ void Framebuffer::BlitToRaw(GLuint target, unsigned int x, unsigned int y, unsig
 
 void Framebuffer::BlitDepthTo(GLuint target, unsigned int x, unsigned int y, unsigned int w, unsigned int h)
 {
-	SubFramebufferBlit(GL_DEPTH_BUFFER_BIT);
-	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, target);
-	glBlitFramebuffer(0, 0, m_width, m_height,
-		x, y, x + w, y + h, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+	CopyDepthRegionTo(target,0,0,m_width,m_height,x,y,w,h);
 
 #ifdef _DEBUG
 	GLenum err = glGetError();
@@ -741,6 +744,41 @@ void Framebuffer::BlitDepthTo(GLuint target, unsigned int x, unsigned int y, uns
 		mprintf((0, "Error blitting depth: %d\n", err));
 	}
 #endif
+}
+
+void Framebuffer::CopyDepthRegionTo(GLuint target,int sx,int sy,int sw,int sh,int x,int y,int w,int h)
+{
+    SubFramebufferBlit(GL_DEPTH_BUFFER_BIT);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER,target);
+    if (!m_stencil || m_samples >= 2) {
+        // Plain D32F (including our explicit MSAA resolve) can use a depth blit.
+        glBlitFramebuffer(sx,sy,sx+sw,sy+sh,x,y,x+w,y+h,GL_DEPTH_BUFFER_BIT,GL_NEAREST);
+        return;
+    }
+    // Packed D32F/S8 cannot be depth-blitted into D32F. Convert in the existing
+    // copy operation; never alias the immutable opaque snapshot to raster depth.
+    SampleResolveScope scope;
+    if (!m_depth_copy_shader.Handle()) {
+        extern const char* blitVertexSrc;
+        m_depth_copy_shader.AttachSource(blitVertexSrc,R"GLSL(#version 450 core
+uniform sampler2D source_depth;
+uniform vec4 source_rect, target_rect;
+void main() {
+    vec2 pixel = source_rect.xy + (gl_FragCoord.xy-target_rect.xy)*source_rect.zw/target_rect.zw;
+    gl_FragDepth = texelFetch(source_depth,ivec2(pixel),0).r;
+}
+)GLSL");
+    }
+    m_depth_copy_shader.Use();
+    glUniform1i(m_depth_copy_shader.FindUniform("source_depth"),0);
+    glUniform4f(m_depth_copy_shader.FindUniform("source_rect"),float(sx),float(sy),float(sw),float(sh));
+    glUniform4f(m_depth_copy_shader.FindUniform("target_rect"),float(x),float(y),float(w),float(h));
+    glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D,m_depthname);
+    glViewport(x,y,w,h);
+    glEnable(GL_DEPTH_TEST); glDepthFunc(GL_ALWAYS); glDepthMask(GL_TRUE);
+    glColorMaski(0,GL_FALSE,GL_FALSE,GL_FALSE,GL_FALSE);
+    glColorMaski(1,GL_FALSE,GL_FALSE,GL_FALSE,GL_FALSE);
+    glDrawArrays(GL_TRIANGLES,0,3); rend_RecordDrawCall(RENDERER_DRAW_CALL_POSTPROCESS);
 }
 
 void Framebuffer::BlitTo(GLuint target, unsigned int x, unsigned int y, unsigned int w, unsigned int h, bool linear_filter)

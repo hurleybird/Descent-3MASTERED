@@ -544,3 +544,27 @@ depth-{1,2}-{refetch,reuse}-* paired effects profiles:
 007 3.004→2.974 and reversed order 3.005→2.969 ms. All four images exact.
 Root integration3/3 passed. depth-reuse-fx-20261107 all8 images exact against
 st-composite-fx-20261107, including mirror/auxiliary save006.
+
+## November7: stencil repair without MSAA
+
+Framebuffer optional coverage now supports single-sample SSAA. Packed D32F/S8
+cannot raw-blit to D32F, so CopyDepthRegionTo owns that conversion, reusing the
+existing snapshot/export copy rather than adding a pass. Compatible plain D32F
+and resolved MSAA sources retain their fast blit. Opaque snapshot remains distinct
+from raster depth; nearest selection, D32F precision and ordering are unchanged.
+Resource operations scope stencil and clip-plane enables as well as prior state.
+Storage cost is nominal4bytes/rasterpixel extra on the single world target:
+~16.1MiB at2740x1542, scaling with SSAA area. Native-resolution targets unchanged.
+
+single-st-{1,2}-{shader,stencil}-* SSAA2/MSAA0/no-effects, median400..1199:
+001 2.331→1.755; reversed2.331→1.754ms.
+007 1.419→1.189; reversed1.414→1.197ms. Four images exact, GL audit passes.
+single-check-* less-particle-heavy scenes000 .522→.522,0021.1315→1.098,
+006 .566→.564ms; all exact. single-s4-* SSAA4 effects image exact.
+
+single-fx-{old,new} all8 no-MSAA effects images exact; single-aux003/006 and
+single-trip003 (all8 PNGs) exact. single-msaa4 all8 exact vs depth-reuse-fx.
+single-settings image-settings passes dynamic SSAA/MSAA transitions/readback.
+Root3/3 passed. Visually inspected dense001 headlight-on effects capture.
+Reference executable for corpus is fdcd6ff (before depth-reuse, irrelevant to
+single-sample output); same-binary flag isolates the timed stencil comparison.
