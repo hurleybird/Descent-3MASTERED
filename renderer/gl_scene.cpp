@@ -1918,10 +1918,15 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         const bool half_field = !FindArg("-scene-fog-full-precision") &&
             d3scene::fogFieldFitsHalf(storage_bound,scene_view_fog_volumes.size());
         const GLenum field_format = scalar_field ? (half_field ? GL_R16F : GL_R32F) : (half_field ? GL_RGBA16F : GL_RGBA32F);
-        auto& program = scene_fog_field_programs[(scalar_field ? 2 : 0)+(half_field ? 1 : 0)];
+        const bool compact_events = !(AutomatedCaptureFrameIndex() >= 0 && FindArg("-scene-fog-full-bins-reference"));
+        const size_t format_index=(scalar_field ? 2 : 0)+(half_field ? 1 : 0);
+        auto& program = scene_fog_field_programs[format_index+(compact_events ? 4 : 0)];
+        auto& repair_program = scene_fog_field_programs[format_index+8];
         auto& scene_fog_field_shader = program.shader;
         auto& scene_fog_field_range = program.range;
         const int field_rows = AutomatedCaptureFrameIndex() >= 0 && FindArg("-scene-fog-row-group-reference") ? 1 : SceneFogFieldRows;
+        const auto initialize_field_program = [&](FogFieldProgram& target,int event_mode) {
+        auto& scene_fog_field_shader = target.shader;
         if (!scene_fog_field_shader.Handle()) {
             std::string source = SceneLightingShader;
             source.replace(0,source.find('\n'),"#version 430 core");
@@ -1930,6 +1935,9 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
             source += FogFieldDefinitions();
             source += SceneFogIntersectionShader;
             source += "\n#define SCENE_FOG_SLICES "+std::to_string(SceneFogFieldSlices)+"\n";
+            if (event_mode == 1) source += "\n#define SCENE_FOG_COMPACT 1\n#define SCENE_FOG_EVENT_CAPACITY "+
+                std::to_string(FindArg("-scene-fog-compact-single-probe") ? 1 : 8)+"\n";
+            if (event_mode == 2) source += "\n#define SCENE_FOG_OVERFLOW_REPAIR 1\n";
             source += "\n#define SCENE_FOG_LANES "+std::to_string(SceneFogFieldColumns*field_rows)+"\n";
             source += "\n#define SCENE_FOG_GROUP_X "+std::to_string(SceneFogFieldColumns)+"\n";
             source += "\n#define SCENE_FOG_GROUP_Y "+std::to_string(field_rows)+"\n";
@@ -1943,8 +1951,12 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
             glUniform1i(scene_fog_field_shader.FindUniform("scene_fog"),6);
             glUniform1i(scene_fog_field_shader.FindUniform("scene_fog_nodes"),13);
             glUniform1i(scene_fog_field_shader.FindUniform("scene_influences"),3);
-            scene_fog_field_range = scene_fog_field_shader.FindUniform("fog_field_range");
+            target.range = scene_fog_field_shader.FindUniform("fog_field_range");
+            target.overflow_offset = scene_fog_field_shader.FindUniform("fog_overflow_offset");
         }
+        };
+        initialize_field_program(program,compact_events ? 1 : 0);
+        if (compact_events) initialize_field_program(repair_program,2);
         const int width_arg = FindArg("-scene-fog-field-width");
         const char* width_text = width_arg ? GetArg(width_arg+1) : nullptr;
         if (width_arg && !width_text) Error("Fog field width requires a value");
@@ -1970,6 +1982,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT|GL_SHADER_STORAGE_BARRIER_BIT);
         scene_fog_field_shader.Use();
         glUniform1f(scene_fog_field_range,field_range);
+        glUniform1i(program.overflow_offset,int(scene_fog_tile_words));
         glBindImageTexture(0,scene_fog_field_texture,0,GL_TRUE,0,GL_READ_WRITE,field_format);
         if (AutomatedCapturePending()) {
             glGenQueries(3,field_queries);
@@ -1992,7 +2005,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         glGetIntegeri_v(GL_SHADER_STORAGE_BUFFER_BINDING,0,&previous_tile_binding);
         glGetIntegerv(GL_SHADER_STORAGE_BUFFER_BINDING,&previous_storage_binding);
         glBindBuffer(GL_SHADER_STORAGE_BUFFER,scene_fog_tile_buffer);
-        const size_t tile_bytes=size_t(scene_fog_tile_words)*sizeof(uint32_t);
+        const size_t tile_bytes=(size_t(scene_fog_tile_words)+(compact_events ? size_t(width)*height : 0))*sizeof(uint32_t);
         if (!scene_fog_tile_capacity || tile_bytes>scene_fog_tile_capacity) {
             scene_fog_tile_capacity=(std::max)(size_t(4096),(tile_bytes+4095)&~size_t(4095));
             glBufferData(GL_SHADER_STORAGE_BUFFER,scene_fog_tile_capacity,nullptr,GL_STREAM_DRAW);
@@ -2006,10 +2019,24 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         scene_fog_field_shader.Use();
         if (field_queries[0]) glQueryCounter(field_queries[1],GL_TIMESTAMP);
         glDispatchCompute((width+SceneFogFieldColumns-1)/SceneFogFieldColumns,(height+field_rows-1)/field_rows,1);
+        if (compact_events) {
+            glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT|GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
+            repair_program.shader.Use();
+            glUniform1f(repair_program.range,field_range);
+            glUniform1i(repair_program.overflow_offset,int(scene_fog_tile_words));
+            glDispatchCompute((width+SceneFogFieldColumns-1)/SceneFogFieldColumns,(height+field_rows-1)/field_rows,1);
+        }
         glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT);
+        if (field_queries[0]) glQueryCounter(field_queries[2],GL_TIMESTAMP);
+        // Diagnostic only: ordinary frames never read overflow flags back.
+        if (compact_events && AutomatedCapturePending()) {
+            std::vector<uint32_t> overflow(size_t(width)*height);
+            glGetBufferSubData(GL_SHADER_STORAGE_BUFFER,GLintptr(size_t(scene_fog_tile_words)*sizeof(uint32_t)),
+                GLsizeiptr(overflow.size()*sizeof(uint32_t)),overflow.data());
+            AutomatedCaptureLog("scene fog compact overflow=%u columns=%u",unsigned(std::count(overflow.begin(),overflow.end(),1u)),unsigned(overflow.size()));
+        }
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER,0,GLuint(previous_tile_binding));
         glBindBuffer(GL_SHADER_STORAGE_BUFFER,GLuint(previous_storage_binding));
-        if (field_queries[0]) glQueryCounter(field_queries[2],GL_TIMESTAMP);
         glBindImageTexture(0,0,0,GL_FALSE,0,GL_WRITE_ONLY,GL_RGBA32F);
         glActiveTexture(GL_TEXTURE12); glBindTexture(GL_TEXTURE_3D,scene_fog_field_texture);
         if (AutomatedCapturePending() && FindArg("-scene-fog-field-audit"))

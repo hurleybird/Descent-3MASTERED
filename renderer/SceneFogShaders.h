@@ -3,7 +3,7 @@
 
 static constexpr int SceneFogFieldSlices = 64;
 // A compact 2D group keeps neighboring optical columns together. Each lane
-// owns its event bins; the group needs 16KiB shared storage for 64 slices.
+// owns its event bins: 3KiB for the compact path, 16KiB for overflow repair.
 static constexpr int SceneFogFieldColumns = 8;
 static constexpr int SceneFogFieldRows = 4;
 
@@ -83,10 +83,23 @@ static const char* SceneFogFieldComputeShader = R"GLSL(
 layout(local_size_x=SCENE_FOG_GROUP_X,local_size_y=SCENE_FOG_GROUP_Y) in;
 layout(SCENE_FOG_FIELD_FORMAT,binding=0) coherent uniform image3D fog_field_output;
 uniform float fog_field_range;
+#if SCENE_FOG_COMPACT
+layout(std430,binding=0) buffer FogTiles {uint fog_tiles[];};
+#else
 layout(std430,binding=0) readonly buffer FogTiles {uint fog_tiles[];};
+#endif
+uniform int fog_overflow_offset;
 const int FOG_SLICES = SCENE_FOG_SLICES;
+#if SCENE_FOG_COMPACT
+shared int event_bins[SCENE_FOG_EVENT_CAPACITY*SCENE_FOG_LANES];
+shared float slope_events[SCENE_FOG_EVENT_CAPACITY*SCENE_FOG_LANES];
+shared float depth_events[SCENE_FOG_EVENT_CAPACITY*SCENE_FOG_LANES];
+int event_count;
+bool event_overflow;
+#else
 shared float slope_events[FOG_SLICES*SCENE_FOG_LANES];
 shared float depth_events[FOG_SLICES*SCENE_FOG_LANES];
+#endif
 bool fieldEdge(vec4 plane,vec2 sample_position,int flags,int edge) {
     float side=dot(plane.xy,sample_position)+plane.z;
     return side>0.0 || (side==0.0 && (flags&(1<<edge))!=0);
@@ -94,14 +107,44 @@ bool fieldEdge(vec4 plane,vec2 sample_position,int flags,int edge) {
 void crossingEvent(float z,float sign,float start) {
     int slice = max(0,int(floor(sqrt(max(0.0,z/fog_field_range))*float(FOG_SLICES))));
     if (slice>=FOG_SLICES) return;
+#if SCENE_FOG_COMPACT
+    int lane=int(gl_LocalInvocationIndex);
+    int slot=0;
+    while (slot<event_count && event_bins[slot*SCENE_FOG_LANES+lane]<slice) ++slot;
+    if (slot<event_count && event_bins[slot*SCENE_FOG_LANES+lane]==slice) {
+        int address=slot*SCENE_FOG_LANES+lane;
+        slope_events[address]+=sign;
+        depth_events[address]+=sign*max(z,start);
+        return;
+    }
+    if (event_count==SCENE_FOG_EVENT_CAPACITY) { event_overflow=true; return; }
+    for (int move=event_count;move>slot;--move) {
+        int to=move*SCENE_FOG_LANES+lane,from=to-SCENE_FOG_LANES;
+        event_bins[to]=event_bins[from]; slope_events[to]=slope_events[from]; depth_events[to]=depth_events[from];
+    }
+    int address=slot*SCENE_FOG_LANES+lane;
+    event_bins[address]=slice;
+    slope_events[address]=0.0+sign;
+    depth_events[address]=0.0+sign*max(z,start);
+    ++event_count;
+#else
     int address=slice*SCENE_FOG_LANES+int(gl_LocalInvocationIndex);
     slope_events[address] += sign;
     depth_events[address] += sign*max(z,start);
+#endif
 }
 void main() {
     ivec3 size = imageSize(fog_field_output);
     ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
     if (any(greaterThanEqual(pixel,size.xy))) return;
+#if SCENE_FOG_COMPACT || SCENE_FOG_OVERFLOW_REPAIR
+    int overflow_address=fog_overflow_offset+pixel.y*size.x+pixel.x;
+#if SCENE_FOG_COMPACT
+    fog_tiles[overflow_address]=0u;
+#else
+    if (fog_tiles[overflow_address]==0u) return;
+#endif
+#endif
     int lane=int(gl_LocalInvocationIndex);
     bool first_volume=true;
     vec2 ndc = (vec2(pixel)+.5)/vec2(size.xy)*2.0-1.0;
@@ -129,9 +172,13 @@ void main() {
         // volume before reading its prefix sums back for the next contribution.
         if (!first_volume) memoryBarrierImage();
         vec4 density=vec4(appearance.rgb,1.0)/appearance.w;
+#if SCENE_FOG_COMPACT
+        event_count=0; event_overflow=false;
+#else
         for (int i=0;i<FOG_SLICES;++i) {
             slope_events[i*SCENE_FOG_LANES+lane]=0.0; depth_events[i*SCENE_FOG_LANES+lane]=0.0;
         }
+#endif
         int field_base=view_nodes*4-SCENE_FOG_HEADER_WORDS;
         int first=field_base+texelFetch(scene_influences,field_base).r;
         int mask_base=texelFetch(scene_influences,field_base+2).r;
@@ -158,10 +205,26 @@ void main() {
             }
         }
         float winding=float(texelFetch(scene_influences,entry+3).r);
+#if SCENE_FOG_COMPACT
+        if (event_overflow) { fog_tiles[overflow_address]=1u; return; }
+        int event_cursor=0;
+        int next_event=event_count>0 ? event_bins[lane] : FOG_SLICES;
+#endif
         float integrated_length=0.0;
         if (first_volume) imageStore(fog_field_output,ivec3(pixel,0),vec4(0));
         for (int slice=0;slice<FOG_SLICES;++slice) {
+#if SCENE_FOG_COMPACT
+            float slope=0.0,depth=0.0;
+            if (slice==next_event) {
+                int address=event_cursor*SCENE_FOG_LANES+lane;
+                slope=slope_events[address]; depth=depth_events[address];
+                ++event_cursor;
+                next_event=event_cursor<event_count ? event_bins[event_cursor*SCENE_FOG_LANES+lane] : FOG_SLICES;
+            }
+#else
             int address=slice*SCENE_FOG_LANES+lane;
+            float slope=slope_events[address],depth=depth_events[address];
+#endif
             float low=float(slice)/float(FOG_SLICES),high=float(slice+1)/float(FOG_SLICES);
             float low_z=low*low*fog_field_range,high_z=high*high*fog_field_range;
             float interval=max(0.0,high_z-max(low_z,start*forward_scale));
@@ -169,7 +232,7 @@ void main() {
             // accepting/missing the whole interval at one jittered depth.
             // Closed non-overlapping boundaries are exact along this column.
             // Clamp overlapping sheets per cell, never amplify their density.
-            float occupied=winding*interval+slope_events[address]*high_z-depth_events[address];
+            float occupied=winding*interval+slope*high_z-depth;
             if (interval>0.0) integrated_length+=clamp(occupied,0.0,high_z-low_z);
             ivec3 output_cell=ivec3(pixel,slice+1);
 #if SCENE_FOG_SCALAR_FIELD
@@ -179,7 +242,7 @@ void main() {
             vec4 prior=first_volume ? vec4(0) : imageLoad(fog_field_output,output_cell);
             imageStore(fog_field_output,output_cell,prior+density*integrated_length);
 #endif
-            winding+=slope_events[address];
+            winding+=slope;
         }
         first_volume=false;
     }

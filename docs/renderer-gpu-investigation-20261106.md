@@ -741,3 +741,30 @@ are orphaned then filled over their live range, with no render-thread allocation
 Capture reference: scene-texture-lights-reference. Root3/3; uniformlight-fx all8
 exact vs lazyray-fx; auxiliary003/006 exact; GL-audited interface switches18..22
 produce five images identical to the texture-buffer reference.
+
+## November7: compact fog crossing bins with explicit overflow repair
+
+The old producer reserves64 slope/depth bins per ray (16KiB per8x4 group).
+Sparse rays now keep up to8 sorted occupied bins (3KiB/group), preserving the
+original addition order within each bin. Overflow flags append to the existing
+tile SSBO; a second dispatch uses the original full-capacity shader only for
+flagged columns. No missing crossings, resolution reduction, precision change,
+or ordinary-frame readback. Worst-case overflowing rays pay both attempts.
+
+fogcompact paired0013.4265→3.392 and3.439→3.425;
+0072.810→2.794 and2.794→2.765ms. Four benchmark images exact. Isolated dense
+field capture .145-ish→.082120ms; do NOT equate that to total-frame savings.
+Forced capacity1 sent15843/57920 columns through repair and gave the same image
+and numerical audit. Wider8x8 grouping was not repeatably better, removed.
+An invalid fogcompactwide-* launch raced a rebuild and was stopped; only
+fogcompactwide-valid-* is usable evidence for the grouping comparison.
+
+Production root3/3, compactfog-fx all8 exact vs uniformlight-fx; auxiliary003/006
+exact; image-settings passes. fc-odd (311 wide, full precision), fc-vector,
+fc-overflow pairs exact; four fc-roof frames150..153 exact. Independent CPU
+field audits agree with reference. Capture reference scene-fog-full-bins-reference;
+scene-fog-compact-single-probe exercises overflow without dropping crossings.
+
+Latest lightrefresh baseline, before this compact producer, old/current rounded:
+001 native.78/.72 (old varied; not a reliable victory),SSAA1.44/1.59,full3.21/3.43;
+007 native.40/.47,SSAA.89/1.10,full2.81/2.79. Overall victory still outstanding.

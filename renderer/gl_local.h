@@ -222,8 +222,8 @@ class GL4Renderer : public IRenderer
 	d3scene::SceneGpuCache<d3scene::FogAsset,SceneFogGpu> scene_fog_assets;
 	SceneFogGpu scene_empty_fog;
 	GLuint scene_fog_nodes_texture = 0; // float view of the shared per-view influence stream
-	struct FogFieldProgram { ShaderProgram shader; GLint range = -1; };
-	std::array<FogFieldProgram,4> scene_fog_field_programs;
+	struct FogFieldProgram { ShaderProgram shader; GLint range = -1, overflow_offset = -1; };
+	std::array<FogFieldProgram,12> scene_fog_field_programs;
 	GLuint scene_fog_field_texture = 0;
 	ShaderProgram scene_fog_tile_program;
 	GLuint scene_fog_tile_buffer = 0;

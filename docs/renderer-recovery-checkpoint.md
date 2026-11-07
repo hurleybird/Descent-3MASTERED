@@ -1,5 +1,67 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November7 — latest: compact fog producer QUALIFIED, moving to unlit scheduling
+
+Compact8-bin producer is now default; reference -scene-fog-full-bins-reference,
+forced repair -scene-fog-compact-single-probe. Wide8x8 group was neutral on repeat
+and removed; keep8x4. INVALID fogcompactwide-* run raced a rebuild, was stopped,
+and must NOT be used. Valid comparison is fogcompactwide-valid-*.
+Root3/3; compactfog-fx all8 exact vs uniformlight-fx; aux003/006 exact;
+image-settings pass; fc-odd/fullprecision311, fc-vector, fc-overflow pairs exact;
+four fc-roof moving frames150..153 exact. Numerical field audits match reference.
+Forced capacity1 repairs15843/57920 columns; default8 had0 overflow in these
+fixtures. Ordinary frames never read flags back. Worst-case overflowing rays
+pay compact attempt plus old full integration, not a quality loss/light cap.
+
+No active game/build after qualification. Private runtime current; Candidate,
+Previous Candidate, main worktree and unrelated lib/gitinfo.h remain untouched.
+NEXT: native LateWorld unlit effects still use the general lit program. Add
+stable UnlitWorld runs to buildViewPasses (no order changes), then use an unlit
+no-layer shader with common view/draw UBOs. Existing tests are
+tools/renderer-scene-tests/view_tests.cpp lines1500..1630. SoftVolumes scheduling
+still must preserve blend saturation boundaries and late depth-writer barrier.
+Proposed cache indexing:2 light storage modes x3 fog modes x2 layer interfaces
+x2 lit/unlit=24; only initialize needed variants. Depth-snapshot origin must be
+set on each selected unlit program; field range/color/debug uploaded once/view.
+Do not add per-draw uniform copies or mutate compositing schedules.
+Continue until actual baseline victory, not another ordinary checkpoint yield.
+
+## November7 — latest ACTIVE: compact fog event producer
+
+Accepted HEAD3c42220 pushed (uniform lights); compact fog is uncommitted in
+gl_scene.cpp, gl_local.h, SceneFogShaders.h. No unrelated edits touched.
+Compact probe stores up to8 sorted occupied bins per ray (3KiB shared per8x4
+group instead of16KiB); preserves original per-bin addition order. Per-column
+overflow flags append to the existing tile SSBO. A second dispatch uses the
+original64-bin shader ONLY for overflow columns. No CPU readback except final
+capture diagnostics, no loss of crossings or change to field dimensions.
+Program cache has12 entries:4 original,4 compact,4 repair, keyed by color/precision.
+
+Flags: -scene-fog-compact-probe; -scene-fog-compact-single-probe forces capacity1
+and exercises repair; -scene-fog-compact-wide-probe uses8x8 vs8x4 groups.
+Default still reference while qualifying. Wide variant added but NOT measured
+at this checkpoint; build session76191 was running. Inspect before launching.
+Next: paired profile script Tag fogcompactwide, ReferenceFlag compact-probe,
+ProbeFlag compact-wide-probe. Then select faster group and make default,
+qualify all8/roof/odd311/fullprecision/forced overflow and image-settings.
+
+Evidence fogcompact-check-{reference,compact,single}-20261107: all images exact;
+compact0/57920 overflow, forced single15843/57920. Both CPU field audits match
+reference max error.000204976648. Compact capture field GPU .082120ms; single
+.130880. Full1500-frame paired fogcompact0013.4265/3.392,3.439/3.425;
+0072.810/2.794,2.794/2.765. Four images exact. Whole-frame gain is smaller than
+the isolated field timing difference; do not conflate or sum them.
+
+Latest baseline matrix lightrefresh old/current rounded:001 native.78/.72
+(old varies; don't claim victory from this outlier),SSAA1.44/1.59,full3.21/3.43;
+007 native.40/.47,SSAA.89/1.10,full2.81/2.79. Still no overall victory.
+After compact fog, promising next UPSTREAM candidate: native LateWorld unlit
+particles still use general lit shader; specialization currently only applies
+to SSAA SoftVolumes. Split stable unlit runs in scene pass schedule, use an
+unlit no-layer shader, preserve exact order/material contracts and upload view
+state once. Not implemented yet; examine schedule tests before changing.
+Continue until baseline victory, not an ordinary checkpoint yield.
+
 ## November7 — latest: uniform light storage qualified; compact fog next
 
 Up to256 lights share one16KiB uniform block; larger tables keep existing TBO
