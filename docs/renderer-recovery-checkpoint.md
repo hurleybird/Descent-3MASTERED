@@ -1,5 +1,17 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November7 — latest: unlit illumination skipped
+
+Unlit materials no longer compute light then overwrite it with white. Paired/
+reversed effects0013.6275→3.580/3.640→3.578,0072.946→2.9185/2.941→2.919ms.
+Native clean001 .779→.746,007 .504→.487. First-pair and clean images exact;
+final all8 effects exact, root3/3 passed. Diagnostic flag removed. Private runtime
+is this tested version; source-only unrelated lib/gitinfo.h remains untouched.
+Next refresh old/current comparisons (out/profile-gpu-effects-matrix.ps1 now
+accepts SelectedCases and Tag; use new Tag to avoid overwriting prior evidence).
+Possible further GPU investigation: unlit soft-volume passes still use the lit
+program's varying interface. Do NOT assume specialization helps without a probe.
+
 ## November7 — latest: AO eligibility avoids wasted particle work
 
 Skip AO lookup/highlight/correction for unlit and multiply materials: they already

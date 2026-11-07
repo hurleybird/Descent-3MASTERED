@@ -600,3 +600,14 @@ ao-elig-{1,2}-{reference,eligible}-* effects medians:
 0072.957→2.937 and reversed2.965→2.939ms. Four images exact.
 Final root3/3 passed; ao-eligible-fx all8 exact vs single-msaa4;
 ao-eligible-s4 SSAA4/MSAA0 effects exact vs single-s4-stencil, GL audit passed.
+
+## November7: skip illumination discarded by unlit materials
+
+Initialize illumination to white; only evaluate baked/directional/dynamic light
+for lit materials. Previously those results were computed then overwritten with
+white. Baked value remains available to the lit specular path. No precision,
+lighting, fog or material-policy change. Temporary comparison flag removed.
+unlit-{1,2}-{reference,eligible}-* effects0013.6275→3.580 and3.640→3.578;
+0072.946→2.9185 and2.941→2.919ms. First-pair images exact.
+Native clean unlit-clean-*001 .779→.746,007 .504→.487ms, both exact.
+Final root3/3 passed. unlit-final-fx all8 exact vs ao-eligible-fx.

@@ -551,16 +551,18 @@ void main() {
     surface_motion.w = occlusion_class/255.0;
     surface_identity = motion_identity;
     if (surface_prepass != 0) return;
-    vec3 baked = use_lightmap != 0 ? texture(lightmaptexture,lightcoord*light_scale).rgb : vec3(1);
-    vec3 illumination = use_lightmap != 0 ? baked : ambient;
-    if (use_lightmap == 0 && directional_ambient != 0 && lighting_per_pixel != 0) {
-        vec3 n = reflection_normal/max(length(reflection_normal),1.e-8);
-        vec3 direction = ambient_direction/max(length(ambient_direction),1.e-8);
-        illumination *= clamp((1.0-dot(n,direction))*.5,0.0,1.0);
+    vec3 baked = vec3(1), illumination = vec3(1);
+    if (unlit == 0) {
+        baked = use_lightmap != 0 ? texture(lightmaptexture,lightcoord*light_scale).rgb : vec3(1);
+        illumination = use_lightmap != 0 ? baked : ambient;
+        if (use_lightmap == 0 && directional_ambient != 0 && lighting_per_pixel != 0) {
+            vec3 n = reflection_normal/max(length(reflection_normal),1.e-8);
+            vec3 direction = ambient_direction/max(length(ambient_direction),1.e-8);
+            illumination *= clamp((1.0-dot(n,direction))*.5,0.0,1.0);
+        }
+        vec3 dynamic_color = lighting_per_pixel != 0 ? sceneDynamicLighting(world_position,primitive_influences) : vertex_dynamic;
+        illumination = clamp(illumination+dynamic_color,vec3(0),vec3(1));
     }
-    vec3 dynamic_color = lighting_per_pixel != 0 ? sceneDynamicLighting(world_position,primitive_influences) : vertex_dynamic;
-    illumination = clamp(illumination+dynamic_color,vec3(0),vec3(1));
-    if (unlit != 0) illumination = vec3(1);
     color=vec4(base.rgb*color_modulation*authored_color*illumination*lighting_modulation,base.a);
     if (specular_response.x > 0 && unlit == 0 && dot(reflection_normal,reflection_normal) > 1.e-6) {
         vec3 n = reflection_normal/max(length(reflection_normal),1.e-8);
