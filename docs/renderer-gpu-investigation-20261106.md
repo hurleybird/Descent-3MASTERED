@@ -611,3 +611,21 @@ unlit-{1,2}-{reference,eligible}-* effects0013.6275→3.580 and3.640→3.578;
 0072.946→2.9185 and2.941→2.919ms. First-pair images exact.
 Native clean unlit-clean-*001 .779→.746,007 .504→.487ms, both exact.
 Final root3/3 passed. unlit-final-fx all8 exact vs ao-eligible-fx.
+
+## November7: refreshed old/current comparison after retained fixes
+
+gpu-mx-*-final-20261107 swaps both verified old exe/assets and current exe/assets.
+720p medians400..1199, old/new (rounded):001 native.68/.75,
+SSAA2/MSAA0 no-effects1.35/1.72, full effects3.22/3.78;
+007 native.40/.49, SSAA2/MSAA0 .89/1.18, full2.82/2.93.
+Repeat full-only gpu-mx-*-repeat-20261107 gives0013.19/3.63,
+0072.84/2.93. Dense final image is identical to prior unlit-2-eligible image.
+Do not attribute the dense3.78 outlier to a new visual/workload change, or add
+timing gains from different sessions. The new renderer still DOES NOT beat the
+reconstructed old renderer on these GPU cases. Effect implementations differ.
+
+Further candidate, not implemented or proven: SoftVolumes is an explicitly
+unlit pass but still links the general lit program/varying interface. Specializing
+its program might reduce interpolation/register costs. First measure; don't add
+per-draw uniform copying or a second material interpretation to production.
+All accepted source pushed through7615c39; private runtime restored to current.

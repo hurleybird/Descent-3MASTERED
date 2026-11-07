@@ -1,5 +1,19 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November7 — latest: baseline refresh complete, no active experiment
+
+HEAD7615c39 plus this evidence update; all accepted source pushed. New/current
+full effects repeated0013.19/3.63ms,0072.84/2.93ms against reconstructed old.
+Still behind; do not claim GPU baseline victory. Initial dense run3.78 varied;
+image exact against unlit probe. Matrix final/repeat dirs preserve paired data.
+Private runtime restored CURRENT exe+assets; no running game/build/replay.
+Worktree only unrelated untracked lib/gitinfo.h after this doc commit. No credits
+spent (last check30% used, ordinary usage allowed, balance62044.8730600000).
+Next measured candidate: specialized unlit SoftVolumes program to remove unused
+lit varying payload. NOT implemented; needs evidence, and clean pass/view uniform
+ownership if worthwhile, not per-draw driver uniform copies. Main/Candidates
+untouched; renderer remains unqualified for general gameplay, no shadow work.
+
 ## November7 — latest: unlit illumination skipped
 
 Unlit materials no longer compute light then overwrite it with white. Paired/
