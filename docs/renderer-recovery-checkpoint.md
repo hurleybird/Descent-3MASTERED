@@ -1,5 +1,21 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November7 — latest: continuing UNTIL baseline victory
+
+User explicitly renewed persistence: "Continue until we have the victory vs baseline."
+Do not stop at another ordinary checkpoint while GPU baseline gap remains.
+SoftVolumes now owns an unlit program; ordinary raster passes omit the layer
+interface. Same shared source/UBOs, no per-draw copies/readbacks/image products.
+volspec paired dense54–57us/00722–24us better; opaquespec additional dense12–26us/
+00716–18us better. Eight effects and eight MSAA0 images exact; auxiliary003/006
+exact; dynamic image-settings and root3/3 pass. Private runtime current.
+Next candidate: measured full-resolution depth resolve still~.19ms. Its loop
+queries textureSamples at runtime despite sample count being a resource invariant.
+Test specialization by actual sample count, preserving nearest sample/tie rule.
+IMPORTANT Framebuffer::SwapStorage swaps sample counts but NOT shaders, so use
+a count-keyed shader cache (or equivalent correct lifetime), not one stale shader.
+No games/builds/replays active now. Main/Candidates and lib/gitinfo.h untouched.
+
 ## November7 — latest: baseline refresh complete, no active experiment
 
 HEAD7615c39 plus this evidence update; all accepted source pushed. New/current

@@ -629,3 +629,21 @@ unlit pass but still links the general lit program/varying interface. Specializi
 its program might reduce interpolation/register costs. First measure; don't add
 per-draw uniform copying or a second material interpretation to production.
 All accepted source pushed through7615c39; private runtime restored to current.
+
+## November7: specialize programs by pass contract
+
+SoftVolumes scheduling already guarantees unlit materials. Compile its shader
+with that fact, sharing the same source, view/draw UBOs and initialization path.
+Only fog parameters are uploaded to both programs once per view; no per-draw
+uniform copies, driver readbacks, or extra image storage. Ordinary passes no
+longer carry the particle-layer interface merely because the view has particles.
+Shader programs remain cached and released through the existing lifecycle.
+
+volspec-{1,2}-{reference,eligible}-* isolates unlit specialization:
+0013.561→3.5045 and3.567→3.513;0072.917→2.895 and2.921→2.897ms.
+opaquespec-* then isolates removing the layer interface from ordinary surfaces:
+0013.542→3.530 and3.546→3.520;0072.9175→2.900 and2.914→2.898ms.
+Paired images exact. Capture-only scene-general-volume-reference and
+scene-general-opaque-reference keep the comparisons reproducible.
+Final root3/3, volspec-fx all8 exact vs unlit-final-fx; volspec-msaa0 all8 exact
+vs single-fx-new; aux003/006 exact vs st-composite-aux; image-settings passes.

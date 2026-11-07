@@ -105,7 +105,11 @@ layout(std140) uniform SceneDrawBlock { vec4 draw_params[23]; uvec4 draw_identit
 #define lighting_modulation (draw_params[16].y)
 #define occlusion_class (draw_params[16].z)
 #define soft_depth_range (draw_params[16].w)
+#if SCENE_UNLIT_PASS
+#define unlit 1
+#else
 #define unlit (int(draw_params[17].x))
+#endif
 #define fog_enabled (int(draw_params[17].y))
 #define fog_additive (int(draw_params[17].z) == 1 ? 1 : 0)
 #define premultiplied_material (int(draw_params[17].z) == 2)
@@ -1573,8 +1577,12 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     const bool particle_shader = std::any_of(passes.begin(),passes.end(),[](const d3scene::ViewPass& pass) {
         return pass.kind == d3scene::ViewPassKind::SoftVolumes;
     });
-    auto& scene_shader = scene_programs[fog_mode*2+particle_shader].shader;
-    auto& scene_uniforms = scene_programs[fog_mode*2+particle_shader].uniforms;
+    const bool specialize_volumes = particle_shader && !(AutomatedCaptureFrameIndex() >= 0 && FindArg("-scene-general-volume-reference"));
+    const bool general_layer = particle_shader && (!specialize_volumes ||
+        (AutomatedCaptureFrameIndex() >= 0 && FindArg("-scene-general-opaque-reference")));
+    const auto initialize_program = [&](SceneProgram& program,bool unlit_pass,bool layer_interface) {
+    auto& scene_shader = program.shader;
+    auto& scene_uniforms = program.uniforms;
     if (!scene_shader.Handle()) {
         if (AutomatedCaptureFrameIndex() >= 0) {
             GLint varying = 0, vertex = 0, fragment = 0;
@@ -1585,12 +1593,15 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
                 reinterpret_cast<const char*>(glGetString(GL_RENDERER)),varying,vertex,fragment);
         }
         auto fragment = SceneFragmentShader;
+        fragment.insert(fragment.find('\n')+1,std::string("#define SCENE_UNLIT_PASS ")+(unlit_pass ? "1\n" : "0\n"));
         fragment.insert(fragment.find('\n')+1,std::string("#define SCENE_EARLY_SOFT_ALPHA ")+
             (AutomatedCaptureFrameIndex() >= 0 && FindArg("-scene-soft-alpha-late-reference") ? "0\n" : "1\n"));
-        if (particle_shader) fragment.insert(fragment.find("void main()"),ParticleEdgeShader);
-        fragment.insert(fragment.find('\n')+1,std::string("#define SCENE_PARTICLE_LAYER ")+(particle_shader ? "1\n" : "0\n"));
+        if (layer_interface) fragment.insert(fragment.find("void main()"),ParticleEdgeShader);
+        fragment.insert(fragment.find('\n')+1,std::string("#define SCENE_PARTICLE_LAYER ")+(layer_interface ? "1\n" : "0\n"));
         fragment.insert(fragment.find('\n')+1,"#define SCENE_FOG_MODE "+std::to_string(fog_mode)+"\n");
-        scene_shader.AttachSource(SceneVertexShader.c_str(), fragment.c_str());
+        auto vertex = SceneVertexShader;
+        if (unlit_pass) vertex.insert(vertex.find('\n')+1,"#define SCENE_UNLIT_PASS 1\n");
+        scene_shader.AttachSource(vertex.c_str(), fragment.c_str());
         // Resolve the shader interface at link time, never by string in a view.
         scene_uniforms.colortexture = scene_shader.FindUniform("colortexture");
         scene_uniforms.planar_texture = scene_shader.FindUniform("planar_texture");
@@ -1636,6 +1647,13 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         glUniform1i(scene_uniforms.scene_occlusion,11);
         glUniform1i(scene_uniforms.opaque_depth,7);
     }
+    };
+    auto& view_program = scene_programs[fog_mode*2+general_layer];
+    auto& volume_program = scene_programs[6+fog_mode];
+    initialize_program(view_program,false,general_layer);
+    if (specialize_volumes) initialize_program(volume_program,true,true);
+    auto& scene_shader = view_program.shader;
+    auto& scene_uniforms = view_program.uniforms;
 
     // The pass owns depth/blend/culling policy. No game draw-state capture and
     // no invocation of RenderMine/RenderTerrain/RenderObject occurs here.
@@ -1963,6 +1981,13 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     glUniform1f(scene_uniforms.fog_field_range,field_range);
     glUniform4f(scene_uniforms.fog_field_color,field_color.x,field_color.y,field_color.z,scalar_field ? 1.f : 0.f);
     glUniform1i(scene_uniforms.fog_debug,FindArg("-scene-fog-debug") != 0);
+    if (specialize_volumes) {
+        volume_program.shader.Use();
+        glUniform1f(volume_program.uniforms.fog_field_range,field_range);
+        glUniform4f(volume_program.uniforms.fog_field_color,field_color.x,field_color.y,field_color.z,scalar_field ? 1.f : 0.f);
+        glUniform1i(volume_program.uniforms.fog_debug,FindArg("-scene-fog-debug") != 0);
+        scene_shader.Use();
+    }
     const auto exteriorRoom = [&](int room) {
         if (room < 0) return true;
         const auto* found = presentation.roomIndices().find(room);
@@ -2372,6 +2397,15 @@ void main() {
       // Image consumers do not write clip distances; never leak this state.
       depth_prepass = pass.kind == d3scene::ViewPassKind::DepthSurface;
       const bool volume_layer = pass.kind == d3scene::ViewPassKind::SoftVolumes;
+      // Scheduling admits only unlit read-only materials to this pass. Its
+      // program can omit lit varyings without changing material interpretation.
+      auto& raster_program = volume_layer && specialize_volumes ? volume_program : view_program;
+      auto& scene_shader = raster_program.shader;
+      auto& scene_uniforms = raster_program.uniforms;
+      scene_shader.Use();
+      if (volume_layer && specialize_volumes)
+          glUniform2i(scene_uniforms.depth_snapshot_origin,depth_for_sampling == depth.texture ? raster.x : 0,
+              depth_for_sampling == depth.texture ? raster.y : 0);
       const int volume_width = (std::max)(1,raster.width/SupersamplingFactor());
       const int volume_height = (std::max)(1,raster.height/SupersamplingFactor());
       d3scene::Rect volume_coverage = raster;
