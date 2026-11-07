@@ -3988,19 +3988,6 @@ void GL4Renderer::CloseFramebuffer(void)
 	surface_records.Destroy();
 	scene_motion = {}; completed_scene_motion = {};
 	post_protection_mask.Destroy();
-	if (room_fog_portal_buffer != 0)
-	{
-		glDeleteBuffers(1, &room_fog_portal_buffer);
-		room_fog_portal_buffer = 0;
-	}
-	for (RoomFogEntryCache& cache : room_fog_entry_cache)
-	{
-		cache.framebuffer.Destroy();
-		cache = {};
-	}
-	room_fog_entry_stamp = 0;
-	room_fog_entry_texture = 0;
-	room_fog_entry_map_enabled = false;
 	glDeleteBuffers(3, per_pixel_lightmap_buffers);
 	memset(per_pixel_lightmap_buffers, 0, sizeof(per_pixel_lightmap_buffers));
 	memset(per_pixel_lightmap_buffer_initialized, 0,
@@ -4008,8 +3995,6 @@ void GL4Renderer::CloseFramebuffer(void)
 	per_pixel_lightmap_buffer_index = -1;
 	per_pixel_lightmap_buffer_ready = false;
 	per_pixel_lightmap_lookup_upload.clear();
-	room_fog_enabled = false;
-	room_fog_portal_cache.clear();
 
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 

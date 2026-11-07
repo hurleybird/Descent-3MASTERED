@@ -113,7 +113,6 @@ noperspective out float out_retained_effect_alpha;
 out vec4 outnormal;
 out vec4 out_motion_world_position;
 out vec4 out_motion_previous_world_position;
-out vec4 out_room_fog_world_position;
 flat out int out_retained_lightmap_handle;
 flat out int out_retained_ao_class;
 flat out int out_retained_lightmap_info;
@@ -333,7 +332,6 @@ void main()
 		#endif
 		vec4 retained_interpolated_world_position =
 			retained_world_position * retained_payload_scale;
-		out_room_fog_world_position = retained_interpolated_world_position;
 		// The legacy generic stream overloads this attribute: Phong draws carry a
 		// normal, while dynamically-lightmapped draws carry perspective-correct
 		// world position.  Retained geometry must make the same selection.
@@ -445,7 +443,6 @@ void main()
 	// Static immediate room draws do not consume the per-vertex previous-motion
 	// payload. The renderer uses it to carry the original world position when
 	// local room fog is active, including CPU-clipped boundary triangles.
-	out_room_fog_world_position = motion_previous_world_position;
 	#if defined(USE_SPECULAR)
 		out_field_specular_centers[0] = field_specular_center0;
 		out_field_specular_centers[1] = field_specular_center1;

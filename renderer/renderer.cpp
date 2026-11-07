@@ -323,17 +323,6 @@ bool rend_DrawWeatherQuadBatch(int handle, const renderer_weather_quad *items, i
 	return Renderer_initted && items && count > 0 &&
 		renderer_inst->DrawWeatherQuadBatch(handle, items, count, map_type);
 }
-bool rend_SetRoomFogState(const renderer_room_fog_state *state)
-{
-	return Renderer_initted && renderer_inst->SetRoomFogState(state);
-}
-
-void rend_SetRoomFogOverlay(int state)
-{
-	if (Renderer_initted)
-		renderer_inst->SetRoomFogOverlay(state);
-}
-
 void rend_DrawPolygon2D(int handle, g3Point** p, int nv)
 {
 	if (!Renderer_initted)

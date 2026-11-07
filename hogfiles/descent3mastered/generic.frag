@@ -110,20 +110,7 @@ layout(std430, binding = 6) readonly buffer PerPixelLightmapBuffer
 	vec4 retained_dynamic_lights[];
 };
 
-uniform int room_fog_enabled;
-uniform int room_fog_viewer_inside;
-uniform vec3 room_fog_viewer_position;
-uniform vec3 room_fog_viewer_forward;
-uniform vec3 room_fog_color;
-uniform float room_fog_depth;
-uniform float room_fog_intensity;
-uniform sampler2D room_fog_entry_depth;
-uniform int room_fog_entry_map_enabled;
-uniform ivec2 room_fog_entry_origin;
-uniform ivec2 room_fog_entry_size;
-// 0: base material, 1: additive light/specular, 2: portal cap,
-// 3: approximate multiplicative overlay fallback, 4: raw multiplier pass,
-// 5: exact additive fog correction for a multiplier already applied to the base.
+// Legacy depth fog blend: 0 base, 1 additive, 3 destination multiply.
 uniform int fog_composite_mode;
 
 in vec4 outcolor;
@@ -131,7 +118,6 @@ noperspective in float out_retained_effect_alpha;
 in vec4 outnormal;
 in vec4 out_motion_world_position;
 in vec4 out_motion_previous_world_position;
-in vec4 out_room_fog_world_position;
 flat in int out_retained_lightmap_handle;
 flat in int out_retained_ao_class;
 flat in int out_retained_lightmap_info;
@@ -380,36 +366,6 @@ float SoftParticleEyeDepth(float depth)
 	return 1.0 / max(1.0 - clamp(depth, 0.0, 0.9999), 0.0001);
 }
 
-float RoomFogAmount()
-{
-	// Room fog is authored in camera-forward depth. Reconstruct it from raster
-	// depth so retained, immediate and CPU-clipped geometry share one stable
-	// source instead of depending on legacy world-position payloads.
-	float fog_length = SoftParticleEyeDepth(gl_FragCoord.z);
-	if (room_fog_viewer_inside == 0)
-	{
-		if (room_fog_entry_map_enabled == 0)
-			return 0.0;
-		ivec2 fragment_pixel = ivec2(gl_FragCoord.xy);
-		if (any(lessThan(fragment_pixel, room_fog_entry_origin)) ||
-			any(greaterThanEqual(fragment_pixel,
-				room_fog_entry_origin + room_fog_entry_size)))
-		{
-			return 0.0;
-		}
-		ivec2 entry_size = textureSize(room_fog_entry_depth, 0);
-		ivec2 entry_pixel = clamp(fragment_pixel - room_fog_entry_origin,
-			ivec2(0), entry_size - ivec2(1));
-		float entry_depth = texelFetch(room_fog_entry_depth, entry_pixel, 0).r;
-		if (entry_depth > 1.0e20)
-			return 0.0;
-		fog_length = max(fog_length - entry_depth, 0.0);
-	}
-
-	return clamp((fog_length / max(room_fog_depth, 0.0001)) *
-		room_fog_intensity, 0.0, 1.0);
-}
-
 void main()
 {
 	velocity = vec2(0.0);
@@ -456,29 +412,6 @@ void main()
 		frame0.a *= particle_fade;
 		frame1.a *= particle_fade;
 
-		float room_amount = 0.0;
-		if (room_fog_enabled != 0)
-		{
-			room_amount = RoomFogAmount();
-			if (fog_composite_mode == 1)
-			{
-				frame0.rgb *= 1.0 - room_amount;
-				frame1.rgb *= 1.0 - room_amount;
-			}
-			else if (fog_composite_mode == 3)
-			{
-				frame0.rgb = mix(vec3(1.0), frame0.rgb, 1.0 - room_amount);
-				if (has_frame1)
-					frame1.rgb = mix(vec3(1.0), frame1.rgb, 1.0 - room_amount);
-			}
-			else
-			{
-				frame0.rgb = mix(frame0.rgb, room_fog_color, room_amount);
-				if (has_frame1)
-					frame1.rgb = mix(frame1.rgb, room_fog_color, room_amount);
-			}
-		}
-
 		float legacy_fog_amount = 0.0;
 		#if defined(USE_FOG)
 			float fog_start = clamp(1.0 - (1.0 / max(fog.start_dist, 0.0001)), 0.0, 1.0);
@@ -507,10 +440,6 @@ void main()
 
 		float suppression0 = clamp(frame0.a, 0.0, 1.0);
 		float suppression1 = has_frame1 ? clamp(frame1.a, 0.0, 1.0) : 0.0;
-		// Fog destroys small-scale contrast faster than its color opacity alone
-		// suggests. Preserve the authored fog ramp, but attenuate deferred AO by
-		// the corresponding two-pass transmittance (1 - (1 - f)^2).
-		float room_ao_suppression = room_amount * (2.0 - room_amount);
 		float ao_mask0;
 		float ao_mask1;
 		if (post_mask_blend_mode == 1)
@@ -531,11 +460,6 @@ void main()
 		{
 			ao_mask0 = ao_suppression * suppression0;
 			ao_mask1 = ao_suppression * suppression1;
-			if (fog_composite_mode == 0)
-			{
-				ao_mask0 = max(ao_mask0, room_ao_suppression * suppression0);
-				ao_mask1 = max(ao_mask1, room_ao_suppression * suppression1);
-			}
 		}
 
 		float bloom0 = bloom_suppression *
@@ -602,10 +526,6 @@ void main()
 			}
 		}
 
-		if (room_fog_enabled != 0)
-		{
-			color.rgb *= 1.0 - RoomFogAmount();
-		}
 		#if defined(USE_FOG)
 			float fog_start = clamp(1.0 - (1.0 / max(fog.start_dist, 0.0001)), 0.0, 1.0);
 			float fog_end = clamp(1.0 - (1.0 / max(fog.end_dist, 0.0001)), 0.0, 1.0);
@@ -629,13 +549,6 @@ void main()
 		#else
 			color = base_color * outcolor;
 		#endif
-
-		float room_amount = 0.0;
-		if (room_fog_enabled != 0)
-		{
-			room_amount = RoomFogAmount();
-			color.rgb = mix(color.rgb, room_fog_color, room_amount);
-		}
 		float bloom_mask = 0.0;
 		#if defined(USE_FOG)
 			float fog_start = clamp(1.0 - (1.0 / max(fog.start_dist, 0.0001)), 0.0, 1.0);
@@ -659,8 +572,7 @@ void main()
 		}
 		int room_ao_class = retained_room_lightmap_arrays != 0 ?
 			out_retained_ao_class : ao_class_value;
-		float retained_ao_mask = max(room_amount * coverage,
-			ao_suppression * coverage);
+		float retained_ao_mask = ao_suppression * coverage;
 		post_mask = vec4(retained_ao_mask, bloom_mask, 0.0,
 			float(clamp(room_ao_class, 0, 255)) / 255.0);
 		return;
@@ -711,7 +623,6 @@ void main()
 
 	float ao_mask = 0.0;
 	float bloom_mask = 0.0;
-	float room_fog_amount = 0.0;
 
 	#if defined(USE_SPECULAR)
 		vec4 base_color = texture(colortexture, outuv.xy / outuv.z);
@@ -782,36 +693,6 @@ void main()
 			color.a *= fade;
 		}
 	}
-	if (room_fog_enabled != 0)
-	{
-		room_fog_amount = RoomFogAmount();
-		if (fog_composite_mode == 2)
-			color = vec4(room_fog_color, room_fog_amount);
-		else if (fog_composite_mode == 1)
-			color.rgb *= 1.0 - room_fog_amount;
-		else if (fog_composite_mode == 3)
-		{
-			// Destination-multiplying materials (scorches, dark smoke, and
-			// similar overlays) must converge to the neutral multiplier as the
-			// underlying surface disappears into fog.
-			color.rgb = mix(vec3(1.0), color.rgb, 1.0 - room_fog_amount);
-			room_fog_amount = 0.0;
-		}
-		else if (fog_composite_mode == 4)
-		{
-			// The destination-multiply pass needs the unmodified material value.
-			room_fog_amount = 0.0;
-		}
-		else if (fog_composite_mode == 5)
-		{
-			color.rgb = room_fog_color * room_fog_amount *
-				(vec3(1.0) - color.rgb);
-			color.a = 0.0;
-			room_fog_amount = 0.0;
-		}
-		else
-			color.rgb = mix(color.rgb, room_fog_color, room_fog_amount);
-	}
 	float suppression_alpha = clamp(color.a, 0.0, 1.0);
 	if (post_mask_blend_mode == 1)
 	{
@@ -834,17 +715,6 @@ void main()
 	}
 	else
 		ao_mask = clamp(ao_suppression * suppression_alpha, 0.0, 1.0);
-	// Fog only replaces destination color for the base-material and portal-cap
-	// composites.  Additive lights are merely attenuated by fog, while
-	// multiplicative overlays converge toward their neutral multiplier; neither
-	// operation covers the destination for the deferred AO composite.  Weight
-	// alpha-blended base materials by their actual coverage so transparent texels
-	// cannot stamp a rectangular fog mask into the scene.
-	float room_fog_ao_suppression = room_fog_amount * (2.0 - room_fog_amount);
-	if (fog_composite_mode == 0)
-		ao_mask = max(ao_mask, room_fog_ao_suppression * suppression_alpha);
-	else if (fog_composite_mode == 2)
-		ao_mask = max(ao_mask, room_fog_ao_suppression);
 	bloom_mask = clamp(bloom_suppression * (1.0 - pow(1.0 - suppression_alpha, 3.0)), 0.0, 1.0);
 	if (texture_bloom_protection > 0.0 && texture_bloom_range > 0.0)
 	{

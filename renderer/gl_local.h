@@ -375,7 +375,6 @@ class GL4Renderer : public IRenderer
 	ShaderProgram motionvectordebugshader;
 	ShaderProgram motionblurshader;
 	ShaderProgram scene_ao_debug_shader;
-	ShaderProgram roomfogentryshader;
 	BloomResources bloom;
 	AOResources ao;
 	//Cached projection matrix and near/far for AO. Updated on every
@@ -417,9 +416,6 @@ class GL4Renderer : public IRenderer
 	GLint motionvectordebug_previous_view_projection = -1;
 	GLint motionvectordebug_has_static_reconstruction = -1;
 	GLint motionvectordebug_has_dynamic_velocity = -1;
-	GLint roomfogentry_view_projection = -1;
-	GLint roomfogentry_viewer_position = -1;
-	GLint roomfogentry_viewer_forward = -1;
 	GLint motionblur_color_source = -1;
 	GLint motionblur_velocity_source = -1;
 	GLint motionblur_depth_source = -1;
@@ -510,16 +506,6 @@ class GL4Renderer : public IRenderer
 	GLint drawshader_soft_particle_enabled_uniforms[DRAW_SHADER_COUNT] = {};
 	GLint drawshader_soft_particle_screen_size_uniforms[DRAW_SHADER_COUNT] = {};
 	GLint drawshader_soft_particle_depth_range_uniforms[DRAW_SHADER_COUNT] = {};
-	GLint drawshader_room_fog_enabled_uniforms[DRAW_SHADER_COUNT] = {};
-	GLint drawshader_room_fog_viewer_inside_uniforms[DRAW_SHADER_COUNT] = {};
-	GLint drawshader_room_fog_viewer_position_uniforms[DRAW_SHADER_COUNT] = {};
-	GLint drawshader_room_fog_viewer_forward_uniforms[DRAW_SHADER_COUNT] = {};
-	GLint drawshader_room_fog_color_uniforms[DRAW_SHADER_COUNT] = {};
-	GLint drawshader_room_fog_depth_uniforms[DRAW_SHADER_COUNT] = {};
-	GLint drawshader_room_fog_intensity_uniforms[DRAW_SHADER_COUNT] = {};
-	GLint drawshader_room_fog_entry_map_enabled_uniforms[DRAW_SHADER_COUNT] = {};
-	GLint drawshader_room_fog_entry_origin_uniforms[DRAW_SHADER_COUNT] = {};
-	GLint drawshader_room_fog_entry_size_uniforms[DRAW_SHADER_COUNT] = {};
 	GLint drawshader_fog_composite_mode_uniforms[DRAW_SHADER_COUNT] = {};
 	int lastdrawshader = -1;
 	bool legacy_draw_uniforms_dirty = true;
@@ -607,37 +593,11 @@ class GL4Renderer : public IRenderer
 	GLuint commonbuffername = 0;
 	GLuint legacycommonbuffername = 0;
 	GLuint fogbuffername = 0;
-	GLuint room_fog_portal_buffer = 0;
-	struct RoomFogEntryCache
-	{
-		ColorFramebuffer framebuffer;
-		uint64_t hash = 0;
-		uint64_t last_used = 0;
-		int origin[2] = {};
-		int size[2] = {};
-		bool valid = false;
-	};
-	static constexpr int ROOM_FOG_ENTRY_CACHE_COUNT = 12;
-	RoomFogEntryCache room_fog_entry_cache[ROOM_FOG_ENTRY_CACHE_COUNT];
-	uint64_t room_fog_entry_stamp = 0;
-	GLuint room_fog_entry_texture = 0;
-	bool room_fog_entry_map_enabled = false;
-	int room_fog_entry_origin[2] = {};
-	int room_fog_entry_size[2] = {};
 	GLuint per_pixel_lightmap_buffers[3] = {};
 	bool per_pixel_lightmap_buffer_initialized[3] = {};
 	int per_pixel_lightmap_buffer_index = -1;
 	bool per_pixel_lightmap_buffer_ready = false;
 	std::vector<int> per_pixel_lightmap_lookup_upload;
-	std::vector<renderer_room_fog_triangle> room_fog_portal_cache;
-	bool room_fog_enabled = false;
-	bool room_fog_overlay = false;
-	bool room_fog_viewer_inside = false;
-	float room_fog_viewer_position[3] = {};
-	float room_fog_viewer_forward[3] = {};
-	float room_fog_color[3] = {};
-	float room_fog_depth = 1.0f;
-	float room_fog_intensity = 1.0f;
 	GLuint specularbuffername = 0;
 	GLuint terrainfogbuffername = 0;
 	int terrainfogcounter = 0;
@@ -690,9 +650,7 @@ private:
 	void SetDrawDefaults();
 	void SelectDrawShader(bool retained_setup = false);
 	void SetBloomProtectionBitmap(int handle);
-	bool UsesExactRoomFogMultiply() const;
 	bool CurrentDrawNeedsPostMask(bool include_ao_class) const;
-	void SetCurrentFogCompositeMode(int mode);
 	GLuint PrepareSoftParticleDepthTexture();
 	void InvalidateSoftParticleDepthTexture();
 	void BuildDrawVertex(gl_vertex& vert, const g3Point* pnt, float xscalar, float yscalar,
@@ -726,8 +684,6 @@ private:
 	bool scene_sample_resolve_verified = false;
 	// AO changes surface radiance, never fog/emissive radiance. This image stays
 	// in lockstep with scene compositing instead of estimating it from color.
-	void DrawRoomFogMultiplyCorrection(GLenum primitive, GLint first, GLsizei count);
-	bool PrepareRoomFogEntryMap(const renderer_room_fog_state& state);
 
 	// Turns on/off multitexture blending
 	void SetMultitextureBlendMode(bool state);
@@ -942,8 +898,6 @@ public:
 		int map_type = MAP_TYPE_BITMAP) override;
 	bool DrawWeatherQuadBatch(int handle, const renderer_weather_quad *items, int count,
 		int map_type = MAP_TYPE_BITMAP) override;
-	bool SetRoomFogState(const renderer_room_fog_state *state) override;
-	void SetRoomFogOverlay(int state) override;
 	// Given a handle to a bitmap and nv point vertices, draws a 2D polygon
 	void DrawPolygon2D(int handle, g3Point** p, int nv) override;
 

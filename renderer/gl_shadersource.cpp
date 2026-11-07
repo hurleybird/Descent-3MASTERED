@@ -42,45 +42,6 @@ const char* blitVertexSrc =
 "}\n"
 "";
 
-const char* roomFogEntryVertexSrc =
-"#version 450 core\n"
-"\n"
-"struct RoomFogPortalTriangle\n"
-"{\n"
-"    vec4 a;\n"
-"    vec4 b;\n"
-"    vec4 c;\n"
-"};\n"
-"layout(std430, binding = 5) readonly buffer RoomFogPortalBuffer\n"
-"{\n"
-"    RoomFogPortalTriangle room_fog_portals[];\n"
-"};\n"
-"uniform mat4 view_projection;\n"
-"uniform vec3 viewer_position;\n"
-"uniform vec3 viewer_forward;\n"
-"out float out_entry_depth;\n"
-"void main()\n"
-"{\n"
-"    RoomFogPortalTriangle triangle = room_fog_portals[gl_VertexID / 3];\n"
-"    int corner = gl_VertexID % 3;\n"
-"    vec3 world_position = corner == 0 ? triangle.a.xyz :\n"
-"        (corner == 1 ? triangle.b.xyz : triangle.c.xyz);\n"
-"    gl_Position = view_projection * vec4(world_position, 1.0);\n"
-"    out_entry_depth = dot(world_position - viewer_position, viewer_forward);\n"
-"}\n"
-"";
-
-const char* roomFogEntryFragmentSrc =
-"#version 450 core\n"
-"\n"
-"in float out_entry_depth;\n"
-"layout(location = 0) out float entry_depth;\n"
-"void main()\n"
-"{\n"
-"    entry_depth = max(out_entry_depth, 0.0);\n"
-"}\n"
-"";
-
 const char* blitFragmentSrc =
 "#version 450 core\n"
 "\n"

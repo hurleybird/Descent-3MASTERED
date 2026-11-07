@@ -534,32 +534,6 @@ void rend_DrawPolygon3D(int handle,g3Point **p,int nv,int map_type=MAP_TYPE_BITM
 void rend_DrawPolygon3DBatch(int handle,const renderer_poly_batch_item *items,int count,int map_type=MAP_TYPE_BITMAP);
 bool rend_DrawWeatherQuadBatch(int handle,const renderer_weather_quad *items,int count,int map_type=MAP_TYPE_BITMAP);
 
-struct renderer_room_fog_triangle
-{
-	float a[4];
-	float b[4];
-	float c[4];
-};
-
-struct renderer_room_fog_state
-{
-	bool enabled;
-	bool viewer_inside;
-	float viewer_position[3];
-	float viewer_forward[3];
-	float color[3];
-	float depth;
-	float intensity;
-	const renderer_room_fog_triangle *triangles;
-	int triangle_count;
-};
-
-
-// Applies homogeneous local-room fog in the material shader. Portal triangles
-// describe the room openings through which an outside eye ray can enter.
-bool rend_SetRoomFogState(const renderer_room_fog_state *state);
-void rend_SetRoomFogOverlay(int state);
-
 // Given a handle to a bitmap and nv point vertices, draws a 2D polygon
 void rend_DrawPolygon2D(int handle,g3Point **p,int nv);
 

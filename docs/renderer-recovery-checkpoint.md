@@ -1,5 +1,22 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November 6 — legacy room-fog pipeline retired
+
+Removed unused SetRoomFogState/Overlay, entry-map shader/cache/portal buffer,
+multiply correction redraws, native room-fog uniforms and shader branches.
+Owned SceneFog/field resources unchanged. Kept native depth-fog blend modes.
+Build/root3/3 pass. Executable DA58BBB6014CEF6034EAD58544BE5082CDB5F90D90625F45767733E3D81E15B5;
+shader HOG 3B1F38BD4BFFECBAA36DC58415C10F417C133050930C0A4EAE5010415B24A3AE.
+Both deployed only to private verification runtime. qual-legacy-fog-corpus-20261106
+all8clean/exact60 EXACT mesh-api corpus; qual-legacy-fog-{before,after}-20261106
+003/006/007effects/field/motion60 EXACT. Viewed007after, fog/particles intact.
+Modal-ui003/00622: three PNG exact;003UI initially399 differing pixels solely
+in VIDEO button label bounds762,278..815,289. Viewed both; repeated003UI capture
+EXACT previous reference. Keep that variation explicit, not a whole-run exact
+claim. Evidence qual-legacy-fog-ui{-repeat,}-20261106.
+Next: remove unreachable retained branches in native generic shaders; then the
+temporary 592-byte default UBO can disappear too. No owned scene shader changes.
+
 ## November 6 — unused generic mesh layer retired
 
 Deleted gl_mesh.cpp/h, MeshBuilder and unused public vertex/index-buffer types.

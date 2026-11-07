@@ -745,10 +745,6 @@ void ShaderProgram::CreateCommonBindings(int bindindex)
 	if (index != -1)
 		glUniform1i(index, 2); //Set to GL_TEXTURE2
 
-	index = glGetUniformLocation(m_name, "room_fog_entry_depth");
-	if (index != -1)
-		glUniform1i(index, 10); //Retained room lightmap arrays occupy 3..9.
-
 	const char* room_lightmap_arrays[7] = {
 		"retained_room_lightmaps_2", "retained_room_lightmaps_4",
 		"retained_room_lightmaps_8", "retained_room_lightmaps_16",

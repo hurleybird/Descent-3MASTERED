@@ -39,7 +39,6 @@ constexpr size_t DRAW_BUFFER_TARGET_BYTES = 64u * 1024u * 1024u;
 constexpr int MIN_VERTS_PER_BUFFER = 65536;
 constexpr float PIXEL_MOTION_BLUR_REFERENCE_FRAME_TIME = 1.0f / 60.0f;
 constexpr unsigned int GL4_MOTION_OBJECT_LEGACY_BLUR_MASK = 0x80000000u;
-constexpr GLuint GL4_ROOM_FOG_PORTAL_BINDING = 5;
 constexpr GLuint GL4_PER_PIXEL_LIGHTMAP_BINDING = 6;
 constexpr GLuint GL4_RETAINED_DRAW_BINDING = 5;
 
@@ -267,44 +266,12 @@ static void GL4UseSceneColorDrawBuffer()
 	glDrawBuffers(1, &draw_buffer);
 }
 
-bool GL4Renderer::UsesExactRoomFogMultiply() const
-{
-	return room_fog_enabled && !room_fog_overlay &&
-		(OpenGL_state.cur_alpha_type == AT_LIGHTMAP_BLEND ||
-		 OpenGL_state.cur_alpha_type == AT_LIGHTMAP_BLEND_VERTEX);
-}
-
 bool GL4Renderer::CurrentDrawNeedsPostMask(bool include_ao_class) const
 {
-	if (post_protection_mask.mask_texture == 0)
-		return false;
-	if (include_ao_class || ao_suppression_draw_value > 0.0f ||
-		bloom_suppression_draw_value > 0.0f ||
-		texture_bloom_protection_draw_value > 0.0f || room_fog_overlay)
-	{
-		return true;
-	}
-
-	if (!room_fog_enabled)
-		return false;
-
-	// Additive light and destination-multiply materials are attenuated toward
-	// their neutral contribution by room fog; they do not cover the opaque
-	// surface consumed by deferred AO. Their post-mask output is therefore zero.
-	switch (OpenGL_state.cur_alpha_type)
-	{
-	case AT_SPECULAR:
-	case AT_SATURATE_TEXTURE:
-	case AT_SATURATE_VERTEX:
-	case AT_SATURATE_CONSTANT_VERTEX:
-	case AT_SATURATE_TEXTURE_VERTEX:
-	case AT_LIGHTMAP_BLEND_SATURATE:
-	case AT_LIGHTMAP_BLEND:
-	case AT_LIGHTMAP_BLEND_VERTEX:
-		return false;
-	default:
-		return true;
-	}
+	return post_protection_mask.mask_texture != 0 &&
+		(include_ao_class || ao_suppression_draw_value > 0.0f ||
+		 bloom_suppression_draw_value > 0.0f ||
+		 texture_bloom_protection_draw_value > 0.0f);
 }
 
 void GL4Renderer::SetBloomProtectionBitmap(int handle)
@@ -336,31 +303,6 @@ void GL4Renderer::SetBloomProtectionBitmap(int handle)
 	}
 	if (value > 0.0f)
 		post_protection_mask_dirty = true;
-}
-
-void GL4Renderer::SetCurrentFogCompositeMode(int mode)
-{
-	if (lastdrawshader >= 0 &&
-		drawshader_fog_composite_mode_uniforms[lastdrawshader] != -1)
-	{
-		glUniform1i(drawshader_fog_composite_mode_uniforms[lastdrawshader], mode);
-	}
-}
-
-void GL4Renderer::DrawRoomFogMultiplyCorrection(GLenum primitive, GLint first,
-	GLsizei count)
-{
-	// The fogged destination is D = B*T + F*(1-T). A destination-multiplying
-	// material M belongs on the surface, so the exact result is
-	// D*M + F*(1-T)*(1-M). The first draw supplies D*M; this color-only pass
-	// restores the fog term without another depth copy or resolve.
-	GL4UseSceneColorDrawBuffer();
-	SetCurrentFogCompositeMode(5);
-	glBlendFuncSeparate(GL_ONE, GL_ONE, GL_ZERO, GL_ONE);
-	rend_RecordDrawCall(draw_call_category);
-	glDrawArrays(primitive, first, count);
-	glBlendFuncSeparate(GL_DST_COLOR, GL_ZERO, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
-	SetCurrentFogCompositeMode(4);
 }
 
 static void GL4BuildOrtho(float* mat, float left, float right, float bottom, float top, float znear, float zfar)
@@ -1609,19 +1551,6 @@ void GL4Renderer::SetDrawDefaults()
 		drawshader_soft_particle_enabled_uniforms[i] = drawshaders[i].FindUniform("soft_particle_enabled");
 		drawshader_soft_particle_screen_size_uniforms[i] = drawshaders[i].FindUniform("soft_particle_screen_size");
 		drawshader_soft_particle_depth_range_uniforms[i] = drawshaders[i].FindUniform("soft_particle_depth_range");
-		drawshader_room_fog_enabled_uniforms[i] = drawshaders[i].FindUniform("room_fog_enabled");
-		drawshader_room_fog_viewer_inside_uniforms[i] = drawshaders[i].FindUniform("room_fog_viewer_inside");
-		drawshader_room_fog_viewer_position_uniforms[i] = drawshaders[i].FindUniform("room_fog_viewer_position");
-		drawshader_room_fog_viewer_forward_uniforms[i] = drawshaders[i].FindUniform("room_fog_viewer_forward");
-		drawshader_room_fog_color_uniforms[i] = drawshaders[i].FindUniform("room_fog_color");
-		drawshader_room_fog_depth_uniforms[i] = drawshaders[i].FindUniform("room_fog_depth");
-		drawshader_room_fog_intensity_uniforms[i] = drawshaders[i].FindUniform("room_fog_intensity");
-		drawshader_room_fog_entry_map_enabled_uniforms[i] =
-			drawshaders[i].FindUniform("room_fog_entry_map_enabled");
-		drawshader_room_fog_entry_origin_uniforms[i] =
-			drawshaders[i].FindUniform("room_fog_entry_origin");
-		drawshader_room_fog_entry_size_uniforms[i] =
-			drawshaders[i].FindUniform("room_fog_entry_size");
 		drawshader_fog_composite_mode_uniforms[i] = drawshaders[i].FindUniform("fog_composite_mode");
 	}
 
@@ -1802,7 +1731,6 @@ void GL4Renderer::SelectDrawShader(bool retained_setup)
 		const bool fast_additive_bitmap =
 			(shader_index == 1 || shader_index == 5) &&
 			post_mask_blend_mode == 1 &&
-			!room_fog_overlay &&
 			OpenGL_state.cur_light_state != LS_PHONG &&
 			cockpit_backing_effect.enabled == 0 &&
 			ao_suppression_draw_value == 0.0f && bloom_suppression_draw_value == 0.0f &&
@@ -1864,59 +1792,27 @@ void GL4Renderer::SelectDrawShader(bool retained_setup)
 			Last_texel_unit_set = 0;
 		}
 	}
-	if (drawshader_room_fog_enabled_uniforms[shader_index] != -1)
+	if (drawshader_fog_composite_mode_uniforms[shader_index] != -1)
 	{
-		glUniform1i(drawshader_room_fog_enabled_uniforms[shader_index], room_fog_enabled ? 1 : 0);
-		glUniform1i(drawshader_room_fog_viewer_inside_uniforms[shader_index], room_fog_viewer_inside ? 1 : 0);
-		glUniform3fv(drawshader_room_fog_viewer_position_uniforms[shader_index], 1, room_fog_viewer_position);
-		glUniform3fv(drawshader_room_fog_viewer_forward_uniforms[shader_index], 1, room_fog_viewer_forward);
-		glUniform3fv(drawshader_room_fog_color_uniforms[shader_index], 1, room_fog_color);
-		glUniform1f(drawshader_room_fog_depth_uniforms[shader_index], room_fog_depth);
-		glUniform1f(drawshader_room_fog_intensity_uniforms[shader_index], room_fog_intensity);
-		if (drawshader_room_fog_entry_map_enabled_uniforms[shader_index] != -1)
+		int mode = 0;
+		switch (OpenGL_state.cur_alpha_type)
 		{
-			glUniform1i(drawshader_room_fog_entry_map_enabled_uniforms[shader_index],
-				room_fog_entry_map_enabled ? 1 : 0);
-			if (drawshader_room_fog_entry_origin_uniforms[shader_index] != -1)
-				glUniform2iv(drawshader_room_fog_entry_origin_uniforms[shader_index], 1,
-					room_fog_entry_origin);
-			if (drawshader_room_fog_entry_size_uniforms[shader_index] != -1)
-				glUniform2iv(drawshader_room_fog_entry_size_uniforms[shader_index], 1,
-					room_fog_entry_size);
-			if (room_fog_entry_map_enabled && room_fog_entry_texture != 0)
-			{
-				GL_BindFramebufferTexture(room_fog_entry_texture, 10, GL_NEAREST);
-				glActiveTexture(GL_TEXTURE0);
-				Last_texel_unit_set = 0;
-			}
+		case AT_SPECULAR:
+		case AT_SATURATE_TEXTURE:
+		case AT_SATURATE_VERTEX:
+		case AT_SATURATE_CONSTANT_VERTEX:
+		case AT_SATURATE_TEXTURE_VERTEX:
+		case AT_LIGHTMAP_BLEND_SATURATE:
+			mode = 1;
+			break;
+		case AT_LIGHTMAP_BLEND:
+		case AT_LIGHTMAP_BLEND_VERTEX:
+			mode = 3;
+			break;
+		default:
+			break;
 		}
-		int fog_composite_mode = 0;
-		if (room_fog_overlay)
-		{
-			fog_composite_mode = 2;
-		}
-		else
-		{
-			switch (OpenGL_state.cur_alpha_type)
-			{
-			case AT_SPECULAR:
-			case AT_SATURATE_TEXTURE:
-			case AT_SATURATE_VERTEX:
-			case AT_SATURATE_CONSTANT_VERTEX:
-			case AT_SATURATE_TEXTURE_VERTEX:
-			case AT_LIGHTMAP_BLEND_SATURATE:
-				fog_composite_mode = 1;
-				break;
-			case AT_LIGHTMAP_BLEND:
-			case AT_LIGHTMAP_BLEND_VERTEX:
-				fog_composite_mode = 3;
-				break;
-			default:
-				break;
-			}
-		}
-		glUniform1i(drawshader_fog_composite_mode_uniforms[shader_index],
-			fog_composite_mode);
+		glUniform1i(drawshader_fog_composite_mode_uniforms[shader_index], mode);
 	}
 
 	const bool phong_enabled = OpenGL_state.cur_light_state == LS_PHONG;
@@ -2191,27 +2087,8 @@ void GL4Renderer::DrawPolygon3D(int handle, g3Point** p, int nv, int map_type)
 				include_ao_class,
 				include_motion_object_ids);
 	}
-	const bool exact_room_fog_multiply = drawing_to_scene && UsesExactRoomFogMultiply();
-	if (exact_room_fog_multiply)
-		SetCurrentFogCompositeMode(4);
 	rend_RecordDrawCall(draw_call_category);
 	glDrawArrays(GL_TRIANGLE_FAN, offset, nv);
-	if (exact_room_fog_multiply)
-	{
-		DrawRoomFogMultiplyCorrection(GL_TRIANGLE_FAN, offset, nv);
-		if (override_draw_buffers)
-		{
-			if (cockpit_scene_frame_active)
-				GL4UseSceneColorDrawBuffer();
-			else
-				GL4UseSceneDrawBuffersForCurrentDraw(include_motion_vectors,
-					include_post_mask, include_ao_class, include_motion_object_ids);
-		}
-		else
-		{
-			UseSceneDrawBuffers();
-		}
-	}
 	NotifyDepthBufferWrite();
 	if (include_motion_vectors || include_motion_object_ids)
 	{
@@ -2337,28 +2214,8 @@ void GL4Renderer::DrawPolygon3DBatch(int handle, const renderer_poly_batch_item 
 				include_ao_class,
 				include_motion_object_ids);
 	}
-	const bool exact_room_fog_multiply = drawing_to_scene && UsesExactRoomFogMultiply();
-	if (exact_room_fog_multiply)
-		SetCurrentFogCompositeMode(4);
 	rend_RecordDrawCall(draw_call_category);
 	glDrawArrays(GL_TRIANGLES, offset, (GLsizei)vertices.size());
-	if (exact_room_fog_multiply)
-	{
-		DrawRoomFogMultiplyCorrection(GL_TRIANGLES, offset,
-			(GLsizei)vertices.size());
-		if (override_draw_buffers)
-		{
-			if (cockpit_scene_frame_active)
-				GL4UseSceneColorDrawBuffer();
-			else
-				GL4UseSceneDrawBuffersForCurrentDraw(include_motion_vectors,
-					include_post_mask, include_ao_class, include_motion_object_ids);
-		}
-		else
-		{
-			UseSceneDrawBuffers();
-		}
-	}
 	NotifyDepthBufferWrite();
 	if (include_motion_vectors || include_motion_object_ids)
 	{
@@ -2722,303 +2579,6 @@ bool GL4Renderer::DrawWeatherQuadBatch(int handle, const renderer_weather_quad *
 
 	CHECK_ERROR(12);
 	return true;
-}
-
-static uint64_t GL4RoomFogHashBytes(uint64_t hash, const void* data, size_t size)
-{
-	const auto* bytes = static_cast<const unsigned char*>(data);
-	for (size_t i = 0; i < size; i++)
-	{
-		hash ^= bytes[i];
-		hash *= UINT64_C(1099511628211);
-	}
-	return hash;
-}
-
-bool GL4Renderer::PrepareRoomFogEntryMap(const renderer_room_fog_state& state)
-{
-	if (!framebuffer_ok || !have_current_view_projection || state.viewer_inside ||
-		state.triangle_count <= 0 || !state.triangles)
-	{
-		return false;
-	}
-
-	Framebuffer& scene = framebuffers[framebuffer_current_draw];
-	const int width = (int)scene.Width();
-	const int height = (int)scene.Height();
-	if (width <= 0 || height <= 0)
-		return false;
-
-	GLint viewport[4] = {};
-	glGetIntegerv(GL_VIEWPORT, viewport);
-	int entry_origin[2] = { viewport[0] + viewport[2], viewport[1] + viewport[3] };
-	int entry_end[2] = { viewport[0], viewport[1] };
-	bool full_viewport = false;
-	for (int triangle_index = 0; triangle_index < state.triangle_count && !full_viewport;
-		triangle_index++)
-	{
-		const renderer_room_fog_triangle& triangle = state.triangles[triangle_index];
-		const float* corners[3] = { triangle.a, triangle.b, triangle.c };
-		for (const float* corner : corners)
-		{
-			const vector world_position = { corner[0], corner[1], corner[2] };
-			vec4_array clip = {};
-			GL4TransformWorldToClip(current_view_projection, world_position, clip);
-			if (clip.w <= 0.0001f || clip.z <= -clip.w)
-			{
-				// A portal crossing the eye or near plane can cover an arbitrarily
-				// large portion of the view after clipping. Use the conservative bound.
-				full_viewport = true;
-				break;
-			}
-			const float screen_x = viewport[0] +
-				((clip.x / clip.w) * 0.5f + 0.5f) * viewport[2];
-			const float screen_y = viewport[1] +
-				((clip.y / clip.w) * 0.5f + 0.5f) * viewport[3];
-			entry_origin[0] = std::min(entry_origin[0], (int)std::floor(screen_x) - 2);
-			entry_origin[1] = std::min(entry_origin[1], (int)std::floor(screen_y) - 2);
-			entry_end[0] = std::max(entry_end[0], (int)std::ceil(screen_x) + 2);
-			entry_end[1] = std::max(entry_end[1], (int)std::ceil(screen_y) + 2);
-		}
-	}
-	if (full_viewport)
-	{
-		entry_origin[0] = viewport[0];
-		entry_origin[1] = viewport[1];
-		entry_end[0] = viewport[0] + viewport[2];
-		entry_end[1] = viewport[1] + viewport[3];
-	}
-	entry_origin[0] = std::max(viewport[0], std::min(entry_origin[0], viewport[0] + viewport[2]));
-	entry_origin[1] = std::max(viewport[1], std::min(entry_origin[1], viewport[1] + viewport[3]));
-	entry_end[0] = std::max(viewport[0], std::min(entry_end[0], viewport[0] + viewport[2]));
-	entry_end[1] = std::max(viewport[1], std::min(entry_end[1], viewport[1] + viewport[3]));
-	const int entry_size[2] = {
-		std::max(entry_end[0] - entry_origin[0], 0),
-		std::max(entry_end[1] - entry_origin[1], 0)
-	};
-	if (entry_size[0] <= 0 || entry_size[1] <= 0)
-		return false;
-	uint64_t hash = UINT64_C(1469598103934665603);
-	hash = GL4RoomFogHashBytes(hash, &width, sizeof(width));
-	hash = GL4RoomFogHashBytes(hash, &height, sizeof(height));
-	hash = GL4RoomFogHashBytes(hash, viewport, sizeof(viewport));
-	hash = GL4RoomFogHashBytes(hash, current_view_projection, sizeof(current_view_projection));
-	hash = GL4RoomFogHashBytes(hash, state.viewer_position, sizeof(state.viewer_position));
-	hash = GL4RoomFogHashBytes(hash, state.viewer_forward, sizeof(state.viewer_forward));
-	hash = GL4RoomFogHashBytes(hash, &state.triangle_count, sizeof(state.triangle_count));
-	if (state.triangle_count > 0)
-	{
-		hash = GL4RoomFogHashBytes(hash, state.triangles,
-			(size_t)state.triangle_count * sizeof(renderer_room_fog_triangle));
-	}
-
-	room_fog_entry_stamp++;
-	for (RoomFogEntryCache& cache : room_fog_entry_cache)
-	{
-		if (cache.valid && cache.hash == hash &&
-			cache.framebuffer.Width() == (uint32_t)entry_size[0] &&
-			cache.framebuffer.Height() == (uint32_t)entry_size[1])
-		{
-			cache.last_used = room_fog_entry_stamp;
-			room_fog_entry_texture = cache.framebuffer.ColorTextureForRead();
-			memcpy(room_fog_entry_origin, cache.origin, sizeof(room_fog_entry_origin));
-			memcpy(room_fog_entry_size, cache.size, sizeof(room_fog_entry_size));
-			return room_fog_entry_texture != 0;
-		}
-	}
-
-	RoomFogEntryCache* target = &room_fog_entry_cache[0];
-	for (RoomFogEntryCache& cache : room_fog_entry_cache)
-	{
-		if (!cache.valid)
-		{
-			target = &cache;
-			break;
-		}
-		if (cache.last_used < target->last_used)
-			target = &cache;
-	}
-
-	PERF_MARKER_SCOPE("RoomFog.BuildEntryMap");
-	GLint old_draw = 0;
-	GLint old_read = 0;
-	GLint old_vao = 0;
-	GLint old_active_texture = GL_TEXTURE0;
-	GLint old_scissor_box[4] = {};
-	GLint old_blend_equation_rgb = GL_FUNC_ADD;
-	GLint old_blend_equation_alpha = GL_FUNC_ADD;
-	GLint old_blend_src_rgb = GL_ONE;
-	GLint old_blend_dst_rgb = GL_ZERO;
-	GLint old_blend_src_alpha = GL_ONE;
-	GLint old_blend_dst_alpha = GL_ZERO;
-	GLboolean old_color_mask[4] = {};
-	const GLboolean blend_enabled = glIsEnabled(GL_BLEND);
-	const GLboolean depth_enabled = glIsEnabled(GL_DEPTH_TEST);
-	const GLboolean cull_enabled = glIsEnabled(GL_CULL_FACE);
-	const GLboolean scissor_enabled = glIsEnabled(GL_SCISSOR_TEST);
-	const GLboolean clip0_enabled = glIsEnabled(GL_CLIP_DISTANCE0);
-	const GLboolean clip1_enabled = glIsEnabled(GL_CLIP_DISTANCE1);
-	const GLboolean clip2_enabled = glIsEnabled(GL_CLIP_DISTANCE2);
-	const GLboolean depth_clamp_enabled = glIsEnabled(GL_DEPTH_CLAMP);
-	glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &old_draw);
-	glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &old_read);
-	glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &old_vao);
-	glGetIntegerv(GL_ACTIVE_TEXTURE, &old_active_texture);
-	glGetIntegerv(GL_SCISSOR_BOX, old_scissor_box);
-	glGetIntegerv(GL_BLEND_EQUATION_RGB, &old_blend_equation_rgb);
-	glGetIntegerv(GL_BLEND_EQUATION_ALPHA, &old_blend_equation_alpha);
-	glGetIntegerv(GL_BLEND_SRC_RGB, &old_blend_src_rgb);
-	glGetIntegerv(GL_BLEND_DST_RGB, &old_blend_dst_rgb);
-	glGetIntegerv(GL_BLEND_SRC_ALPHA, &old_blend_src_alpha);
-	glGetIntegerv(GL_BLEND_DST_ALPHA, &old_blend_dst_alpha);
-	glGetBooleanv(GL_COLOR_WRITEMASK, old_color_mask);
-
-	glActiveTexture(GL_TEXTURE10);
-	glBindTexture(GL_TEXTURE_2D, 0);
-	target->framebuffer.Update(entry_size[0], entry_size[1], GL_R32F, GL_RED, GL_FLOAT);
-	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, target->framebuffer.Handle());
-	glViewport(viewport[0] - entry_origin[0], viewport[1] - entry_origin[1],
-		viewport[2], viewport[3]);
-	glDisable(GL_SCISSOR_TEST);
-	glDisable(GL_DEPTH_TEST);
-	glDisable(GL_CULL_FACE);
-	glDisable(GL_CLIP_DISTANCE0);
-	glDisable(GL_CLIP_DISTANCE1);
-	glDisable(GL_CLIP_DISTANCE2);
-	glEnable(GL_DEPTH_CLAMP);
-	glEnable(GL_BLEND);
-	glBlendEquation(GL_MIN);
-	glBlendFunc(GL_ONE, GL_ONE);
-	glColorMask(GL_TRUE, GL_FALSE, GL_FALSE, GL_FALSE);
-	const GLfloat no_entry[4] = { FLT_MAX, 0.0f, 0.0f, 0.0f };
-	glClearBufferfv(GL_COLOR, 0, no_entry);
-
-	roomfogentryshader.Use();
-	glUniformMatrix4fv(roomfogentry_view_projection, 1, GL_FALSE, current_view_projection);
-	glUniform3fv(roomfogentry_viewer_position, 1, state.viewer_position);
-	glUniform3fv(roomfogentry_viewer_forward, 1, state.viewer_forward);
-	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, GL4_ROOM_FOG_PORTAL_BINDING,
-		room_fog_portal_buffer);
-	glBindVertexArray(GL_GetFramebufferVAO());
-	glDrawArrays(GL_TRIANGLES, 0, state.triangle_count * 3);
-
-	glColorMask(old_color_mask[0], old_color_mask[1], old_color_mask[2], old_color_mask[3]);
-	glBlendEquationSeparate(old_blend_equation_rgb, old_blend_equation_alpha);
-	glBlendFuncSeparate(old_blend_src_rgb, old_blend_dst_rgb,
-		old_blend_src_alpha, old_blend_dst_alpha);
-	if (blend_enabled) glEnable(GL_BLEND); else glDisable(GL_BLEND);
-	if (depth_enabled) glEnable(GL_DEPTH_TEST); else glDisable(GL_DEPTH_TEST);
-	if (cull_enabled) glEnable(GL_CULL_FACE); else glDisable(GL_CULL_FACE);
-	if (scissor_enabled)
-	{
-		glEnable(GL_SCISSOR_TEST);
-		glScissor(old_scissor_box[0], old_scissor_box[1], old_scissor_box[2], old_scissor_box[3]);
-	}
-	else glDisable(GL_SCISSOR_TEST);
-	if (clip0_enabled) glEnable(GL_CLIP_DISTANCE0); else glDisable(GL_CLIP_DISTANCE0);
-	if (clip1_enabled) glEnable(GL_CLIP_DISTANCE1); else glDisable(GL_CLIP_DISTANCE1);
-	if (clip2_enabled) glEnable(GL_CLIP_DISTANCE2); else glDisable(GL_CLIP_DISTANCE2);
-	if (depth_clamp_enabled) glEnable(GL_DEPTH_CLAMP); else glDisable(GL_DEPTH_CLAMP);
-	glBindVertexArray(old_vao);
-	glBindFramebuffer(GL_DRAW_FRAMEBUFFER, old_draw);
-	glBindFramebuffer(GL_READ_FRAMEBUFFER, old_read);
-	glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
-	glActiveTexture(old_active_texture);
-	ShaderProgram::ClearBinding();
-	lastdrawshader = -1;
-	legacy_draw_uniforms_dirty = true;
-
-	target->hash = hash;
-	target->last_used = room_fog_entry_stamp;
-	memcpy(target->origin, entry_origin, sizeof(target->origin));
-	memcpy(target->size, entry_size, sizeof(target->size));
-	target->valid = true;
-	room_fog_entry_texture = target->framebuffer.ColorTextureForRead();
-	memcpy(room_fog_entry_origin, entry_origin, sizeof(room_fog_entry_origin));
-	memcpy(room_fog_entry_size, entry_size, sizeof(room_fog_entry_size));
-	return room_fog_entry_texture != 0;
-}
-
-bool GL4Renderer::SetRoomFogState(const renderer_room_fog_state *state)
-{
-	if (!state || !state->enabled)
-	{
-		room_fog_enabled = false;
-		room_fog_overlay = false;
-		room_fog_viewer_inside = false;
-		room_fog_entry_map_enabled = false;
-		room_fog_entry_texture = 0;
-		memset(room_fog_entry_origin, 0, sizeof(room_fog_entry_origin));
-		memset(room_fog_entry_size, 0, sizeof(room_fog_entry_size));
-		legacy_draw_uniforms_dirty = true;
-		return true;
-	}
-	if (state->depth <= 0.0f || state->triangle_count < 0 ||
-		(state->triangle_count > 0 && !state->triangles))
-	{
-		return false;
-	}
-
-	room_fog_enabled = true;
-	room_fog_viewer_inside = state->viewer_inside;
-	memcpy(room_fog_viewer_position, state->viewer_position,
-		sizeof(room_fog_viewer_position));
-	memcpy(room_fog_viewer_forward, state->viewer_forward,
-		sizeof(room_fog_viewer_forward));
-	memcpy(room_fog_color, state->color, sizeof(room_fog_color));
-	room_fog_depth = state->depth;
-	room_fog_intensity = state->intensity;
-
-	const bool portal_data_changed =
-		room_fog_portal_cache.size() != (size_t)state->triangle_count ||
-		(state->triangle_count > 0 &&
-			memcmp(room_fog_portal_cache.data(), state->triangles,
-				(size_t)state->triangle_count * sizeof(renderer_room_fog_triangle)) != 0);
-	if (portal_data_changed)
-	{
-		if (state->triangle_count > 0)
-		{
-			room_fog_portal_cache.assign(state->triangles,
-				state->triangles + state->triangle_count);
-		}
-		else
-		{
-			room_fog_portal_cache.clear();
-		}
-		if (room_fog_portal_buffer == 0)
-			glGenBuffers(1, &room_fog_portal_buffer);
-		glBindBuffer(GL_SHADER_STORAGE_BUFFER, room_fog_portal_buffer);
-		const GLsizeiptr data_size = std::max<GLsizeiptr>(
-			(GLsizeiptr)sizeof(renderer_room_fog_triangle),
-			(GLsizeiptr)state->triangle_count * sizeof(renderer_room_fog_triangle));
-		glBufferData(GL_SHADER_STORAGE_BUFFER, data_size,
-			state->triangle_count > 0 ? state->triangles : nullptr, GL_STREAM_DRAW);
-	}
-	else if (room_fog_portal_buffer == 0)
-	{
-		glGenBuffers(1, &room_fog_portal_buffer);
-		glBindBuffer(GL_SHADER_STORAGE_BUFFER, room_fog_portal_buffer);
-		glBufferData(GL_SHADER_STORAGE_BUFFER,
-			(GLsizeiptr)sizeof(renderer_room_fog_triangle), nullptr, GL_STREAM_DRAW);
-	}
-	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, GL4_ROOM_FOG_PORTAL_BINDING,
-		room_fog_portal_buffer);
-	room_fog_entry_map_enabled = !state->viewer_inside && PrepareRoomFogEntryMap(*state);
-	if (!state->viewer_inside && !room_fog_entry_map_enabled)
-	{
-		room_fog_enabled = false;
-		room_fog_entry_texture = 0;
-		legacy_draw_uniforms_dirty = true;
-		return false;
-	}
-	legacy_draw_uniforms_dirty = true;
-	return true;
-}
-
-void GL4Renderer::SetRoomFogOverlay(int state)
-{
-	room_fog_overlay = room_fog_enabled && state != 0;
-	legacy_draw_uniforms_dirty = true;
 }
 
 // Takes nv vertices and draws the 2D polygon defined by those vertices.
