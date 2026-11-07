@@ -465,3 +465,24 @@ Final production rebuild/root3/3; st-final-* repeats0014.637→4.050 and
 pairs, do not subtract across suites. Four st-roof-* motion frames150..153 are
 exact against shader repair at1920x1080/SSAA2/MSAA4/AO/bloom, including the accepted
 continuous ceiling fixture. No experimental early-test variants remain.
+
+## November7: sprite footprint and soft-depth rejection
+
+Read back nine sprite textures from the existing capture (no new RDC), including
+all five mip levels. Base64x64 alpha occupies675..2391 of4096 texels, but bounds
+expand at lower mips; naive base-level geometry trimming is not safe with the
+existing filtering contract. No sprite geometry/filtering changed. Evidence
+rdoc-particle-footprint.json; helper out/rdoc_particle_footprint.py exited.
+
+Retained a smaller exact optimization: inside the soft-depth path, reject an
+already-cut-out texel before the depth fetch. Intersection fading is in[0,1], so
+it cannot rescue rejected alpha. The existing final cutoff still handles fading.
+This covers the logical particle layer and native rendering, unlike the earlier
+rejected experiment that moved cutoff ahead of edge classification only.
+Capture reference -scene-soft-alpha-late-reference; no additional resources.
+
+soft-a-* early/lateGPU001 effects3.8585/3.902,clean.771/.788;
+007 effects3.0645/3.077,clean.498/.503. Reversed-order soft-b-*:
+001 effects3.808/3.845,clean.776/.786;007 effects3.051/3.065,clean.498/.503.
+All initial pairs exact. soft-alpha-fx-20261107 all8 exact against stencil-fx.
+This is a small~5–44us improvement, not a solution to the remaining GPU gap.

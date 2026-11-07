@@ -530,6 +530,11 @@ void main() {
         base.a *= step(row/raster_stripe.x,raster_stripe.z);
     }
     if (soft_depth_range > 0.0) {
+#if SCENE_EARLY_SOFT_ALPHA
+        // Intersection fading can only reduce coverage, never rescue a
+        // texture cutout. Avoid its depth read for already-rejected texels.
+        if (base.a < alpha_cutoff) discard;
+#endif
         ivec2 size = textureSize(opaque_depth,0);
         ivec2 pixel = clamp(ivec2(scene_pixel)-depth_snapshot_origin,ivec2(0),size-ivec2(1));
         float depth = texelFetch(opaque_depth,pixel,0).r;
@@ -1578,6 +1583,8 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
                 reinterpret_cast<const char*>(glGetString(GL_RENDERER)),varying,vertex,fragment);
         }
         auto fragment = SceneFragmentShader;
+        fragment.insert(fragment.find('\n')+1,std::string("#define SCENE_EARLY_SOFT_ALPHA ")+
+            (AutomatedCaptureFrameIndex() >= 0 && FindArg("-scene-soft-alpha-late-reference") ? "0\n" : "1\n"));
         if (particle_shader) fragment.insert(fragment.find("void main()"),ParticleEdgeShader);
         fragment.insert(fragment.find('\n')+1,std::string("#define SCENE_PARTICLE_LAYER ")+(particle_shader ? "1\n" : "0\n"));
         fragment.insert(fragment.find('\n')+1,"#define SCENE_FOG_MODE "+std::to_string(fog_mode)+"\n");
