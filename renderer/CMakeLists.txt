@@ -25,8 +25,6 @@ SET (RENDERER_SOURCES
 		renderer/gl_init.cpp
 		renderer/gl_local.h
 		renderer/gl_main.cpp
-		renderer/gl_mesh.cpp
-		renderer/gl_mesh.h
 		renderer/gl_shader.cpp
 		renderer/gl_shadersource.cpp
 		

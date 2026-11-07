@@ -94,6 +94,14 @@ struct color_array
 	ubyte r, g, b, a;
 };
 
+// Ranges in the owned scene's GPU streams; not a public mesh-drawing API.
+struct ElementRange
+{
+	uint32_t offset, count;
+	ElementRange() : offset(0), count(0) {}
+	ElementRange(uint32_t offset, uint32_t count) : offset(offset), count(count) {}
+};
+
 struct tex_array
 {
 	float s, t, w;

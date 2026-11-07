@@ -1,5 +1,17 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November 6 — unused generic mesh layer retired
+
+Deleted gl_mesh.cpp/h, MeshBuilder and unused public vertex/index-buffer types.
+Only surviving helper consumer now calls rend_RestoreLegacy directly. Build
+identified ElementRange as shared by owned scene streams; retained the small
+offset/count type in gl_local.h rather than the obsolete public mesh API.
+Build/integration target passes; all8clean/exact60 images in
+qual-mesh-api-corpus-20261106 EXACT retained-backend corpus. Runtime SHA256:
+408DB255C29EF677DDFF3B35A809298DBDBD9F5DC0A9AB25C6D0CA8F6763B3EA.
+Next: unused SetRoomFogState/Overlay entry-map pipeline and shader branches.
+Do not confuse that legacy pipeline with owned SceneFog and field resources.
+
 ## November 6 — obsolete retained GPU API retired
 
 Removed Begin/EndRetainedPolymodelDraw and the unused room-lightmap array API,

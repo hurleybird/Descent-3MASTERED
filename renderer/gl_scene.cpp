@@ -1,7 +1,6 @@
 // Descent 3MASTERED - GPL-3.0-or-later
 #include "gl_local.h"
 #include "gl_readback.h"
-#include "gl_mesh.h"
 #include "SceneView.h"
 #include "SceneCompositing.h"
 #include "SceneGeometry.h"
@@ -2768,7 +2767,7 @@ void main() {
     // Invalidate that cache rather than lying about scene-owned GL names.
     ClearBoundTextures();
     glActiveTexture(GL_TEXTURE0); Last_texel_unit_set = 0;
-    rendTEMP_UnbindVertexBuffer();
+    rend_RestoreLegacy();
     if (writes_target_depth && target.role != SceneOutputRole::Image) rend_NotifyDepthBufferWrite();
     target.history.commit(history);
     // Broad-phase geometry inspection is NOT gameplay visibility. Do not mark
