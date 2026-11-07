@@ -1657,7 +1657,6 @@ void GL4Renderer::StartFrame(int x1, int y1, int x2, int y2, int clear_flags)
 			post_protection_mask.ClearAttached(framebuffers[framebuffer_current_draw].Handle());
 			post_protection_mask_dirty = false;
 			post_protection_mask_cleared_this_frame = true;
-			terrain_post_mask_default_initialized = false;
 		}
 		UseSceneDrawBuffers();
 	}
@@ -1991,9 +1990,7 @@ bool GL4Renderer::BeginPostPresentFrame()
 	// storage. No pending bloom resources escape this operation.
 	ColorFramebuffer* bloom_framebuffer = bloom.Apply(bloom_enabled ? present_framebuffer : nullptr,
 		OpenGL_preferred_state, OpenGL_state, display_gamma,
-		bloom_depth_texture, protection_mask_texture,
-		terrain_fog_reconstruction_enabled, terrain_fog_reconstruction_start,
-		terrain_fog_reconstruction_end, 0,
+		bloom_depth_texture, protection_mask_texture, 0,
 		post_uv_origin_x, post_uv_origin_y, post_uv_scale_x, post_uv_scale_y);
 	GL4PerfGpuDrain("GPU.Bloom.Apply");
 	GL4PerfGpuSplitMark(GL4_GPU_SPLIT_BLOOM_AFTER_DEFERRED_SOURCE);
@@ -2301,14 +2298,6 @@ void GL4Renderer::CompositeWorldDisplay(Framebuffer* world_source,Framebuffer* c
 			glUniform1i(bloom.composite_use_alpha_mask, 0);
 			glUniform1i(bloom.composite_use_protection_mask,
 				protection_mask != 0 ? 1 : 0);
-			GLuint world_depth_texture =
-				world_source ?
-				world_source->DepthTextureForRead() : 0;
-			glUniform1i(bloom.composite_use_terrain_fog_protection,
-				terrain_fog_reconstruction_enabled && world_depth_texture != 0 &&
-				protection_mask != 0 ? 1 : 0);
-			glUniform2f(bloom.composite_terrain_fog_depth_range,
-				terrain_fog_reconstruction_start, terrain_fog_reconstruction_end);
 			if (bloom.composite_uv_origin != -1)
 				glUniform2f(bloom.composite_uv_origin,
 					uv_x, uv_y);
@@ -2324,8 +2313,6 @@ void GL4Renderer::CompositeWorldDisplay(Framebuffer* world_source,Framebuffer* c
 			GL_BindFramebufferTexture(bloom_output->ColorTextureForRead(), 1, GL_LINEAR);
 			if (protection_mask != 0)
 				GL_BindFramebufferTexture(protection_mask, 3, GL_NEAREST);
-			if (world_depth_texture != 0)
-				GL_BindFramebufferTexture(world_depth_texture, 4, GL_NEAREST);
 			{
 				PERF_MARKER_SCOPE("Bloom.CompositeWorldDisplay");
 				GL_DrawFramebufferQuad(post_present_framebuffer.Handle(), 0, 0,
@@ -3387,60 +3374,6 @@ void GL4Renderer::SetAOClass(int value)
 	}
 }
 
-bool GL4Renderer::BeginTerrainSurface(bool fog_enabled)
-{
-	if (terrain_surface_active || !framebuffer_ok || display_image.composing() ||
-		cockpit_scene_frame_active || post_protection_mask.mask_texture == 0)
-	{
-		return false;
-	}
-
-	GLint draw_framebuffer = 0;
-	glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &draw_framebuffer);
-	if ((GLuint)draw_framebuffer != framebuffers[framebuffer_current_draw].Handle())
-		return false;
-
-	// The terrain is the first opaque surface in a normal outdoor frame. Its AO
-	// class is constant, so initialize the metadata attachment with that class
-	// once and keep the expensive multisampled terrain draw color-only. Later
-	// rooms and objects have larger class values and retain the existing MAX
-	// blend semantics. A clipped terrain portal cannot safely initialize the
-	// whole target after room metadata already exists, so it uses the ordinary
-	// MRT path unless an earlier full-frame terrain draw established the default.
-	if (!terrain_post_mask_default_initialized)
-	{
-		if (glIsEnabled(GL_SCISSOR_TEST) == GL_TRUE)
-			return false;
-
-		const GLenum mask_draw_buffer = GL_COLOR_ATTACHMENT2;
-		glDrawBuffers(1, &mask_draw_buffer);
-		glColorMaski(2, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-		const float terrain_default[4] = { 0.0f, 0.0f, 0.0f, 1.0f / 255.0f };
-		glClearBufferfv(GL_COLOR, 0, terrain_default);
-		post_protection_mask.resolve_valid = false;
-		post_protection_mask_dirty = true;
-		terrain_post_mask_default_initialized = true;
-	}
-
-	terrain_fog_reconstruction_enabled = fog_enabled;
-	terrain_fog_reconstruction_start = std::max(0.0f, std::min(1.0f,
-		1.0f - (1.0f / std::max(OpenGL_terrain_fog_start, 0.0001f))));
-	terrain_fog_reconstruction_end = std::max(0.0f, std::min(1.0f,
-		1.0f - (1.0f / std::max(OpenGL_terrain_fog_end, 0.0001f))));
-
-	glDrawBuffer(GL_COLOR_ATTACHMENT0);
-	terrain_surface_active = true;
-	return true;
-}
-
-void GL4Renderer::EndTerrainSurface()
-{
-	if (!terrain_surface_active)
-		return;
-
-	UseSceneDrawBuffers();
-	terrain_surface_active = false;
-}
 
 void GL4Renderer::SetPostMaskOnly(int state)
 {

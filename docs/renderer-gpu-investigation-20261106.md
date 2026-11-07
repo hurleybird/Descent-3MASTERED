@@ -344,3 +344,27 @@ Next evidence-led targets: protection-mask format/resolve and its consumption,
 and reducing particle repair invocations rather than another per-pixel cache.
 No new source experiment retained from this investigation yet. Capture helper
 and replay processes exited; no game/mouse capture left running.
+
+## November7: scalar bloom-protection contract
+
+Separate storage probes, gpu-mask-{control,rg,texture,both}-savegNNN-20261107:
+RG8 instead ofRGBA8 saves~.08ms in001/007, images exact. MSAA texture storage
+instead of renderbuffer alone provides no meaningful gain. Both probes removed.
+
+The live scene writes only fog protection; surface class already belongs to
+SceneSurfaceResources. Removed the unused Begin/EndTerrainSurface API (no game
+callers), its state, and terrain reconstruction branches/parameters in bloom.
+Bloom composition no longer obtains/binds a depth input solely for that branch.
+Protection is now scalar R8, producer/consumers consistently useR; same8bit
+precision, same sample count and resolve. Capture-only
+-scene-mask-rgba-reference isolates storage without changing scalar semantics.
+Net~130 source lines removed; no new resource or pass.
+
+Same-binary1500-frame medians400..1199, effects2xSSAA/4MSAA/AO/bloom/motion:
+gpu-scalar-{r8,rgba}-savegNNN-20261107:0014.4865 vs4.653;0073.151 vs3.2905ms.
+Do not subtract these from older runs with clock/thermal drift as if paired.
+Root3/3 pass. All8 effects60 images EXACT fog-group-fx-20261106. R8/RGBA1500
+images exact; separate save002MSAA0/8 references exact. Auxiliary003/006 and
+gameplay roundtrip003 all PNGs exact against fog-admit-aux-mb/trip references.
+Evidence mask-r8-{fx,aux,trip}-20261107 and mask-{r8,rgba}-msaa{0,8}-20261107.
+Candidate/Previous Candidate/main checkout remain untouched.

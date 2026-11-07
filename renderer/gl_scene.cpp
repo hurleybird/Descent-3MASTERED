@@ -389,9 +389,9 @@ in vec4 texture_coordinates;
 #define texcoord (texture_coordinates.xy)
 #define lightcoord (texture_coordinates.zw)
 layout(location=0) out vec4 color;
-// G retains the current bloom-protection contract. Surface class is part of
-// the depth-selected surface record, never this averaged coverage product.
-layout(location=2) out vec4 post_coverage;
+// Bloom consumes only fog protection. Surface class belongs to the separate
+// depth-selected surface record, never this averaged coverage product.
+layout(location=2) out float post_coverage;
 uniform int surface_prepass, scene_occlusion_enabled;
 uniform sampler2D scene_occlusion;
 uniform float scene_occlusion_intensity, scene_highlight_gamma, scene_highlight_threshold;
@@ -625,7 +625,7 @@ void main() {
         if (multiply_material == 0)
             color.rgb += surface_radiance*transmission*(pow(ao,scene_occlusion_intensity)-1);
     }
-    post_coverage = vec4(0,1.0-transmission,0,0);
+    post_coverage = 1.0-transmission;
 }
 )GLSL";
 }

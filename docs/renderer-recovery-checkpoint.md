@@ -1,5 +1,20 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November7 — scalar bloom protection verified
+
+R8 replaces the old RGBA8 protection attachment at unchanged resolution/MSAA/
+precision. Removed caller-free terrain mask API/state/reconstruction and bloom
+composition's obsolete depth input. Root3/3; all8 effects images exact, MSAA0/8
+reference exact, auxiliary003/006 and gameplay-roundtrip003 exact. Same-binary
+effectsGPU0014.653→4.4865,0073.2905→3.151ms. See GPU doc for paths and caveats.
+No source probes remain except capture-only RGBA storage reference. Private
+runtime contains tested production candidate; untracked lib/gitinfo.h preserved.
+Next measured lead: particle repair evaluates5 depth samples BEFORE texture
+alpha/soft-depth rejection. RenderDoc shows some draws with3.5million shader
+invocations andzero passing samples. Test moving that classification AFTER
+material cutout/soft fade; preserve complementary composite/repair classification.
+No speculative shader edits for that lead have been made at this checkpoint.
+
 ## November 6 — fog portal admission qualified
 
 Latest investigation after e10e169: effects001/007 still trail reconstructedold
