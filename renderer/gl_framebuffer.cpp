@@ -255,6 +255,7 @@ void Framebuffer::SwapStorage(Framebuffer& other)
 	swap(m_name,other.m_name); swap(m_subname,other.m_subname);
 	swap(m_colorname,other.m_colorname); swap(m_subcolorname,other.m_subcolorname);
 	swap(m_color_format,other.m_color_format);
+	swap(m_stencil,other.m_stencil); swap(m_requested_stencil,other.m_requested_stencil);
 	swap(m_depthname,other.m_depthname); swap(m_subdepthname,other.m_subdepthname);
 	swap(m_width,other.m_width); swap(m_height,other.m_height);
 	swap(m_samples,other.m_samples); swap(m_requested_samples,other.m_requested_samples);
@@ -304,7 +305,7 @@ static void ClearFramebufferAllocationErrors()
 	}
 }
 
-void Framebuffer::Update(int width, int height, int msaa_samples, GLint color_format)
+void Framebuffer::Update(int width, int height, int msaa_samples, GLint color_format, bool multisample_stencil)
 {
 	if (width <= 0 || height <= 0)
 	{
@@ -314,7 +315,8 @@ void Framebuffer::Update(int width, int height, int msaa_samples, GLint color_fo
 
 	msaa_samples = GL_GetSupportedMsaaSamples(msaa_samples);
 
-	if (width == m_width && height == m_height && (uint32_t)msaa_samples == m_requested_samples && m_color_format == color_format && m_name != 0)
+	if (width == m_width && height == m_height && (uint32_t)msaa_samples == m_requested_samples &&
+		m_color_format == color_format && m_requested_stencil == multisample_stencil && m_name != 0)
 		return;
 
 	int attempts[4] = { 0, 0, 0, 0 };
@@ -338,9 +340,17 @@ void Framebuffer::Update(int width, int height, int msaa_samples, GLint color_fo
 		int samples = attempts[i];
 		glBindFramebuffer(GL_FRAMEBUFFER, 0);
 		Destroy();
-		if (Allocate(width, height, samples,color_format))
+		bool allocated = Allocate(width,height,samples,color_format,multisample_stencil && samples >= 2);
+		if (!allocated && multisample_stencil && samples >= 2) {
+			// Coverage acceleration is optional: never reduce MSAA quality just
+			// because this device rejects the wider depth/stencil attachment.
+			ClearFramebufferAllocationErrors(); Destroy();
+			allocated = Allocate(width,height,samples,color_format,false);
+		}
+		if (allocated)
 		{
 			m_requested_samples = msaa_samples;
+			m_requested_stencil = multisample_stencil;
 			if (samples != msaa_samples)
 				mprintf((0, "Framebuffer::Update: falling back from %dx MSAA to %dx MSAA for %dx%d framebuffer.\n",
 					msaa_samples, samples, width, height));
@@ -388,7 +398,7 @@ void DepthFramebuffer::BlitDepthTo(GLuint target,unsigned x,unsigned y,unsigned 
     glBlitFramebuffer(0,0,width,height,x,y,x+w,y+h,GL_DEPTH_BUFFER_BIT,GL_NEAREST);
 }
 
-bool Framebuffer::Allocate(int width, int height, int msaa_samples, GLint color_format)
+bool Framebuffer::Allocate(int width, int height, int msaa_samples, GLint color_format, bool stencil)
 {
 	bool msaa = msaa_samples > 1;
 
@@ -400,6 +410,7 @@ bool Framebuffer::Allocate(int width, int height, int msaa_samples, GLint color_
 	glGenFramebuffers(1, &m_name);
 
 	GLenum textureType = msaa ? GL_TEXTURE_2D_MULTISAMPLE : GL_TEXTURE_2D;
+	m_stencil = msaa && stencil;
 
 	if (msaa)
 	{
@@ -413,7 +424,8 @@ bool Framebuffer::Allocate(int width, int height, int msaa_samples, GLint color_
 		glRenderbufferStorageMultisample(GL_RENDERBUFFER,msaa_samples,color_format,width,height);
 
 		glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, m_depthname);
-		glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, msaa_samples, GL_DEPTH_COMPONENT32F, width, height, GL_TRUE);
+		glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, msaa_samples,
+			m_stencil ? GL_DEPTH32F_STENCIL8 : GL_DEPTH_COMPONENT32F, width, height, GL_TRUE);
 
 		glBindTexture(GL_TEXTURE_2D, m_subcolorname);
 		glTexImage2D(GL_TEXTURE_2D, 0, color_format, width, height, 0, GL_RGBA, GL_FLOAT, nullptr);
@@ -466,6 +478,7 @@ bool Framebuffer::Allocate(int width, int height, int msaa_samples, GLint color_
 	if (msaa) glFramebufferRenderbuffer(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_RENDERBUFFER,m_colorname);
 	else glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, textureType, m_colorname, 0);
 	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, textureType, m_depthname, 0);
+	if (m_stencil) glFramebufferTexture2D(GL_FRAMEBUFFER, GL_STENCIL_ATTACHMENT, textureType, m_depthname, 0);
 	GLenum fbstatus = glCheckFramebufferStatus(GL_FRAMEBUFFER);
 	if (fbstatus != GL_FRAMEBUFFER_COMPLETE)
 	{
@@ -557,6 +570,7 @@ void Framebuffer::Destroy()
 	glDeleteFramebuffers(1, &m_name);
 	glDeleteFramebuffers(1, &m_subname);
 	m_depth_resolve_shader.Destroy();
+	m_stencil = m_requested_stencil = false;
 	if (m_samples >= 2) glDeleteRenderbuffers(1,&m_colorname);
 	else glDeleteTextures(1, &m_colorname);
 	glDeleteTextures(1, &m_depthname);

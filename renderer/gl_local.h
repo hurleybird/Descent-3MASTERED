@@ -235,6 +235,8 @@ class GL4Renderer : public IRenderer
 	};
 	std::map<std::pair<d3scene::ViewKind,uint64_t>,SceneDepthSnapshot> scene_depth_snapshots;
 	ShaderProgram scene_volume_composite;
+	ShaderProgram scene_volume_stencil;
+	GLint scene_volume_stencil_mapping = -1, scene_volume_stencil_origin = -1;
 	GLuint scene_volume_sampler = 0;
 	GLint scene_volume_rectangle = -1, scene_volume_extent = -1;
 	GLint scene_volume_mapping = -1, scene_volume_edge = -1, scene_volume_depth_origin = -1;

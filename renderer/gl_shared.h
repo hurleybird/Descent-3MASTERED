@@ -160,6 +160,7 @@ class Framebuffer
 	uint32_t	m_samples;
 	uint32_t	m_requested_samples;
 	GLint m_color_format = GL_RGBA16F;
+	bool m_stencil = false, m_requested_stencil = false;
 	ShaderProgram m_depth_resolve_shader;
 	//Track whether the MSAA->sub resolve is up to date. Each MSAA resolve blit
 	//costs W*H*samples of bandwidth, and multiple post-process stages can ask
@@ -168,7 +169,7 @@ class Framebuffer
 	bool		m_subcolor_dirty;
 	bool		m_subdepth_dirty;
 
-	bool Allocate(int width, int height, int msaa_samples, GLint color_format);
+	bool Allocate(int width, int height, int msaa_samples, GLint color_format, bool stencil);
 	//Used when multisampling is enabled. Blits the requested buffers to the non-multisample sub framebuffer.
 	//Leaves the sub framebuffer bound for reading to finish the blit.
 	void SubFramebufferBlit(GLbitfield mask);
@@ -178,7 +179,10 @@ public:
 	// Transfer complete framebuffer storage between compositor roles without
 	// copying pixels. Resolve shaders are context-owned and storage-independent.
 	void SwapStorage(Framebuffer& other);
-	void Update(int width, int height, int msaa_samples, GLint color_format = GL_RGBA16F);
+	// Optional transient coverage on the multisampled raster target. Resolved
+	// depth remains D32F; no stencil data is exported to image-space consumers.
+	void Update(int width, int height, int msaa_samples, GLint color_format = GL_RGBA16F, bool multisample_stencil = false);
+	bool HasStencil() const { return m_stencil; }
 	void Destroy();
 	//Mark the resolved sub framebuffer as stale. Call after writing to the MSAA
 	//attachments so the next read triggers a fresh resolve.

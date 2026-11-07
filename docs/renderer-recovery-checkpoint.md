@@ -1,5 +1,38 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November7 — particle repair stencil qualified
+
+Latest work adds optional stencil to multisampled supersampled WORLD depth only;
+resolved depth remains D32F. Same edge predicate, once per soft-volume run, then
+fixed-function rejection on repair draws. On unsupported packed attachments,
+retry depth-only at the same MSAA count; ordinary shader predicate is fallback.
+Capture reference: -scene-particle-shader-repair-reference. No new full-screen
+image/resolve or per-frame allocations. Extra nominal storage~64.5MiB in the
+2740x1542/4MSAA benchmark; native resolution unaffected.
+
+All8 effects paired images exact; all8 production60 exact against mask-r8-fx;
+aux003/006, gameplay roundtrip003, MSAA0/2/8, SSAA4 and roof motion150..153 exact.
+Root3/3 passed, actual dense screenshot inspected. All8 pairedGPU sweep:
+0014.3555→3.8525ms,0073.154→3.066; other6 essentially unchanged. Final production
+pair0014.637→4.050,0073.158→3.0545; clock drift means compare within each pair.
+Evidence paths/complete mechanism are in renderer-gpu-investigation-20261106.md.
+
+IMPORTANT profiling trap discovered: RenderDoc's Samples Passed query disables
+automatic early rejection on this AMD driver. Replaying the SAME capture with
+only duration+PS invocations gives3558829→171562 on a representative repair draw;
+adding just Samples Passed returns3558829. Do not use counter-instrumented draw
+times as gameplay timings. Forced early-test variants offered no ordinary-run
+gain and were removed. No experimental source remains beyond capture references.
+Three bounded~90MB RDCs retained; all helper/game processes ended.
+
+Private runtime integration-runtime-20261022 contains the tested build. Main
+checkout, Candidate and Previous Candidate untouched. lib/gitinfo.h untracked
+and preserved. User wants continued GPU investigation, not speculative tweaks.
+Next possible lead: quantify actual particle sprite alpha footprint using the
+existing capture; do not implement sprite cropping without conservative filter/
+mipmap coverage evidence. Current total GPU001/007 still need comparison against
+reconstructed pre-rewrite baseline; migration acceptance is NOT complete.
+
 ## November7 — scalar bloom protection verified
 
 R8 replaces the old RGBA8 protection attachment at unchanged resolution/MSAA/

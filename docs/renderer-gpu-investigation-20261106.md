@@ -368,3 +368,100 @@ images exact; separate save002MSAA0/8 references exact. Auxiliary003/006 and
 gameplay roundtrip003 all PNGs exact against fog-admit-aux-mb/trip references.
 Evidence mask-r8-{fx,aux,trip}-20261107 and mask-{r8,rgba}-msaa{0,8}-20261107.
 Candidate/Previous Candidate/main checkout remain untouched.
+
+## November7: follow-up rejection and depth-culling probes
+
+All timing pairs below are 1500 frames, median400..1199, effects2xSSAA/4MSAA/
+AO/bloom/motion. Same binary/reference switch; no retained quality reduction.
+
+- Particle alpha+soft-depth rejection before edge classification was slower:
+  gpu-reject-*0014.5475 vs4.3075ms, images exact. Rejected.
+- Cheap alpha rejection alone: gpu-cutout-*0014.2865 vs4.2955,
+  0073.161 vs3.1445. Images exact; no useful consistent gain. Rejected.
+- Bloom color-threshold rejection before depth/protection reads:
+  gpu-bloom-*0014.307 vs4.3055,0073.077 vs3.076. Images exact; neutral.
+  Rejected. The sampled mask bandwidth alone does not establish that changing
+  its read order will improve throughput.
+- Explicit early fragment tests, diagnostic across the whole scene shader:
+  gpu-depth-*0014.5565 vs4.5945,0073.139 vs3.163. Images exact in these two
+  frames, but this is NOT generally valid for depth-writing alpha cutouts.
+  Small total gain does not explain the large repair cost. Removed.
+
+Additional counters from the existing RenderDoc capture, rdoc-depth-values.json:
+repair events2653/2668/2678 have zero HiZ tiles rejected and zero quads culled.
+Event2668 has3483703 pixel invocations and zero passing samples. Actual pipeline
+state confirms depth enabled, LEQUAL, writes disabled. This alone cannot tell
+how much rejection is due to scene occlusion versus the shader edge predicate;
+the forced-early test above does not show a large hidden-geometry saving.
+Next investigation is hardware rejection of non-edge pixels rather than
+reordering texture reads in a shader that still runs over every particle quad.
+
+## November7: stencil classification for particle repair
+
+The stencil predicate is exactly the existing five-depth-sample predicate, with
+the same scissor, mapping and complementary layer composite. Classify once per
+soft-volume run, then stencil-test its repair draws; no sampling-quality change.
+Framebuffer now declares optional multisample stencil storage. Only supersampled
+world targets request it. Raster depth becomes D32F/S8; resolved depth stays D32F.
+If packed storage is unavailable, retry depth-only at the SAME MSAA count before
+considering the existing lower-sample fallback. The shader predicate remains the
+fallback and capture reference (-scene-particle-shader-repair-reference).
+No per-frame allocation, readback, new image product, or additional resolve.
+At2740x1542/4MSAA the wider raster attachment costs~64.5MiB nominal extra storage;
+there is one world framebuffer. Native-resolution targets do not request it.
+
+Rejected setup alternatives: standalone S8+existingD32F attachment returns
+FRAMEBUFFER_UNSUPPORTED onRX6600. Changing every framebuffer's depth format
+breaks depth-copy format compatibility. A temporary packed repair target with
+per-sample depth copy is exact but costs too much: gpu-stencil2-*0014.2755 vs
+4.313,0073.493 vs3.153ms. All temporary target/copy code removed.
+
+Two paired sweeps show the in-place multisample version is useful. gpu-stencil3-*
+0013.824 vs4.2985,0073.045 vs3.152ms. All8 repeat gpu-st4-{normal,stencil}-*:
+
+| Save | Shader repair ms | Stencil repair ms |
+|---|---:|---:|
+|000|1.898|1.897|
+|001|4.3555|3.8525|
+|002|2.944|2.929|
+|003|2.197|2.195|
+|004|1.956|1.958|
+|005|1.813|1.811|
+|006|2.014|2.013|
+|007|3.154|3.066|
+
+All8 paired images exact. Production stencil-fx-20261107 all8 images exact
+against mask-r8-fx-20261107; auxiliary003/006 and roundtrip003 all8 PNGs exact
+against mask-r8-aux/trip. st-q-* coversSSAA2/MSAA0,2,8 andSSAA4/MSAA4: exact
+shader-reference images, GL audit enabled. Root3/3 passes. Dense image inspected.
+
+### Important profiler observer effect
+
+The first counter comparison misleadingly suggested stencil did NOT reduce pixel
+invocations. Isolated counter-set tests on the SAME captured frame explain why:
+requesting GL_SAMPLES_PASSED changes this driver's automatic early-test behavior.
+With duration+pixel-invocations ONLY, original2653→stencil2679 goes3558829→171562;
+2668→2694 goes3483703→171556;2678→2704 goes2793979→171382. Adding only the
+samples-passed query restores the high invocation counts. Replay draw durations
+also change. These counter-instrumented timings are NOT ordinary-frame timings.
+Evidence rdoc-{gpu001,stencil,early}-lean-values.json and
+rdoc-stencil-occlusion-values.json, using existing captures rather than new games.
+
+A separate read-only early_fragment_tests shader variant was tested to check
+this. Normal-run st-early-*001 early3.863/automatic3.855/original4.3295,
+0073.077/3.075/3.158; exact images. Without occlusion queries, automatic and forced
+early tests have IDENTICAL invocation counts. Extra variants/source removed.
+The simpler production path already receives early rejection in ordinary runs.
+Forced-early samples-passed counts differ by definition because shader discards
+occur after those tests; do not treat that counter as final visible coverage.
+References: https://wikis.khronos.org/opengl/Early_Fragment_Test and RenderDoc1.29
+https://raw.githubusercontent.com/baldurk/renderdoc/v1.29/renderdoc/driver/gl/gl_counters.cpp
+(FillTimers starts requested generic queries together around each draw).
+Three bounded~90MB captures retained: original, stencil, forced-early; no helpers
+or games remain running after their respective captures/replays.
+
+Final production rebuild/root3/3; st-final-* repeats0014.637→4.050 and
+0073.158→3.0545ms, exact images. Clock drift exists between suites: use matched
+pairs, do not subtract across suites. Four st-roof-* motion frames150..153 are
+exact against shader repair at1920x1080/SSAA2/MSAA4/AO/bloom, including the accepted
+continuous ceiling fixture. No experimental early-test variants remain.

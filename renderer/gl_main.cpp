@@ -3736,7 +3736,11 @@ void GL4Renderer::UpdateFramebuffer(void)
 	{
 		// AO is applied inside material lighting before the game's legacy-range
 		// color write. No deferred subtraction requires an HDR world attachment.
-		framebuffers[i].Update(target_width, target_height, target_samples,GL_RGBA8);
+		// Supersampled soft-volume repair can reject non-edge pixels in fixed
+		// function stencil before shading. Native-resolution targets need none.
+		const bool repair_stencil = supersampling_factor >= 2 &&
+			!(FindArg("-capture-frame") && FindArg("-scene-particle-shader-repair-reference"));
+		framebuffers[i].Update(target_width,target_height,target_samples,GL_RGBA8,repair_stencil);
 		if (motion_vectors_enabled)
 		{
 			glBindFramebuffer(GL_FRAMEBUFFER,framebuffers[i].Handle());
