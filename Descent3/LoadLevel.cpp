@@ -45,6 +45,7 @@
 #include "door.h"
 #include "objinit.h"
 #include "room.h"
+#include "SceneReflectionBake.h"
 #include "objinfo.h"
 #include "lightmap.h"
 #include "lightmap_info.h"
@@ -58,7 +59,6 @@
 #include "mem.h"
 #include "lighting.h"
 #include "Mission.h"
-#include "render.h"
 #include "weapon.h"
 #include "special_face.h"
 #include "stringtable.h"
@@ -2788,7 +2788,6 @@ int LoadLevel(char* filename, void (*cb_fn)(const char*, int, int))
 
 #ifndef NEWEDITOR
 		// Clear glows
-		ResetLightGlows();
 #endif
 
 		//Reset all the objects

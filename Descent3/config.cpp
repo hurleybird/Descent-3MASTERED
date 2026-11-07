@@ -42,7 +42,6 @@
 #include "hud.h"
 #include "bitmap.h"
 #include "game.h"
-#include "render.h"
 #include "stringtable.h"
 #include "SmallViews.h"
 #include "D3ForceFeedback.h"
@@ -1061,12 +1060,13 @@ static void ApplyAOPresetFromIndex(int index)
 }
 
 extern ubyte Use_motion_blur;
-extern float Legacy_motion_blur_frame_time;
-extern float Legacy_motion_blur_sphere_size_percent;
-extern float Legacy_motion_blur_copy_density;
-extern int Legacy_motion_blur_max_iterations;
-extern float Legacy_motion_blur_alpha_scale;
-extern float Legacy_motion_blur_alpha_exponent;
+// Persisted configuration retained independently of the retired object drawer.
+float Legacy_motion_blur_frame_time = 1.0f / 20.0f;
+float Legacy_motion_blur_sphere_size_percent = 0.20f;
+float Legacy_motion_blur_copy_density = 1.0f;
+int Legacy_motion_blur_max_iterations = 12;
+float Legacy_motion_blur_alpha_scale = 1.0f;
+float Legacy_motion_blur_alpha_exponent = 1.0f;
 
 static float ClampLegacyMotionBlurFrameTime(float frame_time)
 {

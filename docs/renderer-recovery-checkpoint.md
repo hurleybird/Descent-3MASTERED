@@ -1,5 +1,46 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November 6 — room/object/effect draw retirement; continuing
+
+User resumed with "continue now"; earlier milestone stop is superseded.
+Worktree/branch verified at 4e9172e, only unrelated lib/gitinfo.h untracked.
+No AGENTS found. Continue until user asks to yield / included usage exhausted.
+Last usage 10% used, allowed=true, credits62044.8730600000 unchanged.
+
+Removed render.cpp/h, renderobject.cpp/h, retained_room.cpp/h and CMake entries,
+then their legacy particle/weapon drawing and close-screen replay queues.
+~13.5k source lines retired, recoverable in Git. Build caught constructor-based
+RoomMaterialFogScope consumers not in the initial function-call inventory;
+their entire unreachable effect/weapon draw chains were retired, not stubbed.
+Removed old particle atlas prewarm calls/data: only the deleted draw path read
+those atlases. Source texture paging and enhanced-snow source atlas stay live.
+Simulation, effect allocation/movement and close-screen weapon tagging remain.
+Model observation ordering moved verbatim into SceneModels private policy;
+FastCoronas now owned by GameRoomCoronas; legacy model SortStates/scratch moved
+unchanged into model/newstyle.cpp; persisted legacy blur settings moved into
+config.cpp. UI RenderBlankScreen callback now in game.cpp. Module ABI facing
+reset slot remains an explicitly documented no-op because visibility is owned
+by each scene view; no old global facing array remains. Removed dead debug
+settings/shortcuts, old glow/cluster lifecycle calls and empty profiling hooks.
+
+Full build/root3/3 pass. Binary/runtimeSHA256:
+6DF73F0AE05BAF6D46E367F3BAC071AFC6AB1A4C9266D34182617951F4BE60D0.
+qual-room-draw-retirement-20261106 all8 clean60 EXACT terrain-retirement.
+qual-room-draw-before/cinematic-20261106:003/006 effects/field/motion240,
+all8PNG EXACT against verified4e9172e binary. Viewed003frame210.
+qual-room-draw-roundtrip-20261106 effects/field/motion003120 flight/fire,
+quicksave/reload all8PNG EXACT terrain-retirement-roundtrip.
+qual-room-draw-ui-motion-20261106:003/006effects/field/motion22 modal-ui
+all4PNG EXACT startup-gpu-ui. Initial qual-room-draw-ui lacked MotionBlur and
+was NOT a matched comparison; corrected run above is the qualification.
+No new steady-frame performance claim; acceptance guards still active.
+
+Next: remove World_point_buffer/Terrain_rotate_list and obsolete terrain LOD
+scratch/generation now that their last room/terrain draw consumers are gone.
+Terrain min/max, normals, deformation source data and render revision signals
+must remain. GPU regressions and broader gameplay qualification still pending.
+Candidate/Previous Candidate/main repo untouched. No shadows.
+
 ## November 4 — terrain draw retirement; user-requested stopping milestone
 
 User requested stopping at the next natural milestone after usage reset. Stop

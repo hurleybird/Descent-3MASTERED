@@ -45,11 +45,6 @@ bool VisEffectIsLocalPlayerAttachedSourceObject(object *obj);
 bool VisEffectViewerIsFirstPersonLocalPlayerView();
 bool VisEffectIsLocalPlayerViewSourceObject(object *obj);
 bool VisEffectIsNearLocalPlayerView(object *obj,float padding=30.0f);
-void VisEffectBeginCloseScreenFrame();
-void VisEffectEndCloseScreenCollection();
-bool VisEffectQueueCloseScreenWeaponObject(object *obj);
-bool VisEffectQueueCloseScreenAlpha(float r,float g,float b,float alpha);
-void VisEffectRenderCloseScreenEffectsPostAO();
 void VisEffectMarkCloseScreenWeaponObject(object *obj);
 bool VisEffectIsCloseScreenWeaponObject(object *obj);
 bool VisEffectWasMarkedCloseScreenWeaponObject(const object *obj);
@@ -82,15 +77,6 @@ void VisEffectDeleteDead();
 void VisEffectMoveAll ();
 void VisEffectRecordPerfMarkers();
 
-// Renders a vis effect
-void DrawVisEffect (vis_effect *vis);
-
-// Renders through the VIS_FIREBALL batcher when enabled, otherwise uses DrawVisEffect.
-void DrawVisEffectMaybeBatched(vis_effect *vis);
-void DrawEnhancedSnowParticlesBatched();
-void FlushVisEffectBatches();
-void ForceFlushVisEffectBatches();
-void VisEffectPrewarmTexture(int texture_handle);
 
 // Creates a some sparks that go in random directions
 void CreateRandomSparks (int num_sparks,vector *pos,int roomnum,int which_index=-1,float force_scalar=1);

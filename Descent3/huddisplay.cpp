@@ -30,7 +30,6 @@
 #include "ship.h"
 #include "config.h"
 #include "multi.h"
-#include "render.h"
 #include "gamefont.h"
 #include "SceneCanvas.h"
 #include "SceneExtraction.h"

@@ -24,7 +24,6 @@
 #include "manage.h"
 #include "renderer.h"
 #include "game.h"
-#include "render.h"
 #include "grdefs.h"
 #include <stdlib.h>
 #include <string.h>
@@ -396,7 +395,6 @@ void FreeAllRooms()
 	int rn;
 	room* rp;
 	mprintf((1, "Freeing rooms...Higest_room_index %d\n", Highest_room_index));
-	RenderRoomClustersFreeLevel();
 	for (rn = 0, rp = Rooms; rn <= Highest_room_index; rn++, rp++)
 	{
 		if (rp->used)

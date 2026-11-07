@@ -37,7 +37,6 @@
 #include "bitmap.h"
 #include "ddio.h"
 #include "joystick.h"
-#include "render.h"
 #include "descent.h"
 #include "renderer.h"
 #include "vclip.h"
@@ -59,7 +58,6 @@
 #include "AppConsole.h"
 #include "room.h"
 #include "game.h"
-#include "render.h"
 #include "gamefile.h"
 #include "TelCom.h"
 #include "objinfo.h"
@@ -450,11 +448,6 @@ void SaveGameSettings()
 
 	Database->write("Dynamic_Lighting",Detail_settings.Dynamic_lighting);
 
-#ifdef _DEBUG
-	Database->write("Outline_mode",Outline_mode);
-	Database->write("Lighting_on",Lighting_on);
-	Database->write("Render_floating_triggers",Render_floating_triggers);
-#endif
 
 	Database->write("TerrLeveling",Default_player_terrain_leveling);
 	Database->write("RoomLeveling",Default_player_room_leveling);
@@ -574,10 +567,6 @@ void LoadGameSettings()
 	} while (0)
 
 	//set defaults
-#ifdef _DEBUG
-	Outline_mode = OM_ALL;
-	Lighting_on = true;
-#endif
 
 	int tt_arg = FindArg("-timetest");
 	if(tt_arg)
@@ -748,11 +737,6 @@ void LoadGameSettings()
 	}
 	Database->read_int("Dynamic_Lighting",&Detail_settings.Dynamic_lighting);
 	
-#ifdef _DEBUG
-	Database->read_int("Outline_mode",&Outline_mode);
-	Database->read("Lighting_on",&Lighting_on);
-	Database->read("Render_floating_triggers",&Render_floating_triggers);
-#endif
 
 	Database->read_int("TerrLeveling",&Default_player_terrain_leveling);
 	Database->read_int("RoomLeveling",&Default_player_room_leveling);

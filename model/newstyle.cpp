@@ -28,7 +28,6 @@
 #include "renderer.h"
 #include "lighting.h"
 #include "game.h"
-#include "render.h"
 #include "fireball.h"
 #include "lightmap_info.h"
 #include "lightmap.h"
@@ -51,6 +50,68 @@
 #include <vector>
 
 #include "psrand.h"
+
+// Private scratch for the remaining legacy polymodel draw path.
+struct state_limited_element { int facenum; int sort_key; };
+static state_limited_element State_elements[8000];
+#define STATE_PUSH(value) { state_stack[state_stack_counter++] = (value); }
+#define STATE_POP() { state_stack_counter--; pop_val = state_stack[state_stack_counter]; }
+static void SortStates(state_limited_element* state_array, int cellcount)
+{
+	state_limited_element v, t;
+	int pop_val;
+	int l = 0;
+	int r = cellcount - 1;
+	ushort state_stack_counter = 0;
+	ushort state_stack[2000];
+
+	while (1)
+	{
+		while (r > l)
+		{
+			int i = l - 1;
+			int j = r;
+			v = state_array[r];
+			while (1)
+			{
+				while (state_array[++i].sort_key < v.sort_key)
+					;
+				while (state_array[--j].sort_key > v.sort_key)
+					;
+				if (i >= j)
+					break;
+				t = state_array[i];
+				state_array[i] = state_array[j];
+				state_array[j] = t;
+			}
+			t = state_array[i];
+			state_array[i] = state_array[r];
+			state_array[r] = t;
+
+			if (i - l > r - i)
+			{
+				STATE_PUSH(l);
+				STATE_PUSH(i - 1);
+				l = i + 1;
+			}
+			else
+			{
+				STATE_PUSH(i + 1);
+				STATE_PUSH(r);
+				r = i - 1;
+			}
+		}
+		if (!state_stack_counter)
+			break;
+		STATE_POP();
+		r = pop_val;
+		STATE_POP();
+		l = pop_val;
+	}
+}
+#undef STATE_PUSH
+#undef STATE_POP
+
 
 static float face_depth[MAX_POLYGON_VECS];
 static ubyte triangulated_faces[MAX_FACES_PER_ROOM];

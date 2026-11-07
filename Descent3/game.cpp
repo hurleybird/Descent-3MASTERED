@@ -261,7 +261,11 @@ void SetGamemodeScript(const char* scrfilename, int num_teams)
 	Gamemode_info.requested_num_teams = num_teams;
 }
 
-void RenderBlankScreen(void);
+// UI clear callback; independent of world drawing.
+void RenderBlankScreen(void)
+{
+	rend_ClearScreen(GR_BLACK);
+}
 
 const char* ResolveCompatibleGameModule(const char* advertised_name)
 {

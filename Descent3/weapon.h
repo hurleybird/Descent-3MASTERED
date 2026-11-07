@@ -228,8 +228,7 @@ int CreateAndFireWeapon (vector *pos,vector *dir,object *parent,int weapon_num);
 int FireWeaponFromObject (object *obj,int weapon_num,int gun_num=-1,bool f_force_forward = false,bool f_force_target = false);
 
 
-// Draws a weapon
-void DrawWeaponObject (object *obj);
+// Classifies effects attached to the active player's near-camera weapon.
 bool WeaponIsCloseScreenEffectObject(object *obj);
 
 //	unconditionally adds a weapon and ammo to a player.
@@ -291,9 +290,6 @@ void DoSprayEffect (object *obj,otype_wb_info *static_wb,ubyte wb_index);
 
 // Plays the animation that accompanies a weapon death
 void DoWeaponExploded (object *,vector *norm=NULL,vector *collision_point=NULL,object *hit_object=NULL);
-
-// Flushes any queued batched weapon streamer lines.
-void FlushWeaponStreamerBatches();
 
 void TimeoutWeapon (object *);
 

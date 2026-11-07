@@ -19,7 +19,6 @@
 #include "help.h"
 #include "mono.h"
 #include "renderer.h"
-#include "render.h"
 #include "ddio.h"
 #include "descent.h"
 #include "game.h"

@@ -16,7 +16,7 @@
 #include "config.h"
 #include "grdefs.h"
 
-extern int FastCoronas;
+static int FastCoronas = 0;
 namespace {
 constexpr uint64_t Collection = 0x524f4f4d474c4f57ull;
 struct RoomSources {

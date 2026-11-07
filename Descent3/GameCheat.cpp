@@ -34,7 +34,6 @@
 #include "pilot.h"
 #include "Mission.h"
 #include "ship.h"
-#include "render.h"
 #include "renderer.h"
 
 #define CHEATSPOT 14

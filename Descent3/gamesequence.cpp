@@ -53,7 +53,6 @@
 #include "ship.h"
 #include "TelCom.h"
 #include "scorch.h"
-#include "render.h"
 #include "SceneExtraction.h"
 #include "renderer.h"
 #include "stringtable.h"
@@ -526,7 +525,6 @@ void StartLevel()
 	ResetMarkers();
 	ResetScorches();
 	ResetWaypoint();
-	ResetLightGlows();
 	DoorwayDeactivateAll();
 	ClearViewerObjects();
 	DeleteAmbientObjects();
@@ -1437,19 +1435,16 @@ void PageInWeapon(int id)
 	if (weaponpointer->explode_image_handle != -1)
 	{
 		PageInLevelTexture(weaponpointer->explode_image_handle);
-		VisEffectPrewarmTexture(weaponpointer->explode_image_handle);
 	}
 
 	if (weaponpointer->particle_handle != -1)
 	{
 		PageInLevelTexture(weaponpointer->particle_handle);
-		VisEffectPrewarmTexture(weaponpointer->particle_handle);
 	}
 
 	if (weaponpointer->smoke_handle != -1)
 	{
 		PageInLevelTexture(weaponpointer->smoke_handle);
-		VisEffectPrewarmTexture(weaponpointer->smoke_handle);
 	}
 
 	if (weaponpointer->scorch_handle != -1)
@@ -1747,8 +1742,6 @@ void PageInAllData()
 	const int light_flare = FindTextureName(IGNORE_TABLE("LightFlare"));
 	PageInLevelTexture(light_flare_star);
 	PageInLevelTexture(light_flare);
-	VisEffectPrewarmTexture(light_flare_star);
-	VisEffectPrewarmTexture(light_flare);
 
 	LoadLevelProgress(LOAD_PROGRESS_PAGING_DATA, PAGED_IN_CALC);
 
@@ -1764,7 +1757,6 @@ void PageInAllData()
 		if (id != -1)
 		{
 			PageInLevelTexture(id);
-			VisEffectPrewarmTexture(id);
 		}
 	}
 	LoadLevelProgress(LOAD_PROGRESS_PAGING_DATA, PAGED_IN_CALC);

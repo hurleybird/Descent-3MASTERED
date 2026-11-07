@@ -33,7 +33,6 @@
 #include "findintersection.h"
 #include "fireball_external.h"
 #include "weapon.h"
-#include "render.h"
 
 #include <stdlib.h>
 #include <math.h>

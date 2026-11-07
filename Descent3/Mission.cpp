@@ -52,7 +52,6 @@
 #include "BOA.h"
 #include "terrain.h"
 #include "multi.h"
-#include "render.h"
 
 //	---------------------------------------------------------------------------
 //	Data

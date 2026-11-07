@@ -22,7 +22,6 @@
 #include "game.h"
 #include "config.h"
 #include "renderer.h"
-#include "render.h"
 #include "player.h"
 #include "polymodel.h"
 #include "gametexture.h"

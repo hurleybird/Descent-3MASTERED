@@ -40,7 +40,6 @@
 #include "../renderer/SceneLighting.h"
 #include "../renderer/SceneAnimation.h"
 #include "game.h"
-#include "render.h"
 #include "descent.h"
 #include "slew.h"
 #include "mono.h"
@@ -105,7 +104,6 @@
 #include "spew.h"
 #include "grtext.h"
 #include "gamefont.h"
-#include "renderobject.h"
 #include "vibeinterface.h"
 #include "gamespy.h"
 #include "viseffect.h"
@@ -1077,7 +1075,6 @@ void PerfMarkersBeginFrame()
 	Perf_marker_records.clear();
 	Perf_marker_stack.clear();
 	PolymodelPerfReset();
-	RenderObjectPerfReset();
 	Perf_marker_frame_number++;
 }
 
@@ -1098,7 +1095,6 @@ void PerfMarkersEndFrame()
 	}
 
 	PolymodelPerfFlush();
-	RenderObjectPerfFlush();
 	PerfMarkersRecordDuration("Frame.Total", Perf_marker_frame_start, frame_end - Perf_marker_frame_start);
 	if (!Perf_marker_stack.empty())
 	{
@@ -2125,10 +2121,6 @@ void ProcessTestKeys(int key)
 		AddHUDMessage("Terrain LOD engine turned %s", Terrain_LOD_engine_off ? "OFF" : "ON");
 		break;
 
-	case KEY_M:
-		Render_portals = 1 - Render_portals;
-		break;
-
 	case KEY_N + KEY_SHIFTED:
 		if (Current_level && Current_level->filename) {
 			vector player_pos = Player_object->pos;
@@ -2141,16 +2133,6 @@ void ProcessTestKeys(int key)
 			//Restore player position
 			ObjSetPos(Player_object, &player_pos, player_roomnum, &player_orient, true);
 		}
-		break;
-
-	case KEY_O:
-		Outline_mode ^= OM_ON;
-		AddHUDMessage("Outline mode turned %s", OUTLINE_ON(0) ? "ON" : "OFF");
-		break;
-
-	case KEY_O + KEY_SHIFTED:
-		Outline_mode = OM_ON + OM_ALL;
-		AddHUDMessage("All outline options turned on.");
 		break;
 
 	case KEY_Q:
@@ -2880,7 +2862,6 @@ void ProcessKeys()
 //					rear_view - if true, we're looking out the rear of this object
 
 #ifdef _DEBUG
-extern void DrawRoomVisPnts(object* obj);
 #endif
 
 // GameRenderWorld's stateful world execution has been removed. World views
@@ -3067,9 +3048,6 @@ void GameRenderFrame(void)
 		}
 	}
 
-#ifndef RELEASE
-	Mine_depth = 0;
-#endif
 
 	// Don't render if receiving data
 	if ((Game_mode & GM_MULTI) && NetPlayers[Player_num].sequence != NETSEQ_PLAYING)

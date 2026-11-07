@@ -29,7 +29,6 @@
 #include "../renderer/SceneGeometry.h"
 #include "args.h"
 #include "config.h"
-#include "renderobject.h"
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
@@ -37,6 +36,38 @@
 extern bool is_multi_demo;
 
 namespace {
+// Observation ordering is a game presentation policy, not a draw-pass query.
+bool usesFrontToBackObservation(object* obj)
+{
+	if (!obj)
+		return false;
+
+	int model_num = -1;
+	if (obj->render_type == RT_POLYOBJ)
+	{
+		model_num = obj->rtype.pobj_info.model_num;
+	}
+	else if (obj->render_type == RT_WEAPON)
+	{
+		if (WeaponIsCloseScreenEffectObject(obj))
+			return false;
+		if (obj->id < 0 || obj->id >= MAX_WEAPONS)
+			return false;
+		const int transparent_image_flags = WF_IMAGE_BITMAP | WF_IMAGE_VCLIP | WF_ELECTRICAL;
+		if (Weapons[obj->id].flags & transparent_image_flags)
+			return false;
+		model_num = obj->rtype.pobj_info.model_num;
+	}
+	else
+	{
+		return false;
+	}
+
+	if (model_num < 0 || model_num >= MAX_POLY_MODELS)
+		return false;
+	const poly_model& model = Poly_models[model_num];
+	return model.used && model.new_style;
+}
 d3scene::Vec3 value(const vector& v) { return {v.x, v.y, v.z}; }
 d3scene::Transform value(const ModelSubmodelTransform& t) {
     return {value(t.translation), value(t.orientation.rvec), value(t.orientation.uvec), value(t.orientation.fvec)};
@@ -269,7 +300,7 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::Presenta
         owner.observation_radius = source->size;
         owner.observation_eligible = owner.visible && source->render_type != RT_NONE &&
             (!OBJECT_OUTSIDE(source) || (!(source->flags & OF_DEAD) && source->type != OBJ_ROOM));
-        owner.observation_front_to_back = RenderObjectCanUseSeparatedPasses(source);
+        owner.observation_front_to_back = usesFrontToBackObservation(source);
         if (source->type == OBJ_WEAPON && source->id >= 0 && source->id < MAX_WEAPONS) {
             const auto flags = Weapons[source->id].flags;
             if (flags & WF_STREAMER) owner.observation_radius = Weapons[source->id].phys_info.velocity.z;

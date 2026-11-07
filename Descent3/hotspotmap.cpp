@@ -18,7 +18,6 @@
 
 #include "mono.h"
 #include "renderer.h"
-#include "render.h"
 #include "grdefs.h"
 #include "ddio.h"
 #include "descent.h"

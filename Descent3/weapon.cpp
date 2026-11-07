@@ -1397,9 +1397,6 @@ bool AutoSelectWeapon(int weapon_type, int new_wpn)
 // The r,g,b floats specify the color
 void DrawAlphaBlendedScreen(float r, float g, float b, float alpha)
 {
-	if (VisEffectQueueCloseScreenAlpha(r, g, b, alpha))
-		return;
-
 	g3Point* pntlist[4], points[4];
 	ddgr_color	color;
 	int i;

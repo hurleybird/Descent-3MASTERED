@@ -65,7 +65,6 @@
 #include "manage.h"
 #include "PHYSICS.H"
 #include "collide.h"
-#include "render.h"
 #include "audiotaunts.h"
 #include "polymodel.h"
 #include "osiris_share.h"
@@ -337,9 +336,8 @@ static bool ModuleFrameParameters(int* x,int* y,int* right,int* bottom) {
     return GetFrameParameters(x,y,right,bottom);
 }
 static void ModuleResetFacings() {
-    // Preview requests query immutable world geometry; they cannot reset the
-    // game's legacy traversal marks while the source callback is recording.
-    if (!ModuleCanvasCapture()) ResetFacings();
+    // Preserve the module ABI slot. Published scene views own their visibility;
+    // the retired renderer's global facing marks no longer exist to reset.
 }
 static void ModuleDepthState(sbyte state) {
     // Canvas geometry is depth-independent; recorded world images own depth.

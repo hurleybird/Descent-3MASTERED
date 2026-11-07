@@ -24,7 +24,6 @@
 #include "descent.h"
 #include "game.h"
 #include "polymodel.h"
-#include "renderobject.h"
 #include <stdlib.h>
 #include "lightmap_info.h"
 #include "fireball.h"
@@ -34,23 +33,6 @@
 #include "findintersection.h"
 #include "psrand.h"
 #include "../model/retained_polymodel.h"
-
-// returns true if this light point is visible
-bool IsLightPointVisible(vector* pos, float size, object* obj)
-{
-	if (obj != NULL)
-	{
-		if ((obj->flags & OF_RENDERED) || IsPointVisible(pos, size, NULL))
-			return true;
-	}
-	else
-	{
-		if (IsPointVisible(pos, size, NULL))
-			return true;
-	}
-
-	return false;
-}
 
 // Fills in the color of the passed in players thrusters.  For lighting
 void FindPlayerThrusterColor(int slot, float* r, float* g, float* b)
@@ -86,7 +68,6 @@ void FindPlayerThrusterColor(int slot, float* r, float* g, float* b)
 ubyte EasterEgg = 0;
 #define EASTER_EGG_TIMER (3600*4)
 
-void ReflectRay(vector*, vector*, vector*);
 namespace { uint64_t Object_lightmap_layout_revision = 1; }
 uint64_t ObjectLightmapLayoutRevision() { return Object_lightmap_layout_revision; }
 void InvalidateObjectLightmapLayouts() {

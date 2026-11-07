@@ -84,9 +84,6 @@ void InitRooms ();
 // Talk to Chris if you need something like this function.
 int FindPointRoom(vector *pnt);
 
-//Put this here so we don't need to include render.h
-extern bool Render_floating_triggers;
-
 #endif
 
 //Initalize a room, allocating memory and filling in fields
