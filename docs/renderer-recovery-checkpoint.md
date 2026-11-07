@@ -2,6 +2,15 @@
 
 ## November 6 — fog portal admission qualified
 
+Follow-up: fresh old/new clean corpus now wins6/8 GPU scenes;001 .737→.809 and
+007 .403→.515 still regress. Per-draw timestamps localize late cost to particle
+sprites. Removing lighting/specular machinery only saves~10% of those passes;
+destructive probe removed. Compact8x4 fog compute groups repeatedly improve
+001 .800→.7805 and007 .515→.503, with all8 effects images, roof motion, odd-width
+full-precision reference pixel-identical. Root3/3 pass. Grouping is now the
+production candidate; no resolution/refinement reduction. Evidence in GPU doc.
+Next: investigate remaining particle fog/field costs and effects scaling.
+
 Room-owned fog now uses existing conservative portal visibility before node
 preparation, field allocation, color factorization, and integration. Unknown
 metadata admits conservatively; connected volumes retain their full boundary.

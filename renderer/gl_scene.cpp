@@ -1853,6 +1853,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         auto& program = scene_fog_field_programs[(scalar_field ? 2 : 0)+(half_field ? 1 : 0)];
         auto& scene_fog_field_shader = program.shader;
         auto& scene_fog_field_range = program.range;
+        const int field_rows = AutomatedCaptureFrameIndex() >= 0 && FindArg("-scene-fog-row-group-reference") ? 1 : SceneFogFieldRows;
         if (!scene_fog_field_shader.Handle()) {
             std::string source = SceneLightingShader;
             source.replace(0,source.find('\n'),"#version 430 core");
@@ -1861,7 +1862,9 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
             source += FogFieldDefinitions();
             source += SceneFogIntersectionShader;
             source += "\n#define SCENE_FOG_SLICES "+std::to_string(SceneFogFieldSlices)+"\n";
-            source += "\n#define SCENE_FOG_LANES "+std::to_string(SceneFogFieldLanes)+"\n";
+            source += "\n#define SCENE_FOG_LANES "+std::to_string(SceneFogFieldColumns*field_rows)+"\n";
+            source += "\n#define SCENE_FOG_GROUP_X "+std::to_string(SceneFogFieldColumns)+"\n";
+            source += "\n#define SCENE_FOG_GROUP_Y "+std::to_string(field_rows)+"\n";
             source += scalar_field ? "\n#define SCENE_FOG_SCALAR_FIELD 1\n" : "\n#define SCENE_FOG_SCALAR_FIELD 0\n";
             source += "\n#define SCENE_FOG_FIELD_FORMAT ";
             source += scalar_field ? (half_field ? "r16f\n" : "r32f\n") : (half_field ? "rgba16f\n" : "rgba32f\n");
@@ -1934,7 +1937,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         }
         scene_fog_field_shader.Use();
         if (field_queries[0]) glQueryCounter(field_queries[1],GL_TIMESTAMP);
-        glDispatchCompute((width+SceneFogFieldLanes-1)/SceneFogFieldLanes,height,1);
+        glDispatchCompute((width+SceneFogFieldColumns-1)/SceneFogFieldColumns,(height+field_rows-1)/field_rows,1);
         glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT);
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER,0,GLuint(previous_tile_binding));
         glBindBuffer(GL_SHADER_STORAGE_BUFFER,GLuint(previous_storage_binding));

@@ -2,7 +2,10 @@
 #pragma once
 
 static constexpr int SceneFogFieldSlices = 64;
-static constexpr int SceneFogFieldLanes = 8;
+// A compact 2D group keeps neighboring optical columns together. Each lane
+// owns its event bins; the group needs 16KiB shared storage for 64 slices.
+static constexpr int SceneFogFieldColumns = 8;
+static constexpr int SceneFogFieldRows = 4;
 
 // Shared by the reference surface integrator and the view-field compiler.
 static const char* SceneFogIntersectionShader = R"GLSL(
@@ -77,7 +80,7 @@ void main() {
 // Compile centered optical columns in one pass. Boundary crossings are binned
 // once per ray, analytically integrated per cell, then accumulated in depth.
 static const char* SceneFogFieldComputeShader = R"GLSL(
-layout(local_size_x=SCENE_FOG_LANES,local_size_y=1) in;
+layout(local_size_x=SCENE_FOG_GROUP_X,local_size_y=SCENE_FOG_GROUP_Y) in;
 layout(SCENE_FOG_FIELD_FORMAT,binding=0) coherent uniform image3D fog_field_output;
 uniform float fog_field_range;
 layout(std430,binding=0) readonly buffer FogTiles {uint fog_tiles[];};

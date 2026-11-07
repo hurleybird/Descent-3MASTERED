@@ -233,3 +233,53 @@ argument limit; exclude qual-fog-admission-saveg001-exact-reference-effects
 from evidence. Short-path reruns above succeeded. Candidate/Previous Candidate
 remain untouched. Dense001/007 still need GPU investigation; these results do
 not establish a win over the pre-rewrite renderer on every scene/settings.
+
+### Refreshed pre-rewrite comparison and late-draw isolation
+
+gpu-admit-{old,new}-savegNNN-20261106,1500frames,median400..1199,
+720p,1x,noMSAA/AO/bloom,headlight,render thread CPU2. Old is reconstructed
+bfb59647 with its matching archive, not the deleted original executable.
+Current executable and archive were restored after the sequential runs.
+
+| Save | Reconstructed old GPU ms | Current GPU ms |
+|---|---:|---:|
+| 000 | .3190 | .1680 |
+| 001 | .7370 | .8090 |
+| 002 | 1.4625 | .4815 |
+| 003 | .5900 | .2700 |
+| 004 | .3470 | .1640 |
+| 005 | .2390 | .1380 |
+| 006 | .3280 | .2000 |
+| 007 | .4030 | .5150 |
+
+Six of eight improve;001/007 still regress. This is NOT an effects-scaled or
+strict image-equivalence comparison between the two renderers.
+
+Capture-frame per-draw timestamps (queued, read only after view submission)
+localize001 late-pass .41488ms to24 sprites, bitmap2923..2931;007 .17576ms to10
+sprites in the same range. Largest001 draws cost .048-.054ms apiece. Evidence
+gpu-late-saveg{001,007}-20261106. Shader-cost isolation removed surface lighting
+and specular code globally, retaining fog/soft-depth/material sampling. This
+INVALIDATES opaque appearance; it is NOT a proposed implementation. The late
+pass only improves to .37484/.15720ms (~10%). Thus lightweight unlit shaders
+alone cannot eliminate the remaining cost. Evidence gpu-unlit-*. All temporary
+per-draw and destructive shader probe code removed after measurement.
+
+### Compact 2D fog compute groups
+
+Keep each invocation's exact column integration, but group8x4 adjacent columns
+instead of8x1. This uses16KiB shared event storage, no new resource, and no
+sampling change. The producer's existing32-thread row experiment did not show
+this gain: 2D layout matters on the measured GPU. Mechanism is inferred from
+the layout experiment; no hardware cache/occupancy counter claim is made.
+
+First gpu-{control,square}-saveg{001,007}-20261106:
+001 GPU .800→.780ms;007 .515→.502. Reversed-order repeat
+gpu-repeat-{group,row}-savegNNN-20261106:001 .800→.7805,007 .515→.503.
+Capture-frame integration001 .15064→.13340ms;007 .11760→.10556.
+Root3/3 pass. All8 effects/MotionBlur captures pixel-identical to the admission
+candidate (fog-group-fx-20261106). Roof motion150..153 all four frames exact
+between groups (fog-roof-{group,row}-20261106). Odd311-wide field with full
+precision is exact (fog-odd-*). All controls use the capture-only
+-scene-fog-row-group-reference flag; ordinary execution uses8x4. Small but
+repeatable gain, not a solution to all remaining dense-scene overhead.
