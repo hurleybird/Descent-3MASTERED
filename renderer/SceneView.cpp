@@ -990,14 +990,10 @@ void buildViewPasses(const Presentation& frame,const ViewVisibility& view,ViewPr
         depth_required = depth_required || (view.soft_particles && visibleSurfaceBinding(frame,view.surfaces[i]).soft_depth_range > 0);
     if (depth_required) passes.push_back({ViewPassKind::SnapshotOpaqueDepth,index,index});
     if (products.opaque_scene && !products.occlusion) passes.push_back({ViewPassKind::ExportOpaqueScene,index,index});
-    if (!products.soft_volume_layer) {
-        if (index < view.surfaces.size()) passes.push_back({ViewPassKind::LateWorld,index,static_cast<uint32_t>(view.surfaces.size())});
-        return;
-    }
     bool late_depth_changed = false;
     const auto soft_volume = [&](uint32_t i) {
         const auto& item = view.surfaces[i];
-        if (late_depth_changed || !item.mesh ||
+        if (!products.soft_volume_layer || late_depth_changed || !item.mesh ||
             frame.data().meshes[item.mesh_index].raster_domain != RasterDomain::SoftVolume) return false;
         const auto& surface = visibleSurfaceBinding(frame,item);
         const auto policy = visibleSurfacePolicy(frame,item);
@@ -1010,16 +1006,20 @@ void buildViewPasses(const Presentation& frame,const ViewVisibility& view,ViewPr
     while (index < view.surfaces.size()) {
         const auto first = index;
         const bool soft = soft_volume(index);
+        const bool unlit = visibleSurfaceBinding(frame,view.surfaces[index]).unlit;
         const auto blend = visibleSurfacePolicy(frame,view.surfaces[index]).blend;
         do {
             late_depth_changed = late_depth_changed || visibleSurfacePolicy(frame,view.surfaces[index]).writesDepth();
             ++index;
         } while (index < view.surfaces.size() && soft_volume(index) == soft &&
+            (soft || visibleSurfaceBinding(frame,view.surfaces[index]).unlit == unlit) &&
             // The scene destination clamps normalized color between draws.
             // An additive run followed by alpha cannot share one floating-
             // point accumulator: intervening saturation would be lost.
             (!soft || visibleSurfacePolicy(frame,view.surfaces[index]).blend == blend));
-        passes.push_back({soft ? ViewPassKind::SoftVolumes : ViewPassKind::LateWorld,first,index});
+        // Lighting frequency is a pass contract, independent of whether this
+        // view borrows a reduced-resolution particle layer. Never reorder runs.
+        passes.push_back({soft ? ViewPassKind::SoftVolumes : (unlit ? ViewPassKind::UnlitWorld : ViewPassKind::LateWorld),first,index});
     }
 }
 } // namespace d3scene

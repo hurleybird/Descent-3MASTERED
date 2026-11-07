@@ -181,12 +181,9 @@ class GL4Renderer : public IRenderer
 		GLint planar_projection = -1;
 	};
 	struct SceneProgram { ShaderProgram shader; SceneUniformLocations uniforms; };
-	// Fog mode x particle-layer interface. Views without a layer retain the
-	// ordinary fragment shader, including native-resolution and image views.
-	// Three additional fog variants serve the explicitly unlit SoftVolumes pass.
-	// Each set is cached independently for uniform-block or large texture-table
-	// lights. Crossing the capacity boundary never reuses the wrong interface.
-	std::array<SceneProgram,18> scene_programs;
+	// Light storage x fog mode x layer interface x lighting contract. Only
+	// requested combinations compile; every program shares the view/draw UBOs.
+	std::array<SceneProgram,24> scene_programs;
 	GLuint scene_light_buffer = 0, scene_light_texture = 0;
 	GLuint scene_draw_buffer = 0;
     GLuint scene_view_buffer = 0;

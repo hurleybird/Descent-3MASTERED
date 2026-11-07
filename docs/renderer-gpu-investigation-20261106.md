@@ -768,3 +768,20 @@ scene-fog-compact-single-probe exercises overflow without dropping crossings.
 Latest lightrefresh baseline, before this compact producer, old/current rounded:
 001 native.78/.72 (old varied; not a reliable victory),SSAA1.44/1.59,full3.21/3.43;
 007 native.40/.47,SSAA.89/1.10,full2.81/2.79. Overall victory still outstanding.
+
+## November7: unlit world runs independent of supersampling
+
+buildViewPasses now emits stable UnlitWorld runs for late unlit materials,
+including native-resolution and auxiliary views. No draw reorder, new image,
+or per-draw uniform copies. Existing soft-layer blend saturation boundaries and
+late depth-writer barriers remain intact. Program key explicitly represents
+light storage/fog/layer interface/lighting contract; only used variants compile.
+
+unlitnative paired001 .657→.619,.659→.620;007 .435→.420,.4355→.420ms.
+unlitworld full-effects neutral:0013.323/3.330,3.342/3.334;
+0072.758/2.755,2.762/2.763. All eight paired images exact. Capture reference
+scene-general-unlit-reference uses general programs with the same schedule.
+Root3/3 (including mixed lit/unlit schedule tests); unlitworld-fx all8 exact
+against compactfog-fx, uw-native all8 reference/unlit pairs exact; auxiliary003/006
+exact and image-settings passes. Native gains are not claimed for SSAA volumes,
+which already used specialized unlit shaders.

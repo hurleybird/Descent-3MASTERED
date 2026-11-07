@@ -1607,6 +1607,10 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         return pass.kind == d3scene::ViewPassKind::SoftVolumes;
     });
     const bool specialize_volumes = particle_shader && !(AutomatedCaptureFrameIndex() >= 0 && FindArg("-scene-general-volume-reference"));
+    const bool specialize_unlit = !(AutomatedCaptureFrameIndex() >= 0 && FindArg("-scene-general-unlit-reference")) &&
+        std::any_of(passes.begin(),passes.end(),[](const d3scene::ViewPass& pass) {
+            return pass.kind == d3scene::ViewPassKind::UnlitWorld;
+        });
     const bool general_layer = particle_shader && (!specialize_volumes ||
         (AutomatedCaptureFrameIndex() >= 0 && FindArg("-scene-general-opaque-reference")));
     const auto initialize_program = [&](SceneProgram& program,bool unlit_pass,bool layer_interface) {
@@ -1687,11 +1691,13 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         glUniform1i(scene_uniforms.opaque_depth,7);
     }
     };
-    const size_t light_program_base = uniform_lights ? 9 : 0;
-    auto& view_program = scene_programs[light_program_base+fog_mode*2+general_layer];
-    auto& volume_program = scene_programs[light_program_base+6+fog_mode];
+    const size_t program_base = (uniform_lights ? 12 : 0)+fog_mode*4;
+    auto& view_program = scene_programs[program_base+(general_layer ? 2 : 0)];
+    auto& volume_program = scene_programs[program_base+3];
+    auto& unlit_program = scene_programs[program_base+1];
     initialize_program(view_program,false,general_layer);
     if (specialize_volumes) initialize_program(volume_program,true,true);
+    if (specialize_unlit) initialize_program(unlit_program,true,false);
     auto& scene_shader = view_program.shader;
     auto& scene_uniforms = view_program.uniforms;
 
@@ -2048,13 +2054,14 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     glUniform1f(scene_uniforms.fog_field_range,field_range);
     glUniform4f(scene_uniforms.fog_field_color,field_color.x,field_color.y,field_color.z,scalar_field ? 1.f : 0.f);
     glUniform1i(scene_uniforms.fog_debug,FindArg("-scene-fog-debug") != 0);
-    if (specialize_volumes) {
-        volume_program.shader.Use();
-        glUniform1f(volume_program.uniforms.fog_field_range,field_range);
-        glUniform4f(volume_program.uniforms.fog_field_color,field_color.x,field_color.y,field_color.z,scalar_field ? 1.f : 0.f);
-        glUniform1i(volume_program.uniforms.fog_debug,FindArg("-scene-fog-debug") != 0);
-        scene_shader.Use();
+    for (auto* program : {specialize_volumes ? &volume_program : nullptr,specialize_unlit ? &unlit_program : nullptr}) {
+        if (!program) continue;
+        program->shader.Use();
+        glUniform1f(program->uniforms.fog_field_range,field_range);
+        glUniform4f(program->uniforms.fog_field_color,field_color.x,field_color.y,field_color.z,scalar_field ? 1.f : 0.f);
+        glUniform1i(program->uniforms.fog_debug,FindArg("-scene-fog-debug") != 0);
     }
+    scene_shader.Use();
     const auto exteriorRoom = [&](int room) {
         if (room < 0) return true;
         const auto* found = presentation.roomIndices().find(room);
@@ -2273,7 +2280,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     for (const auto& pass : passes) {
       if (measure_passes) glQueryCounter(pass_queries[pass_query_index++],GL_TIMESTAMP);
       if (debug_occlusion && (pass.kind == d3scene::ViewPassKind::OpaqueWorld ||
-          pass.kind == d3scene::ViewPassKind::LateWorld || pass.kind == d3scene::ViewPassKind::SoftVolumes ||
+          pass.kind == d3scene::ViewPassKind::LateWorld || pass.kind == d3scene::ViewPassKind::UnlitWorld || pass.kind == d3scene::ViewPassKind::SoftVolumes ||
           pass.kind == d3scene::ViewPassKind::SnapshotOpaqueDepth)) continue;
       if (pass.kind == d3scene::ViewPassKind::EvaluateWorldOcclusion) {
         AOInputs inputs;
@@ -2464,13 +2471,14 @@ void main() {
       // Image consumers do not write clip distances; never leak this state.
       depth_prepass = pass.kind == d3scene::ViewPassKind::DepthSurface;
       const bool volume_layer = pass.kind == d3scene::ViewPassKind::SoftVolumes;
+      const bool unlit_pass = pass.kind == d3scene::ViewPassKind::UnlitWorld && specialize_unlit;
       // Scheduling admits only unlit read-only materials to this pass. Its
       // program can omit lit varyings without changing material interpretation.
-      auto& raster_program = volume_layer && specialize_volumes ? volume_program : view_program;
+      auto& raster_program = volume_layer && specialize_volumes ? volume_program : (unlit_pass ? unlit_program : view_program);
       auto& scene_shader = raster_program.shader;
       auto& scene_uniforms = raster_program.uniforms;
       scene_shader.Use();
-      if (volume_layer && specialize_volumes)
+      if ((volume_layer && specialize_volumes) || unlit_pass)
           glUniform2i(scene_uniforms.depth_snapshot_origin,depth_for_sampling == depth.texture ? raster.x : 0,
               depth_for_sampling == depth.texture ? raster.y : 0);
       const int volume_width = (std::max)(1,raster.width/SupersamplingFactor());

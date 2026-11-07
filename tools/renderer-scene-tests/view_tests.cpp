@@ -1532,7 +1532,7 @@ int runSceneViewTests() {
     }
     check(passes.size() == 4 && passes[0].kind == d3scene::ViewPassKind::Background &&
         passes[1].kind == d3scene::ViewPassKind::OpaqueWorld && passes[2].kind == d3scene::ViewPassKind::SnapshotOpaqueDepth &&
-        passes[3].kind == d3scene::ViewPassKind::LateWorld,"Opaque depth dependency was scheduled after its consumer");
+        passes[3].kind == d3scene::ViewPassKind::UnlitWorld,"Opaque depth dependency was scheduled after its consumer");
     check(passes[0].begin == 0 && passes[0].end == 1 && passes[1].begin == 1 && passes[1].end == 2 &&
         passes[2].begin == passes[2].end && passes[3].begin == 2 && passes[3].end == 3,"View pass ranges overlap or omit surfaces");
     scheduled.meshes[0].surface.soft_depth_range = 0; scheduled.meshes[0].surface.blend = d3scene::BlendMode::Alpha;
@@ -1541,7 +1541,7 @@ int runSceneViewTests() {
         "Unconsumed opaque depth was copied");
     const auto exported = d3scene::buildViewPasses(*scheduled_frame,scheduled_visibility,{true});
     check(exported.size() == 5 && exported[3].kind == d3scene::ViewPassKind::ExportOpaqueScene &&
-        exported[4].kind == d3scene::ViewPassKind::LateWorld,"Opaque image product includes translucent consumers");
+        exported[4].kind == d3scene::ViewPassKind::UnlitWorld,"Opaque image product includes translucent consumers");
     const auto empty_frame = d3scene::Presentation::freeze(shaken);
     {
         auto volume = soft;
@@ -1551,13 +1551,13 @@ int runSceneViewTests() {
         auto volume_data = scheduled; volume_data.meshes = {volume};
         auto volume_frame = d3scene::Presentation::freeze(volume_data);
         auto volume_view = d3scene::queryView(*volume_frame,view());
-        check(d3scene::buildViewPasses(*volume_frame,volume_view).back().kind == d3scene::ViewPassKind::LateWorld,
-            "Soft volume changed the default raster schedule");
+        check(d3scene::buildViewPasses(*volume_frame,volume_view).back().kind == d3scene::ViewPassKind::UnlitWorld,
+            "Native unlit volume lost its lighting contract");
         check(d3scene::buildViewPasses(*volume_frame,volume_view,{false,false,true}).back().kind == d3scene::ViewPassKind::SoftVolumes,
             "Explicit soft volume was not scheduled into its layer");
         volume_data.meshes[0].surface.blend = d3scene::BlendMode::Multiply;
         volume_frame = d3scene::Presentation::freeze(volume_data);
-        check(d3scene::buildViewPasses(*volume_frame,d3scene::queryView(*volume_frame,view()),{false,false,true}).back().kind == d3scene::ViewPassKind::LateWorld,
+        check(d3scene::buildViewPasses(*volume_frame,d3scene::queryView(*volume_frame,view()),{false,false,true}).back().kind == d3scene::ViewPassKind::UnlitWorld,
             "Multiplicative material entered scalar-coverage particle layer");
         auto glass = volume; glass.raster_domain = d3scene::RasterDomain::Surface;
         auto depth_writer = glass; depth_writer.surface.depth = d3scene::DepthMode::ReadWrite;
@@ -1568,10 +1568,19 @@ int runSceneViewTests() {
         check(grouped.size() == 6 && grouped[1].kind == d3scene::ViewPassKind::SoftVolumes &&
             grouped[1].begin == 0 && grouped[1].end == 2 &&
             grouped[2].kind == d3scene::ViewPassKind::SoftVolumes && grouped[2].begin == 2 && grouped[2].end == 3 &&
-            grouped[3].kind == d3scene::ViewPassKind::LateWorld && grouped[3].begin == 3 && grouped[3].end == 4 &&
+            grouped[3].kind == d3scene::ViewPassKind::UnlitWorld && grouped[3].begin == 3 && grouped[3].end == 4 &&
             grouped[4].kind == d3scene::ViewPassKind::SoftVolumes && grouped[4].begin == 4 && grouped[4].end == 5 &&
-            grouped[5].kind == d3scene::ViewPassKind::LateWorld && grouped[5].begin == 5 && grouped[5].end == 7,
+            grouped[5].kind == d3scene::ViewPassKind::UnlitWorld && grouped[5].begin == 5 && grouped[5].end == 7,
             "Particle grouping crossed blend saturation, transparency or depth-writing barriers");
+        auto lit_glass = glass; lit_glass.surface.unlit = false;
+        volume_data.meshes = {glass,lit_glass,glass,glass};
+        volume_frame = d3scene::Presentation::freeze(volume_data);
+        const auto native_runs = d3scene::buildViewPasses(*volume_frame,d3scene::queryView(*volume_frame,view()));
+        check(native_runs.size() == 4 && native_runs[0].kind == d3scene::ViewPassKind::SnapshotOpaqueDepth &&
+            native_runs[1].kind == d3scene::ViewPassKind::UnlitWorld && native_runs[1].begin == 0 && native_runs[1].end == 1 &&
+            native_runs[2].kind == d3scene::ViewPassKind::LateWorld && native_runs[2].begin == 1 && native_runs[2].end == 2 &&
+            native_runs[3].kind == d3scene::ViewPassKind::UnlitWorld && native_runs[3].begin == 2 && native_runs[3].end == 4,
+            "Native lighting specialization reordered or merged through a lit draw");
     }
     {
         auto read_only = solid; read_only.surface.depth = d3scene::DepthMode::ReadOnly;
@@ -1623,7 +1632,7 @@ int runSceneViewTests() {
         (prepass+1)->kind == d3scene::ViewPassKind::ExportOpaqueScene &&
         (prepass+2)->kind == d3scene::ViewPassKind::EvaluateWorldOcclusion &&
         (prepass+3)->kind == d3scene::ViewPassKind::OpaqueWorld &&
-        radiance_passes.back().kind == d3scene::ViewPassKind::LateWorld,
+        radiance_passes.back().kind == d3scene::ViewPassKind::UnlitWorld,
         "Occlusion must consume surface depth before lighting, not revisit completed translucent color");
     const d3scene::RadianceSample opaque{{.6f,.7f,.8f},{.3f,.2f,.1f}}; // the remainder is fog/emissive
     for (const auto blend : {d3scene::BlendMode::Alpha,d3scene::BlendMode::Additive,d3scene::BlendMode::Multiply}) {

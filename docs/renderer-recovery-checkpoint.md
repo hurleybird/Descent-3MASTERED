@@ -1,5 +1,29 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November7 — latest: stable unlit world runs QUALIFIED
+
+Schedule now distinguishes UnlitWorld in stable late runs, including native
+rendering. SoftVolumes blend saturation/depth-writer barriers unchanged. Tests
+cover mixed lit/unlit ordering and retained schedule storage. Shader cache24
+combinations keyed by light storage/fog/layer/lighting contract; only needed
+programs compile. View fog uniforms once/view; depth snapshot origin per selected
+program. No per-draw uniform copies. Reference scene-general-unlit-reference.
+Root3/3; unlitworld-fx all8 exact vs compactfog-fx; uw-native reference/unlit
+all8 exact; aux003/006 exact; image-settings passes. Private runtime current.
+Native paired001 .657/.619,.659/.620;007 .435/.420,.4355/.420ms.
+Full-effects neutral:0013.323/3.330,3.342/3.334;0072.758/2.755,2.762/2.763.
+All eight timing-pair images exact. No active game/build after qualification.
+
+NEXT investigate SoftVolumes internal GPU times: reduced shading, composite+
+classification, repair. Existing pass timing lumps them together. Add temporary
+capture-only timestamp boundaries, read only after view submission. Let this
+decide the next change. Potential gather-offset classifier must be MEASURED,
+not assumed faster: four strided depth taps may compile to multiple instructions.
+Khronos GLSL4.3 spec confirms textureGatherOffsets samples i0/j0 for each constant
+offset; existing depth textures clamp-to-edge. No gather probe implemented yet.
+Continue until actual baseline victory; still no full baseline win claimed.
+Latest account usage37% consumed, credits unchanged62044.8730600000.
+
 ## November7 — latest: compact fog producer QUALIFIED, moving to unlit scheduling
 
 Compact8-bin producer is now default; reference -scene-fog-full-bins-reference,
