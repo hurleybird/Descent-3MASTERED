@@ -1,5 +1,40 @@
 # GPU bottleneck investigation — November 6
 
+## November7 checkpoint: particle stages and AO loop investigation
+
+Accepted production changes through31cc21a remain. This slice adds only
+capture-gated particle stage timestamps; no ordinary-frame query/readback or
+allocation. All timestamps are queued before any results are read after view
+submission. Flag: -scene-particle-stage-audit.
+
+particle-stages-saveg001/007-20261107, capture120, full effects:
+
+| Scene | Low-resolution shading | Composite/classification | Edge repair |
+|---|---:|---:|---:|
+|001|.353760 ms|.126160 ms|.353360 ms|
+|007|.194160 ms|.123800 ms|.139880 ms|
+
+These are diagnostic capture intervals, not whole-frame medians. Explicit early
+depth/stencil tests on read-only SoftVolumes were neutral: earlyparticles round1/2
+reference/probe0013.325/3.331,3.348/3.344;0072.753/2.747,2.7485/2.748.
+All4 images exact. Probe removed. Confirms the earlier explicit-early-tests
+finding; do not repeat it without a changed pipeline or new evidence.
+
+AO static-loop probe replaced uniform bounds with constants, preserving the
+benchmark's32 samples (8 directions x4 steps), locations, and arithmetic. Guard
+rejected other settings. aostatic32 round1/2 reference/probe GPU medians:
+0013.340/3.333,3.401/3.354;0072.748/2.711,2.769/2.7215. All4 images exact.
+This is a promising next lead, not an accepted general implementation. Removed
+fixed-setting override before checkpoint. Next: bounded specialization by actual
+quality pattern with safe generic fallback and settings/context-lifetime tests;
+qualify all8 before accepting. No fewer samples or changed sample pattern.
+Initial aostatic-* used wrong128 assumption, guard rejected it; incomplete run
+is INVALID evidence. Actual default32 is Descent3/init.cpp605.
+
+User requested natural-checkpoint yield/push. No refreshed baseline matrix or
+overall GPU victory claimed in this slice. Final build retains production
+behavior and capture-only diagnostics; experimental shader overrides removed.
+
 Investigation, not a shipped optimization. Production source remains at 075ae88;
 temporary diagnostic modes were removed afterward. Candidate and Previous
 Candidate were not changed. No instancing implementation was started.

@@ -2276,6 +2276,8 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     std::vector<GLuint> pass_queries(measure_passes ? passes.size()+1 : 0);
     if (measure_passes) glGenQueries(static_cast<GLsizei>(pass_queries.size()),pass_queries.data());
     size_t pass_query_index = 0;
+    const bool measure_particles = measure_passes && FindArg("-scene-particle-stage-audit");
+    std::vector<std::array<GLuint,4>> particle_queries;
     bool debug_occlusion = false;
     for (const auto& pass : passes) {
       if (measure_passes) glQueryCounter(pass_queries[pass_query_index++],GL_TIMESTAMP);
@@ -2471,6 +2473,13 @@ void main() {
       // Image consumers do not write clip distances; never leak this state.
       depth_prepass = pass.kind == d3scene::ViewPassKind::DepthSurface;
       const bool volume_layer = pass.kind == d3scene::ViewPassKind::SoftVolumes;
+      GLuint* particle_query = nullptr;
+      if (volume_layer && measure_particles) {
+          particle_queries.emplace_back();
+          particle_query = particle_queries.back().data();
+          glGenQueries(4,particle_query);
+          glQueryCounter(particle_query[0],GL_TIMESTAMP);
+      }
       const bool unlit_pass = pass.kind == d3scene::ViewPassKind::UnlitWorld && specialize_unlit;
       // Scheduling admits only unlit read-only materials to this pass. Its
       // program can omit lit varyings without changing material interpretation.
@@ -2796,6 +2805,7 @@ void main() {
       glBindSampler(0,0); glBindSampler(1,0); glBindSampler(8,0);
       glDisable(GL_CLIP_DISTANCE0);
       if (volume_layer && !particle_phase) {
+          if (particle_query) glQueryCounter(particle_query[1],GL_TIMESTAMP);
           if (!scene_volume_composite.Handle()) {
               extern const char* blitVertexSrc;
               const std::string composite = std::string(R"GLSL(#version 330 core
@@ -2854,8 +2864,10 @@ void main() {
           glBindSampler(14,0); glBindTexture(GL_TEXTURE_2D,0);
           rend_RecordDrawCall(RENDERER_DRAW_CALL_POSTPROCESS);
           scene_shader.Use(); glUniform4f(scene_uniforms.fragment_mapping,1,1,0,0);
+          if (particle_query) glQueryCounter(particle_query[2],GL_TIMESTAMP);
       }
       }
+      if (particle_query) glQueryCounter(particle_query[3],GL_TIMESTAMP);
       if (scene_uniforms.volume_edge_only >= 0) glUniform1i(scene_uniforms.volume_edge_only,0);
       if (stencil_repair) {
           glDisable(GL_STENCIL_TEST); glStencilMask(0xff);
@@ -2899,6 +2911,13 @@ void main() {
     }
     if (measure_passes) {
         glQueryCounter(pass_queries.back(),GL_TIMESTAMP);
+        for (auto& queries : particle_queries) {
+            GLuint64 times[4]{};
+            for (int i=0;i<4;++i) glGetQueryObjectui64v(queries[i],GL_QUERY_RESULT,&times[i]);
+            AutomatedCaptureLog("scene particles GPU shade=%.6f composite=%.6f repair=%.6f",
+                double(times[1]-times[0])*1.e-6,double(times[2]-times[1])*1.e-6,double(times[3]-times[2])*1.e-6);
+            glDeleteQueries(4,queries.data());
+        }
         if (field_queries[0]) {
             GLuint64 begin = 0,tiles = 0,end = 0;
             glGetQueryObjectui64v(field_queries[0],GL_QUERY_RESULT,&begin);

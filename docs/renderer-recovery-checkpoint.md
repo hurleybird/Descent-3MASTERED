@@ -1,5 +1,37 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November7 — user-requested yield: particle breakdown and AO loop evidence
+
+User superseded persistence with: finish at next natural checkpoint, push, yield.
+Accepted production optimizations remain through 31cc21a, previously pushed.
+This checkpoint adds capture-only particle stage timestamps, not a new speedup.
+No victory versus baseline yet; do not claim one. No fresh baseline matrix in
+this slice. Candidate/Previous Candidate/main workspace remain untouched.
+
+Particle-stage capture120 (particle-stages-saveg001/007-20261107): shade/composite/
+repair GPU ms respectively .353760/.126160/.353360 and .194160/.123800/.139880.
+Queries only on requested captures with -scene-particle-stage-audit, all queued
+before readback after view submission. No ordinary-frame allocations or queries.
+Explicit early tests on read-only volume shader neutral; removed. This repeats
+the older early-test finding, so DO NOT repeat again without new evidence.
+
+AO compile-time bounds probe (same 32 samples, 8 directions x4 steps) produced
+exact images in all4 pairs. aostatic32 round1/2 reference->probe GPU medians:
+0013.340->3.333,3.401->3.354;0072.748->2.711,2.769->2.7215.
+Useful lead, NOT shipped: fixed32 probe removed before final build. Generalize
+by actual quality pattern, bounded cache/fallback, settings changes/context
+recreation, then qualify all8 and temporal/settings tests before accepting.
+No sample reduction permitted. AO sample default is32 in Descent3/init.cpp605;
+an earlier hard128 probe was rejected by its validation (aostatic-* incomplete,
+not valid timing evidence). Static shader replacement was in AOResources::InitShaders.
+
+Next work: qualify general AO loop specialization, refresh repeated/reversed
+old/current GPU matrix (native/SSAA/MSAA/full), continue remaining baseline gap.
+Capture diagnostic image equivalence and root integration tests checked before
+push; final private runtime restored to production behavior (no shader probes).
+Unrelated untracked lib/gitinfo.h preserved. No deletion/desktop deployment.
+Usage38% consumed; credit balance unchanged62044.8730600000.
+
 ## November7 — latest: stable unlit world runs QUALIFIED
 
 Schedule now distinguishes UnlitWorld in stable late runs, including native
