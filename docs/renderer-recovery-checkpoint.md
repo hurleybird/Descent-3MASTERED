@@ -1,5 +1,20 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November 6 — measured GPU binding fault, investigation only
+
+See renderer-gpu-investigation-20261106.md for reproducible evidence. Mirror006
+inherits unit10 texture28 while rendering into that SAME texture. Clearing
+inherited planar binding at view entry, retaining actual mirror bindings,
+changes GPU .672→.201ms with repeated pixel-exact captures. 2xSSAA/noMSAA
+1.035→.559ms exact. MSAA uses distinct resolve storage: no benefit there,
+including 2xSSAA/4xMSAA/AO+bloom (1.995→1.998ms, exact). Do not oversell scaling.
+Other regression scenes000/001/007 do not benefit; fog field generation and
+late-pass fragment work remain. No instancing implemented. All temporary
+diagnostic source edits removed; no production fix landed in this investigation.
+Next: correct per-view resource binding ownership, then profile fog generation
+and late shading without discarding the accepted edge quality. Candidate and
+Previous Candidate untouched. Untracked lib/gitinfo.h preserved.
+
 ## November 6 — pause after retirement and GPU diagnosis
 
 User requested stopping at the next natural milestone. All retirement changes
