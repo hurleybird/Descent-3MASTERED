@@ -514,3 +514,33 @@ Final production root3/3. st-composite-fx-20261107 all8 exact against soft-alpha
 st-cq-* SSAA2/MSAA2,8 andSSAA4/MSAA4 exact against shader repair withGL audit.
 st-composite-aux003/006, trip003 all8 PNGs and roof150..153 exact against retained
 references. Source reduction removes the classifier added in d9d9e20.
+
+## November7: completed feature matrix and depth resolve reuse
+
+gpu-mx-* (1500 frames, median400..1199) compares reconstructed bfb59647 old
+exe AND assets with fdcd6ff. Not identical effects; not the deleted original exe.
+720p old/new GPU milliseconds, rounded:
+
+| Configuration | save001 old/new | save007 old/new |
+|---|---|---|
+| Native, no effects | .59/.77 | .40/.50 |
+| SSAA2, MSAA0, no effects | 1.33/2.32 | .88/1.40 |
+| SSAA2, MSAA4, no effects | 1.65/2.18 | 1.16/1.56 |
+| Above + AO | 2.76/3.22 | 2.42/2.51 |
+| Above no AO + bloom | 1.95/2.52 | 1.47/1.90 |
+| AO + bloom | 3.08/3.64 | 2.72/2.89 |
+| AO + bloom + motion blur | 3.16/3.74 | 2.81/3.00 |
+
+Gap precedes AO/bloom. AO incremental cost is comparable or lower. Dense001
+SSAA without MSAA is slower than with MSAA: stencil acceleration currently only
+exists on multisampled depth. Next investigate format-aware depth copy to extend
+stencil to single-sample SSAA, without aliasing the opaque snapshot.
+
+SceneSamples GLSL now returns the winning depth alongside its sample index;
+both depth-only and depth/velocity/identity resolves reuse it instead of fetching
+again. Same strict-less tie selection, no resource/pass/precision change.
+depth-{1,2}-{refetch,reuse}-* paired effects profiles:
+001 3.7575→3.714 and reversed order 3.745→3.7095;
+007 3.004→2.974 and reversed order 3.005→2.969 ms. All four images exact.
+Root integration3/3 passed. depth-reuse-fx-20261107 all8 images exact against
+st-composite-fx-20261107, including mirror/auxiliary save006.

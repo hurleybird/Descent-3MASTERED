@@ -636,7 +636,9 @@ void Framebuffer::ResolveDepth() {
 uniform sampler2DMS source_depth;
 void main() {
     ivec2 pixel = ivec2(gl_FragCoord.xy);
-    gl_FragDepth = texelFetch(source_depth,pixel,nearestDepthSample(source_depth,pixel)).r;
+    float nearest;
+    nearestDepthSample(source_depth,pixel,nearest);
+    gl_FragDepth = nearest;
 }
 )GLSL";
         m_depth_resolve_shader.AttachSource(blitVertexSrc,fragment.c_str());
@@ -1127,13 +1129,18 @@ void main() {
     // texel, then select ONE nearest MSAA surface for all categorical fields.
     ivec2 pixel = ivec2(gl_FragCoord.xy*float(read_scale));
 #ifdef MULTISAMPLE
-    int selected = nearestDepthSample(source_depth,pixel);
+    float nearest;
+    int selected = nearestDepthSample(source_depth,pixel,nearest);
 #else
     int selected = 0;
 #endif
     velocity = texelFetch(source_velocity,pixel,selected);
     identity = texelFetch(source_identity,pixel,selected).r;
+#ifdef MULTISAMPLE
+    gl_FragDepth = nearest;
+#else
     gl_FragDepth = texelFetch(source_depth,pixel,selected).r;
+#endif
 }
 )GLSL";
         resolve_shader.AttachSource(blitVertexSrc,fragment.c_str());

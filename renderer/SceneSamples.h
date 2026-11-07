@@ -13,9 +13,9 @@ inline size_t nearestDepthSample(const std::vector<float>& depth) {
     return selected;
 }
 constexpr const char* SampleResolveGlsl = R"GLSL(#version 450 core
-int nearestDepthSample(sampler2DMS depths,ivec2 pixel) {
+int nearestDepthSample(sampler2DMS depths,ivec2 pixel,out float nearest) {
     int selected = 0;
-    float nearest = texelFetch(depths,pixel,0).r;
+    nearest = texelFetch(depths,pixel,0).r;
     for (int i = 1; i < textureSamples(depths); ++i) {
         float candidate = texelFetch(depths,pixel,i).r;
         if (candidate < nearest) { selected = i; nearest = candidate; }

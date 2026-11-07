@@ -1,5 +1,16 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November7 — latest: depth resolve reuse, feature matrix complete
+
+SceneSamples GLSL returns winning depth with index; consumers no longer fetch
+the winning depth twice. Paired/reversed effects0013.7575→3.714/3.745→3.7095;
+0073.004→2.974/3.005→2.969ms. Four images and all8 effects corpus exact.
+Root3/3 passed. No extra resource, pass, or quality change.
+Matrix below HAS NOW RUN; evidence in renderer-gpu-investigation-20261106.md.
+New still slower overall; gap precedes AO/bloom. Next concrete target is missing
+stencil acceleration for single-sample SSAA, requiring format-aware depth copy.
+Private runtime current; main/Candidate/Previous Candidate untouched.
+
 ## November7 — latest: composite owns repair coverage
 
 Supersedes standalone-classifier details below. Existing particle composite now
