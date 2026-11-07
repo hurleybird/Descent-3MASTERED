@@ -2143,6 +2143,16 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     }
 
     PERF_MARKER_SCOPE("Scene.Submission");
+    // Image inputs belong to this view, not the previous view's GL state.
+    // Even a dynamically unused sampler must not retain this view's output:
+    // the reflection image can still be bound from its previous consumer.
+    // Material draws, depth snapshots, AO and compositing bind their own inputs
+    // below. Keep the view's buffer textures and freshly built fog field intact.
+    for (int unit : {0,1,7,8,10,11,14,15}) {
+        glActiveTexture(GL_TEXTURE0+unit);
+        glBindTexture(GL_TEXTURE_2D,0);
+    }
+    glActiveTexture(GL_TEXTURE0);
     // Diagnostic timestamps are confined to the requested screenshot frame.
     // Queue every marker before reading results so individual passes do not
     // acquire CPU/GPU synchronization points during execution.
@@ -2581,6 +2591,33 @@ void main() {
         previous_raster = raster_key; raster_bound = true;
         }
         if (packet.vao != previous_vao) { glBindVertexArray(packet.vao); previous_vao = packet.vao; }
+        // Validate inherited as well as explicitly requested inputs. The
+        // bind_view_image ownership check alone cannot catch a stale sampler.
+        // Capture-only: never put synchronous state queries on ordinary frames.
+        if (measure_passes && item_index == pass.begin) {
+            std::array<GLint,5> outputs{};
+            size_t index = 0;
+            for (GLenum attachment : {GL_COLOR_ATTACHMENT0,GL_COLOR_ATTACHMENT1,
+                    GL_COLOR_ATTACHMENT2,GL_COLOR_ATTACHMENT4,GL_DEPTH_ATTACHMENT}) {
+                GLint type = 0;
+                glGetFramebufferAttachmentParameteriv(GL_DRAW_FRAMEBUFFER,attachment,
+                    GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE,&type);
+                if (type == GL_TEXTURE)
+                    glGetFramebufferAttachmentParameteriv(GL_DRAW_FRAMEBUFFER,attachment,
+                        GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME,&outputs[index]);
+                ++index;
+            }
+            GLint active = 0;
+            glGetIntegerv(GL_ACTIVE_TEXTURE,&active);
+            for (int unit : {0,1,7,8,10,11,14,15}) {
+                GLint input = 0;
+                glActiveTexture(GL_TEXTURE0+unit);
+                glGetIntegerv(GL_TEXTURE_BINDING_2D,&input);
+                if (input && std::find(outputs.begin(),outputs.end(),input) != outputs.end())
+                    Error("Scene image input unit %d aliases an output texture (%d)",unit,input);
+            }
+            glActiveTexture(active);
+        }
         auto attribution = packet.attribution;
         uint32_t end = item_index+1;
         while (end < pass.end && compatible(item_index,end)) {

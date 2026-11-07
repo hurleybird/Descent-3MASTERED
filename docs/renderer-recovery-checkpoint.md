@@ -1,5 +1,30 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November 6 — view image-input ownership fixed and verified
+
+ExecuteSceneView resets its eight 2D image input slots once before submission;
+materials/snapshots/AO/compositing subsequently bind their declared inputs.
+Buffer tables and the freshly generated 3D fog field stay intact. Capture-only
+first-draw checks compare input texture identities with all output texture
+attachments, catching inherited aliases missed by bind_view_image validation.
+No ordinary-frame GL readback added.
+Root3/3 pass. qual-view-inputs-clean-20261106 all8 EXACT cpu-lightmap corpus;
+qual-view-inputs-effects(-before)-20261106 all8 EXACT; final capture guard in
+qual-view-inputs-audit-20261106 passes all8 and remains EXACT effects-before.
+Auxiliary lifecycle003/006 passes. Gameplay roundtrip003120 all8PNG EXACT
+qual-cpu-lightmap-roundtrip-20261106. Effects mirror006 visually inspected.
+Production-path perf-view-inputs-savegNNN-20261106 GPU medians:006 .200ms,
+000 .500,001 .925,007 .516. Candidate/Previous Candidate unchanged.
+
+Continued GPU investigation: fog lanes8/16/32/64 all preserve the images but
+give no consistent gain; probe removed. perf-fog-lanesN-savegNNN-20261106:
+000 .503/.498/.492/.5025;001 .932/.921/.9315/.935;
+007 .516/.511/.520/.526. Do not promote workgroup tuning as a fix.
+Doubling field storage precision (perf-fog-full-storage-savegNNN-20261106)
+raises capture-frame integration000 .218→.362ms,001 .219→.333ms, while scalar
+007 .117→.118ms. Four-channel field traffic is significant; investigate the
+representation/work generated, not lower resolution or disabled refinement.
+
 ## November 6 — measured GPU binding fault, investigation only
 
 See renderer-gpu-investigation-20261106.md for reproducible evidence. Mirror006
