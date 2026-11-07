@@ -568,3 +568,35 @@ single-settings image-settings passes dynamic SSAA/MSAA transitions/readback.
 Root3/3 passed. Visually inspected dense001 headlight-on effects capture.
 Reference executable for corpus is fdcd6ff (before depth-reuse, irrelevant to
 single-sample output); same-binary flag isolates the timed stencil comparison.
+
+## November7: continued investigation, rejected gather layout
+
+Fresh bounded rdoc-refresh_frame1500.rdc retains low repair invocation counts:
+events2666/2676/2686 are171562/171556/171382. However replay duration values
+disagree substantially with ordinary in-game timestamps, even after two warm-up
+collections. Do not use those replay milliseconds to rank the next optimization.
+Capture frame1800 reports opaque.647, depth snapshot.188, soft volumes.960ms;
+these are single-frame diagnostic numbers, not median benchmarks. No extra depth
+resolve was demonstrated from the conservative end-view dirty mark; no change.
+
+Tested 2D-array fog field with two scalar texture gathers instead of four3D
+column samples. Same320-wide/64-slice field, boundary refinement and precision.
+Gather ordering from Khronos GLSL4.60 specification:
+https://registry.khronos.org/OpenGL/specs/gl/GLSLangSpec.4.60.html
+fog-gather-{1,2}-{3d,gather}-* effects0013.7315→3.742 and3.7105→3.725;
+0072.961→2.969 and2.9575→2.9655ms. Also changes2916/668 pixels in first001/007
+captures from interpolation differences. Rejected: all source and reference
+flag removed. Do not retain this representation change as an optimization.
+
+## November7: enforce AO radiance eligibility before sampling
+
+The shader set unlit surface_radiance to0 and excluded multiply materials from
+the final AO correction, but still sampled AO and computed highlight suppression
+and correction for those draws. Guard the complete AO block with unlit==0 and
+multiply_material==0. Same visible contract, no extra resource or shader variant.
+Temporary comparison macro/flag removed from final source.
+ao-elig-{1,2}-{reference,eligible}-* effects medians:
+0013.7115→3.6385 and reversed3.711→3.640;
+0072.957→2.937 and reversed2.965→2.939ms. Four images exact.
+Final root3/3 passed; ao-eligible-fx all8 exact vs single-msaa4;
+ao-eligible-s4 SSAA4/MSAA0 effects exact vs single-s4-stencil, GL audit passed.

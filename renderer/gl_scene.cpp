@@ -619,7 +619,9 @@ void main() {
     float transmission;
     color.rgb = applySceneFog(color.rgb,transmission);
     if (fog_debug != 0 && fog_enabled != 0) color.rgb = vec3(1.0-transmission);
-    if (scene_occlusion_enabled != 0) {
+    // Unlit radiance has no AO-eligible component; multiply materials do not
+    // apply the surface AO correction either. Do not sample it for those draws.
+    if (scene_occlusion_enabled != 0 && unlit == 0 && multiply_material == 0) {
         vec4 estimate = texture(scene_occlusion,scene_pixel/scene_raster_extent);
         float ao = clamp(estimate.x,0,1);
         if (scene_highlight_suppression != 0) {
@@ -627,8 +629,7 @@ void main() {
             float brightness = max(max(display_color.r,display_color.g),display_color.b);
             ao = mix(ao,1,clamp((brightness-scene_highlight_threshold)/max(1-scene_highlight_threshold,.0001),0,1));
         }
-        if (multiply_material == 0)
-            color.rgb += surface_radiance*transmission*(pow(ao,scene_occlusion_intensity)-1);
+        color.rgb += surface_radiance*transmission*(pow(ao,scene_occlusion_intensity)-1);
     }
     post_coverage = 1.0-transmission;
 }

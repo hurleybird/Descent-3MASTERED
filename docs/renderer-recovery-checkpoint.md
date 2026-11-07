@@ -1,5 +1,17 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November7 — latest: AO eligibility avoids wasted particle work
+
+Skip AO lookup/highlight/correction for unlit and multiply materials: they already
+had no AO-eligible radiance/correction. Same image, no new resource or variant.
+Paired/reversed0013.7115→3.6385/3.711→3.640,0072.957→2.937/2.965→2.939ms.
+Final all8 effects and SSAA4/MSAA0 exact, root3/3 passed. Diagnostic flag removed.
+Fog 2D-array gather experiment was slightly slower and changed pixels; ALL source
+removed. Refresh RDC invocation counts useful, replay duration values unreliable
+even warmed; details in investigation doc. Runtime is current tested code.
+Next continue GPU investigation; gap to reconstructed old still exists. No games
+or builds active at this checkpoint; preserved unrelated lib/gitinfo.h only.
+
 ## November7 — latest: single-sample SSAA repair accelerated
 
 Framebuffer optional stencil now works with MSAA off. CopyDepthRegionTo handles
