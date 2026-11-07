@@ -779,7 +779,6 @@ void GL4Renderer::DestroySceneResources() {
     if (scene_volume_sampler) glDeleteSamplers(1,&scene_volume_sampler);
     scene_volume_sampler = 0;
     scene_volume_composite.Destroy();
-    scene_volume_stencil.Destroy();
     scene_volume_rectangle = -1;
     if (scene_light_buffer) glDeleteBuffers(1,&scene_light_buffer);
     if (scene_influence_buffer) glDeleteBuffers(1,&scene_influence_buffer);
@@ -2446,34 +2445,7 @@ void main() {
           glUniform4f(scene_uniforms.volume_mapping,float(raster.width)/volume_width,float(raster.height)/volume_height,float(raster.x),float(raster.y));
           glUniform1i(scene_uniforms.volume_edge_only,1);
           if (stencil_repair) {
-              // Classify once, then reject non-edge coverage before every
-              // repair draw. The predicate is identical to the complementary
-              // layer composite; no additional pixels are approximated.
-              if (!scene_volume_stencil.Handle()) {
-                  extern const char* blitVertexSrc;
-                  const std::string shader = std::string("#version 330 core\nuniform sampler2D opaque_depth;\nuniform ivec2 depth_snapshot_origin;\n") +
-                      ParticleEdgeShader + "\nvoid main() { if (!particleDepthEdge(gl_FragCoord.xy)) discard; }\n";
-                  scene_volume_stencil.AttachSource(blitVertexSrc,shader.c_str());
-                  scene_volume_stencil.Use();
-                  glUniform1i(scene_volume_stencil.FindUniform("opaque_depth"),7);
-                  scene_volume_stencil_mapping=scene_volume_stencil.FindUniform("volume_mapping");
-                  scene_volume_stencil_origin=scene_volume_stencil.FindUniform("depth_snapshot_origin");
-              }
-              scene_volume_stencil.Use();
-              glUniform4f(scene_volume_stencil_mapping,float(raster.width)/volume_width,float(raster.height)/volume_height,float(raster.x),float(raster.y));
-              glUniform2i(scene_volume_stencil_origin,depth_for_sampling == depth.texture ? raster.x : 0,depth_for_sampling == depth.texture ? raster.y : 0);
-              glDrawBuffer(GL_NONE);
-              glEnable(GL_SCISSOR_TEST);
-              glScissor(volume_coverage.x,volume_coverage.y,volume_coverage.width,volume_coverage.height);
-              glDisable(GL_DEPTH_TEST); glDepthMask(GL_FALSE);
-              glDisable(GL_CULL_FACE); glDisable(GL_CLIP_DISTANCE0);
-              glEnable(GL_STENCIL_TEST); glStencilMask(0xff);
-              const GLint clear_stencil=0; glClearBufferiv(GL_STENCIL,0,&clear_stencil);
-              glStencilFunc(GL_ALWAYS,1,0xff); glStencilOp(GL_KEEP,GL_KEEP,GL_REPLACE);
-              glBindVertexArray(GL_GetFramebufferVAO()); glDrawArrays(GL_TRIANGLES,0,3);
-              rend_RecordDrawCall(RENDERER_DRAW_CALL_POSTPROCESS);
-              glStencilMask(0); glStencilFunc(GL_EQUAL,1,0xff); glStencilOp(GL_KEEP,GL_KEEP,GL_KEEP);
-              bind_outputs(); scene_shader.Use();
+              glStencilMask(0); glStencilFunc(GL_EQUAL,0,0xff); glStencilOp(GL_KEEP,GL_KEEP,GL_KEEP);
               glUniform1i(scene_uniforms.volume_edge_only,0);
           }
       }
@@ -2750,6 +2722,13 @@ void main() {
           glScissor(volume_coverage.x,volume_coverage.y,volume_coverage.width,volume_coverage.height);
           if (output.Samples() >= 2) glEnable(GL_MULTISAMPLE);
           glDisable(GL_DEPTH_TEST); glDepthMask(GL_FALSE); glDisable(GL_CULL_FACE);
+          if (stencil_repair) {
+              // The composite already discards repair pixels. Mark only the
+              // pixels it draws; repair consumes the unmarked complement.
+              glEnable(GL_STENCIL_TEST); glStencilMask(0xff);
+              const GLint clear=0; glClearBufferiv(GL_STENCIL,0,&clear);
+              glStencilFunc(GL_ALWAYS,1,0xff); glStencilOp(GL_KEEP,GL_KEEP,GL_REPLACE);
+          }
           glEnablei(GL_BLEND,0);
           glBlendFuncSeparatei(0,GL_ONE,GL_ONE_MINUS_SRC_ALPHA,GL_ONE,GL_ONE_MINUS_SRC_ALPHA);
           scene_volume_composite.Use();

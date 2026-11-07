@@ -486,3 +486,31 @@ soft-a-* early/lateGPU001 effects3.8585/3.902,clean.771/.788;
 001 effects3.808/3.845,clean.776/.786;007 effects3.051/3.065,clean.498/.503.
 All initial pairs exact. soft-alpha-fx-20261107 all8 exact against stencil-fx.
 This is a small~5–44us improvement, not a solution to the remaining GPU gap.
+
+Rejected lazy-ray setup probe: defer direction/inverse/boundary setup until the
+field actually requests refinement or exterior fog. fog-ray-* initially improves
+001 clean.771→.753/effects3.830→3.793,007 clean.500→.489/effects3.0505→3.0315.
+But reversed-order fog-ray2-*001 regresses4.062→4.205 (0073.068→3.0435).
+Insufficiently reliable performance case; ALL probe source removed. All8 effects,
+four roof motion frames and exact001/002/007 images are unchanged. Do not mistake
+the first run's small gain for a qualified optimization.
+
+## November7: consolidate particle classification into its composite
+
+The layer composite already discards precisely the repair pixels. Clear stencil
+to0, mark drawn/non-edge pixels1 during that EXISTING composite, then repair only
+stencil0. Removed the standalone classifier program, uniforms, full-screen draw
+and repeated depth reads. Same predicate/coverage; no extra resource or shader
+variant. The shader-repair reference remains available.
+
+Encoding matters on this GPU. First attempt cleared1/wrote0/repair1 and was
+slower (st-combo-*0013.9205 vs3.8655,0073.104 vs3.074). Clear0/write1/repair0
+improves st-combo0-*0013.8305→3.7675,0073.055→3.000. Three-way same-binary
+st-enc-* confirms separate/clear1/clear0:0013.817/3.849/3.7685,
+0073.0415/3.0615/2.988. Images exact; do not infer speed from pass count alone.
+Temporary clear1/separate diagnostic paths removed after comparison.
+
+Final production root3/3. st-composite-fx-20261107 all8 exact against soft-alpha-fx;
+st-cq-* SSAA2/MSAA2,8 andSSAA4/MSAA4 exact against shader repair withGL audit.
+st-composite-aux003/006, trip003 all8 PNGs and roof150..153 exact against retained
+references. Source reduction removes the classifier added in d9d9e20.

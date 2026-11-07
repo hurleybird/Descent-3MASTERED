@@ -1,5 +1,30 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November7 — latest: composite owns repair coverage
+
+Supersedes standalone-classifier details below. Existing particle composite now
+marks non-edge pixels1 into initially-zero stencil; repair consumes stencil0.
+Standalone classifier shader/uniforms/full-screen draw removed. Same predicates,
+images and storage. Same-binary three-way001 separate3.817/clear1variant3.849/
+acceptedclear0variant3.7685ms;0073.0415/3.0615/2.988. All8 effects, MSAA2/8,
+SSAA4, auxiliary003/006, roundtrip003 and roof150..153 exact. Root3/3 passed.
+Private runtime/build contain the tested consolidated version.
+
+55bfcb3 also rejects already-transparent texels before soft-depth reads: small
+repeatable5–44us gain, all8 images exact. Lazy fog-ray setup was tried and rejected
+for inconsistent dense-scene performance; all that probe source is removed.
+No uncommitted source experiment remains at this checkpoint. lib/gitinfo.h is
+the preserved unrelated untracked file. Main/Candidate/Previous Candidate untouched.
+
+Next investigation prepared: out/profile-gpu-effects-matrix.ps1 compares the
+reconstructed old exe+hog versus current build, saves001/007, seven feature
+configurations (native/SSAA/MSAA/AO/bloom/AO+bloom/full). It restores BOTH current
+runtime files in finally. NOT RUN YET at this checkpoint. Run only with no game,
+build or replay active. User asked for GPU evidence, continued work, no credits.
+Possible concrete follow-up: SceneSamples.h returns only selected sample index,
+so both depth resolve consumers fetch the winning depth AGAIN. Inspect/measure
+returning both index and depth; preserve shared depth/identity/motion selection.
+
 ## November7 — particle repair stencil qualified
 
 Latest work adds optional stencil to multisampled supersampled WORLD depth only;
