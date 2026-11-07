@@ -1,5 +1,29 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November7 — latest: uniform light storage qualified; compact fog next
+
+Up to256 lights share one16KiB uniform block; larger tables keep existing TBO
+shaders. Same backing buffer, no duplicate uploads/table, no light cap. Cache
+separates both interfaces. Fragment diffuse keeps draw-uniform ranges uniform,
+while per-polygon model ranges remain supported. Combined lightuniformdraw
+0013.468/3.428 and3.470/3.425;0072.815/2.7845 and2.810/2.787ms, images exact.
+Production root3/3, uniformlight-fx all8 exact vs lazyray-fx; auxiliary003/006
+exact; GL-audited storage switches frames18..22 all5 images exact against TBO.
+Reference -scene-texture-lights-reference; switch -scene-light-storage-switch-probe.
+
+2D fog-column layout lost~.06/.04ms and was removed. Linear falloff branch lost;
+uniform range alone neutral. Only combined uniform storage/draw-range accepted.
+Main world alreadyRGBA8; overscan alreadydisabled withoutAO. Not missed fixes.
+
+NEXT concrete algorithm: fog producer currently reserves64 slope/depth bins
+per ray in shared memory, even sparse rays. Earlier validity-mask probe did NOT
+reduce that reservation. Test sorted compact event bins (8 slots per ray),
+preserving per-bin addition order. Overflow flag per column appended to existing
+fog-tile SSBO; second dispatch runs original64-bin shader only for flagged rays.
+No dropped crossings, no reduced field precision/resolution. Need force-capacity1
+test to exercise fallback and exact image/field audits. Not yet implemented here.
+User requires continuation until baseline victory; do not stop at checkpoint.
+
 ## November7 — latest: deferred fog-ray setup qualified
 
 Moved geometric ray/clip/bounds setup after field sampling, guarded by

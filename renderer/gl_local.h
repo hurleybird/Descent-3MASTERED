@@ -184,7 +184,9 @@ class GL4Renderer : public IRenderer
 	// Fog mode x particle-layer interface. Views without a layer retain the
 	// ordinary fragment shader, including native-resolution and image views.
 	// Three additional fog variants serve the explicitly unlit SoftVolumes pass.
-	std::array<SceneProgram,9> scene_programs;
+	// Each set is cached independently for uniform-block or large texture-table
+	// lights. Crossing the capacity boundary never reuses the wrong interface.
+	std::array<SceneProgram,18> scene_programs;
 	GLuint scene_light_buffer = 0, scene_light_texture = 0;
 	GLuint scene_draw_buffer = 0;
     GLuint scene_view_buffer = 0;

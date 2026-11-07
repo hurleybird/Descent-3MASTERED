@@ -23,6 +23,9 @@
 extern int Last_texel_unit_set;
 
 namespace {
+constexpr size_t SceneUniformLightCapacity = 256;
+constexpr size_t SceneUniformLightBytes = SceneUniformLightCapacity*16*sizeof(float);
+static_assert(SceneUniformLightBytes <= 16384,"Light block exceeds the portable uniform-block minimum");
 bool SceneFogFieldEnabled(const d3scene::Camera& camera) {
     const bool exact = FindArg("-scene-fog-exact") != 0;
     const bool field = FindArg("-scene-fog-field") != 0;
@@ -133,13 +136,19 @@ layout(std140) uniform SceneDrawBlock { vec4 draw_params[23]; uvec4 draw_identit
 #define raster_trail (draw_params[22])
 #define deformation_identity (draw_identity.w)
 uniform samplerBuffer scene_lights;
+#if SCENE_UNIFORM_LIGHT_STORAGE
+layout(std140) uniform SceneLightBlock { vec4 uniform_light_records[SCENE_UNIFORM_LIGHT_RECORDS]; };
+vec4 sceneLight(int index) { return uniform_light_records[index]; }
+#else
+vec4 sceneLight(int index) { return texelFetch(scene_lights,index); }
+#endif
 uniform isamplerBuffer scene_influences;
 
 float sceneEmitterAttenuation(int light,vec3 world_position,out vec3 incident) {
-    vec4 position_radius = texelFetch(scene_lights,light);
-    vec4 color_falloff = texelFetch(scene_lights,light+1);
-    vec4 direction_cone = texelFetch(scene_lights,light+2);
-    vec4 flags = texelFetch(scene_lights,light+3);
+    vec4 position_radius = sceneLight(light);
+    vec4 color_falloff = sceneLight(light+1);
+    vec4 direction_cone = sceneLight(light+2);
+    vec4 flags = sceneLight(light+3);
     vec3 delta = world_position-position_radius.xyz;
     float distance = length(delta);
     incident = distance > .000001 ? delta/distance : vec3(0);
@@ -155,7 +164,7 @@ vec3 sceneDynamicLighting(vec3 world_position,ivec2 influences) {
     vec3 dynamic_color = vec3(0);
     for (int index = 0; index < influences.y; ++index) {
         int light = texelFetch(scene_influences,influences.x+index).r*4;
-        vec4 color_falloff = texelFetch(scene_lights,light+1);
+        vec4 color_falloff = sceneLight(light+1);
         vec3 incident;
         float attenuation = sceneEmitterAttenuation(light,world_position,incident);
         dynamic_color += color_falloff.rgb*attenuation;
@@ -401,6 +410,13 @@ uniform sampler2D scene_occlusion;
 uniform float scene_occlusion_intensity, scene_highlight_gamma, scene_highlight_threshold;
 uniform int scene_highlight_suppression;
 )GLSL" + SceneFogIntersectionShader + R"GLSL(
+vec3 scenePixelLighting(vec3 world) {
+#if SCENE_UNIFORM_LIGHT_STORAGE
+    if (polygon_light_table == 0)
+        return sceneDynamicLighting(world,ivec2(influence_offset,influence_count));
+#endif
+    return sceneDynamicLighting(world,primitive_influences);
+}
 vec3 applySceneFog(vec3 radiance,out float transmission) {
     transmission = 1.0;
     // No medium can contribute: preserve transmission without constructing
@@ -568,7 +584,7 @@ void main() {
             vec3 direction = ambient_direction/max(length(ambient_direction),1.e-8);
             illumination *= clamp((1.0-dot(n,direction))*.5,0.0,1.0);
         }
-        vec3 dynamic_color = lighting_per_pixel != 0 ? sceneDynamicLighting(world_position,primitive_influences) : vertex_dynamic;
+        vec3 dynamic_color = lighting_per_pixel != 0 ? scenePixelLighting(world_position) : vertex_dynamic;
         illumination = clamp(illumination+dynamic_color,vec3(0),vec3(1));
     }
     color=vec4(base.rgb*color_modulation*authored_color*illumination*lighting_modulation,base.a);
@@ -605,7 +621,7 @@ void main() {
             vec3 incident;
             float attenuation = sceneEmitterAttenuation(light,world_position,incident);
             float response = pow(max(0.0,dot(v,reflect(incident,n))),specular_response.y);
-            reflected += texelFetch(scene_lights,light+1).rgb*attenuation*response*texelFetch(scene_lights,light+3).z;
+            reflected += sceneLight(light+1).rgb*attenuation*response*sceneLight(light+3).z;
         }
         reflected *= mix(vec3(1),clamp(use_reflection_field != 0 ? reflection_payload[6].xyz : baked,vec3(0),vec3(1)),specular_response.z);
         float mask = texture(specular_texture,material_uv).a;
@@ -1276,7 +1292,12 @@ void GL4Renderer::PrepareSceneViewTables(const d3scene::PreparedView& prepared) 
         }
         if (new_frame) {
             glBindBuffer(GL_TEXTURE_BUFFER,scene_light_buffer);
-            glBufferData(GL_TEXTURE_BUFFER,lights.size()*sizeof(float),lights.data(),GL_STREAM_DRAW);
+            // One store serves both access paths. Small tables fit the portable
+            // constant block; larger tables retain the unbounded texture view.
+            if (lights.size()*sizeof(float)<SceneUniformLightBytes) {
+                glBufferData(GL_TEXTURE_BUFFER,SceneUniformLightBytes,nullptr,GL_STREAM_DRAW);
+                glBufferSubData(GL_TEXTURE_BUFFER,0,lights.size()*sizeof(float),lights.data());
+            } else glBufferData(GL_TEXTURE_BUFFER,lights.size()*sizeof(float),lights.data(),GL_STREAM_DRAW);
         }
         if (!indices.empty()) {
             glBindBuffer(GL_TEXTURE_BUFFER,scene_influence_buffer);
@@ -1290,6 +1311,7 @@ void GL4Renderer::PrepareSceneViewTables(const d3scene::PreparedView& prepared) 
     BindSceneTables();
 }
 void GL4Renderer::BindSceneTables() {
+    glBindBufferBase(GL_UNIFORM_BUFFER,9,scene_light_buffer);
     if (scene_view_buffer) glBindBufferBase(GL_UNIFORM_BUFFER,8,scene_view_buffer);
     glActiveTexture(GL_TEXTURE2); glBindTexture(GL_TEXTURE_BUFFER,scene_light_texture);
     glActiveTexture(GL_TEXTURE3); glBindTexture(GL_TEXTURE_BUFFER,scene_influence_texture);
@@ -1578,6 +1600,9 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     check_scene_error("frame upload");
     const bool field_fog = scene_view_fog.count && SceneFogFieldEnabled(visibility.camera);
     const size_t fog_mode = scene_view_fog.count == 0 ? 0 : (field_fog ? 2 : 1);
+    const bool uniform_lights = presentation.data().lights.size() <= SceneUniformLightCapacity &&
+        !(AutomatedCaptureFrameIndex() >= 0 && (FindArg("-scene-texture-lights-reference") ||
+            (FindArg("-scene-light-storage-switch-probe") && (AutomatedCaptureFrameIndex()/10)%2 != 0)));
     const bool particle_shader = std::any_of(passes.begin(),passes.end(),[](const d3scene::ViewPass& pass) {
         return pass.kind == d3scene::ViewPassKind::SoftVolumes;
     });
@@ -1604,8 +1629,18 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         fragment.insert(fragment.find('\n')+1,std::string("#define SCENE_PARTICLE_LAYER ")+(layer_interface ? "1\n" : "0\n"));
         fragment.insert(fragment.find('\n')+1,"#define SCENE_FOG_MODE "+std::to_string(fog_mode)+"\n");
         auto vertex = SceneVertexShader;
+        if (uniform_lights) {
+            const std::string definitions = "#define SCENE_UNIFORM_LIGHT_STORAGE 1\n#define SCENE_UNIFORM_LIGHT_RECORDS "+
+                std::to_string(SceneUniformLightCapacity*4)+"\n";
+            vertex.insert(vertex.find('\n')+1,definitions);
+            fragment.insert(fragment.find('\n')+1,definitions);
+        }
         if (unlit_pass) vertex.insert(vertex.find('\n')+1,"#define SCENE_UNLIT_PASS 1\n");
         scene_shader.AttachSource(vertex.c_str(), fragment.c_str());
+        if (uniform_lights) {
+            const auto block=glGetUniformBlockIndex(scene_shader.Handle(),"SceneLightBlock");
+            if (block!=GL_INVALID_INDEX) glUniformBlockBinding(scene_shader.Handle(),block,9);
+        }
         // Resolve the shader interface at link time, never by string in a view.
         scene_uniforms.colortexture = scene_shader.FindUniform("colortexture");
         scene_uniforms.planar_texture = scene_shader.FindUniform("planar_texture");
@@ -1652,8 +1687,9 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         glUniform1i(scene_uniforms.opaque_depth,7);
     }
     };
-    auto& view_program = scene_programs[fog_mode*2+general_layer];
-    auto& volume_program = scene_programs[6+fog_mode];
+    const size_t light_program_base = uniform_lights ? 9 : 0;
+    auto& view_program = scene_programs[light_program_base+fog_mode*2+general_layer];
+    auto& volume_program = scene_programs[light_program_base+6+fog_mode];
     initialize_program(view_program,false,general_layer);
     if (specialize_volumes) initialize_program(volume_program,true,true);
     auto& scene_shader = view_program.shader;

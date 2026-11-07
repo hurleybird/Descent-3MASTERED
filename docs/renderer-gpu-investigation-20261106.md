@@ -723,3 +723,21 @@ lazyray-fx all8 pixel-identical to depthspec-fx; lazyray-aux003/006 pass.
 Explicit two-texel column interpolation was separately rejected: first-round
 fogfetch0013.451→3.485,0072.835→2.848ms. It also changed2916/668 pixels through
 interpolation rounding; no quality or timing benefit claimed. Source removed.
+
+## November7: preserve uniform lighting data frequency
+
+2D fog-column stripe layout lost (fogflat round2 0013.454/3.516,
+0072.835/2.877ms) and was removed. A linear-falloff branch also lost; removed.
+Draw-uniform range selection alone was neutral. Uniform-buffer storage alone
+was weak, but combining it with a distinct draw-uniform diffuse lookup path
+gave repeatable gains: lightuniformdraw0013.468→3.428,3.470→3.425;
+0072.815→2.7845,2.810→2.787. All four paired images exact.
+
+Production uses one light backing store: at least16KiB for a256-light std140
+block, or the existing unbounded texture-buffer view when there are more lights.
+No emitter truncation or second CPU light table. Program cache separates the
+interfaces; model per-polygon influence ranges remain supported. Small buffers
+are orphaned then filled over their live range, with no render-thread allocation.
+Capture reference: scene-texture-lights-reference. Root3/3; uniformlight-fx all8
+exact vs lazyray-fx; auxiliary003/006 exact; GL-audited interface switches18..22
+produce five images identical to the texture-buffer reference.
