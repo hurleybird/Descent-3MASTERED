@@ -459,12 +459,6 @@ class GL4Renderer : public IRenderer
 	bool OpenGL_blending_on = true;
 
 	GLuint drawbuffer = 0;
-	GLuint retained_draw_buffer = 0;
-	GLsizeiptr retained_draw_buffer_stride = 0;
-	GLuint retained_draw_buffer_cursor = 0;
-	void* retained_draw_buffer_map = nullptr;
-	int retained_draw_buffer_active_segment = -1;
-	GLsync retained_draw_buffer_sync_points[GL4_DRAW_BUFFER_SYNC_POINT_COUNT] = {};
 	//The next committed vertex is where to start writing vertex data to the buffer
 	GLuint nextcommittedvertex = 0;
 	static constexpr int DRAW_SHADER_COUNT = 8;
@@ -521,13 +515,6 @@ class GL4Renderer : public IRenderer
 	GLint drawshader_fog_composite_mode_uniforms[DRAW_SHADER_COUNT] = {};
 	int lastdrawshader = -1;
 	bool legacy_draw_uniforms_dirty = true;
-	bool retained_draw_active = false;
-	bool retained_override_draw_buffers = false;
-	bool retained_include_motion_vectors = false;
-	bool retained_include_motion_object_ids = false;
-	bool retained_custom_clip_active = false;
-	bool retained_near_clip_active = false;
-	bool retained_far_clip_active = false;
 	float ao_suppression_draw_value = 0.0f;
 	float bloom_suppression_draw_value = 0.0f;
 	float texture_bloom_protection_draw_value = 0.0f;
@@ -607,11 +594,6 @@ class GL4Renderer : public IRenderer
 
 	bool OpenGL_cache_initted = false;
 
-	static constexpr int RETAINED_ROOM_LIGHTMAP_ARRAY_COUNT = 7;
-	GLuint retained_room_lightmap_arrays[RETAINED_ROOM_LIGHTMAP_ARRAY_COUNT] = {};
-	std::vector<int> retained_room_lightmap_pages;
-	std::vector<int> retained_room_lightmap_handles;
-	bool retained_room_lightmaps_ready = false;
 
 	//SHADER
 	GLuint commonbuffername = 0;
@@ -688,9 +670,9 @@ private:
 	void UseDrawVAO();
 	bool InitPersistentDrawBuffer(size_t size);
 	void DestroyPersistentDrawBuffer();
-	void InitRetainedDrawBuffer();
-	void DestroyRetainedDrawBuffer();
-	void UseLegacyRetainedDrawBlock();
+	GLuint legacy_draw_defaults_buffer = 0;
+	void InitLegacyDrawDefaults();
+	void DestroyLegacyDrawDefaults();
 	void ResetPersistentDrawBufferSyncs();
 	void AddPersistentDrawBufferSyncsForOffset(GLuint offset);
 	void WaitForPersistentDrawBufferSync(GLsync& sync);
@@ -765,8 +747,6 @@ private:
 	void FreeUploadBuffers();
 	void SetUploadBufferSize(int width, int height);
 	void TranslateBitmapToOpenGL(int texnum, int bm_handle, int map_type, int replace, int tn);
-	void DestroyRetainedRoomLightmaps();
-	void UploadRetainedRoomLightmap(int lightmap_handle);
 
 	bool CheckExtension(char* extName);
 	void UpdateFramebuffer();
@@ -954,12 +934,6 @@ public:
 		int map_type = MAP_TYPE_BITMAP) override;
 	bool DrawWeatherQuadBatch(int handle, const renderer_weather_quad *items, int count,
 		int map_type = MAP_TYPE_BITMAP) override;
-	bool BeginRetainedPolymodelDraw(const renderer_retained_polymodel_draw *draw) override;
-	void EndRetainedPolymodelDraw() override;
-	bool PrepareRetainedRoomLightmaps(const int* lightmap_handles, int count) override;
-	bool RetainedRoomLightmapsReady() const override { return retained_room_lightmaps_ready; }
-	int GetRetainedRoomLightmapPage(int lightmap_handle) const override;
-	void RefreshRetainedRoomLightmaps() override;
 	bool SetRoomFogState(const renderer_room_fog_state *state) override;
 	void SetRoomFogOverlay(int state) override;
 	// Given a handle to a bitmap and nv point vertices, draws a 2D polygon

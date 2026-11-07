@@ -1,5 +1,19 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November 6 — obsolete retained GPU API retired
+
+Removed Begin/EndRetainedPolymodelDraw and the unused room-lightmap array API,
+wrappers, resources and state. Replaced the 8192-record retained uniform ring
+with one 592-byte static zero/default block at UBO binding5 for native/UI shaders.
+Owned scene UBO bindings7/8 unchanged. No frame-time improvement claimed.
+Build/root3/3 pass. Runtime SHA256:
+2D4F8899323AF3FA93F31DA3088BDDA66D28167D8FB3C73EFF11C6C1AB628840.
+qual-retained-backend-corpus-20261106 all8clean/exact60 EXACT model-draw corpus.
+qual-retained-backend-ui-20261106 003/006effects/field/motion22 modal-ui all4PNG
+EXACT room-draw-ui-motion. Viewed003 gameplay image. Candidate unchanged.
+Next: remove unused gl_mesh abstraction and MeshBuilder; only external helper
+call wraps rend_RestoreLegacy. No shadows, no acceptance-guard removal.
+
 ## November 6 — legacy polymodel drawer retired
 
 Deleted model/newstyle.cpp and retained_polymodel.cpp/h. Moved the two source

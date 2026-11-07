@@ -534,57 +534,6 @@ void rend_DrawPolygon3D(int handle,g3Point **p,int nv,int map_type=MAP_TYPE_BITM
 void rend_DrawPolygon3DBatch(int handle,const renderer_poly_batch_item *items,int count,int map_type=MAP_TYPE_BITMAP);
 bool rend_DrawWeatherQuadBatch(int handle,const renderer_weather_quad *items,int count,int map_type=MAP_TYPE_BITMAP);
 
-struct renderer_retained_polymodel_draw
-{
-	float transform[16];
-	float modelview[16];
-	float current_world[16];
-	float previous_world[16];
-	float base_color[3];
-	float u_offset;
-	float v_offset;
-	float uv2_scale[2];
-	float depth_bias;
-	bool legacy_depth;
-	bool legacy_world_projection;
-	float legacy_view_position[3];
-	float legacy_view_right[3];
-	float legacy_view_up[3];
-	float legacy_view_forward[3];
-	float legacy_viewport_scale[2];
-	float legacy_viewport_center[2];
-	int lighting_mode_override;
-	int effect_mode;
-	float effect_alpha_scale;
-	float fog_plane[3];
-	float fog_distance;
-	float fog_eye_distance;
-	float fog_depth;
-	float specular_view_position[3];
-	float specular_light_position[3];
-	float specular_scalar;
-	bool specular_smooth;
-	bool deform_enabled;
-	int deform_mode;
-	uint32_t deform_seed;
-	float deform_range;
-	float deform_direction[3];
-	bool custom_clip_enabled;
-	float custom_clip_point[3];
-	float custom_clip_plane[3];
-	float custom_clip_scale[3];
-	bool near_clip_enabled;
-	bool far_clip_enabled;
-	float far_clip_z;
-	bool per_pixel_specular_payload;
-	bool fast_room_base;
-	bool retained_room_lightmap_arrays;
-	bool retained_dynamic_lightmaps;
-	int polygon_count;
-	int vertex_count;
-	bool has_previous;
-};
-
 struct renderer_room_fog_triangle
 {
 	float a[4];
@@ -605,13 +554,6 @@ struct renderer_room_fog_state
 	int triangle_count;
 };
 
-// Selects the legacy material shader while sourcing a polymodel from retained local-space buffers.
-bool rend_BeginRetainedPolymodelDraw(const renderer_retained_polymodel_draw *draw);
-void rend_EndRetainedPolymodelDraw();
-bool rend_PrepareRetainedRoomLightmaps(const int* lightmap_handles, int count);
-bool rend_RetainedRoomLightmapsReady();
-int rend_GetRetainedRoomLightmapPage(int lightmap_handle);
-void rend_RefreshRetainedRoomLightmaps();
 
 // Applies homogeneous local-room fog in the material shader. Portal triangles
 // describe the room openings through which an outside eye ray can enter.

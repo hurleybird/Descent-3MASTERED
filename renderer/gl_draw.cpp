@@ -42,7 +42,6 @@ constexpr unsigned int GL4_MOTION_OBJECT_LEGACY_BLUR_MASK = 0x80000000u;
 constexpr GLuint GL4_ROOM_FOG_PORTAL_BINDING = 5;
 constexpr GLuint GL4_PER_PIXEL_LIGHTMAP_BINDING = 6;
 constexpr GLuint GL4_RETAINED_DRAW_BINDING = 5;
-constexpr GLuint GL4_RETAINED_DRAW_CAPACITY = 8192;
 
 struct alignas(16) GL4RetainedDrawBlock
 {
@@ -971,84 +970,26 @@ void GL4Renderer::DestroyPersistentDrawBuffer()
 	}
 }
 
-void GL4Renderer::InitRetainedDrawBuffer()
+// Native/UI shaders share RetainedDrawBlock in its zero/default mode.
+// Owned scene draws use independent bindings 7 and 8.
+void GL4Renderer::InitLegacyDrawDefaults()
 {
-	DestroyRetainedDrawBuffer();
-
-	GLint alignment = 1;
-	glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT, &alignment);
-	const size_t required_alignment = static_cast<size_t>(std::max(alignment, 1));
-	const size_t block_size = sizeof(GL4RetainedDrawBlock);
-	retained_draw_buffer_stride = static_cast<GLsizeiptr>(
-		(block_size + required_alignment - 1) / required_alignment * required_alignment);
-
-	glGenBuffers(1, &retained_draw_buffer);
-	glBindBuffer(GL_UNIFORM_BUFFER, retained_draw_buffer);
-	const GLsizeiptr buffer_size =
-		retained_draw_buffer_stride * GL4_RETAINED_DRAW_CAPACITY;
-	if (OpenGL_buffer_storage_enabled)
-	{
-		glBufferStorage(GL_UNIFORM_BUFFER, buffer_size, nullptr,
-			GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT);
-		if (glGetError() == GL_NO_ERROR)
-		{
-			retained_draw_buffer_map = glMapBufferRange(GL_UNIFORM_BUFFER, 0, buffer_size,
-				GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT);
-		}
-	}
-	if (retained_draw_buffer_map == nullptr)
-	{
-		if (OpenGL_buffer_storage_enabled)
-		{
-			glDeleteBuffers(1, &retained_draw_buffer);
-			glGenBuffers(1, &retained_draw_buffer);
-			glBindBuffer(GL_UNIFORM_BUFFER, retained_draw_buffer);
-		}
-		glBufferData(GL_UNIFORM_BUFFER, buffer_size, nullptr, GL_STREAM_DRAW);
-	}
-
-	const GL4RetainedDrawBlock legacy_block = {};
-	if (retained_draw_buffer_map != nullptr)
-		std::memcpy(retained_draw_buffer_map, &legacy_block, sizeof(legacy_block));
-	else
-		glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(legacy_block), &legacy_block);
-	glBindBufferRange(GL_UNIFORM_BUFFER, GL4_RETAINED_DRAW_BINDING,
-		retained_draw_buffer, 0, sizeof(legacy_block));
+	DestroyLegacyDrawDefaults();
+	const GL4RetainedDrawBlock defaults = {};
+	glGenBuffers(1, &legacy_draw_defaults_buffer);
+	glBindBuffer(GL_UNIFORM_BUFFER, legacy_draw_defaults_buffer);
+	glBufferData(GL_UNIFORM_BUFFER, sizeof(defaults), &defaults, GL_STATIC_DRAW);
+	glBindBufferBase(GL_UNIFORM_BUFFER, GL4_RETAINED_DRAW_BINDING,
+		legacy_draw_defaults_buffer);
 	glBindBuffer(GL_UNIFORM_BUFFER, 0);
-	retained_draw_buffer_cursor = 1;
-	retained_draw_buffer_active_segment = -1;
 }
 
-void GL4Renderer::DestroyRetainedDrawBuffer()
+void GL4Renderer::DestroyLegacyDrawDefaults()
 {
-	for (GLsync& sync : retained_draw_buffer_sync_points)
+	if (legacy_draw_defaults_buffer != 0)
 	{
-		if (sync != nullptr && glDeleteSync != nullptr)
-			glDeleteSync(sync);
-		sync = nullptr;
-	}
-	if (retained_draw_buffer != 0)
-	{
-		if (retained_draw_buffer_map != nullptr)
-		{
-			glBindBuffer(GL_UNIFORM_BUFFER, retained_draw_buffer);
-			glUnmapBuffer(GL_UNIFORM_BUFFER);
-		}
-		glDeleteBuffers(1, &retained_draw_buffer);
-		retained_draw_buffer = 0;
-	}
-	retained_draw_buffer_stride = 0;
-	retained_draw_buffer_cursor = 0;
-	retained_draw_buffer_map = nullptr;
-	retained_draw_buffer_active_segment = -1;
-}
-
-void GL4Renderer::UseLegacyRetainedDrawBlock()
-{
-	if (retained_draw_buffer != 0)
-	{
-		glBindBufferRange(GL_UNIFORM_BUFFER, GL4_RETAINED_DRAW_BINDING,
-			retained_draw_buffer, 0, sizeof(GL4RetainedDrawBlock));
+		glDeleteBuffers(1, &legacy_draw_defaults_buffer);
+		legacy_draw_defaults_buffer = 0;
 	}
 }
 
@@ -1713,7 +1654,7 @@ void GL4Renderer::SetDrawDefaults()
 	}
 
 	glBindBuffer(GL_ARRAY_BUFFER, 0);
-	InitRetainedDrawBuffer();
+	InitLegacyDrawDefaults();
 }
 
 GLuint GL4Renderer::PrepareSoftParticleDepthTexture()
@@ -1861,7 +1802,7 @@ void GL4Renderer::SelectDrawShader(bool retained_setup)
 		const bool fast_additive_bitmap =
 			(shader_index == 1 || shader_index == 5) &&
 			post_mask_blend_mode == 1 &&
-			!retained_draw_active && !room_fog_overlay &&
+			!room_fog_overlay &&
 			OpenGL_state.cur_light_state != LS_PHONG &&
 			cockpit_backing_effect.enabled == 0 &&
 			ao_suppression_draw_value == 0.0f && bloom_suppression_draw_value == 0.0f &&
@@ -2781,266 +2722,6 @@ bool GL4Renderer::DrawWeatherQuadBatch(int handle, const renderer_weather_quad *
 
 	CHECK_ERROR(12);
 	return true;
-}
-
-bool GL4Renderer::BeginRetainedPolymodelDraw(const renderer_retained_polymodel_draw *draw)
-{
-	if (!draw || retained_draw_active)
-		return false;
-
-	SelectDrawShader(true);
-	const int shader_index = lastdrawshader;
-	if (shader_index < 0 || retained_draw_buffer == 0)
-		return false;
-
-	float base_color[3] = { draw->base_color[0], draw->base_color[1], draw->base_color[2] };
-	if (OpenGL_state.cur_light_state == LS_FLAT_GOURAUD || OpenGL_state.cur_texture_type == TT_FLAT)
-	{
-		base_color[0] = GR_COLOR_RED(OpenGL_state.cur_color) / 255.0f;
-		base_color[1] = GR_COLOR_GREEN(OpenGL_state.cur_color) / 255.0f;
-		base_color[2] = GR_COLOR_BLUE(OpenGL_state.cur_color) / 255.0f;
-	}
-	else if (OpenGL_state.cur_light_state == LS_NONE)
-	{
-		base_color[0] = base_color[1] = base_color[2] = 1.0f;
-	}
-
-	int lighting_mode = 0;
-	if (OpenGL_state.cur_light_state == LS_GOURAUD)
-		lighting_mode = 1;
-	else if (OpenGL_state.cur_light_state == LS_PHONG)
-		lighting_mode = 2;
-	if (draw->lighting_mode_override >= 0)
-		lighting_mode = draw->lighting_mode_override;
-
-	const bool use_retained_room_lightmap_arrays =
-		draw->retained_room_lightmap_arrays && retained_room_lightmaps_ready;
-	const bool use_retained_dynamic_lightmaps = draw->retained_dynamic_lightmaps &&
-		per_pixel_lightmap_buffer_ready && per_pixel_lightmap_buffer_index >= 0;
-
-	GL4RetainedDrawBlock block = {};
-	std::memcpy(block.transform, draw->transform, sizeof(block.transform));
-	std::memcpy(block.modelview, draw->modelview, sizeof(block.modelview));
-	std::memcpy(block.current_world, draw->current_world, sizeof(block.current_world));
-	std::memcpy(block.previous_world, draw->previous_world, sizeof(block.previous_world));
-	std::memcpy(block.base_color_depth_bias, base_color, sizeof(base_color));
-	block.base_color_depth_bias[3] = draw->depth_bias;
-	block.uv_offset_uv2_scale[0] = draw->u_offset;
-	block.uv_offset_uv2_scale[1] = draw->v_offset;
-	block.uv_offset_uv2_scale[2] = draw->uv2_scale[0];
-	block.uv_offset_uv2_scale[3] = draw->uv2_scale[1];
-	std::memcpy(block.legacy_view_position, draw->legacy_view_position,
-		sizeof(draw->legacy_view_position));
-	std::memcpy(block.legacy_view_right, draw->legacy_view_right,
-		sizeof(draw->legacy_view_right));
-	std::memcpy(block.legacy_view_up, draw->legacy_view_up,
-		sizeof(draw->legacy_view_up));
-	std::memcpy(block.legacy_view_forward, draw->legacy_view_forward,
-		sizeof(draw->legacy_view_forward));
-	block.legacy_viewport[0] = draw->legacy_viewport_scale[0];
-	block.legacy_viewport[1] = draw->legacy_viewport_scale[1];
-	block.legacy_viewport[2] = draw->legacy_viewport_center[0];
-	block.legacy_viewport[3] = draw->legacy_viewport_center[1];
-	block.alpha_effect[0] = Alpha_multiplier * OpenGL_Alpha_factor / 255.0f;
-	block.alpha_effect[1] = draw->effect_alpha_scale;
-	block.alpha_effect[2] = draw->fog_distance;
-	block.alpha_effect[3] = draw->fog_eye_distance;
-	std::memcpy(block.fog_plane_depth, draw->fog_plane, sizeof(draw->fog_plane));
-	block.fog_plane_depth[3] = draw->fog_depth;
-	std::memcpy(block.specular_view_scalar, draw->specular_view_position,
-		sizeof(draw->specular_view_position));
-	block.specular_view_scalar[3] = draw->specular_scalar;
-	std::memcpy(block.specular_light_range, draw->specular_light_position,
-		sizeof(draw->specular_light_position));
-	block.specular_light_range[3] = draw->deform_range;
-	std::memcpy(block.deform_direction_far_clip, draw->deform_direction,
-		sizeof(draw->deform_direction));
-	block.deform_direction_far_clip[3] = draw->far_clip_z;
-	std::memcpy(block.custom_clip_point, draw->custom_clip_point,
-		sizeof(draw->custom_clip_point));
-	std::memcpy(block.custom_clip_plane, draw->custom_clip_plane,
-		sizeof(draw->custom_clip_plane));
-	std::memcpy(block.custom_clip_scale, draw->custom_clip_scale,
-		sizeof(draw->custom_clip_scale));
-	block.phong_direction[0] = per_pixel_light_direction.x;
-	block.phong_direction[1] = per_pixel_light_direction.y;
-	block.phong_direction[2] = per_pixel_light_direction.z;
-	block.modes0[0] = 1;
-	block.modes0[1] = draw->legacy_depth ? 1 : 0;
-	block.modes0[2] = draw->legacy_world_projection ? 1 : 0;
-	block.modes0[3] = lighting_mode;
-	block.modes1[0] = (OpenGL_state.cur_alpha_type & ATF_VERTEX) != 0 ? 1 : 0;
-	block.modes1[1] = draw->effect_mode;
-	block.modes1[2] = draw->specular_smooth ? 1 : 0;
-	block.modes1[3] = draw->deform_enabled ? 1 : 0;
-	block.modes2[0] = draw->deform_mode;
-	block.modes2[1] = draw->custom_clip_enabled ? 1 : 0;
-	block.modes2[2] = draw->near_clip_enabled ? 1 : 0;
-	block.modes2[3] = draw->far_clip_enabled ? 1 : 0;
-	block.modes3[0] = draw->per_pixel_specular_payload ? 1 : 0;
-	block.modes3[1] = draw->fast_room_base ? 1 : 0;
-	block.modes3[2] = use_retained_room_lightmap_arrays ? 1 : 0;
-	block.modes3[3] = use_retained_dynamic_lightmaps ? 1 : 0;
-	block.deform_seed[0] = draw->deform_seed;
-
-	if (retained_draw_buffer_cursor >= GL4_RETAINED_DRAW_CAPACITY)
-	{
-		retained_draw_buffer_cursor = 1;
-	}
-	if (retained_draw_buffer_map != nullptr)
-	{
-		const GLuint segment_size =
-			GL4_RETAINED_DRAW_CAPACITY / GL4_DRAW_BUFFER_SYNC_POINT_COUNT;
-		const int segment = static_cast<int>(
-			retained_draw_buffer_cursor / segment_size);
-		if (segment != retained_draw_buffer_active_segment)
-		{
-			if (retained_draw_buffer_active_segment >= 0)
-			{
-				GLsync& completed_segment =
-					retained_draw_buffer_sync_points[retained_draw_buffer_active_segment];
-				if (completed_segment != nullptr)
-					WaitForPersistentDrawBufferSync(completed_segment);
-				completed_segment = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
-			}
-			GLsync& incoming_segment = retained_draw_buffer_sync_points[segment];
-			if (incoming_segment != nullptr)
-				WaitForPersistentDrawBufferSync(incoming_segment);
-			retained_draw_buffer_active_segment = segment;
-		}
-	}
-	else if (retained_draw_buffer_cursor == 1)
-	{
-		glBindBuffer(GL_UNIFORM_BUFFER, retained_draw_buffer);
-		glBufferData(GL_UNIFORM_BUFFER,
-			retained_draw_buffer_stride * GL4_RETAINED_DRAW_CAPACITY,
-			nullptr, GL_STREAM_DRAW);
-		const GL4RetainedDrawBlock legacy_block = {};
-		glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(legacy_block), &legacy_block);
-	}
-	const GLintptr block_offset =
-		static_cast<GLintptr>(retained_draw_buffer_cursor++) * retained_draw_buffer_stride;
-	if (retained_draw_buffer_map != nullptr)
-	{
-		std::memcpy(static_cast<unsigned char*>(retained_draw_buffer_map) + block_offset,
-			&block, sizeof(block));
-	}
-	else
-	{
-		glBindBuffer(GL_UNIFORM_BUFFER, retained_draw_buffer);
-		glBufferSubData(GL_UNIFORM_BUFFER, block_offset, sizeof(block), &block);
-	}
-	glBindBufferRange(GL_UNIFORM_BUFFER, GL4_RETAINED_DRAW_BINDING,
-		retained_draw_buffer, block_offset, sizeof(block));
-
-	if (use_retained_dynamic_lightmaps)
-	{
-		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, GL4_PER_PIXEL_LIGHTMAP_BINDING,
-			per_pixel_lightmap_buffers[per_pixel_lightmap_buffer_index]);
-	}
-	if (draw->custom_clip_enabled)
-	{
-		glEnable(GL_CLIP_DISTANCE0);
-		retained_custom_clip_active = true;
-	}
-	if (draw->near_clip_enabled)
-	{
-		glEnable(GL_CLIP_DISTANCE1);
-		retained_near_clip_active = true;
-	}
-	if (draw->far_clip_enabled)
-	{
-		glEnable(GL_CLIP_DISTANCE2);
-		retained_far_clip_active = true;
-	}
-
-	retained_include_motion_vectors = CurrentDrawUsesPixelMotionTarget();
-	retained_include_motion_object_ids = CurrentDrawWritesMotionObjectId();
-	if (drawshader_motion_vector_mode_uniforms[shader_index] != -1)
-		glUniform1i(drawshader_motion_vector_mode_uniforms[shader_index],
-			retained_include_motion_vectors ? RENDERER_MOTION_VECTOR_PIXEL :
-			RENDERER_MOTION_VECTOR_OFF);
-	if (drawshader_motion_vector_current_view_projection_uniforms[shader_index] != -1)
-		glUniformMatrix4fv(
-			drawshader_motion_vector_current_view_projection_uniforms[shader_index],
-			1, GL_FALSE, current_view_projection);
-	if (drawshader_motion_vector_payload_type_uniforms[shader_index] != -1)
-		glUniform1i(drawshader_motion_vector_payload_type_uniforms[shader_index], 0);
-	if (drawshader_motion_vector_previous_view_projection_uniforms[shader_index] != -1)
-		glUniformMatrix4fv(drawshader_motion_vector_previous_view_projection_uniforms[shader_index], 1,
-			GL_FALSE, cockpit_motion_object_active ? cockpit_previous_view_projection :
-			previous_view_projection);
-	const bool has_previous_view = cockpit_motion_object_active ?
-		have_cockpit_previous_view_projection : have_previous_view_projection;
-	if (drawshader_motion_vector_has_previous_uniforms[shader_index] != -1)
-		glUniform1i(drawshader_motion_vector_has_previous_uniforms[shader_index],
-			draw->has_previous && has_previous_view ? 1 : 0);
-	if (drawshader_motion_vector_object_id_uniforms[shader_index] != -1)
-		glUniform1ui(drawshader_motion_vector_object_id_uniforms[shader_index],
-			retained_include_motion_object_ids ? motion_object_id : 0u);
-
-	const bool drawing_to_scene = framebuffer_ok &&
-		GL4DrawTargetIsFramebuffer(framebuffers[framebuffer_current_draw].Handle());
-	const bool force_motion_vector_draw_buffer = CurrentDrawIsLateCockpitPixelMotionVectorDraw();
-	const bool include_ao_class = !cockpit_scene_frame_active &&
-		OpenGL_state.cur_zbuffer_state != 0 && depth_write_enabled;
-	const bool include_post_mask = CurrentDrawNeedsPostMask(include_ao_class);
-	retained_override_draw_buffers = drawing_to_scene &&
-		(cockpit_scene_frame_active || force_motion_vector_draw_buffer ||
-		 PixelMotionVectorModeEnabled() || !include_post_mask || !include_ao_class);
-	if (retained_override_draw_buffers)
-	{
-		if (cockpit_scene_frame_active)
-			GL4UseSceneColorDrawBuffer();
-		else
-			GL4UseSceneDrawBuffersForCurrentDraw(retained_include_motion_vectors,
-				include_post_mask, include_ao_class, retained_include_motion_object_ids);
-	}
-	OpenGL_polys_drawn += draw->polygon_count;
-	OpenGL_verts_processed += draw->vertex_count;
-
-	retained_draw_active = true;
-	return true;
-}
-
-void GL4Renderer::EndRetainedPolymodelDraw()
-{
-	if (!retained_draw_active)
-		return;
-
-	UseLegacyRetainedDrawBlock();
-	if (retained_custom_clip_active)
-	{
-		glDisable(GL_CLIP_DISTANCE0);
-		retained_custom_clip_active = false;
-	}
-	if (retained_near_clip_active)
-	{
-		glDisable(GL_CLIP_DISTANCE1);
-		retained_near_clip_active = false;
-	}
-	if (retained_far_clip_active)
-	{
-		glDisable(GL_CLIP_DISTANCE2);
-		retained_far_clip_active = false;
-	}
-	if (retained_include_motion_vectors || retained_include_motion_object_ids)
-	{
-		motion_vectors_dirty = true;
-		surface_records.MarkDirty();
-	}
-	if (retained_override_draw_buffers)
-	{
-		if (cockpit_scene_frame_active)
-			GL4UseSceneColorDrawBuffer();
-		else
-			UseSceneDrawBuffers();
-	}
-
-	retained_draw_active = false;
-	retained_override_draw_buffers = false;
-	retained_include_motion_vectors = false;
-	retained_include_motion_object_ids = false;
 }
 
 static uint64_t GL4RoomFogHashBytes(uint64_t hash, const void* data, size_t size)

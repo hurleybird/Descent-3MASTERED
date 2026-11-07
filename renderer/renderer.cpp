@@ -323,41 +323,6 @@ bool rend_DrawWeatherQuadBatch(int handle, const renderer_weather_quad *items, i
 	return Renderer_initted && items && count > 0 &&
 		renderer_inst->DrawWeatherQuadBatch(handle, items, count, map_type);
 }
-
-bool rend_BeginRetainedPolymodelDraw(const renderer_retained_polymodel_draw *draw)
-{
-	return Renderer_initted && draw && renderer_inst->BeginRetainedPolymodelDraw(draw);
-}
-
-void rend_EndRetainedPolymodelDraw()
-{
-	if (Renderer_initted)
-		renderer_inst->EndRetainedPolymodelDraw();
-}
-
-bool rend_PrepareRetainedRoomLightmaps(const int* lightmap_handles, int count)
-{
-	return Renderer_initted &&
-		renderer_inst->PrepareRetainedRoomLightmaps(lightmap_handles, count);
-}
-
-bool rend_RetainedRoomLightmapsReady()
-{
-	return Renderer_initted && renderer_inst->RetainedRoomLightmapsReady();
-}
-
-int rend_GetRetainedRoomLightmapPage(int lightmap_handle)
-{
-	return Renderer_initted ?
-		renderer_inst->GetRetainedRoomLightmapPage(lightmap_handle) : -1;
-}
-
-void rend_RefreshRetainedRoomLightmaps()
-{
-	if (Renderer_initted)
-		renderer_inst->RefreshRetainedRoomLightmaps();
-}
-
 bool rend_SetRoomFogState(const renderer_room_fog_state *state)
 {
 	return Renderer_initted && renderer_inst->SetRoomFogState(state);

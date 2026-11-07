@@ -200,12 +200,6 @@ public:
 	{
 		return false;
 	}
-	virtual bool BeginRetainedPolymodelDraw(const renderer_retained_polymodel_draw *draw) { return false; }
-	virtual void EndRetainedPolymodelDraw() {}
-	virtual bool PrepareRetainedRoomLightmaps(const int* lightmap_handles, int count) { return false; }
-	virtual bool RetainedRoomLightmapsReady() const { return false; }
-	virtual int GetRetainedRoomLightmapPage(int lightmap_handle) const { return -1; }
-	virtual void RefreshRetainedRoomLightmaps() {}
 	virtual bool SetRoomFogState(const renderer_room_fog_state *state) { return false; }
 	virtual void SetRoomFogOverlay(int state) {}
 

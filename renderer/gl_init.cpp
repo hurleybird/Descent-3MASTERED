@@ -893,13 +893,12 @@ void GL4Renderer::Close()
 	bloom.DestroyShaders();
 	ao.Destroy();
 
-	DestroyRetainedRoomLightmaps();
 	FreeImages();
 	DestroyFontBatchResources();
 	if (framebuffer_ok)
 		CloseFramebuffer();
 
-	DestroyRetainedDrawBuffer();
+	DestroyLegacyDrawDefaults();
 	DestroyPersistentDrawBuffer();
 	glFinish();
 
