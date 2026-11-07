@@ -1,5 +1,32 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November 6 — pause after retirement and GPU diagnosis
+
+User requested stopping at the next natural milestone. All retirement changes
+through 2ef6f1f are pushed. Temporary gl_scene batch diagnostics removed; no
+instancing implementation started. Unrelated untracked lib/gitinfo.h preserved.
+
+Fresh save006 ABBA, 1500 frames, medians frames400..1199, CPU2, uncapped720p,
+1xSSAA/noMSAA/noAO/noBloom/headlight: old render CPU .7255/.7360ms versus
+new .5000/.4795ms; old GPU .330/.328ms versus new .6765/.679ms;
+old frame intervals1.016/1.030ms versus new .929/.8995ms.
+Evidence perf-retirement006-{old-a,new-a,new-b,old-b}-20261106 under
+C:/tmp/D3RendererVerification. CPU and total interval improve; GPU remains worse.
+Old executable is reconstructed bfb59647, not the deleted original binary.
+Matched baseline archive baseline-pre-rewrite-assets-20261106.hog retained.
+
+Diagnostic diag-instances006-verified-20261106 confirms the late world pass has
+57 items/57 draws, with44 adjacent pairs sharing geometry range, VAO, textures
+and blend/depth policy. Placement/tint/alpha differ. Next candidate: genuine
+ordered instancing of shared geometry, not another material-specific workaround.
+Must account for motion/deformation identity, winding, shader attribute/varying
+budgets and texture-unit availability. No speedup from this idea demonstrated.
+Earlier diag-instances006-20261106 used an older executable while build was
+running; do not use it as geometry-identity evidence.
+
+Remaining: GPU regressions, broader gameplay qualification, acceptance guard.
+Candidate/Previous Candidate untouched; shadows still deferred.
+
 ## November 6 — retired CPU dynamic-lightmap renderer removed
 
 Removed old software/per-face dynamic-light application, canonical-light lists,
