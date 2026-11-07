@@ -1,5 +1,37 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November 6 — legacy polymodel drawer retired
+
+Deleted model/newstyle.cpp and retained_polymodel.cpp/h. Moved the two source
+bounds functions verbatim to ModelBounds.cpp (CMake updated). Removed all three
+unused DrawPolygonModel overloads, their mutable lighting/effect state, legacy
+motion history map and draw profiling hooks. Removed unused objinfo::DrawObject
+and already-commented TelCom model drawing. Kept RenderPolyModel's existing age
+advance, not a new fallback. Removed obsolete retained-cache invalidation calls
+while preserving InvalidateSceneModelSources/InvalidateObjectLightmapLayouts
+and the Level2 lightmap freeing/allocation fix. Physics positional instances,
+pose adapters, source loading and external model structures remain unchanged.
+Removed now-impossible legacy active-model suppression from bitmap drawing and
+old point motion tagging (g3_RotatePoint already clears these flags). No owned
+model presentation, motion, material or simulation math changed.
+
+Build/root3/3 pass. Binary/runtime:
+DEBF7E8A3E734E23AE76C9FD1CBF0CD9812E4C9E03CEF97D66FD4FCBDDC242A8.
+qual-model-draw-corpus-20261106 all8clean60 EXACT terrain-scratch-corpus.
+qual-model-draw-roundtrip-20261106 effects/field/motion003120 all8PNG EXACT
+room-draw-roundtrip. Native ship-preview00350 before/after: final/30 exact;
+frame40 differs only in decorative top strip (7705pixels); region0,60,640,420
+EXACT, including ship geometry. Viewed both frame40 images: TelCom neon trim
+flashes. TelCom.cpp1390ff uses timer_GetTime/random for neon; no full-frame
+exactness claim for that one UI image. Capture directories:
+qual-model-draw-preview-{before,after}-20261106.
+
+Next: unused renderer retained draw/lightmap APIs and backend residency.
+BeginRetainedPolymodelDraw/End and PrepareRetainedRoomLightmaps/Ready/GetPage/
+Refresh have no remaining consumers beyond wrappers/definitions. Audit shared
+UBOs/vertex buffers before removal: owned renderer may still use some shared
+infrastructure. Acceptance guards/GPU gaps/broader qualification still pending.
+
 ## November 6 — obsolete terrain/world scratch retired
 
 Removed World_point_buffer, Terrain_rotate_list, TerrainDeltaBlocks, join/edge

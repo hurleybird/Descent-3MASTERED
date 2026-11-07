@@ -1074,7 +1074,6 @@ void PerfMarkersBeginFrame()
 		(Game_interface_mode != GAME_INTERFACE || Menu_interface_mode || Game_paused);
 	Perf_marker_records.clear();
 	Perf_marker_stack.clear();
-	PolymodelPerfReset();
 	Perf_marker_frame_number++;
 }
 
@@ -1094,7 +1093,6 @@ void PerfMarkersEndFrame()
 		return;
 	}
 
-	PolymodelPerfFlush();
 	PerfMarkersRecordDuration("Frame.Total", Perf_marker_frame_start, frame_end - Perf_marker_frame_start);
 	if (!Perf_marker_stack.empty())
 	{

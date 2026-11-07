@@ -1475,7 +1475,6 @@ static bool QueueOmegaColoredDiskBatch(std::vector<OmegaBatchItem>& batch_items,
 		vector outer_pos = (*pos) + (world_space_circle_vec * size);
 
 		g3_RotatePoint(&inner_points[i], &inner_pos);
-		PolymodelMotionSetObjectPoint(&inner_points[i], &inner_pos);
 		inner_points[i].p3_flags |= PF_RGBA;
 		inner_points[i].p3_a = inner_alpha;
 		inner_points[i].p3_r = r;
@@ -1483,7 +1482,6 @@ static bool QueueOmegaColoredDiskBatch(std::vector<OmegaBatchItem>& batch_items,
 		inner_points[i].p3_b = b;
 
 		g3_RotatePoint(&outer_points[i], &outer_pos);
-		PolymodelMotionSetObjectPoint(&outer_points[i], &outer_pos);
 		outer_points[i].p3_flags |= PF_RGBA;
 		outer_points[i].p3_a = outer_alpha;
 		outer_points[i].p3_r = r;

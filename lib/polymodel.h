@@ -38,53 +38,7 @@
 extern int Num_poly_models;
 extern poly_model Poly_models[];
 
-extern int Polymodel_use_effect;
-extern polymodel_effect Polymodel_effect;
-extern polymodel_light_type Polymodel_light_type;
-extern float Polylighting_static_red;
-extern float Polylighting_static_green;
-extern float Polylighting_static_blue;
-extern ubyte *Polylighting_gouraud;
-extern vector *Polymodel_light_direction,Polymodel_fog_portal_vert,Polymodel_fog_plane,Polymodel_specular_pos,Polymodel_bump_pos;
-extern lightmap_object *Polylighting_lightmap_object;
-
-// An outdoor satellite reflection and a dynamic-light reflection may coexist.
-// This is renderer-internal state rather than part of polymodel_effect so the
-// public effect structure and module ABI remain unchanged.
-void SetPolymodelSecondarySpecular(const vector *position, float r, float g,
-	float b, float scalar);
-void ClearPolymodelSecondarySpecular();
-bool GetPolymodelSecondarySpecular(vector *position, float *r, float *g,
-	float *b, float *scalar);
-
-extern vector Model_eye_position;
 extern vector Interp_pos_instance_vec;
-extern g3Point Robot_points[];
-
-//Flag to draw an outline around the faces
-extern bool Polymodel_outline_mode;
-
-enum polymodel_render_pass
-{
-	POLYMODEL_RENDER_ALL,
-	POLYMODEL_RENDER_OPAQUE,
-	POLYMODEL_RENDER_TRANSPARENT,
-	// Used for geometry motion-blur copies: draw every material with depth
-	// writes disabled by the transparent queue.
-	POLYMODEL_RENDER_TRANSLUCENT_ALL
-};
-
-extern polymodel_render_pass Polymodel_render_pass;
-
-constexpr ubyte POLYMODEL_LATE_GEOMETRY = 1;
-constexpr ubyte POLYMODEL_LATE_FACING = 2;
-
-// The separated object renderer uses the opaque traversal to discover which
-// portions of the late pass are actually required.
-void PolymodelBeginLatePassTracking();
-ubyte PolymodelLatePassMask();
-void PolymodelSetTransparentReplayMask(ubyte mask);
-void PolymodelClearTransparentReplayMask();
 
 inline float POLY_WIDTH(int model_num)
 {
@@ -112,25 +66,6 @@ void ChangePolyModelName (char *src,char *dest);
 // or index of polymodel with name
 int FindPolyModelName (char *name);
 
-// Draws a polygon model to the viewport
-// Normalized_time is an array of floats from 0 to 1 that represent how far into
-// an animation state we are
-
-// This one is for static lighting - ie 1 light value for the entire model
-void DrawPolygonModel(vector *pos,matrix *orient,int model_num,float *normalized_time,int flags,float r,float g,float b, uint f_render_sub = 0xFFFFFFFF,ubyte use_effect=0,ubyte overlay=0);
-
-// This one is for gouraud shading - the lightdir is the normalized light direction, and lightscalar is a 0-1 scalar to apply
-void DrawPolygonModel(vector *pos,matrix *orient,int model_num,float *normalized_time,int flags,vector *lightdir,float r,float g,float b, uint f_render_sub=0xFFFFFFFF,ubyte use_effect=0,ubyte overlay=0);
-
-// This one is for lightmap rendering
-void DrawPolygonModel(vector *pos,matrix *orient,int model_num,float *normalized_time,int flags,lightmap_object *lm_object, uint f_render_sub,ubyte use_effect=0,ubyte overlay=0);
-
-//gives the interpreter an array of points to use
-void g3_SetInterpPoints(g3Point *pointlist);
-
-//calls the object interpreter to render an object.  The object renderer
-//is really a seperate pipeline. returns true if drew
-int InterpPolygonModel(poly_model * pm);
 
 // Inits our models array 
 int InitModels ();
@@ -154,22 +89,6 @@ void StartPolyModelPosInstance (vector *posvec);
 // Pops a positional instance
 void DonePolyModelPosInstance ();
 
-void PolymodelMotionStartFrame();
-void PolymodelMotionBeginObject(int object_handle, vector *pos, matrix *orient);
-bool PolymodelMotionBeginTransientTransform(vector *pos, matrix *orient);
-void PolymodelMotionCaptureCurrent(poly_model *pm, vector *pos, matrix *orient);
-bool PolymodelMotionGetObjectPrevious(int object_handle, vector *pos, matrix *orient);
-bool PolymodelMotionHasActiveObject();
-void PolymodelMotionEndObject();
-void PolymodelMotionSetPoint(g3Point *point, poly_model *pm, int submodel_num, const vector *local_pos);
-void PolymodelMotionSetObjectPoint(g3Point *point, const vector *world_pos);
-bool PolymodelMotionGetSubmodelMatrices(poly_model *pm, int submodel_num,
-	float current_world[16], float previous_world[16], bool *has_previous);
-
-void PolymodelPerfReset();
-void PolymodelPerfFlush();
-void PolymodelPerfAddDrawModel(double start_time);
-void PolymodelPerfAddDrawModelSetup(double start_time);
 
 
 
@@ -184,19 +103,12 @@ float	ComputeDefaultSize(int type, int handle, float *size_ptr);
 // Returns the total number of faces in a model
 int CountFacesInPolymodel (poly_model *pm);
 
-// Rendering functions
-int RenderPolygonModel (poly_model *, uint f_render_sub = 0xFFFFFFFF);
-void RenderSubmodel (poly_model *pm,bsp_info *sm, uint f_render_sub);
-
 //	returns point within polymodel/submodel in world coordinates.
 void GetPolyModelPointInWorld (vector *dest,poly_model *pm, vector *wpos, matrix *orient,int subnum, vector *pos,vector *norm=NULL);
 void GetPolyModelPointInWorld (vector *dest,poly_model *pm, vector *wpos, matrix *orient,int subnum, float *normalized_time, vector *pos, vector *norm=NULL);
 
 // Returns 1 if this submodel shouldn't be rendered
 int IsNonRenderableSubmodel (poly_model *pm,int submodelnum);
-
-// Sets the effect used by a polymodel
-void SetPolymodelEffect (polymodel_effect *);
 
 // Pages in a polymodel if its not already in memory
 void PageInPolymodel (int polynum, int type = -1, float *size_ptr = NULL);

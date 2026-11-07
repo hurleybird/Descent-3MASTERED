@@ -114,8 +114,6 @@ void g3_GetProjectionMatrix( float zoom, float *projMat )
 static void g3_StartFrameInternal(vector *view_pos,matrix *view_matrix,float zoom,
 								  int anchor_x, int anchor_y, int anchor_w, int anchor_h)
 {
-	PolymodelMotionStartFrame();
-
 	// initialize the viewport transform
 	g3_GetProjectionMatrixAnchored( zoom, gTransformProjection, anchor_x, anchor_y, anchor_w, anchor_h );
 	g3_GetModelViewMatrix( view_pos, view_matrix, gTransformModelView );

@@ -32,7 +32,6 @@
 #include "config.h"
 #include "findintersection.h"
 #include "psrand.h"
-#include "../model/retained_polymodel.h"
 
 // Fills in the color of the passed in players thrusters.  For lighting
 void FindPlayerThrusterColor(int slot, float* r, float* g, float* b)
@@ -80,7 +79,6 @@ void ClearObjectLightmaps(object* obj)
     InvalidateObjectLightmapLayouts();
 	if (obj->lm_object.used == 1)
 	{
-		RetainedPolymodelInvalidateLightmapObject(&obj->lm_object);
 		obj->lm_object.used = 0;
 		mprintf((1, "CLEAR %d %s", obj->handle, obj->name));
 
@@ -208,7 +206,6 @@ void SetupObjectLightmapMemory(object* obj)
 	lightmap_object_face* lof;
 
 	ASSERT(obj->lm_object.used == 0);
-	RetainedPolymodelInvalidateLightmapObject(&obj->lm_object);
 	obj->lm_object.used = 1;
 
 	poly_model* pm = &Poly_models[obj->rtype.pobj_info.model_num];

@@ -306,16 +306,6 @@ int GetObjectImage(int handle)
 		return (Object_info[handle].render_handle);
 }
 
-// Given an object, renders the representation of this object
-void DrawObject(object* obj)
-{
-	ASSERT(Object_info[obj->id].type != OBJ_NONE);
-
-	if (obj->render_type == RT_POLYOBJ)
-		DrawPolygonModel(&obj->pos, &obj->orient, Object_info[obj->id].render_handle, NULL, 0, 1.0, 1.0, 1.0, obj->rtype.pobj_info.subobj_flags);
-	else
-		Int3();
-}
 
 
 //Go through the object list and update an ID which has changed

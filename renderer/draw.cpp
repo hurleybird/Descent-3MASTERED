@@ -343,13 +343,8 @@ void g3_DrawBitmap(vector *pos,float width,float height,int bm,int color)
 		return;
 
 	// And draw!!
-	const bool suppress_motion_vectors = PolymodelMotionHasActiveObject();
-	if (suppress_motion_vectors)
-		rend_SuspendMotionVectorWrites();
 	rend_DrawScaledBitmapWithZ(x1, y1, x2, y2, bm, u0, v0, u1, v1, pnt.p3_z,
 		color, nullptr, pos);
-	if (suppress_motion_vectors)
-		rend_ResumeMotionVectorWrites();
 }
 
 // Draws a bitmap that has been rotated about its center.  Angle of rotation is passed as 'rot_angle'

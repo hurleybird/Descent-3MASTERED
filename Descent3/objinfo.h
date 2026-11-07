@@ -264,7 +264,6 @@ int FindObjectIDName(char *name);
 int GetObjectImage(int handle);
 
 // Given an object, renders the representation of this object
-void DrawObject(object *obj);
 
 // Moves an object from a given index into a new one (above MAX_STATIC_IDS)
 // returns new index

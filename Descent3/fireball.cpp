@@ -1763,7 +1763,6 @@ void DrawColoredRing(vector* pos, float r, float g, float b, float inner_alpha, 
 		vector outerPos = (*pos) + (worldSpaceCircleVec * outerRingSize);
 
 		g3_RotatePoint(&innerPoints[i], &innerPos);
-		PolymodelMotionSetObjectPoint(&innerPoints[i], &innerPos);
 		innerPoints[i].p3_flags |= PF_RGBA;
 		innerPoints[i].p3_a = inner_alpha;
 		innerPoints[i].p3_r = r;
@@ -1771,7 +1770,6 @@ void DrawColoredRing(vector* pos, float r, float g, float b, float inner_alpha, 
 		innerPoints[i].p3_b = b;
 
 		g3_RotatePoint(&outerPoints[i], &outerPos);
-		PolymodelMotionSetObjectPoint(&outerPoints[i], &outerPos);
 		outerPoints[i].p3_flags |= PF_RGBA;
 		outerPoints[i].p3_a = outer_alpha;
 		outerPoints[i].p3_r = r;
@@ -1890,7 +1888,6 @@ void DrawSphere(vector* pos, float r, float g, float b, float alpha, float size,
 		{
 			vector temp_vec = *pos + (sphere_vecs[i][t] * size);
 			g3_RotatePoint(&sphere_points[i][t], &temp_vec);
-			PolymodelMotionSetObjectPoint(&sphere_points[i][t], &temp_vec);
 		}
 	}
 	for (i = 0; i < 16; i++)

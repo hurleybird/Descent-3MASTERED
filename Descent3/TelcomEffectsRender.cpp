@@ -907,67 +907,6 @@ void RenderMovie(tceffect* tce, float frametime, int xoff, int yoff, bool ok_to_
 
 void RenderPolyModel(tceffect* tce, float frametime, int xoff, int yoff, bool ok_to_render)
 {
-	/*
-	if(!ok_to_render)
-		return;
-	ASSERT(tce->type==EFX_POLYMODEL);
-	if(tce->polyinfo.handle==-1)
-		return false;
-	float k = tce->age;
-	//setup how much we're gonna rotate
-	float xrot = k*tce->polyinfo.m_Rot.x + tce->polyinfo.m_Ori.x;
-	float yrot = k*tce->polyinfo.m_Rot.y + tce->polyinfo.m_Ori.y;
-	float zrot = k*tce->polyinfo.m_Rot.z + tce->polyinfo.m_Ori.z;
-	//fade in speed 2.0f
-	k*=(1.0f/2.0f);
-	if (k > 1.3) {
-		k = 1.3f;
-	}
-	else
-	if (k < 0){
-		k = 0.0f;
-	}
-	poly_model *pm=GetPolymodelPointer(tce->polyinfo.handle);
-	vector view_vec;
-	matrix view_orient;
-	float light_scalar;
-	//set all animation to default position
-	float norm_angles[MAX_SUBOBJECTS];
-	for (int i=0;i<MAX_SUBOBJECTS;i++){
-		norm_angles[i]=0;
-	}
-	//viewer at origin
-	vm_MakeIdentity(&view_orient);
-	vector pos;
-	pos.x = - (tce->polyinfo.m_Pos.x + (((float)glitch_dx)/tce->polyinfo.m_Pos.z));
-	pos.y = - (tce->polyinfo.m_Pos.y + (((float)glitch_dy)/tce->polyinfo.m_Pos.z));
-	pos.z = - tce->polyinfo.m_Pos.z;
-
-	g3_StartFrame (&pos,&view_orient,D3_DEFAULT_ZOOM);
-	//shed some light on the subject
-	light_scalar = 0.86f;
-	//we need to rotate our model about Y 180 degrees so it faces the camera
-	vm_AnglesToMatrix(&view_orient,xrot,yrot,zrot);
-	tce->polyinfo.m_mOrient += view_orient;
-	vm_Orthogonalize(&tce->polyinfo.m_mOrient);
-
-	//draw the polymodel with our little fade in effect
-	polymodel_effect pe={0};
-	pe.type=PEF_ALPHA;
-	if(k>=0.3)
-		pe.alpha=k-0.3f;
-	else
-		pe.alpha=0.005f;
-	SetPolymodelEffect(&pe);
-	vm_MakeZero (&view_vec);
-	rend_SetZBufferState(1);
-	DrawPolygonModel(&view_vec,&tce->polyinfo.m_mOrient,tce->polyinfo.handle,norm_angles,0,light_scalar,light_scalar,light_scalar,0xFFFFFFFF,1);
-	//DrawPolygonModel(&m_Pos,&m_mOrient,m_iHandle,norm_angles,0,light_scalar,0xFFFFFFFF,1);
-	if(k<1)
-		DrawModelOutline(GR_RGB(255,255,255),1.0-k);
-	g3_EndFrame();
-	rend_SetZBufferState(0);
-	*/
 	tce->age += frametime;
 }
 
