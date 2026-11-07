@@ -1,5 +1,22 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November 6 — retired CPU dynamic-lightmap renderer removed
+
+Removed old software/per-face dynamic-light application, canonical-light lists,
+retired world root, lightmap SSBO upload API/state, frame-end restore and object
+edge-flush calls. InitLightingSources now initializes only source tables; no
+1,000,000-byte dynamic scratch pool, dynamic records or spare specular lightmaps.
+Eight retained functions are copied verbatim: room ambient sample, Float_to_ubyte,
+BlendLightingEdges, room pulse, volume size, DestroyLight and its queue/drain.
+Preserved byte-conversion table/math and source lightmap revision notifications.
+No simulation or destructible-light algorithm changes intended.
+Build/root3/3 pass; all8clean/exact60 qual-cpu-lightmap-corpus-20261106 EXACT
+native-shader corpus. Flight/fire/save/reload effects/field/motion003120 all8PNG
+in qual-cpu-lightmap-roundtrip-20261106 EXACT model-draw-roundtrip.
+Runtime binary6210B746485A0BF9A9FA3F0E671A035C554DA824D9CA062C639F81C0CF48123E;
+shader archive remains3524C6A189CE9CC0E484FA01AB3BA05197D439EE7BAB12A6EDECA79C4F237706.
+No frame-rate claim from dead-code removal. Candidate/Previous Candidate untouched.
+
 ## November 6 — native shaders no longer support retained geometry
 
 Removed dead retained vertex transforms/deformation/clipping, effect-alpha and

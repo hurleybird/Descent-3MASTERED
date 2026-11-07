@@ -3581,12 +3581,6 @@ void GameRenderFrame(void)
 	}
 	rend_PerfGpuSceneMark(RENDERER_GPU_SCENE_AFTER_UI);
 
-	//Done with the dynamic lights
-	{
-		PERF_MARKER_SCOPE("ClearDynamicLightmaps");
-		ClearDynamicLightmaps();
-	}
-
 	//Increment frame count
 	FrameCount++;
 	//#ifdef GAMEGAUGE

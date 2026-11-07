@@ -2119,7 +2119,7 @@ bool CheckCdForValidity(int cd);
 //	initialize lighting systems
 	InitLightmapInfo();
 	InitSpecialFaces();
-	InitDynamicLighting();
+	InitLightingSources();
 	AutomatedCaptureLog("systems1 core data complete");
 	
 // Initialize missions

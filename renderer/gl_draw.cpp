@@ -39,7 +39,6 @@ constexpr size_t DRAW_BUFFER_TARGET_BYTES = 64u * 1024u * 1024u;
 constexpr int MIN_VERTS_PER_BUFFER = 65536;
 constexpr float PIXEL_MOTION_BLUR_REFERENCE_FRAME_TIME = 1.0f / 60.0f;
 constexpr unsigned int GL4_MOTION_OBJECT_LEGACY_BLUR_MASK = 0x80000000u;
-constexpr GLuint GL4_PER_PIXEL_LIGHTMAP_BINDING = 6;
 struct GL4FramebufferBindingState
 {
 	GLuint draw = 0;

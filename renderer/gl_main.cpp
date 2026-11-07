@@ -3034,91 +3034,6 @@ void GL4Renderer::SetPerPixelDynamicLighting(const vector *face_normal, int coun
 		per_pixel_dynamic_directions, per_pixel_dynamic_dot_ranges, per_pixel_dynamic_directional);
 }
 
-void GL4Renderer::UpdatePerPixelLightmapLighting(
-	const renderer_per_pixel_lightmap_entry *entries, int entry_count)
-{
-	constexpr int gpu_lookup_count = 65536;
-	constexpr int gpu_entry_count = 2000;
-	constexpr int gpu_lights_per_entry = RENDERER_MAX_PER_PIXEL_DYNAMIC_LIGHTS;
-	constexpr GLuint gpu_binding = 6;
-	struct GpuLight
-	{
-		float position_radius[4];
-		float color_falloff[4];
-		float direction_dot[4];
-	};
-
-	if (!OpenGL_preferred_state.per_pixel_lighting || !entries || entry_count <= 0)
-	{
-		per_pixel_lightmap_buffer_ready = false;
-		return;
-	}
-
-	entry_count = std::min(entry_count, gpu_entry_count);
-	static std::vector<int> active_lookup_keys;
-	if (per_pixel_lightmap_lookup_upload.size() != gpu_lookup_count)
-		per_pixel_lightmap_lookup_upload.assign(gpu_lookup_count, 0);
-	else
-	{
-		for (int lmi : active_lookup_keys)
-			per_pixel_lightmap_lookup_upload[lmi] = 0;
-	}
-	active_lookup_keys.clear();
-	active_lookup_keys.reserve(entry_count);
-	for (int candidate = 0; candidate < entry_count; candidate++)
-	{
-		const int lmi = entries[candidate].lightmap_key;
-		if (lmi < 0 || lmi >= gpu_lookup_count)
-			continue;
-		const int count = std::min((int)entries[candidate].count, gpu_lights_per_entry);
-		per_pixel_lightmap_lookup_upload[lmi] = ((candidate + 1) << 4) | count;
-		active_lookup_keys.push_back(lmi);
-	}
-
-	static std::vector<GpuLight> gpu_lights;
-	gpu_lights.clear();
-	gpu_lights.resize((size_t)entry_count * gpu_lights_per_entry);
-	for (int entry = 0; entry < entry_count; entry++)
-	{
-		const int count = std::min((int)entries[entry].count, gpu_lights_per_entry);
-		for (int light_index = 0; light_index < count; light_index++)
-		{
-			const renderer_per_pixel_light& source = entries[entry].lights[light_index];
-			GpuLight& destination = gpu_lights[(size_t)entry * gpu_lights_per_entry + light_index];
-			memcpy(destination.position_radius, source.position, sizeof(source.position));
-			destination.position_radius[3] = source.radius;
-			memcpy(destination.color_falloff, source.color, sizeof(source.color));
-			destination.color_falloff[3] = source.falloff;
-			memcpy(destination.direction_dot, source.direction, sizeof(source.direction));
-			destination.direction_dot[3] = source.directional ? source.dot_range : -2.0f;
-		}
-	}
-
-	per_pixel_lightmap_buffer_index = (per_pixel_lightmap_buffer_index + 1) % 3;
-	GLuint& buffer = per_pixel_lightmap_buffers[per_pixel_lightmap_buffer_index];
-	if (buffer == 0)
-		glGenBuffers(1, &buffer);
-	glBindBuffer(GL_SHADER_STORAGE_BUFFER, buffer);
-	const GLsizeiptr lookup_bytes = gpu_lookup_count * sizeof(int);
-	const GLsizeiptr light_capacity_bytes =
-		gpu_entry_count * gpu_lights_per_entry * sizeof(GpuLight);
-	if (!per_pixel_lightmap_buffer_initialized[per_pixel_lightmap_buffer_index])
-	{
-		glBufferData(GL_SHADER_STORAGE_BUFFER, lookup_bytes + light_capacity_bytes,
-			nullptr, GL_STREAM_DRAW);
-		per_pixel_lightmap_buffer_initialized[per_pixel_lightmap_buffer_index] = true;
-	}
-	glBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, lookup_bytes,
-		per_pixel_lightmap_lookup_upload.data());
-	if (!gpu_lights.empty())
-	{
-		glBufferSubData(GL_SHADER_STORAGE_BUFFER, lookup_bytes,
-			(GLsizeiptr)(gpu_lights.size() * sizeof(GpuLight)), gpu_lights.data());
-	}
-	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, gpu_binding, buffer);
-	per_pixel_lightmap_buffer_ready = true;
-}
-
 void GL4Renderer::SetColorModel(color_model state)
 {
 	if (state == OpenGL_state.cur_color_model)
@@ -3988,14 +3903,6 @@ void GL4Renderer::CloseFramebuffer(void)
 	surface_records.Destroy();
 	scene_motion = {}; completed_scene_motion = {};
 	post_protection_mask.Destroy();
-	glDeleteBuffers(3, per_pixel_lightmap_buffers);
-	memset(per_pixel_lightmap_buffers, 0, sizeof(per_pixel_lightmap_buffers));
-	memset(per_pixel_lightmap_buffer_initialized, 0,
-		sizeof(per_pixel_lightmap_buffer_initialized));
-	per_pixel_lightmap_buffer_index = -1;
-	per_pixel_lightmap_buffer_ready = false;
-	per_pixel_lightmap_lookup_upload.clear();
-
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
 	GL_DestroyFramebufferVAO();

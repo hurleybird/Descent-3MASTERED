@@ -593,11 +593,6 @@ class GL4Renderer : public IRenderer
 	GLuint commonbuffername = 0;
 	GLuint legacycommonbuffername = 0;
 	GLuint fogbuffername = 0;
-	GLuint per_pixel_lightmap_buffers[3] = {};
-	bool per_pixel_lightmap_buffer_initialized[3] = {};
-	int per_pixel_lightmap_buffer_index = -1;
-	bool per_pixel_lightmap_buffer_ready = false;
-	std::vector<int> per_pixel_lightmap_lookup_upload;
 	GLuint specularbuffername = 0;
 	GLuint terrainfogbuffername = 0;
 	int terrainfogcounter = 0;
@@ -823,9 +818,6 @@ public:
 	void SetPerPixelLightingDirection(const vector *lightdir) override;
 	void SetPerPixelDynamicLighting(const vector *face_normal, int count,
 		const renderer_per_pixel_light *lights) override;
-	void UpdatePerPixelLightmapLighting(
-		const renderer_per_pixel_lightmap_entry *entries, int entry_count) override;
-	bool PerPixelLightmapLightingReady() const override { return per_pixel_lightmap_buffer_ready; }
 
 	// Adds a bias to each coordinates z value.  This is useful for making 2d bitmaps
 	// get drawn without being clipped by the zbuffer

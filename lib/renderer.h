@@ -133,20 +133,9 @@ struct renderer_per_pixel_light
 	float specular_scalar;
 };
 
-struct renderer_per_pixel_lightmap_entry
-{
-	int lightmap_key;
-	ubyte count;
-	renderer_per_pixel_light lights[RENDERER_MAX_PER_PIXEL_DYNAMIC_LIGHTS];
-};
-
 void rend_SetLighting(light_state);
 void rend_SetPerPixelLightingDirection(const vector *lightdir);
 void rend_SetPerPixelDynamicLighting(const vector *face_normal, int count, const renderer_per_pixel_light *lights);
-void rend_UpdatePerPixelLightmapLighting(
-	const renderer_per_pixel_lightmap_entry *entries, int entry_count);
-bool rend_PerPixelLightmapLightingReady();
-
 enum color_model
 {
 	CM_MONO,		// monochromatic (intensity) model - default

@@ -1387,18 +1387,6 @@ void rend_SetPerPixelDynamicLighting(const vector *face_normal, int count, const
 	renderer_inst->SetPerPixelDynamicLighting(face_normal, count, lights);
 }
 
-void rend_UpdatePerPixelLightmapLighting(
-	const renderer_per_pixel_lightmap_entry *entries, int entry_count)
-{
-	if (Renderer_initted)
-		renderer_inst->UpdatePerPixelLightmapLighting(entries, entry_count);
-}
-
-bool rend_PerPixelLightmapLightingReady()
-{
-	return Renderer_initted && renderer_inst->PerPixelLightmapLightingReady();
-}
-
 void rend_SetColorModel(color_model model)
 {
 	if (!Renderer_initted)

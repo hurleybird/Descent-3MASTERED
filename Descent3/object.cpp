@@ -2112,7 +2112,6 @@ void ObjDoLightingFrameAll()
 		}
 	}
 
-	BlendAllLightingEdges();
 }
 
 int	Max_used_objects = MAX_OBJECTS - 20;
@@ -2186,9 +2185,6 @@ void ObjDoFrameAll()
 		VisEffectMoveAll();
 		RTP_ENDINCTIME(vis_eff_move);
 	}
-
-	// Blend all lights that are needed
-	BlendAllLightingEdges();
 
 	mprintf_at((1, 5, 40, "Objs=%d ", objs_live));
 
