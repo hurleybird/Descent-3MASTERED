@@ -148,32 +148,6 @@ struct terrain_sky
 	int flags;
 };
 
-struct link_tile
-{
-	int mine_seg;
-	int mine_side;
-	int portal_num;
-	int terrain_seg;
-	
-};
-
-struct terrain_mine_list
-{
-	int terrain_seg;
-	ubyte num_segs;
-	short mine_segs[50];
-};
-
-struct terrain_render_info
-{
-	float z;
-	ushort right_edge,left_edge,top_edge,bottom_edge;  // for fixing tjoint problems
-	ubyte right_count,left_count,top_count,bottom_count;
-	ushort segment;	// what segment to render
-	ubyte lod;			// what level of detail: 0=16x16, 1=8x8, 2=4x4, 3=2x2, 4=just this segment (1x1)
-	ubyte pad;			
-};
-
 struct terrain_normals
 {
 	vector normal1;		// Upper left triangle
@@ -194,13 +168,6 @@ void TerrainRenderDataChanged();
 // Our lighting maps for the terrain, one for each quadrant (starting at lower left)
 extern int TerrainLightmaps[4];
 
-extern int TerrainEdgeTest[MAX_TERRAIN_LOD][16];
-
-extern terrain_render_info Terrain_list[];	
-
-extern float VisibleTerrainZ;
-extern float Terrain_average_height;	
-
 extern float Last_terrain_render_time;
 
 extern terrain_segment Terrain_seg[TERRAIN_WIDTH*TERRAIN_DEPTH];
@@ -219,9 +186,6 @@ extern terrain_render_clip_plane Terrain_render_clip_planes[MAX_TERRAIN_RENDER_C
 extern int Num_terrain_render_clip_planes;
 extern terrain_tex_segment Terrain_tex_seg[TERRAIN_TEX_WIDTH*TERRAIN_TEX_DEPTH];
 
-// first object to render after cell has been rendered (only used for SW renderer)
-extern short Terrain_seg_render_objs[];
-
 #define TERRAIN_REGION(x) ((Terrain_seg[0x7FFFFFFF&x].flags&TFM_REGION_MASK)>>5)
 
 extern terrain_sky Terrain_sky;
@@ -231,23 +195,13 @@ extern terrain_sky Terrain_sky;
 	extern bool Terrain_render_ext_room_objs;
 #endif
 
-extern int Terrain_LOD_engine_off;
-
-extern ubyte TerrainJoinMap[];
-extern float *TerrainDeltaBlocks[];
 extern ubyte *Terrain_max_height_int[];
 extern ubyte *Terrain_min_height_int[];
-
-extern int Camera_direction,Sort_direction;
 
 #if (defined(_DEBUG) || defined(NEWEDITOR))
 	extern ubyte TerrainSelected[];
 	extern int Num_terrain_selected;
 #endif
-
-extern ushort *Terrain_rotate_list;	// which points have been sub/rotated this frame
-extern g3Point *World_point_buffer;	// Rotated points
-
 
 #define TSEARCH_FOUND_TERRAIN	0
 #define TSEARCH_FOUND_MINE		1
@@ -306,13 +260,6 @@ void BuildLightingNormalForSegment (int n);
 
 // Takes our light angle and fills in the appropriate values in the lightsource vector
 void GenerateLightSource ();
-
-// Returns the terrain segment index of the farthest point that mine segment "mine_seg"
-// touches.  Based on Camera_direction
-int GetFurthestMineSegment (int mine_seg);
-
-// Generates info for the LOD engine...must be called after the geometry changes
-void GenerateLODDeltas ();
 
 // Generates lightmaps based on the info given by the .light field of each Terrain_seg
 void UpdateTerrainLightmaps ();

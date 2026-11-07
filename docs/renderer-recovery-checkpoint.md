@@ -1,5 +1,33 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November 6 — obsolete terrain/world scratch retired
+
+Removed World_point_buffer, Terrain_rotate_list, TerrainDeltaBlocks, join/edge
+tables, old draw list and debug LOD toggle. Removed their allocation/reset/free
+paths and delta generation during BuildMinMaxTerrain/DeformTerrain. Preserved
+source height changes, normals, min/max tables, lightmap updates and revision
+notifications. 397 net lines removed. Compiler syntax-only static_assert proved
+sizeof(g3Point)==220; removed non-dedicated heap allocation payload is exactly
+14,635,008bytes (13.957MiB):65536points,65536ushortmarks,3floatLODlevels.
+This excludes retired static arrays and allocator overhead, not an FPS claim.
+Temporary size-check source removed with apply_patch; no generated binary.
+
+Full build/root3/3 pass. Runtime/build SHA256:
+BDDF6E1C56358203434FA1238CE741761338A3B25FED2CA77B9A35F57E15EFCF.
+qual-terrain-scratch-corpus-20261106 all8clean60 EXACT room-draw-retirement.
+Exterior before/after003/006clean/exact60 each differ by precisely one pixel:
+003(304,9),006(568,2), in the previously variable sky/top strip; all other pixels
+exact. Directly viewed006after. Do not claim fully exact exterior captures.
+Candidate/Previous Candidate unchanged. Continue; no new stop request.
+
+Next audit: model/newstyle.cpp external consumers now only polymodel.cpp draw
+functions, ComputeDefaultSize callers and empty perf hooks. DrawPolygonModel
+outside polymodel.cpp only referenced by unused objinfo::DrawObject and an
+already-commented-out TelcomEffectsRender::RenderPolyModel body. Need preserve
+model loading/pose/bounds/ABI and check constructors/globals as well as functions
+before retiring model draw code. Legacy retained_polymodel residency can likely
+retire after that; ClearObjectLightmaps source-layout AV fix must stay intact.
+
 ## November 6 — room/object/effect draw retirement; continuing
 
 User resumed with "continue now"; earlier milestone stop is superseded.

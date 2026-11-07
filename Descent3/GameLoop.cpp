@@ -2116,11 +2116,6 @@ void ProcessTestKeys(int key)
 		break;
 	}
 
-	case KEY_L:
-		Terrain_LOD_engine_off = !Terrain_LOD_engine_off;
-		AddHUDMessage("Terrain LOD engine turned %s", Terrain_LOD_engine_off ? "OFF" : "ON");
-		break;
-
 	case KEY_N + KEY_SHIFTED:
 		if (Current_level && Current_level->filename) {
 			vector player_pos = Player_object->pos;

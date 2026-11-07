@@ -44,9 +44,6 @@
 #define SKY_RADIUS	2500.0
 #define DEFAULT_LIGHT_SOURCE	{0,TERRAIN_SIZE*100,0}
 
-// How far we can see (in world coordinates)
-float VisibleTerrainZ;
-
 terrain_segment Terrain_seg[TERRAIN_WIDTH * TERRAIN_DEPTH];
 ubyte Terrain_cell_clip_plane[TERRAIN_WIDTH * TERRAIN_DEPTH];
 terrain_render_clip_plane Terrain_render_clip_planes[MAX_TERRAIN_RENDER_CLIP_PLANES];
@@ -57,19 +54,8 @@ terrain_sky Terrain_sky;
 // Scene visibility feedback used to admit weather effects.
 float Last_terrain_render_time = -1;
 
-#if (!defined(RELEASE) || defined(NEWEDITOR))
-// first object to render after cell has been rendered (only used for SW renderer)
-short Terrain_seg_render_objs[TERRAIN_WIDTH * TERRAIN_DEPTH];
-#endif
-
 // Our lighting maps for the terrain, one for each quadrant (starting at lower left)
 int TerrainLightmaps[4];
-
-// A list of terrain to render
-terrain_render_info Terrain_list[MAX_CELLS_TO_RENDER];
-
-ushort* Terrain_rotate_list;	// which points have been sub/rotated this frame
-g3Point* World_point_buffer;	// Rotated points
 
 // The min/max values for a particular region of terrain
 ubyte* Terrain_min_height_int[7];
@@ -82,15 +68,6 @@ ubyte Terrain_dynamic_table[TERRAIN_WIDTH * TERRAIN_DEPTH];
 // Terrain normals depending on LOD
 terrain_normals* TerrainNormals[MAX_TERRAIN_LOD];
 
-// Max deltas per terrain lod block
-float* TerrainDeltaBlocks[MAX_TERRAIN_LOD];
-
-// Tracks edges of LOD
-ubyte TerrainJoinMap[TERRAIN_WIDTH * TERRAIN_DEPTH];
-
-// Terrain Y values
-float Terrain_y_values[256];
-
 #if (defined(EDITOR) || defined(NEWEDITOR))
 ubyte TerrainSelected[TERRAIN_WIDTH * TERRAIN_DEPTH];
 int Num_terrain_selected = 0;
@@ -99,11 +76,6 @@ bool Terrain_render_ext_room_objs = true;
 #endif
 
 int TSearch_on = 0, TSearch_found_type, TSearch_x, TSearch_y, TSearch_seg, TSearch_face;
-
-int Terrain_LOD_engine_off = 0;
-
-int TerrainEdgeTest[MAX_TERRAIN_LOD][16];
-ubyte TerrainEdgeJump[MAX_TERRAIN_LOD];
 
 // Unique terrain geometry identifier
 int Terrain_checksum = -1;
@@ -120,234 +92,6 @@ void TerrainRenderDataChanged()
 ubyte Terrain_occlusion_map[256][32];
 int Terrain_occlusion_checksum = -2;
 
-// returns the index of the highest float
-int GetHighestDelta(float* deltas, int count)
-{
-	int high_index = -999;
-	float high_delta = -99999;
-	int i;
-
-	for (i = 0; i < count; i++)
-	{
-		if ((deltas[i]) > (high_delta))
-		{
-			high_index = i;
-			high_delta = deltas[i];
-		}
-	}
-
-	ASSERT(high_index < count);
-
-	return high_index;
-}
-
-float RecurseLODDeltas(int x1, int y1, int x2, int y2, int lod)
-{
-	float deltas[6];
-	float maxdelta;
-	float v0, v1, v2, v3;
-	int edgex = x2, edgey = y2;
-	int i, t;
-
-	if (x1 % 2)
-		Int3();
-	if (x2 % 2)
-		Int3();
-	if (y1 % 2)
-		Int3();
-	if (y2 % 2)
-		Int3();
-
-	int midx = ((x2 - x1) / 2) + x1;
-	int midy = ((y2 - y1) / 2) + y1;
-
-	if (x2 == TERRAIN_WIDTH)
-		edgex = TERRAIN_WIDTH - 1;
-	if (y2 == TERRAIN_DEPTH)
-		edgey = TERRAIN_DEPTH - 1;
-
-	// starts from lower left, proceeds clockwise
-	v0 = Terrain_seg[y1 * TERRAIN_WIDTH + x1].y;
-	v1 = Terrain_seg[edgey * TERRAIN_WIDTH + x1].y;
-	v2 = Terrain_seg[edgey * TERRAIN_WIDTH + edgex].y;
-	v3 = Terrain_seg[y1 * TERRAIN_WIDTH + edgex].y;
-
-	deltas[0] = fabs(Terrain_seg[(midy)*TERRAIN_WIDTH + midx].y - (((v2 - v0) / 2) + v0));
-	deltas[1] = fabs(Terrain_seg[(midy)*TERRAIN_WIDTH + midx].y - (((v3 - v1) / 2) + v1));
-
-	//left edge
-	deltas[2] = fabs(Terrain_seg[(midy)*TERRAIN_WIDTH + x1].y - (((v1 - v0) / 2) + v0));
-
-	// top edge
-	deltas[3] = fabs(Terrain_seg[(edgey)*TERRAIN_WIDTH + midx].y - (((v2 - v1) / 2) + v1));
-
-	// right edge
-	deltas[4] = fabs(Terrain_seg[(midy)*TERRAIN_WIDTH + edgex].y - (((v3 - v2) / 2) + v2));
-
-	// bottom edge
-	deltas[5] = fabs(Terrain_seg[(y1)*TERRAIN_WIDTH + midx].y - (((v3 - v0) / 2) + v0));
-
-	maxdelta = deltas[GetHighestDelta(deltas, 6)];
-
-	if (lod != MAX_TERRAIN_LOD - 2)
-	{
-		deltas[0] = RecurseLODDeltas(x1, midy, midx, y2, lod + 1);
-		deltas[1] = RecurseLODDeltas(midx, midy, x2, y2, lod + 1);
-		deltas[2] = RecurseLODDeltas(midx, y1, x2, midy, lod + 1);
-		deltas[3] = RecurseLODDeltas(x1, y1, midx, midy, lod + 1);
-
-		if (deltas[0] == SHUTOFF_LOD_INVISIBLE && deltas[1] == SHUTOFF_LOD_INVISIBLE &&
-			deltas[2] == SHUTOFF_LOD_INVISIBLE && deltas[3] == SHUTOFF_LOD_INVISIBLE)
-		{
-			maxdelta = SHUTOFF_LOD_INVISIBLE;
-		}
-		else
-		{
-			for (i = 0; i < 4; i++)
-			{
-				if (deltas[i] == SHUTOFF_LOD_INVISIBLE)
-					deltas[i] = SHUTOFF_LOD_DELTA;
-
-			}
-
-			float maxdelta2 = deltas[GetHighestDelta(deltas, 4)];
-			if (maxdelta2 > maxdelta)
-				maxdelta = maxdelta2;
-		}
-	}
-
-	// Now check if there is anything special about this level of detail that
-	// excludes it from being used in the engine
-	if (lod == MAX_TERRAIN_LOD - 2)
-	{
-		int total_counted = 0, total_invis = 0;
-
-		for (i = y1; i < y2; i++)
-		{
-			for (t = x1; t < x2; t++, total_counted++)
-			{
-				if ((Terrain_seg[i * TERRAIN_WIDTH + t].flags & TF_INVISIBLE))
-				{
-					maxdelta = SHUTOFF_LOD_DELTA;
-					total_invis++;
-				}
-			}
-		}
-
-		// See if we can completely turn off this LOD
-		if (total_invis == total_counted)
-			maxdelta = SHUTOFF_LOD_INVISIBLE;
-	}
-
-	return (maxdelta);
-}
-
-// returns highest slopechange
-float GetGreatestSlopeChange(float* slopes, int count)
-{
-	float high_delta = -90000.0f;
-	int i, t;
-
-	for (i = 0; i < count; i++)
-	{
-		for (t = 0; t < count; t++)
-		{
-			if ((fabs(slopes[t] - slopes[i])) > high_delta)
-			{
-				high_delta = fabs(slopes[t] - slopes[i]);
-			}
-		}
-	}
-
-	return high_delta;
-}
-
-void GenerateSingleLODDelta(int sx, int sz)
-{
-	int w, h, i, z, x;
-	int simplemul, rowsize;
-	int chunk_size = 1 << (MAX_TERRAIN_LOD - 1);
-
-	sx *= chunk_size;
-	sz *= chunk_size;
-
-	int save_x = sx;
-	int save_z = sz;
-
-	//Starts from lower-left, going clockwise
-	// 0 is lowest_level_detail (blunt)
-	for (i = 0; i < MAX_TERRAIN_LOD - 1; i++)
-	{
-		w = chunk_size >> ((MAX_TERRAIN_LOD - 1) - i);
-		h = chunk_size >> ((MAX_TERRAIN_LOD - 1) - i);
-
-		simplemul = 1 << ((MAX_TERRAIN_LOD - 1) - i);
-		rowsize = TERRAIN_WIDTH / simplemul;
-
-		sx = save_x;
-		sz = save_z;
-
-		sx /= simplemul;
-		sz /= simplemul;
-
-
-		for (z = sz; z < sz + h; z++)
-		{
-			for (x = sx; x < sx + w; x++)
-			{
-				float delta;
-
-				delta = RecurseLODDeltas(x * simplemul, (z * simplemul), (x * simplemul) + simplemul, z * simplemul + simplemul, i);
-				TerrainDeltaBlocks[i][z * rowsize + x] = delta;
-			}
-		}
-	}
-}
-
-void GenerateLODDeltas()
-{
-	int w, h, i, z, x;
-	int simplemul, rowsize;
-	//Starts from lower-left, going clockwise
-	for (i = 0; i < MAX_TERRAIN_LOD - 1; i++)
-	{
-		w = TERRAIN_WIDTH >> ((MAX_TERRAIN_LOD - 1) - i);
-		h = TERRAIN_DEPTH >> ((MAX_TERRAIN_LOD - 1) - i);
-
-		simplemul = 1 << ((MAX_TERRAIN_LOD - 1) - i);
-		rowsize = TERRAIN_WIDTH / simplemul;
-
-		// zar: if this hits 31 it will be out of bounds
-		// since 31 * 8 = 248. Add 8 and that's 256, 
-		// which is past the maximum terrain size.
-		// I'm not sure how this system works so this will, 
-		// at best, not overflow and be broken.
-		// The other option might be to increase terrain width and depth to 257...
-		// or boundry check RecurseLODDeltas.
-		/*if (h >= TERRAIN_DEPTH >> 4)
-			h = (TERRAIN_DEPTH >> 4) - 1;
-
-		if (w >= TERRAIN_WIDTH >> 4)
-			w = (TERRAIN_WIDTH >> 4) - 1;*/
-
-		for (z = 0; z < h; z++)
-		{
-			for (x = 0; x < w; x++)
-			{
-				float delta;
-
-				delta = RecurseLODDeltas(
-					x * simplemul,
-					(z * simplemul),
-					(x * simplemul) + simplemul,
-					z * simplemul + simplemul,
-					i
-				);
-				TerrainDeltaBlocks[i][z * rowsize + x] = delta;
-			}
-		}
-	}
-}
 
 // Returns a unique checksum for the current terrain geometry
 int GetTerrainGeometryChecksum()
@@ -377,10 +121,6 @@ void BuildMinMaxTerrain()
 	{
 		float fl;
 
-#if (!defined(RELEASE) || defined(NEWEDITOR))
-		Terrain_seg_render_objs[i] = -1;
-#endif
-
 		fl = Terrain_seg[i].ypos * TERRAIN_HEIGHT_INCREMENT;
 
 		Terrain_seg[i].y = fl;
@@ -392,10 +132,6 @@ void BuildMinMaxTerrain()
 		return;
 
 	Terrain_checksum = check;
-
-	// Generate level of detail deltas	
-	if (!Dedicated_server)
-		GenerateLODDeltas();
 
 	for (i = 0; i < 7; i++)
 	{
@@ -605,18 +341,6 @@ void DeformTerrain(vector* pos, int depth, float size)
 		}
 	}
 
-	int div = (1 << (MAX_TERRAIN_LOD - 1));
-
-	startx /= div;
-	startz /= div;
-	endx /= div;
-	endz /= div;
-
-	GenerateSingleLODDelta(startx, startz);
-	GenerateSingleLODDelta(endx, startz);
-	GenerateSingleLODDelta(endx, endz);
-	GenerateSingleLODDelta(startx, endz);
-
 	for (i = 0; i < 4; i++)
 	{
 		if (changed[i])
@@ -725,14 +449,6 @@ void CloseTerrain(void)
 			mem_free(Terrain_max_height_int[i]);
 	}
 
-	if (!Dedicated_server)
-	{
-		mem_free(Terrain_rotate_list);
-		mem_free(World_point_buffer);
-
-		for (i = 0; i < MAX_TERRAIN_LOD - 1; i++)
-			mem_free(TerrainDeltaBlocks[i]);
-	}
 }
 
 // Given a 3space triplet, computes the u,v coords for a texture map at that position
@@ -1000,9 +716,6 @@ void ResetTerrain(int force)
 	{
 		for (t = 0; t < TERRAIN_WIDTH; t++)
 		{
-#if (!defined(RELEASE) || defined(NEWEDITOR))
-			Terrain_seg_render_objs[i * TERRAIN_WIDTH + t] = -1;
-#endif
 			Terrain_seg[i * TERRAIN_WIDTH + t].objects = -1;
 			Terrain_seg[i * TERRAIN_WIDTH + t].flags = 0;
 			Terrain_cell_clip_plane[i * TERRAIN_WIDTH + t] = 0;
@@ -1046,16 +759,6 @@ void ResetTerrain(int force)
 		}
 
 
-		if (!Dedicated_server)
-		{
-			for (i = 0; i < MAX_TERRAIN_LOD - 1; i++)
-			{
-				int w = TERRAIN_WIDTH >> ((MAX_TERRAIN_LOD - 1) - i);
-				int h = TERRAIN_DEPTH >> ((MAX_TERRAIN_LOD - 1) - i);
-
-				memset(TerrainDeltaBlocks[i], 0, w * h * sizeof(float));
-			}
-		}
 
 	}
 
@@ -1073,7 +776,6 @@ void ResetTerrain(int force)
 	memset(TerrainSelected, 0, TERRAIN_WIDTH * TERRAIN_DEPTH);
 #endif
 
-	memset(TerrainJoinMap, 0, TERRAIN_WIDTH * TERRAIN_DEPTH);
 
 
 	Terrain_sky.damage_per_second = 0;
@@ -1091,29 +793,10 @@ void GenerateLightSource()
 
 void InitTerrain(void)
 {
-	int i, w, h, t;
+	int i, w, h;
 
 	// set sky texture to unused
 	Terrain_sky.textured = 0;
-
-	// Setup stuff for rendering
-	if (!Dedicated_server)
-	{
-		Terrain_rotate_list = (ushort*)mem_malloc(TERRAIN_WIDTH * TERRAIN_DEPTH * sizeof(ushort));
-		ASSERT(Terrain_rotate_list);
-
-		World_point_buffer = (g3Point*)mem_malloc(TERRAIN_WIDTH * TERRAIN_DEPTH * sizeof(g3Point));
-		ASSERT(World_point_buffer);
-
-		// Allocate space for lod delta tree and unique texture IDs
-		for (i = 0; i < MAX_TERRAIN_LOD - 1; i++)
-		{
-			w = TERRAIN_WIDTH >> ((MAX_TERRAIN_LOD - 1) - i);
-			h = TERRAIN_DEPTH >> ((MAX_TERRAIN_LOD - 1) - i);
-
-			TerrainDeltaBlocks[i] = (float*)mem_malloc(w * h * sizeof(float));
-		}
-	}
 
 	// Allocate space for lod normals
 
@@ -1152,28 +835,6 @@ void InitTerrain(void)
 		TerrainLightmaps[i] = lm_AllocLightmap(128, 128);
 		ASSERT(TerrainLightmaps[i] != BAD_LM_INDEX);
 		GameLightmaps[TerrainLightmaps[i]].flags |= LF_WRAP;
-	}
-
-	for (i = 0; i < MAX_TERRAIN_LOD; i++)
-	{
-		int simplemul = 1 << ((MAX_TERRAIN_LOD - 1) - i);
-		int answer;
-
-		TerrainEdgeJump[i] = simplemul;
-
-		for (t = 0; t < 16; t++)
-		{
-			if (t == 0)
-				answer = 1;
-			else
-			{
-				if (t % simplemul == 0)
-					answer = 1;
-				else
-					answer = 0;
-			}
-			TerrainEdgeTest[i][t] = answer;
-		}
 	}
 
 	// Setup dome textures
