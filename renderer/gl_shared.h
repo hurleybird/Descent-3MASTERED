@@ -420,7 +420,6 @@ struct AOResources
 	GLuint noise_texture = 0;
 
 	ShaderProgram depth_shader;
-	ShaderProgram ao_shader;
 	ShaderProgram blur_x_shader;
 	ShaderProgram blur_y_shader;
 	ShaderProgram temporal_shader;
@@ -440,25 +439,33 @@ struct AOResources
 	GLint depth_mine_rock_occlusion = -1;
 	GLint depth_mine_occlusion = -1;
 
-	//AO shader uniforms.
-	GLint ao_proj_info = -1;        //(2/proj[0], 2/proj[5], -1/proj[0], -1/proj[5])
-	GLint ao_near_far = -1;         //(nearZ, farZ)
-	GLint ao_radius = -1;           //world-space radius
-	GLint ao_radius_pixels = -1;    //radius converted to half-screen-height pixels at depth 1
-	GLint ao_max_radius_pixels = -1;
-	GLint ao_neg_inv_radius2 = -1;  //-1/(r*r)
-	GLint ao_angle_bias = -1;
-	GLint ao_inv_screen_size = -1;  //1/width, 1/height
-	GLint ao_working_inv_screen_size = -1;
-	GLint ao_screen_size = -1;      //width, height
-	GLint ao_noise_origin = -1;
-	GLint ao_noise_jitter = -1;
-	GLint ao_directions = -1;
-	GLint ao_steps = -1;
-	GLint ao_terrain_occlusion = -1;
-	GLint ao_polyobject_occlusion = -1;
-	GLint ao_mine_rock_occlusion = -1;
-	GLint ao_mine_occlusion = -1;
+	// Quality-keyed programs: generic fallback plus three retained patterns.
+	struct SamplingProgram {
+		ShaderProgram shader;
+		int directions = -1, steps = -1;
+		//AO shader uniforms.
+		GLint ao_proj_info = -1;        //(2/proj[0], 2/proj[5], -1/proj[0], -1/proj[5])
+		GLint ao_near_far = -1;         //(nearZ, farZ)
+		GLint ao_radius = -1;           //world-space radius
+		GLint ao_radius_pixels = -1;    //radius converted to half-screen-height pixels at depth 1
+		GLint ao_max_radius_pixels = -1;
+		GLint ao_neg_inv_radius2 = -1;  //-1/(r*r)
+		GLint ao_angle_bias = -1;
+		GLint ao_inv_screen_size = -1;  //1/width, 1/height
+		GLint ao_working_inv_screen_size = -1;
+		GLint ao_screen_size = -1;      //width, height
+		GLint ao_noise_origin = -1;
+		GLint ao_noise_jitter = -1;
+		GLint ao_directions = -1;
+		GLint ao_steps = -1;
+		GLint ao_terrain_occlusion = -1;
+		GLint ao_polyobject_occlusion = -1;
+		GLint ao_mine_rock_occlusion = -1;
+		GLint ao_mine_occlusion = -1;
+	};
+	SamplingProgram sampling_programs[4];
+	unsigned next_sampling_program = 1;
+	SamplingProgram& SelectSamplingProgram(int directions, int steps);
 
 	//Blur shader uniforms (same for both x and y).
 	GLint blur_x_delta = -1;

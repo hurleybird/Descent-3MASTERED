@@ -1,5 +1,27 @@
 # GPU bottleneck investigation — November 6
 
+## November10: qualified quality-keyed AO shader cache
+
+AOResources owns generic plus3 retained sampling patterns. Exact loop bounds
+specialized for <=128 sample patterns; larger patterns keep generic shader,
+without truncation. Warm frames allocate/compile nothing. Context destruction
+destroys every cached program. Reference -scene-ao-dynamic-loop-reference.
+Capture pattern probe traverses1,4,12,24,32,64,128,256,1024,32,16,32 settings,
+exercising eviction, fallback and return to prior patterns.
+
+aocache1110-{1,2}-{reference,eligible}-savegNNN-20261107 GPU medians:
+0013.3905/3.330,3.3615/3.3115;0072.766/2.7145,2.764/2.710 ms.
+All4 images exact. Root3/3; aocache-fx-20261110 all8 exact vs unlitworld-fx;
+aux003/006 exact; image-settings passes; all12 pattern snapshots exact vs generic
+and GL-audited. No changed sample locations/counts, AO parameters or resolution.
+
+Fresh gpu-mx-*-aocache-20261110 old/new (rounded):001native.74/.62,
+SSAA2/noMSAA/noeffects1.36/1.54,full3.19/3.33;007native.40/.42,
+SSAA.89/1.08,full2.83/2.71. Nativeold001 still varies; do not overclaim it.
+No overall victory. Remaining SSAA gap exists without AO and requires world/
+particle work, not further attributing it to AO. Baseline effects differ as
+previously documented; reconstructed baseline is not the deleted original.
+
 ## November7 checkpoint: particle stages and AO loop investigation
 
 Accepted production changes through31cc21a remain. This slice adds only

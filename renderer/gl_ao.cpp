@@ -17,6 +17,8 @@
 */
 #include "gl_local.h"
 #include "gameloop.h"
+#include "args.h"
+#include <string>
 #include <math.h>
 #include <stdint.h>
 
@@ -157,7 +159,6 @@ void AOResources::InitShaders()
 {
 	extern const char* blitVertexSrc;
 	extern const char* aoDepthFragmentSrc;
-	extern const char* aoAOFragmentSrc;
 	extern const char* aoBlurFragmentSrc;
 	extern const char* aoTemporalFragmentSrc;
 
@@ -180,30 +181,6 @@ void AOResources::InitShaders()
 	depth_mine_rock_occlusion = depth_shader.FindUniform("mine_rock_ao_occlusion");
 	depth_mine_occlusion = depth_shader.FindUniform("mine_ao_occlusion");
 
-	ao_shader.AttachSource(blitVertexSrc, aoAOFragmentSrc);
-	ao_shader.Use();
-	GLint depth_loc = ao_shader.FindUniform("depth_tex");
-	GLint noise_loc = ao_shader.FindUniform("noise_tex");
-	if (depth_loc != -1) glUniform1i(depth_loc, 0);
-	if (noise_loc != -1) glUniform1i(noise_loc, 1);
-	ao_proj_info = ao_shader.FindUniform("proj_info");
-	ao_near_far = ao_shader.FindUniform("near_far");
-	ao_radius = ao_shader.FindUniform("radius");
-	ao_radius_pixels = ao_shader.FindUniform("radius_pixels");
-	ao_max_radius_pixels = ao_shader.FindUniform("max_radius_pixels");
-	ao_neg_inv_radius2 = ao_shader.FindUniform("neg_inv_radius2");
-	ao_angle_bias = ao_shader.FindUniform("angle_bias");
-	ao_inv_screen_size = ao_shader.FindUniform("inv_screen_size");
-	ao_working_inv_screen_size = ao_shader.FindUniform("ao_inv_screen_size");
-	ao_screen_size = ao_shader.FindUniform("screen_size");
-	ao_noise_origin = ao_shader.FindUniform("noise_origin");
-	ao_noise_jitter = ao_shader.FindUniform("noise_jitter");
-	ao_directions = ao_shader.FindUniform("directions");
-	ao_steps = ao_shader.FindUniform("steps");
-	ao_terrain_occlusion = ao_shader.FindUniform("terrain_ao_occlusion");
-	ao_polyobject_occlusion = ao_shader.FindUniform("polyobject_ao_occlusion");
-	ao_mine_rock_occlusion = ao_shader.FindUniform("mine_rock_ao_occlusion");
-	ao_mine_occlusion = ao_shader.FindUniform("mine_ao_occlusion");
 
 	blur_x_shader.AttachSource(blitVertexSrc, aoBlurFragmentSrc);
 	blur_x_shader.Use();
@@ -272,10 +249,64 @@ void AOResources::InitShaders()
 	}
 }
 
+AOResources::SamplingProgram& AOResources::SelectSamplingProgram(int directions, int steps)
+{
+	// Large/custom patterns retain the bounded generic shader. Never cap samples.
+	if (directions*steps > 128 || (AutomatedCaptureFrameIndex() >= 0 && FindArg("-scene-ao-dynamic-loop-reference")))
+		directions = steps = 0;
+	for (auto& program : sampling_programs)
+		if (program.shader.Handle() && program.directions == directions && program.steps == steps) return program;
+	auto& program = sampling_programs[directions == 0 ? 0 : next_sampling_program];
+	if (directions != 0) next_sampling_program = next_sampling_program == 3 ? 1 : next_sampling_program+1;
+	program.shader.Destroy();
+	extern const char* blitVertexSrc;
+	extern const char* aoAOFragmentSrc;
+	std::string source = aoAOFragmentSrc;
+	if (directions != 0) {
+		const std::string direction_decl = "uniform int directions;", step_decl = "uniform int steps;";
+		source.replace(source.find(direction_decl), direction_decl.size(), "const int directions = "+std::to_string(directions)+";");
+		source.replace(source.find(step_decl), step_decl.size(), "const int steps = "+std::to_string(steps)+";");
+	}
+	auto& ao_shader = program.shader;
+	ao_shader.AttachSource(blitVertexSrc, source.c_str());
+	ao_shader.Use();
+	GLint depth_loc = ao_shader.FindUniform("depth_tex");
+	GLint noise_loc = ao_shader.FindUniform("noise_tex");
+	if (depth_loc != -1) glUniform1i(depth_loc, 0);
+	if (noise_loc != -1) glUniform1i(noise_loc, 1);
+	program.ao_proj_info = ao_shader.FindUniform("proj_info");
+	program.ao_near_far = ao_shader.FindUniform("near_far");
+	program.ao_radius = ao_shader.FindUniform("radius");
+	program.ao_radius_pixels = ao_shader.FindUniform("radius_pixels");
+	program.ao_max_radius_pixels = ao_shader.FindUniform("max_radius_pixels");
+	program.ao_neg_inv_radius2 = ao_shader.FindUniform("neg_inv_radius2");
+	program.ao_angle_bias = ao_shader.FindUniform("angle_bias");
+	program.ao_inv_screen_size = ao_shader.FindUniform("inv_screen_size");
+	program.ao_working_inv_screen_size = ao_shader.FindUniform("ao_inv_screen_size");
+	program.ao_screen_size = ao_shader.FindUniform("screen_size");
+	program.ao_noise_origin = ao_shader.FindUniform("noise_origin");
+	program.ao_noise_jitter = ao_shader.FindUniform("noise_jitter");
+	program.ao_directions = ao_shader.FindUniform("directions");
+	program.ao_steps = ao_shader.FindUniform("steps");
+	program.ao_terrain_occlusion = ao_shader.FindUniform("terrain_ao_occlusion");
+	program.ao_polyobject_occlusion = ao_shader.FindUniform("polyobject_ao_occlusion");
+	program.ao_mine_rock_occlusion = ao_shader.FindUniform("mine_rock_ao_occlusion");
+	program.ao_mine_occlusion = ao_shader.FindUniform("mine_ao_occlusion");
+
+	program.directions = directions; program.steps = steps;
+	if (AutomatedCaptureFrameIndex() >= 0)
+		AutomatedCaptureLog("scene AO sampling program directions=%d steps=%d generic=%d",directions,steps,directions == 0);
+	return program;
+}
+
 void AOResources::DestroyShaders()
 {
 	depth_shader.Destroy();
-	ao_shader.Destroy();
+	for (auto& program : sampling_programs) {
+		program.shader.Destroy();
+		program.directions = program.steps = -1;
+	}
+	next_sampling_program = 1;
 	blur_x_shader.Destroy();
 	blur_y_shader.Destroy();
 	temporal_shader.Destroy();
@@ -405,6 +436,10 @@ AOResult AOResources::Evaluate(const AOInputs& inputs, const renderer_preferred_
 	if (fabsf(m11) < 1e-6f) m11 = 1.0f;
 
 	int samples = ClampInt((int)pref_state.ao_sample_count, 1, 1024);
+	if (AutomatedCaptureFrameIndex() >= 0 && FindArg("-scene-ao-pattern-probe")) {
+		static constexpr int patterns[]{1,4,12,24,32,64,128,256,1024,32,16,32};
+		samples = patterns[(AutomatedCaptureFrameIndex()/10)%12];
+	}
 	int directions = 0;
 	int steps = 0;
 	AOSamplePattern(samples, &directions, &steps);
@@ -473,29 +508,30 @@ AOResult AOResources::Evaluate(const AOInputs& inputs, const renderer_preferred_
 	//-------------------------------------------------------------------------
 	{
 		PERF_MARKER_SCOPE("AO.Generate");
-		ao_shader.Use();
-		glUniform4f(ao_proj_info,
+		auto& sampling = SelectSamplingProgram(directions,steps);
+		sampling.shader.Use();
+		glUniform4f(sampling.ao_proj_info,
 			2.0f / m00,
 			2.0f / m11,
 			(-projection[8] / projection[11] - 1.0f) / m00,
 			(-projection[9] / projection[11] - 1.0f) / m11);
-		glUniform2f(ao_near_far, nearz, farz);
-		glUniform1f(ao_radius, radius);
-		glUniform1f(ao_radius_pixels, radius_pixels);
-		glUniform1f(ao_max_radius_pixels, max_radius_pixels);
-		glUniform1f(ao_neg_inv_radius2, neg_inv_r2);
-		glUniform1f(ao_angle_bias, bias);
-		glUniform2f(ao_inv_screen_size, 1.0f / (float)ao_width, 1.0f / (float)ao_height);
-		if (ao_working_inv_screen_size != -1)
-			glUniform2f(ao_working_inv_screen_size, 1.0f / (float)ao_width, 1.0f / (float)ao_height);
-		glUniform2f(ao_screen_size, (float)ao_width, (float)ao_height);
-		if (ao_noise_origin != -1)
+		glUniform2f(sampling.ao_near_far, nearz, farz);
+		glUniform1f(sampling.ao_radius, radius);
+		glUniform1f(sampling.ao_radius_pixels, radius_pixels);
+		glUniform1f(sampling.ao_max_radius_pixels, max_radius_pixels);
+		glUniform1f(sampling.ao_neg_inv_radius2, neg_inv_r2);
+		glUniform1f(sampling.ao_angle_bias, bias);
+		glUniform2f(sampling.ao_inv_screen_size, 1.0f / (float)ao_width, 1.0f / (float)ao_height);
+		if (sampling.ao_working_inv_screen_size != -1)
+			glUniform2f(sampling.ao_working_inv_screen_size, 1.0f / (float)ao_width, 1.0f / (float)ao_height);
+		glUniform2f(sampling.ao_screen_size, (float)ao_width, (float)ao_height);
+		if (sampling.ao_noise_origin != -1)
 		{
-			glUniform2f(ao_noise_origin,
+			glUniform2f(sampling.ao_noise_origin,
 				(float)noise_origin_x * (float)ao_width / (float)source_width,
 				(float)noise_origin_y * (float)ao_height / (float)source_height);
 		}
-		if (ao_noise_jitter != -1)
+		if (sampling.ao_noise_jitter != -1)
 		{
 			float jitter_x = 0.0f;
 			float jitter_y = 0.0f;
@@ -509,18 +545,18 @@ AOResult AOResources::Evaluate(const AOInputs& inputs, const renderer_preferred_
 			{
 				ao_jitter_frame = 0;
 			}
-			glUniform2f(ao_noise_jitter, jitter_x, jitter_y);
+			glUniform2f(sampling.ao_noise_jitter, jitter_x, jitter_y);
 		}
-		glUniform1i(ao_directions, directions);
-		glUniform1i(ao_steps, steps);
-		if (ao_terrain_occlusion != -1)
-			glUniform1f(ao_terrain_occlusion, Clamp01(pref_state.ao_terrain_occlusion));
-		if (ao_polyobject_occlusion != -1)
-			glUniform1f(ao_polyobject_occlusion, Clamp01(pref_state.ao_polyobject_occlusion));
-		if (ao_mine_rock_occlusion != -1)
-			glUniform1f(ao_mine_rock_occlusion, Clamp01(pref_state.ao_mine_rock_occlusion));
-		if (ao_mine_occlusion != -1)
-			glUniform1f(ao_mine_occlusion, Clamp01(pref_state.ao_mine_occlusion));
+		glUniform1i(sampling.ao_directions, directions);
+		glUniform1i(sampling.ao_steps, steps);
+		if (sampling.ao_terrain_occlusion != -1)
+			glUniform1f(sampling.ao_terrain_occlusion, Clamp01(pref_state.ao_terrain_occlusion));
+		if (sampling.ao_polyobject_occlusion != -1)
+			glUniform1f(sampling.ao_polyobject_occlusion, Clamp01(pref_state.ao_polyobject_occlusion));
+		if (sampling.ao_mine_rock_occlusion != -1)
+			glUniform1f(sampling.ao_mine_rock_occlusion, Clamp01(pref_state.ao_mine_rock_occlusion));
+		if (sampling.ao_mine_occlusion != -1)
+			glUniform1f(sampling.ao_mine_occlusion, Clamp01(pref_state.ao_mine_occlusion));
 
 		rend_ClearBoundTextures();
 		GL_BindFramebufferTexture(ao_depth_framebuffer.ColorTextureForRead(), 0, GL_NEAREST);

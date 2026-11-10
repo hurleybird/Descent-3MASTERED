@@ -1,5 +1,29 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November10 — AO sampling cache qualified, baseline still incomplete
+
+User resumed persistence. AOResources now owns generic plus3 bounded sampling
+programs keyed by directions/steps. Patterns <=128 samples specialize exact
+loop bounds; larger patterns use generic without reducing samples. No steady
+allocations/compilation. Cache destroyed with renderer. Reference flag
+-scene-ao-dynamic-loop-reference; capture -scene-ao-pattern-probe exercises
+1,4,12,24,32,64,128,256,1024,32,16,32 samples in10-frame phases.
+Root3/3; aocache-fx-20261110 all8 exact vs unlitworld-fx; aux003/006 exact;
+image-settings passes. All12 pattern screenshots exact against generic, eviction
+and generic fallback observed in log. All4 timing pairs exact.
+aocache1110 round1/2 reference->cache:0013.3905->3.330,3.3615->3.3115;
+0072.766->2.7145,2.764->2.710 ms. Private runtime updated; Candidates untouched.
+
+Fresh matrix gpu-mx-*-aocache-20261110 old/new rounded:
+001 native.74/.62,SSAA2 no-effects1.36/1.54,full3.19/3.33;
+007 native.40/.42,SSAA.89/1.08,full2.83/2.71. Oldnative001 remainsvariable.
+Still NOT overall victory. Next investigate world/particle SSAA path, not AO;
+consider 2D-array fog field + two XY gathers instead of four trilinear3D samples
+(no extra confidence texture/compute pass). This is a hypothesis, NOT implemented
+or accepted. Existing rejected flat-column2D layout was different; do not confuse.
+No active game after matrix. Untracked lib/gitinfo.h preserved. Usage49%, credits
+unchanged62044.8730600000. Worktree stays isolated.
+
 ## November7 — user-requested yield: particle breakdown and AO loop evidence
 
 User superseded persistence with: finish at next natural checkpoint, push, yield.
