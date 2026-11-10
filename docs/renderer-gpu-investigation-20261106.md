@@ -1,5 +1,54 @@
 # GPU bottleneck investigation — November 6
 
+## November10: brightness-first bloom qualified
+
+SampleBloom now computes the unchanged source threshold first. Zero-contribution
+taps need no depth, alpha-occlusion or protection lookup. All13 taps, weights,
+formats, gamma and mask behavior retained. Shared BloomRadiance avoids duplicated
+threshold arithmetic. Capture-only -scene-bloom-mask-first-reference compares
+the previous ordering. Scalar power shortcut rejected as negligible extra gain.
+
+bloomq reference/early GPU medians (720p,SSAA2,MSAA4,AO,bloom,motion blur):
+0001.850/1.764;0013.353/3.2715;0022.6695/2.589;0032.161/2.071;
+0041.9145/1.831;0051.761/1.679;0061.9435/1.8625;0072.729/2.647ms.
+All8 paired images exact; bloomearly-fx all8 exact against aocache-fx.
+Root3/3; image-settings and auxiliary003/006 lifecycle runs pass.
+This saves .0805-.090ms total GPU, not enough alone for overall baseline victory.
+
+## November10: rejected fog gather and low-resolution particle depth probes
+
+Additional measured rejections: infubo1110 uniform16KiB influence-index prefix
+reference/probe0013.385/3.3725,3.363/3.370;0072.732/2.744,2.729/2.7325.
+Draw-uniform-only infdraw1110:0013.3295/3.360,3.332/3.3625;
+0072.7095/2.724,2.718/2.723. All8 images exact, no repeatable gain.
+packdepth1110 matched packed D32FS8 snapshot storage for direct image copy:
+SSAA2/noeffects0011.5515/1.571,1.552/1.5705;0071.076/1.117,1.089/1.1135.
+Slower with extra memory; removed. Packed-depth blit was NOT tested.
+
+Additional rejected probes (all experimental source removed):
+volcolor1110 dropped unused motion/identity/protection exports from specialized
+SoftVolumes shader; all4 images exact, neutral/slower: reference/probe
+0013.3335/3.331,3.3325/3.3375;0072.710/2.716,2.7155/2.720.
+fusedfg1110 fused final SSAA foreground reduction and source-over, explicitly
+rounding to RGBA8 before blending. Reference/probe0013.3055/3.302,3.320/3.294;
+0072.709/2.692,2.7055/2.695. Small gain but6605 differing pixels in001; no new
+blend/reduction policy retained. Would require rounding/format investigation
+and broader proof, not a claim of exact equivalence.
+
+foggather1110 round1/2 reference/probe0013.3625/3.3645,3.359/3.3565;
+0072.736/2.728,2.725/2.727. Replaced3D field storage with2D-array slices and
+two XY gathers plus softwareZ interpolation (same scalar field contents and
+contrast/refinement rule). Neutral; changed2916/668 pixels from interpolation
+rounding, same pattern as earlier explicit-Z-fetch probe. Entire probe removed.
+Khronos textureGather reference confirms gather component order (0,1),(1,1),
+(1,0),(0,0): https://raw.githubusercontent.com/KhronosGroup/OpenGL-Refpages/main/gl4/textureGather.xml
+
+voldpth1110 round1/2 reference/probe0013.3655/3.381,3.3435/3.380;
+0072.728/2.7655,2.7155/2.7635. Downsample opaque depth into existing particle
+scratch depth once/view, enable early depth testing for zero-depth-offset
+soft volumes. All4 images exact, but added copy cost outweighs avoided shading.
+Entire probe removed; no extra depth copy retained.
+
 ## November10: qualified quality-keyed AO shader cache
 
 AOResources owns generic plus3 retained sampling patterns. Exact loop bounds

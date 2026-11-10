@@ -1,5 +1,54 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November10 — ACTIVE: bloom early rejection and half-frequency smoke
+
+UPDATE: final bloom qualification complete. bloomq all8 pairs exact and faster
+by .0805-.090ms. bloomearly-fx all8 exact vs aocache-fx; aux003/006 exact;
+image-settings pass. Retain shared brightness-first implementation. Now running
+out/qualify-half-volume.ps1, session12874: SSAA4 pairs, all8 effects pairs and
+moving001 series. Optional half-volume is NOT accepted/default and still needs
+odd-extent padding correction before production consideration.
+Latest usage53% consumed, credits unchanged62044.8730600000.
+
+Latest accepted/pushed9080215 (AO cache). Continue, user has not requested yield.
+Current uncommitted renderer changes: shared bloom shader now rejects zero
+threshold contribution before fetching protection/depth/alpha masks. Capture
+reference -scene-bloom-mask-first-reference restores mask-first ordering.
+Old temporary first/scalar probe flags removed. Scalar variant gave too little
+extra gain to justify complexity. Final shared shader qualification is running
+through out/qualify-bloom-early.ps1 (all8 paired1500-frame profiles plus effects,
+settings and auxiliary corpus). Build/root3 tests pass; no Candidate changes.
+bloomfirst1110 round1/2 control/probe GPU0013.3415/3.2545,3.3375/3.2695;
+0072.712/2.635,2.718/2.637. All4 pairs exact.
+bloomscalar1110 is comparing brightness-first to scalar (not old to scalar).
+All4 scalar comparison pairs exact; probe removed after completion.
+
+gl_scene.cpp also has optional -scene-half-volume-probe: smoke layer half display
+resolution, full-resolution geometry-edge repair retained; NOT DEFAULT.
+halfvol1110 reference/probe full0013.322/3.1855,3.320/3.189;
+007 first2.716/2.583,second probe2.587. Small real image changes:001 meanRGB
+.082666/255,11.647%pixels differ,.06391%above2,max4;007 mean.019851,
+4.404%pixels differ,.000217%above2,max3. Both001 images inspected; no obvious
+artifact, but NOT exact equivalence. SSAA2/noeffects halfvolss1110 saves only
+~.035ms dense001 (1.545/1.510,1.548/1.513),~.11ms007. Don't count lower quality
+as equal-quality baseline victory. out/qualify-half-volume.ps1 prepared but NOT
+run: SSAA4 full1500pairs001/007,all8effects60pairs,moving001series150..154.
+Potential padding fix: odd logical height means actual scale slightly >nominal;
+use conservative ceil(max(raster/volume extent))*2 before shipping any half path.
+
+Rejected and removed: fog2D-array gathers (neutral, roundoff), low-resolution
+particle depth (slower), dropping unused particle outputs(neutral), fused
+foreground reduction/blend(tinygain but6605changedpixels), uniform influence
+index prefix(both general and draw-uniform slower/neutral), packed D32FS8 opaque
+snapshot direct image copy(slower, extra memory). Evidence tags foggather1110,
+voldpth1110,volcolor1110,fusedfg1110,infubo1110,infdraw1110,packdepth1110.
+Add missing final rejection measurements to GPU investigation doc before push.
+All source for these probes removed; unrelated lib/gitinfo.h retained.
+No GPU replays/new RDCs in this slice. Existing counter evidence reports bloom
+threshold heavy memory reads; that motivated brightness-first mask rejection.
+Private runtime currently probe-capable latest build; Candidates untouched.
+Last usage50% consumed, creditbalance unchanged62044.8730600000.
+
 ## November10 — AO sampling cache qualified, baseline still incomplete
 
 User resumed persistence. AOResources now owns generic plus3 bounded sampling

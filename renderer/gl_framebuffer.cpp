@@ -1592,7 +1592,10 @@ void BloomResources::InitShaders()
 	extern const char* bloomMergeFragmentSrc;
 	extern const char* bloomCompositeFragmentSrc;
 
-	thresholdshader.AttachSource(blitVertexSrc, bloomThresholdFragmentSrc);
+	std::string threshold_fragment = bloomThresholdFragmentSrc;
+	if (FindArg("-capture-frame") && FindArg("-scene-bloom-mask-first-reference"))
+		threshold_fragment.insert(threshold_fragment.find('\n')+1,"#define SCENE_BLOOM_MASK_FIRST 1\n");
+	thresholdshader.AttachSource(blitVertexSrc,threshold_fragment.c_str());
 	thresholdshader.Use();
 	GLint threshold_source = thresholdshader.FindUniform("heh");
 	GLint threshold_depth = thresholdshader.FindUniform("depth_source");
