@@ -1,6 +1,29 @@
 # Renderer recovery checkpoint — 2026-09-22
 
-## November10 ACTIVE — final24 ownership sweep
+## November10 COMPLETED — 24/24 measured GPU cases
+
+Final source checkpoint5b0e9bd pushed. `renderer-gpu-24of24-20261110.md` is the
+current result, with all24 precise values, CPU cross-check, methods and caveats.
+Full ownership-20261110 sweep24/24; reversed001/007 all6 win; third001SSAA
+check1.3605→1.3160ms wins. Narrowest repeat001SSAA1.3285→1.3120 (1.2%): do
+not claim allwinslarge/equallyrobust.007SSAA.892→.835 (repeat.890→.830).
+All8native CPU render intervals ahead14–65% in fresh sweep; these are wall-time
+render intervals, not CPU cycles. No totalFPS guarantee, GPUintervalincludesgaps.
+Tests/source qualified above. Private runtime restored BOTH currentbuildassets;
+no game/build/replay running. Main/Candidate/Previous untouched; lib/gitinfo.h
+untracked unrelated preserved. No shadows/cancelledcockpit changes.
+
+Latest user pasted corrected Fable review ofe3e1225. Verified itsCPUclaimwrong:
+even e3 checkpoint includes Nov3 all8 CPUwins13–48%, not justOct21 2/8. Fresh
+CPU numbers above corroborateahead. Whole-level scans/fine-grained drawrecords
+and particlebatching critique substantive; persistentassets/COW != mutation-only
+publication. October note"noSSBOlookup" describes experiment,notarchitecturalban.
+Opaque fogafterreduction meritscoverage/transparencydesign,notautomaticwin;
+MSAAfactoraloneisnotshaderinvocationcount. No new architectural work started.
+
+Historical run notes below (superseded by completed result):
+
+## November10 — ownership sweep preparation
 
 Latest user wants24/24; continue until proven. New user pasted Fable5.2 audit:
 verified largely older renderer/main664aefc, not this tree. render.cpp/gl_mesh.cpp

@@ -1,5 +1,14 @@
 # GPU bottleneck investigation — November 6
 
+## November10 result:24/24 measured cases
+
+See [full result](renderer-gpu-24of24-20261110.md). ownership-20261110 full24
+alllowerGPUintervals; reversed001/007 allsixlower. Third001SSAA1.3605→1.3160.
+Narrowest reversed001SSAA1.3285→1.3120 (1.2%): not allwinslargeorrobust margins.
+Fresh nativeCPU renderwallintervals also all8lower14–65%; noFPSguarantee and
+old/neweffectdifferences stillpreclude strictvisualequivalence. Latest source
+5b0e9bd pushed; private runtime restoredbothassets; no testprocessleft.
+
 ## November10 continuation: remaining four GPU losses
 
 Read-only opaque-depth borrowing qualified. Prepared ViewPass now proves
