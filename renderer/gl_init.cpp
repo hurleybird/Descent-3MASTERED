@@ -845,16 +845,17 @@ int GL4Renderer::Init(oeApplication* app, renderer_preferred_state* pref_state)
 }
 
 // Releases the rendering context
-const GL4Renderer::ImageReductionProgram& GL4Renderer::BindImageReduction(float gamma)
+const GL4Renderer::ImageReductionProgram& GL4Renderer::BindImageReduction(float gamma,bool display_output)
 {
     const bool linear=d3scene::imageReductionIsLinear(gamma) &&
         !(FindArg("-capture-frame") && FindArg("-scene-general-reduction-reference"));
-    auto& program=image_reduction_programs[linear ? 1 : 0];
+    auto& program=image_reduction_programs[(linear ? 1 : 0)+(display_output ? 2 : 0)];
     if(!program.shader.Handle()) {
         extern const char* blitVertexSrc;
         extern const char* downsampleFragmentSrc;
         std::string source=downsampleFragmentSrc;
         if(linear) source.insert(source.find('\n')+1,"#define SCENE_LINEAR_REDUCTION 1\n");
+        if(display_output) source.insert(source.find('\n')+1,"#define SCENE_DISPLAY_REDUCTION 1\n");
         program.shader.AttachSource(blitVertexSrc,source.c_str());
         program.shader.Use();
         glUniform1i(program.shader.FindUniform("heh"),0);

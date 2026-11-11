@@ -384,6 +384,13 @@ const char* downsampleFragmentSrc =
 "{\n"
 "	ivec2 dst = ivec2(gl_FragCoord.xy) - dest_origin;\n"
 "	color = WronskiFilter(dst);\n"
+"#if SCENE_DISPLAY_REDUCTION\n"
+"	// Preserve the former RGBA16F intermediate's rounding before display conversion.\n"
+"	color = vec4(unpackHalf2x16(packHalf2x16(color.rg)),unpackHalf2x16(packHalf2x16(color.ba)));\n"
+"#if !SCENE_LINEAR_REDUCTION\n"
+"	color.rgb = pow(max(color.rgb,vec3(0)),vec3(gamma));\n"
+"#endif\n"
+"#endif\n"
 "}\n"
 "";
 

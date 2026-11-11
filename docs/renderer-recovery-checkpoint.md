@@ -1,6 +1,34 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November10 CURRENT — direct display reduction qualified
+
+Latest user wants24/24; continue, no ordinary milestone yield. Accepted direct
+world display reduction ready for checkpoint after0bea594: no bloom/motion
+consumer means final SSAA reduction owns display image, eliminating temporary
+and copy. Four bounded programs; same filter, explicit half rounding, general
+gamma retained. Reference -scene-separate-display-reference. Private runtime
+has current clean qualified build; no running game/build. All8 frame60 and
+paired gamma/SSAA series exact;1500-frame prior probe maxdelta1 in49/33pixels.
+Root3/3; settings, effects auxiliary003/006, cleanSSAA2roundtrip pass.
+directprod1110 SSAA ref/new0011.410/1.389,1.408/1.389;
+007.936/.9095,.932/.903. Full24 `reduction-20261110` beforethischange was
+23/24 by median but007native.398/.397 effectivelytied,007SSAA.880/.929lost.
+Do NOT claim24/24. All8fulleffectswin.001oldSSAAvaries1.35-1.53; repeat.
+No shadow/cockpit/Candidate/main edits. Unrelated lib/gitinfo.h preserved.
+Usage67%, credits unchanged62044.8730600000. Next investigate measured fog
+producer cost; per-column compact event arrays use shared memory despite no
+cross-lane communication. Private-array probe not implemented/tested yet.
+Prior sections below are historical, not active session records.
+
 ## November10 ACTIVE — reduction transfer specialization
+
+UPDATE: reduction is accepted/pushed0bea594. Common-falloff probe was neutral
+and removed: commonlaw1110 reference/probe SSAA0011.406/1.4045,1.415/1.408;
+007.938/.939,.930/.932. Clean accepted source rebuilt, root3/3 passed.
+Full24 reduction-20261110 matrix running session52429; NO builds or other
+games while it swaps private runtime assets. It restores both assets at end.
+Separate depth/stencil capability checked and unsupported on RX6600 (8cdd,
+no GL error). Diagnostic resource probe removed. No permanent fallback added.
 
 Latest accepted/pushed HEAD34ee672 inline light records. Latest user wants24/24;
 continue, no ordinary milestone yield. Current candidate source introduces a
@@ -22,9 +50,8 @@ reductionfull1110 completed:0013.152/3.077,3.166/3.103;
 Both current assets deployed only in private integration-runtime-20261022.
 
 Next finish qualification/full timings, refresh all24 baseline if justified;
-remaining SSAA gaps still~.04ms each, not24/24. Consider separating transient
-stencil storage from D32F depth: currently packed D32F/S8 adds storage and depth
-conversion; capability/perf NOT tested, no source for that idea yet.
+remaining SSAA gaps were~.04ms each, not24/24. Separate depth/stencil capability
+has now been tested and rejected by the driver (above); do not retry blindly.
 gl_init.cpp tracked file has mixed endings; changed lines normalized to LF;
 diff --check clean, untouched line endings preserved.
 Unrelated lib/gitinfo.h remains untracked; main/Candidate/Previous untouched.

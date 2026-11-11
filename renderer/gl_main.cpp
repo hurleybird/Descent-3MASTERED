@@ -1921,18 +1921,32 @@ bool GL4Renderer::BeginPostPresentFrame()
 	post_present_framebuffer.Update(OpenGL_state.screen_width, OpenGL_state.screen_height, 0,GL_RGBA8);
 	// Display composition always consumes completed world color, never an
 	// opaque capture guessed equivalent from a global draw counter.
+	// With no remaining linear-color consumer, reduction owns the display
+	// product directly. Do not allocate/copy an intermediate just to publish it.
+	const bool direct_display_reduction =
+		!(FindArg("-capture-frame") && FindArg("-scene-separate-display-reference")) &&
+		supersampling_factor >= 2 && !bloom_enabled &&
+		OpenGL_preferred_state.pixel_motion_blur_strength <= 0 &&
+		OpenGL_preferred_state.pixel_motion_blur_legacy_object_strength <= 0 &&
+		!OpenGL_preferred_state.motion_vector_debug_preview;
+	if (AutomatedCapturePending())
+		AutomatedCaptureLog("world reduction direct_display=%d scale=%d gamma=%.9g",
+			direct_display_reduction ? 1 : 0,supersampling_factor,display_gamma);
 	if (supersampling_factor >= 2)
 	{
 		Framebuffer* source = &framebuffers[framebuffer_current_draw];
 		for (const auto step : d3scene::imageReductionSteps(supersampling_factor)) {
-			Framebuffer& destination = step.destination_scale == 1 ? resolved_framebuffer : downscale_framebuffer;
-			destination.Update(framebuffer_logical_width*step.destination_scale,framebuffer_logical_height*step.destination_scale,0);
-			const auto& reduction=BindImageReduction(display_gamma);
+			const bool display_output = direct_display_reduction && step.destination_scale == 1;
+			Framebuffer& destination = display_output ? post_present_framebuffer :
+				(step.destination_scale == 1 ? resolved_framebuffer : downscale_framebuffer);
+			if (!display_output) destination.Update(framebuffer_logical_width*step.destination_scale,framebuffer_logical_height*step.destination_scale,0);
+			const auto& reduction=BindImageReduction(display_gamma,display_output);
 			source->DownsampleTo(destination.Handle(),0,0,destination.Width(),destination.Height(),
 				reduction.gamma,display_gamma,reduction.destination_origin,
 				reduction.source_origin,reduction.source_size,
 				post_visible_origin_x*step.source_scale,post_visible_origin_y*step.source_scale,
-				post_visible_width*step.source_scale,post_visible_height*step.source_scale);
+				post_visible_width*step.source_scale,post_visible_height*step.source_scale,
+				display_output ? post_visible_origin_x : 0,display_output ? post_visible_origin_y : 0);
 			GL4PerfGpuDrain("GPU.WorldImageReduction");
 			source = &destination;
 		}
@@ -2002,8 +2016,9 @@ bool GL4Renderer::BeginPostPresentFrame()
 	auto* color_source = ApplyPixelMotionBlur(present_framebuffer,supersampling_factor,
 		post_uv_origin_x,post_uv_origin_y,post_uv_scale_x,post_uv_scale_y);
 	GL4PerfGpuSplitMark(GL4_GPU_SPLIT_BLOOM_AFTER_MOTION_BLUR);
-	CompositeWorldDisplay(present_framebuffer,color_source,bloom_framebuffer,protection_mask_texture,
-		post_uv_origin_x,post_uv_origin_y,post_uv_scale_x,post_uv_scale_y,display_gamma);
+	if (!direct_display_reduction)
+		CompositeWorldDisplay(present_framebuffer,color_source,bloom_framebuffer,protection_mask_texture,
+			post_uv_origin_x,post_uv_origin_y,post_uv_scale_x,post_uv_scale_y,display_gamma);
 	DrawMotionVectorDebugPreview(supersampling_factor);
 	ShaderProgram::ClearBinding();
 

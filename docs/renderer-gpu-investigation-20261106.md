@@ -2,6 +2,35 @@
 
 ## November10 continuation: remaining four GPU losses
 
+Direct world display reduction: when no bloom/motion consumer remains, final
+SSAA reduction writes the display product instead of a temporary RGBA16F image
+and another fullscreen copy. Same Wronski taps, explicit half-float rounding;
+identity transfer uses the already-qualified tolerance. General gamma retained.
+Four bounded programs (transfer x output product); no new render target.
+Reference `-scene-separate-display-reference` is capture-only.
+directprod1110 SSAA reference/new0011.410/1.389,1.408/1.389;
+007.936/.9095,.932/.903. Earlier directdisplay1110 max pixel delta1 (49/33
+pixels in1500-frame images); dd-q all8 at60 and dd-gamma series15/25/35/45/55
+are pixel-identical. dd-active confirms direct_display=1 at capture.
+Root3/3, dd-settings(clean), dd-aux-fx003/006, dd-trip(clean SSAA2) pass.
+dd-aux(clean) captured/shut down but failed required stationary-motion log:
+that profile disables the motion export the scenario audits. Not counted as pass.
+Plain-copy identity uniform-branch probe was negligible (0-.001ms), removed.
+Still NOT24/24;007 SSAA retains~.02-.03ms gap against latestold.880.
+
+Fresh accepted0bea594 full24 sweep `reduction-20261110`:23/24 median wins,
+NOT23 robust wins.007 native .398/.397ms is effectively tied;007 SSAA
+.880/.929 loses.001 native .711/.593,SSAA1.483/1.417,full3.174/3.090;
+007full2.829/2.469. All other six saves win all three configurations.
+Old001 SSAA has varied substantially between runs; repeat marginal cases.
+Common-falloff compiled probe removed after neutral/mixed commonlaw1110:
+0011.406/1.4045,1.415/1.408;007.938/.939,.930/.932.
+
+Separate D32F texture + S8 renderbuffer framebuffer capability probe returned
+GL_FRAMEBUFFER_UNSUPPORTED(0x8cdd), no GL error, on tested RX6600. Temporary
+GPU resources released; probe source removed. No driver changes or unsupported
+production storage path added.
+
 Qualified reduction transfer specialization: two bounded cached programs use
 the same Wronski taps/weights/extents. Identity within1e-6 omits pow calls;
 nonidentity gamma retains the original transfer. Does not edit saved settings.

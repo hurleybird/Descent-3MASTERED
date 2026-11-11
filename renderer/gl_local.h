@@ -375,8 +375,8 @@ class GL4Renderer : public IRenderer
 		ShaderProgram shader;
 		GLint gamma=-1, destination_origin=-1, source_origin=-1, source_size=-1;
 	};
-	std::array<ImageReductionProgram,2> image_reduction_programs;
-	const ImageReductionProgram& BindImageReduction(float gamma);
+	std::array<ImageReductionProgram,4> image_reduction_programs;
+	const ImageReductionProgram& BindImageReduction(float gamma,bool display_output=false);
 	ShaderProgram fontshader;
 	ShaderProgram motionvectordebugshader;
 	ShaderProgram motionblurshader;
