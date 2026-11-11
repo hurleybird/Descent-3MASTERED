@@ -29,6 +29,7 @@
 #include <cstdint>
 #include <vector>
 #include "SceneGeometryAllocator.h"
+#include "SceneRoomBatches.h"
 #include <glad/gl.h>
 #ifndef GL_TEXTURE_MAX_ANISOTROPY_EXT
 #define GL_TEXTURE_MAX_ANISOTROPY_EXT 0x84FE
@@ -143,6 +144,8 @@ class GL4Renderer : public IRenderer
 		GLuint material_indices = 0;
 		std::vector<ElementRange> material_groups;
 		d3scene::SceneGeometryAllocator::Allocation room_surfaces;
+		d3scene::RoomSurfaces room_materials;
+		d3scene::RoomMaterialTemplates room_templates;
 	};
 	struct SceneGeometryPage { GLuint vao = 0, buffer = 0; };
 	d3scene::SceneGeometryAllocator scene_geometry_allocator;
@@ -189,7 +192,7 @@ class GL4Renderer : public IRenderer
 	GLuint scene_draw_buffer = 0;
     GLuint scene_view_buffer = 0;
 	size_t scene_draw_record_bytes = 0;
-	struct SceneDrawPacket { const d3scene::SurfaceBinding* binding; GLuint vao; ElementRange range; d3scene::MaterialPolicy policy; GLuint index_buffer = 0; ElementRange indices; GLint base_vertex = 0; d3scene::DrawAttribution attribution = d3scene::DrawAttribution::Other; ElementRange room_indices; };
+	struct SceneDrawPacket { const d3scene::SurfaceBinding* binding; GLuint vao; ElementRange range; d3scene::MaterialPolicy policy; GLuint index_buffer = 0; ElementRange indices; GLint base_vertex = 0; d3scene::DrawAttribution attribution = d3scene::DrawAttribution::Other; ElementRange room_indices; uint32_t record_index=0; };
 	std::vector<SceneDrawPacket> scene_draw_packets;
 	std::vector<float> scene_draw_records;
 	// Room-only probe: stable geometry-owned table ranges, recycled on revision.
@@ -197,9 +200,12 @@ class GL4Renderer : public IRenderer
 	std::vector<uint32_t> scene_room_surface_page_bases;
 	std::vector<float> scene_room_surface_records;
 	GLuint scene_room_surface_buffer = 0, scene_room_surface_texture = 0;
+	size_t scene_room_surface_gpu_bytes=0;
 	GLuint scene_room_batch_indices = 0;
 	std::vector<uint32_t> scene_room_batch_index_data;
+	std::vector<uint32_t> scene_room_uploaded_indices;
 	std::vector<uint32_t> scene_room_draw_order;
+	d3scene::RoomViewBatches scene_room_view_batches;
 	std::vector<int32_t> scene_influence_records;
 	GLuint scene_influence_buffer = 0, scene_influence_texture = 0;
 	ElementRange scene_view_fog;

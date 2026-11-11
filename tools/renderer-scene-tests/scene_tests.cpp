@@ -4,6 +4,7 @@
 #include "../../renderer/SceneGeometry.h"
 #include "../../renderer/SceneGeometryAllocator.h"
 #include "../../renderer/SceneRoomSurface.h"
+#include "../../renderer/SceneRoomBatches.h"
 #include "../../Descent3/SceneExtraction.h"
 #include "room.h"
 #include "object.h"
@@ -44,6 +45,46 @@ d3scene::MeshGeometry triangle() {
 void storageTests() {
     using namespace d3scene;
     {
+        RoomMaterialTemplates materials; materials.reset(3);
+        std::array<float,RoomDrawWords> draw{};
+        draw[40]=.5f; draw[63]=1;
+        const auto a=materials.intern(0,draw.data());
+        draw[63]=4;
+        check(materials.intern(1,draw.data())==a,"View light count split persistent material templates");
+        draw[40]=.7f;
+        check(materials.intern(2,draw.data())!=a,"Different material radiance shared a template");
+        const auto patch=roomViewPatch(draw.data());
+        auto restored=materials.record(materials.find(2));
+        applyRoomViewPatch(restored.data(),patch);
+        check(restored==draw,"Room material/view split did not reconstruct draw constants");
+        RoomViewBatches batches; batches.begin(128);
+        for (uint32_t i=0;i<100;++i) {
+            RoomBatchKey key{i%7,i/7,patch};
+            const auto first=batches.resolve(key,i);
+            check(first.inserted && first.record==i,"Room batch insertion lost identity");
+        }
+        for (uint32_t i=100;i-->0;) {
+            const auto repeated=batches.resolve({i%7,i/7,patch},999);
+            check(!repeated.inserted && repeated.record==i,"Room batch collision confused material/owner identity");
+        }
+        batches.begin(128);
+        check(batches.resolve({0,0,patch},88).inserted,"Another view reused stale batch bindings");
+        materials.reset(3);
+        check(materials.find(0)==UINT32_MAX,"Revised materials retained an old face template");
+    }
+    {
+        std::vector<uint32_t> indices;
+        appendExpandedFanIndices(100,9,indices);
+        check(indices==std::vector<uint32_t>({100,101,102,100,102,105,100,105,108}),
+            "Polygon index reuse changed fan topology or winding");
+        std::vector<uint32_t> expanded;
+        forEachTriangleCorner(5,[&](size_t corner){expanded.push_back(uint32_t(corner));});
+        for (size_t i=0;i<indices.size();++i)
+            check(expanded[indices[i]-100]==expanded[i],"Reused corner differs from expanded vertex streams");
+        rejects([&]{appendExpandedFanIndices(0,4,indices);},"Non-triangle fan range accepted");
+        rejects([&]{appendExpandedFanIndices(UINT32_MAX-1,3,indices);},"Polygon index overflow accepted");
+    }
+    {
         float draw[100];
         for (int i=0;i<100;++i) draw[i]=float(i+1);
         const auto face=splitRoomSurfaceRecord(draw);
@@ -54,6 +95,10 @@ void storageTests() {
         check(face.words[14]==0 && face.words[15]==0,"Room face padding not initialized");
         check(draw[0]==1 && draw[95]==96 && draw[96]==0 && draw[99]==0,
             "Room face split damaged shared constants or retained inline light indices");
+        for (int i=0;i<100;++i) draw[i]=float(i+1);
+        splitRoomSurfaceRecord(draw,true);
+        for (int i : {62,63,77,78,96,97,98,99})
+            check(draw[i]==float(i+1),"Uniform room lighting lost a light/reflection binding");
     }
     {
         SceneGeometryAllocator ranges(16);

@@ -22,6 +22,18 @@ template<class Consumer> void forEachTriangleCorner(size_t corners, Consumer con
         consume(0); consume(triangle); consume(triangle+1);
     }
 }
+// Index an already expanded polygon fan without shading its duplicated corners
+// again. Every vertex-side stream uses the same forEachTriangleCorner expansion,
+// so the reused corner has identical geometry, UV, normal and reflection data.
+inline void appendExpandedFanIndices(uint32_t base,uint32_t vertices,std::vector<uint32_t>& indices) {
+    if (vertices%3 || uint64_t(base)+vertices>uint64_t(UINT32_MAX)+1)
+        throw std::invalid_argument("Invalid expanded polygon range");
+    for (uint32_t triangle=0;triangle<vertices/3;++triangle) {
+        indices.push_back(base);
+        indices.push_back(base+(triangle ? triangle*3-1 : 1));
+        indices.push_back(base+triangle*3+2);
+    }
+}
 // Preserves D3's radial jitter shape, but replaces draw-order RNG consumption
 // with explicit time/instance/part inputs. No view can advance another's shape.
 std::vector<Vec3> deformMesh(const MeshGeometry&,float range,double time,uint32_t owner,uint32_t part);
