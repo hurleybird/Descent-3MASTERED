@@ -24,6 +24,7 @@ extern int Last_texel_unit_set;
 
 namespace {
 constexpr size_t SceneUniformLightCapacity = 256;
+constexpr size_t SceneDrawRecordWords = 100;
 constexpr size_t SceneUniformLightBytes = SceneUniformLightCapacity*16*sizeof(float);
 static_assert(SceneUniformLightBytes <= 16384,"Light block exceeds the portable uniform-block minimum");
 bool SceneFogFieldEnabled(const d3scene::Camera& camera) {
@@ -71,7 +72,7 @@ layout(std140) uniform SceneViewBlock { vec4 view_params[16]; uvec4 deformer_key
 #define lighting_per_pixel (view_options.x)
 #define fog_volume_count (view_options.y)
 #define fog_volume_offset (view_options.z)
-layout(std140) uniform SceneDrawBlock { vec4 draw_params[23]; uvec4 draw_identity; };
+layout(std140) uniform SceneDrawBlock { vec4 draw_params[23]; uvec4 draw_identity; ivec4 draw_light_indices; };
 #define model_position (draw_params[0].xyz)
 #define effect_depth_offset (draw_params[0].w)
 #define model_right (draw_params[1].xyz)
@@ -143,6 +144,12 @@ vec4 sceneLight(int index) { return uniform_light_records[index]; }
 vec4 sceneLight(int index) { return texelFetch(scene_lights,index); }
 #endif
 uniform isamplerBuffer scene_influences;
+int sceneInfluenceLight(ivec2 influences,int index) {
+#if SCENE_INLINE_LIGHTS
+    if(polygon_light_table==0 && influences.y<=4) return draw_light_indices[index]*4;
+#endif
+    return texelFetch(scene_influences,influences.x+index).r*4;
+}
 
 float sceneEmitterAttenuation(int light,vec3 world_position,out vec3 incident) {
     vec4 position_radius = sceneLight(light);
@@ -163,7 +170,7 @@ float sceneEmitterAttenuation(int light,vec3 world_position,out vec3 incident) {
 vec3 sceneDynamicLighting(vec3 world_position,ivec2 influences) {
     vec3 dynamic_color = vec3(0);
     for (int index = 0; index < influences.y; ++index) {
-        int light = texelFetch(scene_influences,influences.x+index).r*4;
+        int light = sceneInfluenceLight(influences,index);
         vec4 color_falloff = sceneLight(light+1);
         vec3 incident;
         float attenuation = sceneEmitterAttenuation(light,world_position,incident);
@@ -618,7 +625,7 @@ void main() {
         }
         reflected *= static_specular_strength;
         for (int index = 0; index < primitive_influences.y; ++index) {
-            int light = texelFetch(scene_influences,primitive_influences.x+index).r*4;
+            int light = sceneInfluenceLight(primitive_influences,index);
             vec3 incident;
             float attenuation = sceneEmitterAttenuation(light,world_position,incident);
             float response = pow(max(0.0,dot(v,reflect(incident,n))),specular_response.y);
@@ -821,6 +828,7 @@ void GL4Renderer::DestroySceneResources() {
     if (scene_view_buffer) glDeleteBuffers(1,&scene_view_buffer);
     scene_view_buffer = 0;
     scene_draw_packets.clear(); scene_draw_records.clear(); scene_room_bindings.clear();
+    scene_influence_records.clear();
     scene_surface_ranges.clear();
     scene_part_ranges.clear();
     if (scene_position_buffer) glDeleteBuffers(1,&scene_position_buffer);
@@ -979,7 +987,7 @@ void GL4Renderer::PrepareSceneViewTables(const d3scene::PreparedView& prepared) 
         }
         if (lights.empty()) lights.resize(16,0);
         }
-        static thread_local std::vector<int32_t> indices;
+        auto& indices=scene_influence_records;
         static thread_local std::vector<d3scene::Vec2> uvs;
         static thread_local std::vector<d3scene::Vec3> reflections;
         indices.clear(); uvs.clear(); reflections.clear();
@@ -1663,6 +1671,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     PrepareSceneViewTables(prepared);
     check_scene_error("frame upload");
     const bool field_fog = scene_view_fog.count && SceneFogFieldEnabled(visibility.camera);
+    const bool inline_lights=!(AutomatedCaptureFrameIndex()>=0 && FindArg("-scene-indirect-light-indices-reference"));
     const size_t fog_mode = scene_view_fog.count == 0 ? 0 : (field_fog ? 2 : 1);
     const bool uniform_lights = presentation.data().lights.size() <= SceneUniformLightCapacity &&
         !(AutomatedCaptureFrameIndex() >= 0 && (FindArg("-scene-texture-lights-reference") ||
@@ -1711,6 +1720,10 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         fragment.insert(fragment.find('\n')+1,std::string("#define SCENE_PARTICLE_LAYER ")+(layer_interface ? "1\n" : "0\n"));
         fragment.insert(fragment.find('\n')+1,"#define SCENE_FOG_MODE "+std::to_string(fog_mode)+"\n");
         auto vertex = SceneVertexShader;
+        if(inline_lights) {
+            vertex.insert(vertex.find('\n')+1,"#define SCENE_INLINE_LIGHTS 1\n");
+            fragment.insert(fragment.find('\n')+1,"#define SCENE_INLINE_LIGHTS 1\n");
+        }
         if (uniform_lights) {
             const std::string definitions = "#define SCENE_UNIFORM_LIGHT_STORAGE 1\n#define SCENE_UNIFORM_LIGHT_RECORDS "+
                 std::to_string(SceneUniformLightCapacity*4)+"\n";
@@ -2194,7 +2207,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     if (!scene_draw_record_bytes) {
         GLint alignment = 16;
         glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT,&alignment);
-        scene_draw_record_bytes = ((24*16+size_t(alignment)-1)/size_t(alignment))*size_t(alignment);
+        scene_draw_record_bytes = ((SceneDrawRecordWords*sizeof(float)+size_t(alignment)-1)/size_t(alignment))*size_t(alignment);
     }
     const size_t record_bytes = scene_draw_record_bytes;
     auto& records = scene_draw_records; records.assign(visibility.surfaces.size()*(record_bytes/sizeof(float)),0);
@@ -2277,6 +2290,14 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         }
         record[62] = float(influences.offset);
         record[63] = float(view.dynamic_lighting && !surface.unlit ? influences.count : 0);
+        // Short draw-uniform lists travel with their draw record. Larger and
+        // per-polygon lists retain full indirection; no emitter is truncated.
+        if(inline_lights && influences.count<=4 && view.dynamic_lighting && !surface.unlit) {
+            for(uint32_t i=0;i<influences.count;++i) {
+                const int32_t light=scene_influence_records.at(influences.offset+i);
+                std::memcpy(record+96+i,&light,sizeof(light));
+            }
+        }
         record[68] = float(surface.unlit);
         record[66] = float(static_cast<unsigned>(surface.occlusion_class));
         record[67] = float(view.soft_particles && policy.layer == d3scene::RenderLayer::World ? surface.soft_depth_range : 0);
@@ -2726,7 +2747,7 @@ void main() {
                   (ib.terrain || ib.model_material_group || (ib.mesh && !y.two_sided)) &&
               !x.view_image_slot && !y.view_image_slot && !a.policy.planar_slot && !b.policy.planar_slot &&
               std::memcmp(records.data()+first*(record_bytes/sizeof(float)),
-                  records.data()+next*(record_bytes/sizeof(float)),96*sizeof(float)) == 0;
+                  records.data()+next*(record_bytes/sizeof(float)),SceneDrawRecordWords*sizeof(float)) == 0;
       };
       static thread_local std::vector<GLint> draw_starts;
       static thread_local std::vector<GLsizei> draw_counts;
@@ -2820,7 +2841,7 @@ void main() {
             glUniform2i(scene_image_origin,raster.x,raster.y);
             glUniform1i(scene_image_encoded_overlay,target.role == SceneOutputRole::ModalUI);
         } else scene_shader.Use();
-        glBindBufferRange(GL_UNIFORM_BUFFER,7,scene_draw_buffer,item_index*record_bytes,24*16);
+        glBindBufferRange(GL_UNIFORM_BUFFER,7,scene_draw_buffer,item_index*record_bytes,SceneDrawRecordWords*sizeof(float));
         const bool cull = item.terrain || item.model_material_group || (item.mesh && !surface.two_sided);
         // Authored polymodel fronts use clockwise winding, unlike the
         // terrain batches. CPU face-normal culling previously hid this

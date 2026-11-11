@@ -1,43 +1,36 @@
 # Renderer recovery checkpoint — 2026-09-22
 
-## November10 continuation — ACTIVE qualification, keep working toward24/24
+## November10 — inline lighting qualified; continue toward24/24
 
-UPDATE: fog arithmetic qualified: root3/3, fogarith-fx all8 exact against
-dpprimary-fx; fogarith-aux003/006 exact, settings passed,007 image inspected.
-Depth24 SSAA/full neutral and REMOVED from source. All runs finished; no active
-game/build/replay. Runtime still last executable containing disabled-by-default
-depth24 probe; next build/copy BOTH removes it. Next experiment is omitting
-unconsumed surface/motion shader records at view-program selection.
+Latest user wants24/24; CONTINUE, no ordinary-checkpoint yield.
+Accepted previous HEAD1b7257b. Inline lighting ready for checkpoint:
+draw UBO carries up to4 indices; larger/per-polygon lists retain indirection.
+400bytes live,512 aligned on AMD. Retained renderer-owned index vector.
+Reference: -scene-indirect-light-indices-reference.48 programs, no unroll.
+inline4 full pairs0013.217/3.210,3.2155/3.192;0072.580/2.5665,2.574/2.560ms.
+CPU inlinecpu1110 two rounds0013.902/3.870M,3.667/3.558M;
+0074.320/4.205M,4.512/4.075M cycles. No measured CPU regression.
+Root3/3; inlineclean-fx all8 exact vs fogarith-fx; inline4-aux003/006 exact;
+inline4-settings and inline4-trip pass. Private runtime has clean inline build.
 
-Latest user explicitly wants24/24 and continue; do not stop at ordinary checkpoint.
-HEAD e3e1225. Worktree isolated renderer-rearchitecture only. Main/Candidate/
-Previous Candidate untouched, lib/gitinfo.h unrelated. Usage59%, credits unchanged.
+Native16-bit textures and plane-residual particle classifier REMOVED.
+Packed formats had no repeatable timing benefit. Plane classifier saved001
+~.08ms but lost007 and max image error against full-res particles grew4->20.
+Both images visually inspected. No quality-changing probe retained.
+Other rejected probes/results are in GPU investigation doc; do not repeat.
 
-Only current source changes: gl_scene.cpp fog arithmetic optimization now default
-(shared compile-time64 slices; scalar visibility min instead of divide), paired
-SSAA001 ~.04ms faster,007 ~.02-.04ms faster, all4 images exact. Reference flag
--scene-fog-arithmetic-reference. Root3/3 passed; private BOTH assets copied.
-Corpus fogarith-fx-20261110 running then depth24ssaa1110 pairs, session88164.
-Second source file gl_framebuffer.cpp has capture-opt-in -scene-depth24-probe:
-ONLY stencil world targets use D24S8 instead of D32FS8. Existing shader copy to
-D32F snapshots and explicit MSAA resolve retained. This is a precision-change
-experiment, NOT accepted. Must inspect image/GL compatibility and remove if loss.
-No other source experiments remain. Do not build during running benchmark.
+Fresh old/current fogarith-20261110 matrix (before inline):
+001 native.718/.599,SSAA1.3715/1.515,full3.218/3.214;
+007 native.402/.398,SSAA.889/1.032,full2.828/2.574.
+Two clear SSAA losses; full001/native007 roughly ties. Other six scenes last
+won all three cases, not refreshed. NOT robust24/24. Latest SSAA current
+inline001~1.50ms,007~1.01ms.001 rendering CPU~.94ms,007~1.13ms: investigate
+CPU submission gaps as well as shader cost; timestamps are not pure busy time.
 
-Rejected this continuation: no-refine ablation (~.19/.12ms cost, quality loss);
-refinement-only triangle cache (~.06ms slower, all4 exact); early fog evaluation
-and skipping fully obscured lighting (~.1ms slower, all4 exact); homogeneous fog
-prefix table (~.09ms slower); explicit LOD0 field lookup neutral. All removed.
-Full measurements in GPU investigation doc. Existing RenderDoc capture cannot
-provide AMD GL ISA on this driver; small diagnostic script out/rdoc_shader_diagnostics.py
-and shader-isa text outputs only. No replay/game helpers left other than active
-benchmark. No new captures or software installations.
-
-Next: finish corpus/timing, compare fogarith-fx all8 to dpprimary-fx-20261110,
-run auxiliary003/006 and settings qualification, checkpoint accepted arithmetic
-separately from unproven depth24. Need native/full paired timings and refreshed
-old/current matrix before updating20/24 claim. Continue investigating remaining
-losses. No credits. No shadows or cancelled cockpit work.
+Main/Candidate/Previous Candidate untouched. No shadows/cockpit work.
+Only isolated renderer-rearchitecture worktree. Preserve unrelated lib/gitinfo.h.
+Latest usage62%; credits unchanged62044.8730600000. No active game/build.
+No new RDCs or helper applications.
 
 ## November10 — exact fog beam experiment rejected; qualified checkpoint
 

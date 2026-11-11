@@ -2,6 +2,41 @@
 
 ## November10 continuation: remaining four GPU losses
 
+Native packed image uploads rejected/removed: four-bit images matched all four
+paired images but saved only64-196KiB nominal storage in the two dense captures.
+Broader1555/4444 native storage had no repeatable benefit: packedimages1110
+SSAA0011.508/1.499,1.489/1.496;0071.0115/1.0085,1.008/1.009ms.
+No five-bit normalization or storage precision change retained.
+
+Depth-visibility prepass also removed:0011.5165/1.501,1.508/1.4925;
+0071.029/1.056,1.027/1.0585ms. It regressed the second target.
+
+Short light lists carried inside the existing draw UBO avoid dependent influence
+fetches. Up to4 indices inline, per-polygon and larger lists unchanged;400bytes
+live data still512 aligned on tested AMD. No duplicate light backing storage.
+inline4full1110 pairs0013.217/3.210,3.2155/3.192;0072.580/2.5665,2.574/2.560.
+Native gains only~.002-.003ms;SSAA mixed001,~.01ms007. Unrolling was neutral,
+removed. Inline all8 effects/auxiliary images exact; settings and reload pass.
+CPU paired native runs (inlinecpu1110, capture-thread-cycles, CPU2):001
+reference/inline3.902/3.870M,3.667/3.558M cycles;0074.320/4.205M,4.512/4.075M.
+No measured CPU regression; variation precludes attributing all improvement to
+the small index copies. This does not close the remaining SSAA gap.
+
+Plane-residual particle classifier rejected: particleplane1110 SSAA001
+1.498/1.4155,1.495/1.421ms,0071.012/1.016,1.007/1.015ms. The classifier
+reduced unnecessary repair on slopes but increased error against full-resolution
+particles:001 max channel delta4->20, pixels above2 codes.172%->.221%.
+Both full images inspected. No claim of temporal/edge quality equivalence;
+probe source removed rather than accept a one-scene speed/quality tradeoff.
+
+Color-only view-program probe removed: no meaningful improvement. It omitted
+unconsumed motion/class/identity exports and previous vertex transforms, while
+preserving previous endpoints for raster trails. SSAA reference/probe
+0011.518/1.514,1.5145/1.510;0071.031/1.022,1.015/1.022.
+Native001.596/.5965,.597/.594;007.398/.397 both rounds. First SSAA pair images
+001/007 exact. Expanded96-program cache and all source changes removed;
+accepted48-program cache retained. Do not call 1us a meaningful GPU victory.
+
 fogarith1110: expose shared64-slice contract as compile-time fragment constant;
 scalar x/max(1,x) becomes min(x,1), identical for finite scalar depths including
 negative values. Paired SSAA0011.549/1.508,1.551/1.506;

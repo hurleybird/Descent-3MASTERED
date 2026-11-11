@@ -191,6 +191,7 @@ class GL4Renderer : public IRenderer
 	struct SceneDrawPacket { const d3scene::SurfaceBinding* binding; GLuint vao; ElementRange range; d3scene::MaterialPolicy policy; GLuint index_buffer = 0; ElementRange indices; GLint base_vertex = 0; d3scene::DrawAttribution attribution = d3scene::DrawAttribution::Other; };
 	std::vector<SceneDrawPacket> scene_draw_packets;
 	std::vector<float> scene_draw_records;
+	std::vector<int32_t> scene_influence_records;
 	GLuint scene_influence_buffer = 0, scene_influence_texture = 0;
 	ElementRange scene_view_fog;
     std::vector<uint32_t> scene_view_fog_volumes;
