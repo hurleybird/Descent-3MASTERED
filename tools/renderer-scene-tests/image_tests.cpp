@@ -6,6 +6,7 @@
 #include "../../renderer/SceneWaterImage.h"
 #include "../../Descent3/TextureNamePolicy.h"
 #include <stdexcept>
+#include <limits>
 namespace {
 int checks;
 void check(bool value,const char* message) { ++checks; if (!value) throw std::runtime_error(message); }
@@ -18,6 +19,12 @@ template<class F> void rejects(F f) {
 int runSceneImageTests() {
     using namespace d3scene;
     checks = 0;
+    check(imageReductionIsLinear(1.f) && imageReductionIsLinear(0.999999046f) &&
+        imageReductionIsLinear(1.000000954f),"Identity reduction lost float-roundoff tolerance");
+    check(!imageReductionIsLinear(1.000002f) && !imageReductionIsLinear(.999998f) &&
+        !imageReductionIsLinear(.98f) && !imageReductionIsLinear(1.02f),"Reduction erased a nonidentity transfer");
+    check(!imageReductionIsLinear(0) && !imageReductionIsLinear(std::numeric_limits<float>::infinity()) &&
+        !imageReductionIsLinear(std::numeric_limits<float>::quiet_NaN()),"Invalid transfer selected linear reduction");
     {
         SceneAssets owner;
         SceneCache<RetainedDependencies<uint64_t>> world,canvas;

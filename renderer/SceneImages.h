@@ -4,6 +4,9 @@
 #include <cstddef>
 #include <array>
 namespace d3scene {
+// Float-roundoff-sized deviations from identity do not require a power-law
+// reduction. Real display-gamma adjustments retain the general transfer.
+bool imageReductionIsLinear(float exponent);
 // Borrowed only during asset publication. Matching revisions are compared in
 // place; pixels are copied only when an immutable image actually changes.
 struct ImageMipSource {

@@ -17,6 +17,7 @@
 * along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 #include "gl_local.h"
+#include "SceneImages.h"
 #include "args.h"
 #include "enginebrand.h"
 #include <stdio.h>
@@ -725,7 +726,6 @@ int GL4Renderer::Init(oeApplication* app, renderer_preferred_state* pref_state)
 
 	extern const char* blitVertexSrc;
 	extern const char* blitFragmentSrc;
-	extern const char* downsampleFragmentSrc;
 	extern const char* fontVertexSrc;
 	extern const char* fontFragmentSrc;
 	extern const char* motionVectorDebugFragmentSrc;
@@ -745,23 +745,6 @@ int GL4Renderer::Init(oeApplication* app, renderer_preferred_state* pref_state)
 	if (blitshader_uv_scale != -1)
 		glUniform2f(blitshader_uv_scale, 1.0f, 1.0f);
 
-	downsampleshader.AttachSource(blitVertexSrc, downsampleFragmentSrc);
-	downsampleshader.Use();
-	GLint downsampleshader_source = downsampleshader.FindUniform("heh");
-	if (downsampleshader_source != -1)
-		glUniform1i(downsampleshader_source, 0);
-	downsampleshader_gamma = downsampleshader.FindUniform("gamma");
-	if (downsampleshader_gamma == -1)
-		Error("GLRenderer::Init: Failed to find downsample gamma uniform!");
-	downsampleshader_dest_origin = downsampleshader.FindUniform("dest_origin");
-	if (downsampleshader_dest_origin == -1)
-		Error("GLRenderer::Init: Failed to find downsample dest_origin uniform!");
-	downsampleshader_source_visible_origin = downsampleshader.FindUniform("source_visible_origin");
-	downsampleshader_source_visible_size = downsampleshader.FindUniform("source_visible_size");
-	if (downsampleshader_source_visible_origin != -1)
-		glUniform2i(downsampleshader_source_visible_origin, 0, 0);
-	if (downsampleshader_source_visible_size != -1)
-		glUniform2i(downsampleshader_source_visible_size, 0, 0);
 
 	fontshader.AttachSource(fontVertexSrc, fontFragmentSrc);
 	fontshader.Use();
@@ -862,6 +845,29 @@ int GL4Renderer::Init(oeApplication* app, renderer_preferred_state* pref_state)
 }
 
 // Releases the rendering context
+const GL4Renderer::ImageReductionProgram& GL4Renderer::BindImageReduction(float gamma)
+{
+    const bool linear=d3scene::imageReductionIsLinear(gamma) &&
+        !(FindArg("-capture-frame") && FindArg("-scene-general-reduction-reference"));
+    auto& program=image_reduction_programs[linear ? 1 : 0];
+    if(!program.shader.Handle()) {
+        extern const char* blitVertexSrc;
+        extern const char* downsampleFragmentSrc;
+        std::string source=downsampleFragmentSrc;
+        if(linear) source.insert(source.find('\n')+1,"#define SCENE_LINEAR_REDUCTION 1\n");
+        program.shader.AttachSource(blitVertexSrc,source.c_str());
+        program.shader.Use();
+        glUniform1i(program.shader.FindUniform("heh"),0);
+        program.gamma=program.shader.FindUniform("gamma");
+        program.destination_origin=program.shader.FindUniform("dest_origin");
+        program.source_origin=program.shader.FindUniform("source_visible_origin");
+        program.source_size=program.shader.FindUniform("source_visible_size");
+        if((!linear && program.gamma<0) || program.destination_origin<0 || program.source_origin<0 || program.source_size<0)
+            Error("Image reduction program lost its declared interface");
+    } else program.shader.Use();
+    return program;
+}
+
 void GL4Renderer::Close()
 {
 #if defined(SDL3)
@@ -874,7 +880,7 @@ void GL4Renderer::Close()
 	DestroySceneResources();
 
 	blitshader.Destroy();
-	downsampleshader.Destroy();
+	for(auto& program : image_reduction_programs) program.shader.Destroy();
 	fontshader.Destroy();
 	motionvectordebugshader.Destroy();
 	motionblurshader.Destroy();

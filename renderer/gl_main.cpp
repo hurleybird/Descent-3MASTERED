@@ -1927,10 +1927,10 @@ bool GL4Renderer::BeginPostPresentFrame()
 		for (const auto step : d3scene::imageReductionSteps(supersampling_factor)) {
 			Framebuffer& destination = step.destination_scale == 1 ? resolved_framebuffer : downscale_framebuffer;
 			destination.Update(framebuffer_logical_width*step.destination_scale,framebuffer_logical_height*step.destination_scale,0);
-			downsampleshader.Use();
+			const auto& reduction=BindImageReduction(display_gamma);
 			source->DownsampleTo(destination.Handle(),0,0,destination.Width(),destination.Height(),
-				downsampleshader_gamma,display_gamma,downsampleshader_dest_origin,
-				downsampleshader_source_visible_origin,downsampleshader_source_visible_size,
+				reduction.gamma,display_gamma,reduction.destination_origin,
+				reduction.source_origin,reduction.source_size,
 				post_visible_origin_x*step.source_scale,post_visible_origin_y*step.source_scale,
 				post_visible_width*step.source_scale,post_visible_height*step.source_scale);
 			GL4PerfGpuDrain("GPU.WorldImageReduction");
@@ -2133,10 +2133,10 @@ bool GL4Renderer::ResolveCockpitLayerToPostComposite()
 			if (!final) destination.Update(framebuffer_logical_width*step.destination_scale,
 				framebuffer_logical_height*step.destination_scale,0);
 			if (destination.Handle() == 0) return false;
-			downsampleshader.Use();
+			const auto& reduction=BindImageReduction(presentation_gamma);
 			source->DownsampleTo(destination.Handle(),0,0,destination.Width(),destination.Height(),
-				downsampleshader_gamma,presentation_gamma,downsampleshader_dest_origin,
-				downsampleshader_source_visible_origin,downsampleshader_source_visible_size,
+				reduction.gamma,presentation_gamma,reduction.destination_origin,
+				reduction.source_origin,reduction.source_size,
 				visible_origin_x*step.source_scale,visible_origin_y*step.source_scale,
 				visible_width*step.source_scale,visible_height*step.source_scale,
 				final ? visible_origin_x : 0,final ? visible_origin_y : 0);

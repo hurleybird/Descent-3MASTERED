@@ -1508,10 +1508,10 @@ void GL4Renderer::RenderViewImage(const d3scene::PreparedViewImage& product) {
         for (const auto step : d3scene::imageReductionSteps(product.scale())) {
             auto& destination = step.destination_scale == 1 ? image.reduced : image.reduction_scratch;
             destination.Update(view.viewport.width*step.destination_scale,view.viewport.height*step.destination_scale,0);
-            downsampleshader.Use();
+            const auto& reduction=BindImageReduction(1.f);
             source->DownsampleTo(destination.Handle(),0,0,destination.Width(),destination.Height(),
-                downsampleshader_gamma,1.f,downsampleshader_dest_origin,
-                downsampleshader_source_visible_origin,downsampleshader_source_visible_size,
+                reduction.gamma,1.f,reduction.destination_origin,
+                reduction.source_origin,reduction.source_size,
                 0,0,source->Width(),source->Height());
             destination.MarkColorDirty();
             source = &destination;

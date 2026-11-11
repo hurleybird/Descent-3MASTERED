@@ -2,6 +2,51 @@
 
 ## November10 continuation: remaining four GPU losses
 
+Qualified reduction transfer specialization: two bounded cached programs use
+the same Wronski taps/weights/extents. Identity within1e-6 omits pow calls;
+nonidentity gamma retains the original transfer. Does not edit saved settings.
+Observed saved exponent0.999999046 prevented an exact-equality fast path.
+Uniform-branch version lost; compile specialization unitystatic1110 SSAA
+0011.491/1.405,1.4925/1.419;0071.011/.930,1.003/.933ms.22/16 changed pixels,
+maximum ONE 8-bit code. Not pixel-identical, not a filter/resolution change.
+Production reductionfull1110 pairs0013.152/3.077,3.166/3.103;
+0072.558/2.471,2.559/2.472ms. Root3/3 including transfer policy tests.
+reduction-fx all8 images max delta1, changed.00065-.00206% of pixels;
+auxiliary003/006, settings/reload pass. Nonidentity settings25 exact and35
+max delta1 (offscreen image reductions still use identity). Inspected001 lit.
+Reference: -scene-general-reduction-reference. World, foreground and view
+images share the selector; both programs destroyed with renderer context.
+
+Compiled static triangle-edge records rejected: fogedges1110 SSAA001
+1.505/1.506,1.506/1.5045;0071.006/1.023,1.019/1.030ms. First pairs exact.
+Five-vector records replaced four-vector records; no benefit from saved edge
+setup. Early ray-segment rejection alone was neutral: fogsegment1110
+0011.499/1.4935,1.500/1.501;0071.005/1.007,1.014/1.003. First pairs exact.
+Both probes removed; no expanded boundary representation retained.
+
+Exact last-field reuse was also removed after fogreuse1110 stayed~1.50/1.01ms.
+Capture diagnostics show same asset/candidates but genuinely changing camera
+position and field range in both saves (small motion, not frozen cameras).
+No coordinate quantization or stale-field tolerance added to manufacture hits.
+
+REJECTED/REMOVED -scene-fog-interval-probe: one-volume scalar fields encode
+simple zero/one-interval rays as entry/exit/density in RGBA32F, skipping65 depth
+stores. Complex columns retain full prefix-field fallback. Consumer evaluates
+each of four columns independently, retaining spatial interpolation and exact
+contrast-triggered boundary repair. This changes depth interpolation.007 audit
+found52017/57600 valid interval columns, producer~.063ms vs~.081ms, but first
+consumer slowed total1.012/1.0395,1.003/1.044ms. RG32F/two-gather refinement
+was only slightly faster0071.016/.998,1.005/1.001, regressed0011.5075/1.515,
+1.500/1.511. No quality acceptance/numerical audit claim. All shaders, textures,
+binding changes and prototype source removed. Failed fogintervalrg1110 launch
+hit GLSL330 gather-component support; corrected430 runs are fogintervalrgvalid.
+
+Same-format opaque snapshot probe (D32F/S8 -> D32F/S8 depth blit instead of
+D32F/S8 -> D32F shader conversion) rejected: depthpacked1110 SSAA reference/
+probe0011.511/1.510,1.506/1.505;0071.027/1.018,1.008/1.011ms. First pair
+images exact in both saves, but no consistent gain; extra packed snapshot
+storage is not justified. Removed all source changes.
+
 Native packed image uploads rejected/removed: four-bit images matched all four
 paired images but saved only64-196KiB nominal storage in the two dense captures.
 Broader1555/4444 native storage had no repeatable benefit: packedimages1110

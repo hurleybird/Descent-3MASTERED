@@ -6,6 +6,9 @@
 #include <algorithm>
 #include <cmath>
 namespace d3scene {
+bool imageReductionIsLinear(float exponent) {
+    return std::isfinite(exponent) && std::abs(exponent-1.f)<=0.000001f;
+}
 ImageMip compositeDisplayReadback(ImageMip base,const ImageMip& overlay,float gamma) {
     const auto valid = [](const ImageMip& image) {
         return image.width && image.height && image.width <= INT32_MAX && image.height <= INT32_MAX &&

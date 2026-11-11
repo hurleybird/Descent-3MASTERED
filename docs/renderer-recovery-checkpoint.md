@@ -1,5 +1,35 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November10 ACTIVE — reduction transfer specialization
+
+Latest accepted/pushed HEAD34ee672 inline light records. Latest user wants24/24;
+continue, no ordinary milestone yield. Current candidate source introduces a
+bounded TWO-program image reduction cache selected by actual transfer exponent.
+Identity tolerance1e-6 handles saved near-unity0.999999046; no user setting edits.
+General shader preserves gamma adjustments. Reference flag:
+-scene-general-reduction-reference. No interval/reuse/depth/edge probes remain.
+
+Prototype unitystatic1110 SSAA pairs0011.491/1.405,1.4925/1.419;
+0071.011/.930,1.003/.933ms.22/16 pixels change by exactly ONE code, no larger
+differences. Uniform-branch fast path was slower; specialization removes powers
+from program entirely. Production factory now in gl_init.cpp, policy/test in
+SceneImages.cpp/h and image_tests.cpp; main/aux/foreground share the selector.
+Root3/3; reduction-fx all8 max delta1, changed pixels .00065-.00206%; settings
+frames25/35 (nonidentity gamma) exact/max1 respectively. Auxiliary003/006,
+image-settings and gameplay roundtrip pass. Headlight-on effects001 inspected.
+reductionfull1110 completed:0013.152/3.077,3.166/3.103;
+0072.558/2.471,2.559/2.472ms. No running game/build.
+Both current assets deployed only in private integration-runtime-20261022.
+
+Next finish qualification/full timings, refresh all24 baseline if justified;
+remaining SSAA gaps still~.04ms each, not24/24. Consider separating transient
+stencil storage from D32F depth: currently packed D32F/S8 adds storage and depth
+conversion; capability/perf NOT tested, no source for that idea yet.
+gl_init.cpp tracked file has mixed endings; changed lines normalized to LF;
+diff --check clean, untouched line endings preserved.
+Unrelated lib/gitinfo.h remains untracked; main/Candidate/Previous untouched.
+Latest usage64%, credits unchanged62044.8730600000; no helper apps/agents.
+
 ## November10 — inline lighting qualified; continue toward24/24
 
 Latest user wants24/24; CONTINUE, no ordinary-checkpoint yield.

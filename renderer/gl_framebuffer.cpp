@@ -853,6 +853,7 @@ void Framebuffer::DownsampleTo(GLuint target, unsigned int x, unsigned int y, un
 	PERF_MARKER_SCOPE("Post.DownsampleTo");
 	const bool measure = AutomatedCapturePending();
 	GLuint timings[3] = {};
+	if(measure) AutomatedCaptureLog("image reduction gamma=%.9g",gamma);
 	if (measure) { glGenQueries(3,timings); glQueryCounter(timings[0],GL_TIMESTAMP); }
 	SubFramebufferBlit(GL_COLOR_BUFFER_BIT);
 	if (measure) glQueryCounter(timings[1],GL_TIMESTAMP);

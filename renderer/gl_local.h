@@ -371,7 +371,12 @@ class GL4Renderer : public IRenderer
 	unsigned int framebuffer_blit_x = 0, framebuffer_blit_y = 0, framebuffer_blit_w = 0, framebuffer_blit_h = 0;
 
 	ShaderProgram blitshader;
-	ShaderProgram downsampleshader;
+	struct ImageReductionProgram {
+		ShaderProgram shader;
+		GLint gamma=-1, destination_origin=-1, source_origin=-1, source_size=-1;
+	};
+	std::array<ImageReductionProgram,2> image_reduction_programs;
+	const ImageReductionProgram& BindImageReduction(float gamma);
 	ShaderProgram fontshader;
 	ShaderProgram motionvectordebugshader;
 	ShaderProgram motionblurshader;
@@ -401,10 +406,6 @@ class GL4Renderer : public IRenderer
 	GLint blitshader_gamma = -1;
 	GLint blitshader_uv_origin = -1;
 	GLint blitshader_uv_scale = -1;
-	GLint downsampleshader_gamma = -1;
-	GLint downsampleshader_dest_origin = -1;
-	GLint downsampleshader_source_visible_origin = -1;
-	GLint downsampleshader_source_visible_size = -1;
 	GLint fontshader_texture = -1;
 	GLint motionvectordebug_velocity_source = -1;
 	GLint motionvectordebug_depth_source = -1;
