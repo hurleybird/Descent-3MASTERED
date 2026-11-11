@@ -1,5 +1,78 @@
 # GPU bottleneck investigation — November 6
 
+## November10: exact ray-bundle cache rejected
+
+Room shape audit confirms genuine concavity, not numerical tolerance:001
+rooms26/27 maximum outside-plane distances34.98/70.13,007room81 212.96.
+CPU320x180 cell audit finds stable triangle membership in46618/57600 cells001,
+49317/57600 cells007. Retained capture-only shape/beam audits, not production work.
+
+Prototype1 GPU cached up to8 original boundary IDs per certified cell, with
+exact BVH fallback for partial/overflow cells. All8 save images pixel-identical
+to an exact BVH oracle. But SSAA2/noeffects two rounds:
+001 current1.531/1.554 vs beam3.3315/3.329;
+007 current1.057/1.050 vs beam2.199/2.1985ms. Rejected.
+
+Prototype2 cached partial triangles too (exact half-open hit test), used direct
+plane intersection for certified hits. Overflow still exact BVH. Dense001/007
+images exact vs oracle; cached57478/57600 and57082/57600 cells at frame60.
+Two rounds001 current1.552/1.553 vs beam2.2975/2.2905;
+007 current1.043/1.057 vs beam1.4445/1.461ms. Still rejected.
+
+beam2cost normal/no-apply retains producer but disables all fog application:
+0012.295/1.021,0071.447/.730ms. Appearance-breaking diagnostic only.
+Consumer difference1.274/.717ms exceeds current field's~.51/.30ms.
+Corrected timestamp instrumentation puts dense beam construction at.050520ms
+plus.013040 tile masks (single capture, not median). Earlier beam1/beam2 timing
+capture producer query included synchronous audit readback: those stage numbers
+are INVALID. Ordinary1500-frame medians exclude capture frame and remain valid.
+
+All prototype GPU resources/shaders, expanded projected records, test-only flags
+removed. No field quality reduction or extra production renderer path retained.
+Restored build root3/3 passed; beamremoved-fx-20261110 all8 pixel-identical to
+accepted dpprimary-fx-20261110. Both private runtime assets restored; no game left.
+Exact fog arithmetic at every shaded fragment was the wrong cost tradeoff here,
+even after cheaply caching geometry. Next work must address consumer cost.
+
+Common-falloff probe also rejected:0011.560/1.571,1.553/1.568;
+0071.049/1.068,1.057/1.054ms; one pixel changed001. Source removed.
+
+## November10: full eight-save GPU baseline matrix
+
+scalarprog1110 compile-time scalar-field consumer probe:0011.553/1.5565,
+1.554/1.545;0071.0455/1.0505,1.047/1.032. All4 images exact, no repeatable
+gain. Removed expanded64-program key and scalar specialization; retained48
+program capacity from accepted diffuse capability. No field representation
+or sampling change was retained.
+
+Refreshed fog ablation fogcost-{1,2}-{reference,volume,all} SSAA2/noeffects:
+0011.550/1.273/1.0245 and1.5475/1.281/1.043;
+0071.055/.961/.753 and1.058/.950/.752. volume omits fog only in SoftVolumes;
+all omits all fragment fog while retaining field production. INVALID appearance,
+cost evidence only, all ablation source removed. Global fog near-Z bounds are
+negative in both scenes (-41.07,-178.67); a simple front-of-fog rejection cannot
+help these cases. Capture bound diagnostic also removed.
+
+gpu-mx-*-diffusepass-20261110, old reconstructed bfb59647 / current7ce7c62,
+720p, native1x/noMSAA/noeffects, SSAA2/noMSAA/noeffects, full2x/4MSAA/AO/bloom/MB.
+Rounded GPU milliseconds:
+
+| Save | Native old/new | SSAA old/new | Full old/new |
+|---|---|---|---|
+|000|.32/.15|.81/.47|2.55/1.67|
+|001|.75/.62|1.53/1.54|3.19/3.24|
+|002|1.45/.39|1.73/1.00|3.23/2.53|
+|003|.58/.27|1.06/.71|2.95/2.02|
+|004|.35/.16|.81/.57|2.53/1.81|
+|005|.24/.12|.55/.41|2.37/1.60|
+|006|.33/.18|.74/.48|2.52/1.78|
+|007|.40/.41|.89/1.04|2.82/2.60|
+
+20/24 configurations faster, but not an all-case victory. Old001 SSAA varied
+1.35..1.53 across runs; don't select favorable old timing as definitive.
+Effect differences and CPU-fed GPU timestamp intervals limit strict equivalent
+hardware-work claims. No feature was disabled in these matrix runs.
+
 ## November10: reflection-interface capability investigation
 
 speccost1110 disabled specular entirely, ONLY a cost diagnostic:

@@ -1275,6 +1275,67 @@ void GL4Renderer::PrepareSceneViewTables(const d3scene::PreparedView& prepared) 
             }
         }
         if (!fog_records.empty()) {
+            if (AutomatedCapturePending() && FindArg("-scene-fog-beam-audit") && SceneFogFieldEnabled(demand.camera)) {
+                struct BeamTriangle { std::array<double,4> rectangle; std::array<std::array<double,4>,5> planes; };
+                std::vector<BeamTriangle> triangles;
+                const auto& camera = demand.camera;
+                const auto project_plane = [&](const float* p) {
+                    const auto dot = [&](d3scene::Vec3 axis) { return double(p[0])*axis.x+double(p[1])*axis.y+double(p[2])*axis.z; };
+                    const double a=dot(camera.transform.right)/camera.projection.x_scale;
+                    const double b=dot(camera.transform.up)/camera.projection.y_scale;
+                    return std::array<double,4>{{a,b,dot(camera.transform.forward)-a*camera.projection.x_offset-b*camera.projection.y_offset,p[3]}};
+                };
+                for (size_t entry=0;entry<fog_entries.size();entry+=4) {
+                    const size_t base=size_t(fog_entries[entry+1])*4-d3scene::FogFieldHeaderWords-fog_record_start;
+                    uint32_t header[2]; std::memcpy(header,fog_records.data()+base,sizeof(header));
+                    for (uint32_t t=0;t<header[1];++t) {
+                        const float* p=fog_records.data()+base+header[0]+t*d3scene::FogFieldTriangleWords;
+                        BeamTriangle triangle;
+                        std::copy_n(p,4,triangle.rectangle.begin());
+                        for (int edge=0;edge<3;++edge) std::copy_n(p+4+edge*4,4,triangle.planes[edge].begin());
+                        triangle.planes[3]=project_plane(p+16);
+                        triangle.planes[4]=project_plane(p+20);
+                        triangles.push_back(triangle);
+                    }
+                }
+                const int width=d3scene::DefaultFogFieldWidth;
+                const int height=(std::max)(1,int(std::ceil(double(width)*prepared.view().viewport.height/prepared.view().viewport.width)));
+                unsigned stable=0,empty=0,within8=0,within16=0,maximum=0; uint64_t crossings=0;
+                for (int y=0;y<height;++y) for(int x=0;x<width;++x) {
+                    const double cx=(x+.5)*2/width-1,cy=(y+.5)*2/height-1,hx=1.0/width,hy=1.0/height;
+                    bool uncertain=false; unsigned count=0;
+                    const auto range=[&](const std::array<double,4>& p) {
+                        const double middle=p[0]*cx+p[1]*cy+p[2], radius=std::abs(p[0])*hx+std::abs(p[1])*hy;
+                        return std::pair<double,double>{middle-radius,middle+radius};
+                    };
+                    for (const auto& triangle : triangles) {
+                        const auto& r=triangle.rectangle;
+                        if (r[0]>cx+hx || r[2]<cx-hx || r[1]>cy+hy || r[3]<cy-hy) continue;
+                        bool outside=false,partial=false;
+                        for (int edge=0;edge<3;++edge) {
+                            const auto values=range(triangle.planes[edge]); const auto margin=triangle.planes[edge][3];
+                            outside=outside || values.second < -margin;
+                            partial=partial || values.first <= margin;
+                        }
+                        if (outside) continue;
+                        const auto denominator=range(triangle.planes[3]);
+                        const double numerator=triangle.planes[3][3];
+                        const double epsilon=1.e-10*(1+std::abs(denominator.first)+std::abs(denominator.second));
+                        if ((numerator>0 && denominator.second < -epsilon) || (numerator<0 && denominator.first > epsilon)) continue;
+                        const auto inward=range(triangle.planes[4]);
+                        if (partial || std::abs(numerator)<epsilon ||
+                            (denominator.first<=epsilon && denominator.second>=-epsilon) ||
+                            (inward.first<=epsilon && inward.second>=-epsilon)) { uncertain=true; break; }
+                        ++count;
+                    }
+                    if (!uncertain) {
+                        ++stable; if(!count) ++empty; if(count<=8) ++within8; if(count<=16) ++within16;
+                        maximum=(std::max)(maximum,count); crossings+=count;
+                    }
+                }
+                AutomatedCaptureLog("fog beam audit grid=%dx%d triangles=%u stable=%u empty=%u within8=%u within16=%u max=%u crossings=%llu",
+                    width,height,unsigned(triangles.size()),stable,empty,within8,within16,maximum,(unsigned long long)crossings);
+            }
             static_assert(sizeof(float) == sizeof(int32_t),"Fog stream scalar width");
             indices.resize(fog_record_start+fog_records.size());
             std::memcpy(indices.data()+fog_record_start,fog_records.data(),fog_records.size()*sizeof(float));
@@ -1921,6 +1982,32 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     GLuint field_queries[3]{}; // capture frame only; read after all view work
     if (field_fog) {
         PERF_MARKER_SCOPE("Scene.FogField");
+        if (AutomatedCapturePending() && FindArg("-scene-fog-shape-audit")) {
+            for (auto index : scene_view_fog_volumes) {
+                const auto& volume = fog_volumes[index];
+                AutomatedCaptureLog("fog shape volume=%u rooms=%u triangles=%u",index,unsigned(volume.rooms.size()),unsigned(volume.boundary.size()));
+                for (auto number : volume.rooms) {
+                    const auto* found = presentation.roomIndices().find(number);
+                    if (!found) continue;
+                    const auto& geometry = presentation.data().rooms[found->second].asset->geometry();
+                    double outside = 0, nonplanar = 0;
+                    for (const auto& polygon : geometry.polygons) {
+                        if (polygon.corners.empty()) continue;
+                        const auto& n = polygon.normal;
+                        const auto& a = geometry.vertices[polygon.corners[0].vertex];
+                        const double length = std::sqrt(double(n.x)*n.x+double(n.y)*n.y+double(n.z)*n.z);
+                        if (!(length > 0)) { outside = 1.e30; continue; }
+                        const auto side = [&](const d3scene::Vec3& p) {
+                            return ((double(p.x)-a.x)*n.x+(double(p.y)-a.y)*n.y+(double(p.z)-a.z)*n.z)/length;
+                        };
+                        for (const auto& p : geometry.vertices) outside = (std::max)(outside,-side(p));
+                        for (const auto& corner : polygon.corners) nonplanar = (std::max)(nonplanar,std::abs(side(geometry.vertices[corner.vertex])));
+                    }
+                    AutomatedCaptureLog("fog shape room=%d vertices=%u faces=%u outside=%.9g nonplanar=%.9g",number,
+                        unsigned(geometry.vertices.size()),unsigned(geometry.polygons.size()),outside,nonplanar);
+                }
+            }
+        }
         field_range = 1;
         // A shared color factors out of the optical integral. Store only depth
         // for this medium, regardless of volume count or differing densities.

@@ -1,5 +1,29 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November10 — exact fog beam experiment rejected; qualified checkpoint
+
+Accepted/pushed HEAD7ce7c62. Only source edits are capture-only shape and beam
+feasibility audits in gl_scene.cpp. All beam GPU shaders/resources/record-stride
+changes, falloff and scalar probes REMOVED. Rebuild root3/3 passed, BOTH private
+runtime assets restored. beamremoved-fx-20261110 all8 pixel-identical to accepted
+dpprimary-fx-20261110. No game/build active. Unrelated lib/gitinfo.h preserved.
+Usage last58%; credits unchanged. Candidate/Previous Candidate/main untouched.
+
+Concave fog geometry rules out a simple convex replacement. Conservative CPU
+320x180 beam audit: save001 46618/57600 stable cells, all within8 crossings;
+save007 49317 stable,49297 within8, max9. This is feasibility, NOT timing or
+correctness proof. Implemented both certified-only and partial-triangle caches;
+both LOST to current field. Beam1 all8 images exact against exact BVH oracle.
+Beam2 dense001/007 exact. SSAA frame medians0011.55->2.29,0071.05->1.45ms.
+Producer cheap (~.05ms dense capture); per-fragment evaluation costs1.27/.72ms
+vs currentfield ~.51/.30ms. Do not repeat this representation without a new
+consumer design. Full findings in GPU investigation doc. Default field retained.
+
+Overall GPU baseline still20/24 wins; remaining001 SSAA/full,007native/SSAA.
+No all-case victory or release/gameplay qualification claim. Next useful work
+is reducing field-consumer cost without reintroducing boundary shimmer, or
+another measured bottleneck; not more full-resolution exact traversal.
+
 ## November10 — diffuse-pass capability qualified; continue GPU work
 
 Latest accepted/pushed f5133dc brightness-first bloom: all8 paired and effects
