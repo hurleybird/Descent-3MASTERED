@@ -588,6 +588,7 @@ void main() {
         illumination = clamp(illumination+dynamic_color,vec3(0),vec3(1));
     }
     color=vec4(base.rgb*color_modulation*authored_color*illumination*lighting_modulation,base.a);
+#if !SCENE_DIFFUSE_PASS
     if (specular_response.x > 0 && unlit == 0 && dot(reflection_normal,reflection_normal) > 1.e-6) {
         vec3 n = reflection_normal/max(length(reflection_normal),1.e-8);
         vec3 view_delta = eye-world_position;
@@ -628,6 +629,7 @@ void main() {
         color.rgb += clamp(reflected*specular_response.x,vec3(0),vec3(1))*
             clamp(mask*specular_response.w*vertex_alpha,0.0,1.0);
     }
+#endif
     if (multiply_material != 0) color.rgb = mix(vec3(1),color.rgb,color.a);
     vec3 surface_radiance = unlit != 0 ? vec3(0) : color.rgb;
     if (planar_material != 0) {
@@ -1549,7 +1551,8 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     const d3scene::ViewProducts products{owns_world_products,
         owns_world_products && OpenGL_preferred_state.ao_enabled && framebuffer_ok,
         owns_world_products && !target.coverage.width && !FindArg("-scene-native-particles") &&
-            SupersamplingFactor() > 1};
+            SupersamplingFactor() > 1,
+        !(FindArg("-capture-frame") && FindArg("-scene-general-specular-reference"))};
     // Execution is synchronous and observation-free: one renderer-owned plan
     // can be reused by main, auxiliary, image and canvas views without nesting.
     d3scene::buildViewPasses(presentation,visibility,products,scene_view_passes);
@@ -1613,7 +1616,10 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         });
     const bool general_layer = particle_shader && (!specialize_volumes ||
         (AutomatedCaptureFrameIndex() >= 0 && FindArg("-scene-general-opaque-reference")));
-    const auto initialize_program = [&](SceneProgram& program,bool unlit_pass,bool layer_interface) {
+    const bool specialize_diffuse = std::any_of(passes.begin(),passes.end(),[](const d3scene::ViewPass& pass) {
+        return !pass.specular;
+    });
+    const auto initialize_program = [&](SceneProgram& program,bool unlit_pass,bool layer_interface,bool diffuse_pass = false) {
     auto& scene_shader = program.shader;
     auto& scene_uniforms = program.uniforms;
     if (!scene_shader.Handle()) {
@@ -1626,6 +1632,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
                 reinterpret_cast<const char*>(glGetString(GL_RENDERER)),varying,vertex,fragment);
         }
         auto fragment = SceneFragmentShader;
+        fragment.insert(fragment.find('\n')+1,std::string("#define SCENE_DIFFUSE_PASS ")+(diffuse_pass ? "1\n" : "0\n"));
         fragment.insert(fragment.find('\n')+1,std::string("#define SCENE_UNLIT_PASS ")+(unlit_pass ? "1\n" : "0\n"));
         fragment.insert(fragment.find('\n')+1,std::string("#define SCENE_EARLY_SOFT_ALPHA ")+
             (AutomatedCaptureFrameIndex() >= 0 && FindArg("-scene-soft-alpha-late-reference") ? "0\n" : "1\n"));
@@ -1692,12 +1699,18 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     }
     };
     const size_t program_base = (uniform_lights ? 12 : 0)+fog_mode*4;
-    auto& view_program = scene_programs[program_base+(general_layer ? 2 : 0)];
+    const bool primary_diffuse = specialize_diffuse && std::none_of(passes.begin(),passes.end(),[](const d3scene::ViewPass& pass) {
+        return pass.specular && pass.begin != pass.end && pass.kind != d3scene::ViewPassKind::DepthSurface &&
+            pass.kind != d3scene::ViewPassKind::UnlitWorld && pass.kind != d3scene::ViewPassKind::SoftVolumes;
+    });
+    auto& view_program = scene_programs[program_base+(primary_diffuse ? 24 : 0)+(general_layer ? 2 : 0)];
     auto& volume_program = scene_programs[program_base+3];
     auto& unlit_program = scene_programs[program_base+1];
-    initialize_program(view_program,false,general_layer);
+    auto& diffuse_program = scene_programs[program_base+24+(general_layer ? 2 : 0)];
+    initialize_program(view_program,false,general_layer,primary_diffuse);
     if (specialize_volumes) initialize_program(volume_program,true,true);
     if (specialize_unlit) initialize_program(unlit_program,true,false);
+    if (specialize_diffuse && !primary_diffuse) initialize_program(diffuse_program,false,general_layer,true);
     auto& scene_shader = view_program.shader;
     auto& scene_uniforms = view_program.uniforms;
 
@@ -1779,6 +1792,13 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     if (scene_uniforms.fragment_mapping >= 0) glUniform4f(scene_uniforms.fragment_mapping,1,1,0,0);
     if (scene_uniforms.volume_edge_only >= 0) glUniform1i(scene_uniforms.volume_edge_only,0);
     glUniform1i(scene_uniforms.scene_occlusion_enabled,0);
+    if (specialize_diffuse && !primary_diffuse) {
+        diffuse_program.shader.Use();
+        glUniform1i(diffuse_program.uniforms.scene_occlusion_enabled,0);
+        if (diffuse_program.uniforms.fragment_mapping >= 0) glUniform4f(diffuse_program.uniforms.fragment_mapping,1,1,0,0);
+        if (diffuse_program.uniforms.volume_edge_only >= 0) glUniform1i(diffuse_program.uniforms.volume_edge_only,0);
+        scene_shader.Use();
+    }
     const auto& fog_volumes = d3scene::fogVolumes(presentation.data());
     const auto fog_id = presentation.data().fog ? presentation.data().fog->id() : d3scene::AssetId{};
     // Boundary records belong to the immutable fog asset, not the last view.
@@ -2054,7 +2074,8 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     glUniform1f(scene_uniforms.fog_field_range,field_range);
     glUniform4f(scene_uniforms.fog_field_color,field_color.x,field_color.y,field_color.z,scalar_field ? 1.f : 0.f);
     glUniform1i(scene_uniforms.fog_debug,FindArg("-scene-fog-debug") != 0);
-    for (auto* program : {specialize_volumes ? &volume_program : nullptr,specialize_unlit ? &unlit_program : nullptr}) {
+    for (auto* program : {specialize_volumes ? &volume_program : nullptr,specialize_unlit ? &unlit_program : nullptr,
+        specialize_diffuse && !primary_diffuse ? &diffuse_program : nullptr}) {
         if (!program) continue;
         program->shader.Use();
         glUniform1f(program->uniforms.fog_field_range,field_range);
@@ -2308,13 +2329,18 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         glActiveTexture(GL_TEXTURE6); glBindTexture(GL_TEXTURE_BUFFER,fog_gpu.texture);
         glActiveTexture(GL_TEXTURE7); glBindTexture(GL_TEXTURE_2D,depth_for_sampling);
         GL_BindFramebufferTexture(estimate.ao_texture,11,GL_LINEAR);
+        for (auto* program : {&view_program,specialize_diffuse && !primary_diffuse ? &diffuse_program : nullptr}) {
+            if (!program) continue;
+            const auto& uniforms = program->uniforms;
+            program->shader.Use();
+            glUniform1i(uniforms.scene_occlusion_enabled,1);
+            glUniform1f(uniforms.scene_occlusion_intensity,estimate.debug_display ? 1.f :
+                (std::max)(0.f,(std::min)(4.f,OpenGL_preferred_state.ao_intensity)));
+            glUniform1i(uniforms.scene_highlight_suppression,OpenGL_preferred_state.bloom_enabled && !estimate.debug_display);
+            glUniform1f(uniforms.scene_highlight_gamma,OpenGL_preferred_state.gamma != 0 ? 1.f/OpenGL_preferred_state.gamma : 1.f);
+            glUniform1f(uniforms.scene_highlight_threshold,OpenGL_preferred_state.bloom_threshold);
+        }
         scene_shader.Use();
-        glUniform1i(scene_uniforms.scene_occlusion_enabled,1);
-        glUniform1f(scene_uniforms.scene_occlusion_intensity,estimate.debug_display ? 1.f :
-            (std::max)(0.f,(std::min)(4.f,OpenGL_preferred_state.ao_intensity)));
-        glUniform1i(scene_uniforms.scene_highlight_suppression,OpenGL_preferred_state.bloom_enabled && !estimate.debug_display);
-        glUniform1f(scene_uniforms.scene_highlight_gamma,OpenGL_preferred_state.gamma != 0 ? 1.f/OpenGL_preferred_state.gamma : 1.f);
-        glUniform1f(scene_uniforms.scene_highlight_threshold,OpenGL_preferred_state.bloom_threshold);
         glDepthFunc(GL_LEQUAL);
         bind_outputs();
         glViewport(raster.x,raster.y,raster.width,raster.height);
@@ -2483,11 +2509,12 @@ void main() {
       const bool unlit_pass = pass.kind == d3scene::ViewPassKind::UnlitWorld && specialize_unlit;
       // Scheduling admits only unlit read-only materials to this pass. Its
       // program can omit lit varyings without changing material interpretation.
-      auto& raster_program = volume_layer && specialize_volumes ? volume_program : (unlit_pass ? unlit_program : view_program);
+      auto& raster_program = volume_layer && specialize_volumes ? volume_program :
+          (unlit_pass ? unlit_program : (!pass.specular ? diffuse_program : view_program));
       auto& scene_shader = raster_program.shader;
       auto& scene_uniforms = raster_program.uniforms;
       scene_shader.Use();
-      if ((volume_layer && specialize_volumes) || unlit_pass)
+      if ((volume_layer && specialize_volumes) || unlit_pass || !pass.specular)
           glUniform2i(scene_uniforms.depth_snapshot_origin,depth_for_sampling == depth.texture ? raster.x : 0,
               depth_for_sampling == depth.texture ? raster.y : 0);
       const int volume_width = (std::max)(1,raster.width/SupersamplingFactor());

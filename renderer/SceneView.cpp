@@ -984,7 +984,18 @@ void buildViewPasses(const Presentation& frame,const ViewVisibility& view,ViewPr
         passes.push_back({ViewPassKind::ExportOpaqueScene,index,index});
         passes.push_back({ViewPassKind::EvaluateWorldOcclusion,index,index});
     }
-    if (index > opaque) passes.push_back({ViewPassKind::OpaqueWorld,opaque,index});
+    const auto append_material_pass = [&](ViewPassKind kind,uint32_t begin,uint32_t end) {
+        // Keep established depth/compositing order and grouping. A mixed pass
+        // needs the general interface; a wholly diffuse pass can omit it.
+        const auto requires_specular = [&](uint32_t i) {
+            const auto& surface = visibleSurfaceBinding(frame,view.surfaces[i]);
+            return !surface.unlit && surface.specular_image && surface.specular_strength > 0;
+        };
+        bool specular = !products.specialize_specular;
+        for (auto i = begin; i < end && !specular; ++i) specular = requires_specular(i);
+        passes.push_back({kind,begin,end,specular});
+    };
+    if (index > opaque) append_material_pass(ViewPassKind::OpaqueWorld,opaque,index);
     bool depth_required = false;
     for (size_t i = index; i < view.surfaces.size(); ++i)
         depth_required = depth_required || (view.soft_particles && visibleSurfaceBinding(frame,view.surfaces[i]).soft_depth_range > 0);
@@ -1019,7 +1030,8 @@ void buildViewPasses(const Presentation& frame,const ViewVisibility& view,ViewPr
             (!soft || visibleSurfacePolicy(frame,view.surfaces[index]).blend == blend));
         // Lighting frequency is a pass contract, independent of whether this
         // view borrows a reduced-resolution particle layer. Never reorder runs.
-        passes.push_back({soft ? ViewPassKind::SoftVolumes : (unlit ? ViewPassKind::UnlitWorld : ViewPassKind::LateWorld),first,index});
+        if (!soft && !unlit) append_material_pass(ViewPassKind::LateWorld,first,index);
+        else passes.push_back({soft ? ViewPassKind::SoftVolumes : ViewPassKind::UnlitWorld,first,index});
     }
 }
 } // namespace d3scene

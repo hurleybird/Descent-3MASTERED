@@ -1,53 +1,46 @@
 # Renderer recovery checkpoint — 2026-09-22
 
-## November10 — ACTIVE: bloom early rejection and half-frequency smoke
+## November10 — diffuse-pass capability qualified; continue GPU work
 
-UPDATE: final bloom qualification complete. bloomq all8 pairs exact and faster
-by .0805-.090ms. bloomearly-fx all8 exact vs aocache-fx; aux003/006 exact;
-image-settings pass. Retain shared brightness-first implementation. Now running
-out/qualify-half-volume.ps1, session12874: SSAA4 pairs, all8 effects pairs and
-moving001 series. Optional half-volume is NOT accepted/default and still needs
-odd-extent padding correction before production consideration.
-Latest usage53% consumed, credits unchanged62044.8730600000.
+Latest accepted/pushed f5133dc brightness-first bloom: all8 paired and effects
+images exact, .0805-.090ms GPU saving. AO cache9080215 also accepted.
+Main/Candidate/Previous Candidate untouched; isolated renderer worktree only.
+Unrelated lib/gitinfo.h remains untracked. No shadows/cockpit task.
 
-Latest accepted/pushed9080215 (AO cache). Continue, user has not requested yield.
-Current uncommitted renderer changes: shared bloom shader now rejects zero
-threshold contribution before fetching protection/depth/alpha masks. Capture
-reference -scene-bloom-mask-first-reference restores mask-first ordering.
-Old temporary first/scalar probe flags removed. Scalar variant gave too little
-extra gain to justify complexity. Final shared shader qualification is running
-through out/qualify-bloom-early.ps1 (all8 paired1500-frame profiles plus effects,
-settings and auxiliary corpus). Build/root3 tests pass; no Candidate changes.
-bloomfirst1110 round1/2 control/probe GPU0013.3415/3.2545,3.3375/3.2695;
-0072.712/2.635,2.718/2.637. All4 pairs exact.
-bloomscalar1110 is comparing brightness-first to scalar (not old to scalar).
-All4 scalar comparison pairs exact; probe removed after completion.
+Qualified source: existing OpaqueWorld/LateWorld passes declare whether ANY
+material needs specular response (lit, image present, strength>0). No reorder
+or splitting. Mixed pass retains general shader; wholly diffuse pass uses a
+bounded cached program without reflection payload consumption. Default enabled;
+capture reference -scene-general-specular-reference.
+SceneView contract tests cover mixed/diffuse and retained capabilities.
+Shared AO/fog/depth setup handles both lit programs; no new image resources.
 
-gl_scene.cpp also has optional -scene-half-volume-probe: smoke layer half display
-resolution, full-resolution geometry-edge repair retained; NOT DEFAULT.
-halfvol1110 reference/probe full0013.322/3.1855,3.320/3.189;
-007 first2.716/2.583,second probe2.587. Small real image changes:001 meanRGB
-.082666/255,11.647%pixels differ,.06391%above2,max4;007 mean.019851,
-4.404%pixels differ,.000217%above2,max3. Both001 images inspected; no obvious
-artifact, but NOT exact equivalence. SSAA2/noeffects halfvolss1110 saves only
-~.035ms dense001 (1.545/1.510,1.548/1.513),~.11ms007. Don't count lower quality
-as equal-quality baseline victory. out/qualify-half-volume.ps1 prepared but NOT
-run: SSAA4 full1500pairs001/007,all8effects60pairs,moving001series150..154.
-Potential padding fix: odd logical height means actual scale slightly >nominal;
-use conservative ceil(max(raster/volume extent))*2 before shipping any half path.
+Previous ordered-run split was exact but regressed native001 .622->.638,
+.623->.639. REMOVED subdivision, retained only capability over existing passes.
+Current dpnative pairs001 .623/.619,.622/.621;007 .419/.411,.420/.410.
+dpssaa0011.547/1.5355,1.5505/1.5485;0071.082/1.047 twice.
+dpfull0013.2645/3.2255,3.252/3.259 (neutral/noisy);0072.6345/2.609,2.634/2.612.
+All12 timing image pairs exact. Final root3/3; diffusepass-fx all8 exact,
+settings, aux003/006, reload003 pass. Pure diffuse views select diffuse as
+primary (no unused general setup); dpprimary-fx all8 exact, aux003/006 pass.
+Five final native007 CPU pairs (dpprimary1/2,dpvariance1/2/3) median-of-medians
+3663906/3670473.5 cycles (+.18%, neutral amid variability); GPU .419-.420/
+.410-.412ms. No CPU speedup claim. Both assets deployed only to private runtime.
+No active game/build. Ready to checkpoint then continue remaining GPU gap.
 
-Rejected and removed: fog2D-array gathers (neutral, roundoff), low-resolution
-particle depth (slower), dropping unused particle outputs(neutral), fused
-foreground reduction/blend(tinygain but6605changedpixels), uniform influence
-index prefix(both general and draw-uniform slower/neutral), packed D32FS8 opaque
-snapshot direct image copy(slower, extra memory). Evidence tags foggather1110,
-voldpth1110,volcolor1110,fusedfg1110,infubo1110,infdraw1110,packdepth1110.
-Add missing final rejection measurements to GPU investigation doc before push.
-All source for these probes removed; unrelated lib/gitinfo.h retained.
-No GPU replays/new RDCs in this slice. Existing counter evidence reports bloom
-threshold heavy memory reads; that motivated brightness-first mask rejection.
-Private runtime currently probe-capable latest build; Candidates untouched.
-Last usage50% consumed, creditbalance unchanged62044.8730600000.
+Latest accepted baseline matrix bloomearly old/new:
+001 native.70/.62,SSAA2/noeffects1.35/1.55,full3.20/3.27;
+007 native.40/.42,SSAA.89/1.07,full2.83/2.64. No overall victory.
+Baseline reconstructed bfb59647; effect differences still limit apples-to-apples.
+
+Rejected probes removed: half-resolution smoke (SSAA4 dense regression,
+real image changes), per-cell particle depth min/max cache (exact but slower).
+Diagnostic no-specular shader disabled an effect, never accepted. Whole-view
+diffuse prototype replaced by pass capability. Tags and measurements retained
+in GPU investigation doc / C:\tmp\D3RendererVerification.
+No GPU replays or new RDCs this slice. No deletion. Latest usage54% consumed,
+ordinary usage allowed; credits unchanged62044.8730600000.
+User said continue: do not stop at an ordinary checkpoint without another request.
 
 ## November10 — AO sampling cache qualified, baseline still incomplete
 

@@ -6,6 +6,7 @@
 #include "../../renderer/SceneHistory.h"
 #include "../../renderer/SceneSamples.h"
 #include "../../renderer/SceneMotion.h"
+#include "../../renderer/SceneImages.h"
 #include <limits>
 #include <cmath>
 #include <stdexcept>
@@ -1520,7 +1521,8 @@ int runSceneViewTests() {
                 "Warm view schedule replaced its retained storage");
             for (size_t index = 0; index < passes.size(); ++index)
                 check(retained[index].kind == passes[index].kind && retained[index].begin == passes[index].begin &&
-                    retained[index].end == passes[index].end,"Retained view schedule changed ordering or ranges");
+                    retained[index].end == passes[index].end && retained[index].specular == passes[index].specular,
+                    "Retained view schedule changed ordering, ranges or material capability");
         }
         auto empty = scheduled_visibility; empty.surfaces.clear();
         d3scene::buildViewPasses(*scheduled_frame,empty,{},retained);
@@ -1543,6 +1545,34 @@ int runSceneViewTests() {
     check(exported.size() == 5 && exported[3].kind == d3scene::ViewPassKind::ExportOpaqueScene &&
         exported[4].kind == d3scene::ViewPassKind::UnlitWorld,"Opaque image product includes translucent consumers");
     const auto empty_frame = d3scene::Presentation::freeze(shaken);
+    {
+        auto diffuse = solid;
+        diffuse.surface.unlit = false;
+        diffuse.surface.depth = d3scene::DepthMode::ReadOnly;
+        diffuse.surface.blend = d3scene::BlendMode::Alpha;
+        auto reflective = diffuse;
+        reflective.surface.specular_image = 1;
+        reflective.surface.specular_strength = 1;
+        uint16_t pixel = 0xffff;
+        d3scene::ImageSource source;
+        source.mips = {{1,1,reinterpret_cast<const uint8_t*>(&pixel),sizeof(pixel)}};
+        auto data = scheduled;
+        data.images = {{1,assets.publishImage(9001,source)}};
+        data.meshes = {diffuse,reflective,diffuse};
+        const auto frame = d3scene::Presentation::freeze(data);
+        const auto visible = d3scene::queryView(*frame,view());
+        const auto general = d3scene::buildViewPasses(*frame,visible,{false,false,false,false});
+        const auto specialized = d3scene::buildViewPasses(*frame,visible,{false,false,false,true});
+        check(general.size() == 1 && specialized.size() == 1 &&
+            specialized[0].kind == d3scene::ViewPassKind::LateWorld &&
+            specialized[0].begin == 0 && specialized[0].end == 3 && specialized[0].specular,
+            "Material capability changed draw grouping or dropped a mixed pass's specular response");
+        data.meshes[1].surface.specular_strength = 0;
+        const auto disabled = d3scene::Presentation::freeze(data);
+        const auto disabled_runs = d3scene::buildViewPasses(*disabled,d3scene::queryView(*disabled,view()),{false,false,false,true});
+        check(disabled_runs.size() == 1 && !disabled_runs[0].specular,
+            "Disabled specular response retained an unnecessary shader interface");
+    }
     {
         auto volume = soft;
         volume.raster_domain = d3scene::RasterDomain::SoftVolume;

@@ -1,6 +1,49 @@
 # GPU bottleneck investigation — November 6
 
+## November10: reflection-interface capability investigation
+
+speccost1110 disabled specular entirely, ONLY a cost diagnostic:
+0011.566/1.500,1.558/1.498 with24717changedpixels;0071.092/1.046,
+1.078/1.067 with exact image. Never retained as an optimization.
+Metadata-safe whole-view specialization diffuseview1110 was exact:
+0011.553/1.543,1.551/1.546;0071.082/1.058,1.073/1.0555.
+Then tested ordered diffuse/specular subdivisions. All12 timing pairs and all8
+dr-fx images exact, but native001 .622/.638,.623/.639 regressed. Subdivision
+removed: reducing shader work did not repay extra pass/program switching.
+
+Current capability union over EXISTING passes preserves grouping and order.
+dpnative001 .623/.619,.622/.621;007 .419/.411,.420/.410;
+dpssaa0011.547/1.5355,1.5505/1.5485;0071.082/1.047 twice;
+dpfull0013.2645/3.2255,3.252/3.259 (neutral/noisy),0072.6345/2.609,2.634/2.612.
+All12 pairs exact. Benefits are small, mostly007; not a baseline victory.
+Final default-enabled qualification passed; reference flag
+-scene-general-specular-reference. No new render targets or per-frame programs.
+Root3/3; diffusepass-fx all8 exact vs bloomearly-fx, aux003/006 exact,
+image-settings and gameplay reload003 pass. Entirely diffuse views now select
+the diffuse program as primary, avoiding setup/compilation of an unused general
+program. Final dpprimary-fx all8 exact, auxiliary003/006 pass.
+
+CPU cycles were variable, not a proven regression or gain. For final primary
+selection, five paired007 runs (dpprimary rounds1/2 plus dpvariance1/2/3) have
+median-of-run-medians control3663906 vs diffuse3670473.5 cycles (+.18%). GPU
+consistently .419-.420 vs .410-.412ms. Do not cherry-pick the initial noisy
+dpcpu0073.810M/4.624M or favorable dpprimary001 runs as a CPU conclusion.
+
 ## November10: brightness-first bloom qualified
+
+cellbounds1110 tested RG32F min/max depth per particle reconstruction cell,
+computed once/view. Same edge threshold and samples, all4 image pairs exact.
+SSAA2/noeffects reference/probe0011.5665/1.5795,1.556/1.561;
+0071.101/1.103,1.083/1.098. Extra compute/storage outweighed fewer composite
+fetches. Entire probe removed; no new intermediate resource retained.
+
+Separate half-display-resolution smoke probe rejected as a default. At SSAA2
+it saved roughly .13ms in full effects, with small actual image changes.
+At SSAA4 full effects hv-s4 reference/half0019.6955/9.9165ms (regression),
+0077.827/7.701ms. Coarser reconstruction also widens full-resolution repair
+coverage; less shading in the layer is not necessarily less total work.
+All8 effects pairs and moving001 captures completed, but no equal-quality claim.
+Optional probe source removed; normal smoke resolution unchanged.
 
 SampleBloom now computes the unchanged source threshold first. Zero-contribution
 taps need no depth, alpha-occlusion or protection lookup. All13 taps, weights,

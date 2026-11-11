@@ -196,10 +196,11 @@ struct PlanarViewPlan { PreparedView consumer; std::vector<ViewImageRequest> ima
 enum class ViewPassKind { Background, OpaqueWorld, SnapshotOpaqueDepth, ExportOpaqueScene, LateWorld, EvaluateWorldOcclusion, CompositeSurfaces, DepthSurface, SoftVolumes, UnlitWorld };
 // A soft-volume layer is a main-world, pre-reduction consumer. The executor
 // supplies logical-resolution scratch; image and compositing views never own it.
-struct ViewProducts { bool opaque_scene = false, occlusion = false, soft_volume_layer = false; };
+struct ViewProducts { bool opaque_scene = false, occlusion = false, soft_volume_layer = false, specialize_specular = true; };
 struct ViewPass {
     ViewPassKind kind;
     uint32_t begin = 0, end = 0; // half-open range in this view's visible surfaces
+    bool specular = true; // false guarantees no authored specular response in this pass
 };
 const SurfaceBinding& visibleSurfaceBinding(const Presentation&,const VisibleSurface&);
 MaterialPolicy visibleSurfacePolicy(const Presentation&,const VisibleSurface&);

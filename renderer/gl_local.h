@@ -183,7 +183,7 @@ class GL4Renderer : public IRenderer
 	struct SceneProgram { ShaderProgram shader; SceneUniformLocations uniforms; };
 	// Light storage x fog mode x layer interface x lighting contract. Only
 	// requested combinations compile; every program shares the view/draw UBOs.
-	std::array<SceneProgram,24> scene_programs;
+	std::array<SceneProgram,48> scene_programs;
 	GLuint scene_light_buffer = 0, scene_light_texture = 0;
 	GLuint scene_draw_buffer = 0;
     GLuint scene_view_buffer = 0;
