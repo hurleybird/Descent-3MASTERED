@@ -142,6 +142,7 @@ class GL4Renderer : public IRenderer
 		std::vector<ElementRange> polygons;
 		GLuint material_indices = 0;
 		std::vector<ElementRange> material_groups;
+		d3scene::SceneGeometryAllocator::Allocation room_surfaces;
 	};
 	struct SceneGeometryPage { GLuint vao = 0, buffer = 0; };
 	d3scene::SceneGeometryAllocator scene_geometry_allocator;
@@ -183,14 +184,22 @@ class GL4Renderer : public IRenderer
 	struct SceneProgram { ShaderProgram shader; SceneUniformLocations uniforms; };
 	// Light storage x fog mode x layer interface x lighting contract. Only
 	// requested combinations compile; every program shares the view/draw UBOs.
-	std::array<SceneProgram,48> scene_programs;
+	std::array<SceneProgram,96> scene_programs; // upper half: experimental room-only programs
 	GLuint scene_light_buffer = 0, scene_light_texture = 0;
 	GLuint scene_draw_buffer = 0;
     GLuint scene_view_buffer = 0;
 	size_t scene_draw_record_bytes = 0;
-	struct SceneDrawPacket { const d3scene::SurfaceBinding* binding; GLuint vao; ElementRange range; d3scene::MaterialPolicy policy; GLuint index_buffer = 0; ElementRange indices; GLint base_vertex = 0; d3scene::DrawAttribution attribution = d3scene::DrawAttribution::Other; };
+	struct SceneDrawPacket { const d3scene::SurfaceBinding* binding; GLuint vao; ElementRange range; d3scene::MaterialPolicy policy; GLuint index_buffer = 0; ElementRange indices; GLint base_vertex = 0; d3scene::DrawAttribution attribution = d3scene::DrawAttribution::Other; ElementRange room_indices; };
 	std::vector<SceneDrawPacket> scene_draw_packets;
 	std::vector<float> scene_draw_records;
+	// Room-only probe: stable geometry-owned table ranges, recycled on revision.
+	d3scene::SceneGeometryAllocator scene_room_surface_allocator;
+	std::vector<uint32_t> scene_room_surface_page_bases;
+	std::vector<float> scene_room_surface_records;
+	GLuint scene_room_surface_buffer = 0, scene_room_surface_texture = 0;
+	GLuint scene_room_batch_indices = 0;
+	std::vector<uint32_t> scene_room_batch_index_data;
+	std::vector<uint32_t> scene_room_draw_order;
 	std::vector<int32_t> scene_influence_records;
 	GLuint scene_influence_buffer = 0, scene_influence_texture = 0;
 	ElementRange scene_view_fog;

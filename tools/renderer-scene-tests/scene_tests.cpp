@@ -3,6 +3,7 @@
 #include "../../renderer/SceneCache.h"
 #include "../../renderer/SceneGeometry.h"
 #include "../../renderer/SceneGeometryAllocator.h"
+#include "../../renderer/SceneRoomSurface.h"
 #include "../../Descent3/SceneExtraction.h"
 #include "room.h"
 #include "object.h"
@@ -42,6 +43,18 @@ d3scene::MeshGeometry triangle() {
 }
 void storageTests() {
     using namespace d3scene;
+    {
+        float draw[100];
+        for (int i=0;i<100;++i) draw[i]=float(i+1);
+        const auto face=splitRoomSurfaceRecord(draw);
+        constexpr int fields[14]={56,57,58,59,60,61,62,63,19,27,35,43,77,78};
+        for (int i=0;i<14;++i) check(face.words[i]==float(fields[i]+1) &&
+            draw[fields[i]]==((i<2 || i==4 || i==5) ? 1.f : 0.f),
+            "Room face contract lost an address or retained a per-face draw constant");
+        check(face.words[14]==0 && face.words[15]==0,"Room face padding not initialized");
+        check(draw[0]==1 && draw[95]==96 && draw[96]==0 && draw[99]==0,
+            "Room face split damaged shared constants or retained inline light indices");
+    }
     {
         SceneGeometryAllocator ranges(16);
         auto a = ranges.allocate(5), b = ranges.allocate(7), c = ranges.allocate(4);

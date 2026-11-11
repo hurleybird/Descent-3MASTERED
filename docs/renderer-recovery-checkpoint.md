@@ -1,5 +1,20 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November10 — room batching risk-gate checkpoint (not production)
+
+User approved stable-addressing/room-only prototype before broader migration.
+See `renderer-room-batching-probe-20261110.md` for exact flags, measurements and
+remaining work. Opt-in geometry-owned64-byte face table + indexed room grouping
+implemented; default remains original path.301 dense faces→115 grouped draws,
+but dedicated-room GPU probe loses allfour checked pairs; SSAA003 .611→.627,
+007 .829→.861. DO NOT claim a win or promote. CPU submission gets cheaper but
+temporary old-record adapter/sort makes preparation slower. Full delta updates,
+lightmap arrays and particle instances not implemented. Dense groupedSSAA has
+five changed pixels(max5); otherthree images exact. CTest3/3, visual inspection,
+retirement/full-effects probes recorded in report. No Candidate/main changes.
+Unrelated untracked lib/gitinfo.h preserved. Historical24/24 remains qualified
+for checkpoint456ccc5/source5b0e9bd, not for enabling this experimental flag.
+
 ## November10 COMPLETED — 24/24 measured GPU cases
 
 Final source checkpoint5b0e9bd pushed. `renderer-gpu-24of24-20261110.md` is the

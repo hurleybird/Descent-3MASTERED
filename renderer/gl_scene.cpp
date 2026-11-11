@@ -12,6 +12,7 @@
 #include "SceneMotion.h"
 #include "SceneRasterTrail.h"
 #include "SceneDeformation.h"
+#include "SceneRoomSurface.h"
 #include "gameloop.h"
 #include "args.h"
 #include <cstring>
@@ -136,6 +137,48 @@ layout(std140) uniform SceneDrawBlock { vec4 draw_params[23]; uvec4 draw_identit
 #define trail_reference_length (draw_params[21].z)
 #define raster_trail (draw_params[22])
 #define deformation_identity (draw_identity.w)
+#if SCENE_ROOM_TABLE && SCENE_VERTEX_STAGE
+uniform samplerBuffer room_surfaces;
+layout(location=7) in uint polygon;
+int roomSurfaceIndex() { return (int(draw_identity.z)&0x7fffffff)+int(polygon); }
+bool roomTable() {
+#if SCENE_ROOM_ONLY
+    return true;
+#else
+    return int(draw_identity.z)<0;
+#endif
+}
+vec4 roomFace(int texel) { return texelFetch(room_surfaces,roomSurfaceIndex()*4+texel); }
+#undef texture_scale
+#undef texture_offset
+#undef light_scale
+#undef influence_offset
+#undef influence_count
+#undef instance_uv_offset
+#undef texture_uv_offset
+#undef reflection_normal_offset
+#undef reflection_field_offset
+#undef reflection_offset
+#undef reflection_count
+#define texture_scale (roomTable() ? roomFace(0).xy : draw_params[14].xy)
+#define texture_offset (roomTable() ? roomFace(0).zw : draw_params[14].zw)
+#define light_scale (roomTable() ? roomFace(1).xy : draw_params[15].xy)
+#define influence_offset (int(roomTable() ? roomFace(1).z : draw_params[15].z))
+#define influence_count (int(roomTable() ? roomFace(1).w : draw_params[15].w))
+#define instance_uv_offset (int(roomTable() ? roomFace(2).x : draw_params[4].w))
+#define texture_uv_offset (int(roomTable() ? roomFace(2).y : draw_params[6].w))
+#define reflection_normal_offset (int(roomTable() ? roomFace(2).z : draw_params[8].w))
+#define reflection_field_offset (int(roomTable() ? roomFace(2).w : draw_params[10].w))
+#define reflection_offset (int(roomTable() ? roomFace(3).x : draw_params[19].y))
+#define reflection_count (int(roomTable() ? roomFace(3).y : draw_params[19].z))
+#endif
+#if SCENE_ROOM_TABLE && !SCENE_VERTEX_STAGE
+flat in ivec4 primitive_data;
+#undef reflection_offset
+#undef reflection_count
+#define reflection_offset (primitive_data.z)
+#define reflection_count (primitive_data.w)
+#endif
 uniform samplerBuffer scene_lights;
 #if SCENE_UNIFORM_LIGHT_STORAGE
 layout(std140) uniform SceneLightBlock { vec4 uniform_light_records[SCENE_UNIFORM_LIGHT_RECORDS]; };
@@ -187,7 +230,9 @@ layout(location=3) in float alpha;
 layout(location=4) in vec3 normal;
 layout(location=5) in vec3 vertex_color;
 layout(location=6) in vec2 raster_offset;
+#if !SCENE_ROOM_TABLE
 layout(location=7) in uint polygon;
+#endif
 uniform samplerBuffer instance_uvs;
 
 
@@ -211,7 +256,8 @@ out vec4 current_clip, previous_clip;
 out vec4 texture_coordinates;
 // XYZ world position + ambient RGB + dynamic RGB + authored RGB (12 scalars).
 out vec4 surface_payload[3];
-flat out ivec2 primitive_influences;
+flat out ivec4 primitive_data;
+#define primitive_influences (primitive_data.xy)
 uint deformationHash(uint h) {
     h ^= h>>16; h *= 0x7feb352du; h ^= h>>15; h *= 0x846ca68bu; return h^(h>>16);
 }
@@ -239,10 +285,14 @@ vec3 deformWorldPoint(vec3 point,vec3 axis,uint seed) {
     return point+offset;
 }
 void main() {
-    primitive_influences = ivec2(influence_offset,influence_count);
-    if (polygon_light_table != 0) {
+    primitive_data=ivec4(0);
+#if SCENE_ROOM_TABLE
+    primitive_data.zw=ivec2(reflection_offset,reflection_count);
+#endif
+    primitive_data.xy = ivec2(influence_offset,influence_count);
+    if (polygon_light_table > 0) {
         int entry = polygon_light_table-1+int(polygon)*2;
-        primitive_influences = ivec2(texelFetch(scene_influences,entry).r,texelFetch(scene_influences,entry+1).r);
+        primitive_data.xy = ivec2(texelFetch(scene_influences,entry).r,texelFetch(scene_influences,entry+1).r);
     }
     int position_record = (gl_VertexID+instance_position_offset)*2;
     vec3 prepared = use_instance_positions != 0 ? texelFetch(instance_positions,position_record).rgb : position;
@@ -283,6 +333,12 @@ void main() {
     texture_coordinates = vec4(uv,light_uv); normal_alpha.w = alpha*trail_alpha;
     if (use_instance_uvs != 0) texture_coordinates.zw = texelFetch(instance_uvs,gl_VertexID+instance_uv_offset).rg;
     if (use_texture_uvs != 0) texture_coordinates.xy = texelFetch(instance_uvs,gl_VertexID+texture_uv_offset).rg;
+#if SCENE_ROOM_TABLE
+    if (roomTable()) {
+        texture_coordinates.xy=texture_coordinates.xy*texture_scale+texture_offset;
+        texture_coordinates.zw*=light_scale;
+    }
+#endif
     vec3 world_normal = model_right*normal.x + model_up*normal.y + model_forward*normal.z;
     normal_alpha.xyz = use_reflection_normals != 0 ? texelFetch(scene_reflections,gl_VertexID+reflection_normal_offset).rgb : world_normal;
     vec3 field_centers[4], field_colors[4];
@@ -404,7 +460,10 @@ in vec4 surface_payload[3];
 #define ambient vec3(surface_payload[0].w,surface_payload[1].xy)
 #define vertex_dynamic vec3(surface_payload[1].zw,surface_payload[2].x)
 #define authored_color (surface_payload[2].yzw)
-flat in ivec2 primitive_influences;
+#if !SCENE_ROOM_TABLE
+flat in ivec4 primitive_data;
+#endif
+#define primitive_influences (primitive_data.xy)
 in vec4 texture_coordinates;
 #define texcoord (texture_coordinates.xy)
 #define lightcoord (texture_coordinates.zw)
@@ -765,6 +824,8 @@ void GL4Renderer::RetireScene() {
         !scene_view_images.empty() || scene_view_history.size() || !scene_depth_snapshots.empty() ||
         !scene_rooms.empty() || !scene_models.empty() || !scene_terrain.empty() || scene_meshes.size() ||
         !scene_frame_owner.expired() || scene_draw_buffer || scene_view_buffer || scene_fog_assets.size() ||
+        scene_room_surface_buffer || scene_room_surface_texture || scene_room_batch_indices ||
+        !scene_room_surface_page_bases.empty() || scene_room_surface_allocator.pageCount() ||
         scene_empty_fog.texture || scene_empty_fog.buffer)
         Error("Scene retirement left live world resources");
     AutomatedCaptureLog("scene retirement gpu lifetime=%llu pages=%u images=%u views=%u remaining=0",
@@ -825,6 +886,13 @@ void GL4Renderer::DestroySceneResources() {
     scene_uv_buffer = scene_uv_texture = 0;
     if (scene_draw_buffer) glDeleteBuffers(1,&scene_draw_buffer);
     scene_draw_buffer = 0;
+    if (scene_room_surface_buffer) glDeleteBuffers(1,&scene_room_surface_buffer);
+    if (scene_room_surface_texture) glDeleteTextures(1,&scene_room_surface_texture);
+    if (scene_room_batch_indices) glDeleteBuffers(1,&scene_room_batch_indices);
+    scene_room_surface_buffer=scene_room_surface_texture=scene_room_batch_indices=0;
+    scene_room_surface_allocator.clear(); scene_room_surface_page_bases.clear();
+    scene_room_surface_records.clear(); scene_room_batch_index_data.clear();
+    scene_room_draw_order.clear();
     if (scene_view_buffer) glDeleteBuffers(1,&scene_view_buffer);
     scene_view_buffer = 0;
     scene_draw_packets.clear(); scene_draw_records.clear(); scene_room_bindings.clear();
@@ -1382,6 +1450,7 @@ void GL4Renderer::PrepareSceneViewTables(const d3scene::PreparedView& prepared) 
     BindSceneTables();
 }
 void GL4Renderer::BindSceneTables() {
+    glActiveTexture(GL_TEXTURE14); glBindTexture(GL_TEXTURE_BUFFER,scene_room_surface_texture);
     glBindBufferBase(GL_UNIFORM_BUFFER,9,scene_light_buffer);
     if (scene_view_buffer) glBindBufferBase(GL_UNIFORM_BUFFER,8,scene_view_buffer);
     glActiveTexture(GL_TEXTURE2); glBindTexture(GL_TEXTURE_BUFFER,scene_light_texture);
@@ -1397,6 +1466,7 @@ void GL4Renderer::BindSceneTables() {
 void GL4Renderer::ReleaseSceneMesh(SceneMeshGpu& gpu) {
     if (gpu.material_indices) glDeleteBuffers(1,&gpu.material_indices);
     scene_geometry_allocator.release(gpu.vertices);
+    scene_room_surface_allocator.release(gpu.room_surfaces);
     gpu = {};
 }
 void GL4Renderer::UploadSceneMesh(SceneMeshGpu& gpu, d3scene::AssetId id, const d3scene::MeshGeometry& geometry,const d3scene::ModelPart* model) {
@@ -1689,7 +1759,11 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     const bool specialize_diffuse = std::any_of(passes.begin(),passes.end(),[](const d3scene::ViewPass& pass) {
         return !pass.specular;
     });
-    const auto initialize_program = [&](SceneProgram& program,bool unlit_pass,bool layer_interface,bool diffuse_pass = false) {
+    const bool room_batch_probe = FindArg("-scene-room-batch-probe") != 0;
+    const bool room_shader_only = FindArg("-scene-room-shader-only") != 0;
+    const bool room_single_draws = FindArg("-scene-room-single-draws") != 0;
+    const bool isolated_rooms = room_batch_probe && FindArg("-scene-room-isolated-program");
+    const auto initialize_program = [&](SceneProgram& program,bool unlit_pass,bool layer_interface,bool diffuse_pass = false,bool room_only = false) {
     auto& scene_shader = program.shader;
     auto& scene_uniforms = program.uniforms;
     if (!scene_shader.Handle()) {
@@ -1720,6 +1794,14 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         fragment.insert(fragment.find('\n')+1,std::string("#define SCENE_PARTICLE_LAYER ")+(layer_interface ? "1\n" : "0\n"));
         fragment.insert(fragment.find('\n')+1,"#define SCENE_FOG_MODE "+std::to_string(fog_mode)+"\n");
         auto vertex = SceneVertexShader;
+        if (room_batch_probe && (!isolated_rooms || room_only)) {
+            vertex.insert(vertex.find('\n')+1,"#define SCENE_ROOM_TABLE 1\n#define SCENE_VERTEX_STAGE 1\n");
+            fragment.insert(fragment.find('\n')+1,"#define SCENE_ROOM_TABLE 1\n");
+            if (room_only) {
+                vertex.insert(vertex.find('\n')+1,"#define SCENE_ROOM_ONLY 1\n");
+                fragment.insert(fragment.find('\n')+1,"#define SCENE_ROOM_ONLY 1\n");
+            }
+        }
         if(inline_lights) {
             vertex.insert(vertex.find('\n')+1,"#define SCENE_INLINE_LIGHTS 1\n");
             fragment.insert(fragment.find('\n')+1,"#define SCENE_INLINE_LIGHTS 1\n");
@@ -1778,6 +1860,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         glUniform1i(scene_uniforms.scene_fog,6);
         glUniform1i(scene_shader.FindUniform("scene_fog_field"),12);
         glUniform1i(scene_shader.FindUniform("scene_fog_nodes"),13);
+        glUniform1i(scene_shader.FindUniform("room_surfaces"),14);
         glUniform1i(scene_uniforms.scene_occlusion,11);
         glUniform1i(scene_uniforms.opaque_depth,7);
     }
@@ -1791,10 +1874,16 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     auto& volume_program = scene_programs[program_base+3];
     auto& unlit_program = scene_programs[program_base+1];
     auto& diffuse_program = scene_programs[program_base+24+(general_layer ? 2 : 0)];
+    auto& room_program=scene_programs[program_base+48+(primary_diffuse ? 24 : 0)];
+    auto& room_diffuse_program=scene_programs[program_base+48+24];
     initialize_program(view_program,false,general_layer,primary_diffuse);
     if (specialize_volumes) initialize_program(volume_program,true,true);
     if (specialize_unlit) initialize_program(unlit_program,true,false);
     if (specialize_diffuse && !primary_diffuse) initialize_program(diffuse_program,false,general_layer,true);
+    if (isolated_rooms) {
+        initialize_program(room_program,false,false,primary_diffuse,true);
+        initialize_program(room_diffuse_program,false,false,true,true);
+    }
     auto& scene_shader = view_program.shader;
     auto& scene_uniforms = view_program.uniforms;
 
@@ -1876,6 +1965,12 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     if (scene_uniforms.fragment_mapping >= 0) glUniform4f(scene_uniforms.fragment_mapping,1,1,0,0);
     if (scene_uniforms.volume_edge_only >= 0) glUniform1i(scene_uniforms.volume_edge_only,0);
     glUniform1i(scene_uniforms.scene_occlusion_enabled,0);
+    if (isolated_rooms) for (auto* program : {&room_program,&room_diffuse_program}) {
+        program->shader.Use();
+        glUniform1i(program->uniforms.scene_occlusion_enabled,0);
+        glUniform4f(program->uniforms.fragment_mapping,1,1,0,0);
+    }
+    scene_shader.Use();
     if (specialize_diffuse && !primary_diffuse) {
         diffuse_program.shader.Use();
         glUniform1i(diffuse_program.uniforms.scene_occlusion_enabled,0);
@@ -2185,7 +2280,8 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     glUniform4f(scene_uniforms.fog_field_color,field_color.x,field_color.y,field_color.z,scalar_field ? 1.f : 0.f);
     glUniform1i(scene_uniforms.fog_debug,FindArg("-scene-fog-debug") != 0);
     for (auto* program : {specialize_volumes ? &volume_program : nullptr,specialize_unlit ? &unlit_program : nullptr,
-        specialize_diffuse && !primary_diffuse ? &diffuse_program : nullptr}) {
+        specialize_diffuse && !primary_diffuse ? &diffuse_program : nullptr,
+        isolated_rooms ? &room_program : nullptr,isolated_rooms ? &room_diffuse_program : nullptr}) {
         if (!program) continue;
         program->shader.Use();
         glUniform1f(program->uniforms.fog_field_range,field_range);
@@ -2211,6 +2307,8 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     }
     const size_t record_bytes = scene_draw_record_bytes;
     auto& records = scene_draw_records; records.assign(visibility.surfaces.size()*(record_bytes/sizeof(float)),0);
+    scene_room_batch_index_data.clear();
+    uint32_t room_table_faces=0, room_table_draws=0;
     {
     PERF_MARKER_SCOPE("Scene.DrawRecords");
     for (size_t item_index = 0; item_index < visibility.surfaces.size(); ++item_index) {
@@ -2391,10 +2489,99 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         packets[item_index] = {binding,gpu.vao,range,policy,
             item.model_material_group ? gpu.material_indices : 0,material_indices,GLint(gpu.vertices.offset),
             detailed_statistics ? d3scene::attributeDraw(presentation.data(),view,item) : d3scene::DrawAttribution::Other};
+        if (room_batch_probe && !room_shader_only && !item.model && !item.mesh && !item.terrain &&
+            !surface.view_image_slot && !policy.planar_slot && !policy.blended()) {
+            // Allocation follows the GPU asset revision, not this frame's dense
+            // publication indices. Local polygon IDs already exist in vertices.
+            if (!mesh->room_surfaces.count) {
+                mesh->room_surfaces=scene_room_surface_allocator.allocate(uint32_t(mesh->polygons.size()));
+                while (scene_room_surface_page_bases.size()<scene_room_surface_allocator.pageCount()) {
+                    const auto page=uint32_t(scene_room_surface_page_bases.size());
+                    const uint32_t base=page ? scene_room_surface_page_bases.back()+scene_room_surface_allocator.capacity(page-1) : 0;
+                    scene_room_surface_page_bases.push_back(base);
+                }
+            }
+            const uint32_t base=scene_room_surface_page_bases[mesh->room_surfaces.page]+mesh->room_surfaces.offset;
+            const uint32_t face=base+item.polygon_index;
+            if (face>=uint32_t(INT32_MAX/4)) Error("Room surface table exceeds shader address range");
+            if (scene_room_surface_records.size()<(size_t(face)+1)*16) scene_room_surface_records.resize((size_t(face)+1)*16);
+            const auto face_record=d3scene::splitRoomSurfaceRecord(record);
+            std::copy(face_record.words.begin(),face_record.words.end(),scene_room_surface_records.begin()+size_t(face)*16);
+            const uint32_t table=base|0x80000000u;
+            std::memcpy(record+94,&table,sizeof(table));
+            packets[item_index].room_indices=ElementRange(0,range.count);
+            ++room_table_faces;
+        }
     }
     if (!scene_draw_buffer) glGenBuffers(1,&scene_draw_buffer);
     glBindBuffer(GL_UNIFORM_BUFFER,scene_draw_buffer);
     glBufferData(GL_UNIFORM_BUFFER,records.size()*sizeof(float),records.empty() ? nullptr : records.data(),GL_STREAM_DRAW);
+    if (room_table_faces) {
+        auto& order=scene_room_draw_order;
+        order.resize(packets.size());
+        for (uint32_t i=0;i<order.size();++i) order[i]=i;
+        if (FindArg("-scene-room-bucket-probe")) {
+            // Probe only: bounded depth buckets, and non-room work remains an
+            // ordering barrier. Never reorder transparency or composition.
+            const auto key=[&](uint32_t i) {
+                const auto& p=packets[i]; const auto& s=*p.binding;
+                return std::make_tuple(std::floor(visibility.surfaces[i].depth/128.f),p.vao,
+                    s.color_image,s.baked_image,s.specular_image,s.texture_wrap,s.lightmap_wrap,s.texture_filter,
+                    p.policy.layer,p.policy.blend,p.policy.depth);
+            };
+            for (const auto& pass : passes) {
+                if (pass.kind!=d3scene::ViewPassKind::OpaqueWorld && pass.kind!=d3scene::ViewPassKind::DepthSurface) continue;
+                for (uint32_t begin=pass.begin;begin<pass.end;) {
+                    if (!packets[begin].room_indices.count) { ++begin; continue; }
+                    uint32_t end=begin+1;
+                    while (end<pass.end && packets[end].room_indices.count) ++end;
+                    std::sort(order.begin()+begin,order.begin()+end,[&](uint32_t a,uint32_t b) {
+                        const auto x=key(a),y=key(b);
+                        if (x!=y) return x<y;
+                        const int constants=std::memcmp(records.data()+a*(record_bytes/sizeof(float)),
+                            records.data()+b*(record_bytes/sizeof(float)),SceneDrawRecordWords*sizeof(float));
+                        return constants ? constants<0 : a<b;
+                    });
+                    begin=end;
+                }
+            }
+        }
+        for (uint32_t i : order) {
+            auto& packet=packets[i];
+            if (!packet.room_indices.count) continue;
+            auto& indices=scene_room_batch_index_data;
+            packet.room_indices.offset=uint32_t(indices.size());
+            for (uint32_t vertex=packet.range.offset;vertex<packet.range.offset+packet.range.count;++vertex) indices.push_back(vertex);
+        }
+        if (AutomatedCapturePending()) {
+            std::map<std::string,uint32_t> full_keys, array_keys;
+            for (size_t i=0;i<packets.size();++i) {
+                const auto& packet=packets[i];
+                if (!packet.room_indices.count) continue;
+                const auto& s=*packet.binding;
+                const uint32_t state[]={packet.vao,s.color_image,s.specular_image,uint32_t(s.texture_wrap),
+                    uint32_t(s.lightmap_wrap),uint32_t(s.texture_filter),uint32_t(packet.policy.layer),
+                    uint32_t(packet.policy.blend),uint32_t(packet.policy.depth)};
+                std::string key(reinterpret_cast<const char*>(state),sizeof(state));
+                key.append(reinterpret_cast<const char*>(records.data()+i*(record_bytes/sizeof(float))),SceneDrawRecordWords*sizeof(float));
+                ++array_keys[key];
+                key.append(reinterpret_cast<const char*>(&s.baked_image),sizeof(s.baked_image));
+                ++full_keys[key];
+            }
+            AutomatedCaptureLog("scene room grouping upper-bound faces=%u exact_keys=%u ignoring_lightmap_keys=%u",
+                room_table_faces,unsigned(full_keys.size()),unsigned(array_keys.size()));
+        }
+        if (!scene_room_surface_buffer) glGenBuffers(1,&scene_room_surface_buffer);
+        if (!scene_room_surface_texture) glGenTextures(1,&scene_room_surface_texture);
+        glBindBuffer(GL_TEXTURE_BUFFER,scene_room_surface_buffer);
+        glBufferData(GL_TEXTURE_BUFFER,scene_room_surface_records.size()*sizeof(float),scene_room_surface_records.data(),GL_STREAM_DRAW);
+        glActiveTexture(GL_TEXTURE14); glBindTexture(GL_TEXTURE_BUFFER,scene_room_surface_texture);
+        glTexBuffer(GL_TEXTURE_BUFFER,GL_RGBA32F,scene_room_surface_buffer);
+        if (!scene_room_batch_indices) glGenBuffers(1,&scene_room_batch_indices);
+        glBindBuffer(GL_COPY_WRITE_BUFFER,scene_room_batch_indices);
+        glBufferData(GL_COPY_WRITE_BUFFER,scene_room_batch_index_data.size()*sizeof(uint32_t),scene_room_batch_index_data.data(),GL_STREAM_DRAW);
+        glBindBuffer(GL_COPY_WRITE_BUFFER,0);
+    }
     }
 
     PERF_MARKER_SCOPE("Scene.Submission");
@@ -2448,7 +2635,8 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         glActiveTexture(GL_TEXTURE6); glBindTexture(GL_TEXTURE_BUFFER,fog_gpu.texture);
         glActiveTexture(GL_TEXTURE7); glBindTexture(GL_TEXTURE_2D,depth_for_sampling);
         GL_BindFramebufferTexture(estimate.ao_texture,11,GL_LINEAR);
-        for (auto* program : {&view_program,specialize_diffuse && !primary_diffuse ? &diffuse_program : nullptr}) {
+        for (auto* program : {&view_program,specialize_diffuse && !primary_diffuse ? &diffuse_program : nullptr,
+            isolated_rooms ? &room_program : nullptr,isolated_rooms ? &room_diffuse_program : nullptr}) {
             if (!program) continue;
             const auto& uniforms = program->uniforms;
             program->shader.Use();
@@ -2686,6 +2874,14 @@ void main() {
           if (output.Samples() >= 2) glEnable(GL_MULTISAMPLE); else glDisable(GL_MULTISAMPLE);
       }
       glUniform1i(scene_uniforms.surface_prepass,depth_prepass);
+      auto& room_raster_program=!pass.specular ? room_diffuse_program : room_program;
+      if (isolated_rooms) {
+          room_raster_program.shader.Use();
+          glUniform1i(room_raster_program.uniforms.surface_prepass,depth_prepass);
+          glUniform2i(room_raster_program.uniforms.depth_snapshot_origin,depth_for_sampling == depth.texture ? raster.x : 0,
+              depth_for_sampling == depth.texture ? raster.y : 0);
+          scene_shader.Use();
+      }
       if (volume_layer) {
           // This main-world phase precedes SSAA reduction. Its RGBA16F
           // destination has no live color yet: borrow it for the ordered
@@ -2745,6 +2941,7 @@ void main() {
       };
       const auto compatible = [&](uint32_t first,uint32_t next) {
           const auto& a = packets[first]; const auto& b = packets[next];
+          if (room_single_draws && a.room_indices.count) return false;
           const auto& x = *a.binding; const auto& y = *b.binding;
           const auto& ia = visibility.surfaces[first]; const auto& ib = visibility.surfaces[next];
           const auto images = [](const d3scene::SurfaceBinding& s) {
@@ -2761,7 +2958,9 @@ void main() {
       };
       static thread_local std::vector<GLint> draw_starts;
       static thread_local std::vector<GLsizei> draw_counts;
-      for (uint32_t item_index = pass.begin; item_index < pass.end; ++item_index) {
+      const auto source_index=[&](uint32_t i) { return room_table_faces ? scene_room_draw_order[i] : i; };
+      for (uint32_t order_index = pass.begin; order_index < pass.end; ++order_index) {
+        const uint32_t item_index=source_index(order_index);
         const auto& item = visibility.surfaces[item_index];
         const auto& packet = packets[item_index];
         const auto* binding = packet.binding;
@@ -2852,7 +3051,8 @@ void main() {
             glUniform1f(scene_image_gamma,OpenGL_preferred_state.gamma != 0 ? 1.f/OpenGL_preferred_state.gamma : 1.f);
             glUniform2i(scene_image_origin,raster.x,raster.y);
             glUniform1i(scene_image_encoded_overlay,target.role == SceneOutputRole::ModalUI);
-        } else scene_shader.Use();
+        } else if (isolated_rooms && packet.room_indices.count) room_raster_program.shader.Use();
+        else scene_shader.Use();
         glBindBufferRange(GL_UNIFORM_BUFFER,7,scene_draw_buffer,item_index*record_bytes,SceneDrawRecordWords*sizeof(float));
         const bool cull = item.terrain || item.model_material_group || (item.mesh && !surface.two_sided);
         // Authored polymodel fronts use clockwise winding, unlike the
@@ -2921,27 +3121,35 @@ void main() {
             glActiveTexture(active);
         }
         auto attribution = packet.attribution;
-        uint32_t end = item_index+1;
-        while (end < pass.end && compatible(item_index,end)) {
-            if (detailed_statistics) attribution = d3scene::mergeDrawAttribution(attribution,packets[end].attribution);
+        uint32_t end = order_index+1;
+        while (end < pass.end && compatible(item_index,source_index(end))) {
+            if (detailed_statistics) attribution = d3scene::mergeDrawAttribution(attribution,packets[source_index(end)].attribution);
             ++end;
         }
-        if (packet.index_buffer) {
+        if (packet.room_indices.count) {
+            const auto& last=packets[source_index(end-1)].room_indices;
+            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,scene_room_batch_indices);
+            glDrawElements(GL_TRIANGLES,last.offset+last.count-packet.room_indices.offset,GL_UNSIGNED_INT,
+                reinterpret_cast<void*>(size_t(packet.room_indices.offset)*sizeof(uint32_t)));
+            ++room_table_draws;
+            order_index=end-1;
+        }
+        else if (packet.index_buffer) {
             glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,packet.index_buffer);
             glDrawElementsBaseVertex(GL_TRIANGLES,packet.indices.count,GL_UNSIGNED_INT,
                 reinterpret_cast<void*>(size_t(packet.indices.offset)*sizeof(uint32_t)),packet.base_vertex);
         }
-        else if (end == item_index+1) glDrawArrays(GL_TRIANGLES,range.offset,range.count);
+        else if (end == order_index+1) glDrawArrays(GL_TRIANGLES,range.offset,range.count);
         else {
             // Same shader, UBO, textures, raster state and geometry allocation.
             // Keep primitive order exactly; only eliminate redundant submissions.
             draw_starts.clear(); draw_counts.clear();
-            for (uint32_t i = item_index; i < end; ++i) {
-                draw_starts.push_back(GLint(packets[i].range.offset));
-                draw_counts.push_back(GLsizei(packets[i].range.count));
+            for (uint32_t i = order_index; i < end; ++i) {
+                draw_starts.push_back(GLint(packets[source_index(i)].range.offset));
+                draw_counts.push_back(GLsizei(packets[source_index(i)].range.count));
             }
             glMultiDrawArrays(GL_TRIANGLES,draw_starts.data(),draw_counts.data(),GLsizei(draw_starts.size()));
-            item_index = end-1;
+            order_index = end-1;
         }
         // One count per native submission, even when MultiDraw joins several
         // sources. Attribution never splits a batch or mutates compatibility state.
@@ -3041,6 +3249,9 @@ void main() {
           glScissor(inherited_scissor_box[0],inherited_scissor_box[1],inherited_scissor_box[2],inherited_scissor_box[3]);
       }
     }
+    if (room_table_faces && AutomatedCapturePending())
+        AutomatedCaptureLog("scene room table faces=%u draws=%u table_bytes=%u index_bytes=%u",room_table_faces,room_table_draws,
+            unsigned(scene_room_surface_records.size()*sizeof(float)),unsigned(scene_room_batch_index_data.size()*sizeof(uint32_t)));
     if (view.motion_composition == d3scene::View::MotionComposition::Stationary &&
         target.role == SceneOutputRole::SceneLayer && SceneSurfaceTargetEnabled()) {
         // A declared independent scene layer owns this rectangle's temporal
