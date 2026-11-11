@@ -432,7 +432,7 @@ vec3 applySceneFog(vec3 radiance,out float transmission) {
     {
         float z = max(0.0,dot(delta,camera_forward));
         vec2 uv = vec2(dot(delta,camera_right),dot(delta,camera_up))/max(z,1.e-6)*projection.xy+projection.zw;
-        float slices = float(textureSize(scene_fog_field,0).z-1);
+        float slices = SCENE_FOG_SLICES;
         float sample_index = min(slices-1.0,floor(sqrt(clamp(z/fog_field_range,0.0,1.0))*slices));
         float low_z = sample_index*sample_index/(slices*slices)*fog_field_range;
         float high_z = (sample_index+1.0)*(sample_index+1.0)/(slices*slices)*fog_field_range;
@@ -447,7 +447,7 @@ vec3 applySceneFog(vec3 radiance,out float transmission) {
             for (int y=0;y<2;++y) for (int x=0;x<2;++x) {
                 float column=texture(scene_fog_field,vec3((base+vec2(x,y)+0.5)/dimensions,layer)).r;
                 depth+=column*(x==0 ? 1.0-blend.x : blend.x)*(y==0 ? 1.0-blend.y : blend.y);
-                float visible=column/max(1.0,column);
+                float visible=min(column,1.0);
                 low=min(low,visible); high=max(high,visible);
             }
             // A common color is factored out by the field producer. Preserve
@@ -1693,6 +1693,16 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
                 reinterpret_cast<const char*>(glGetString(GL_RENDERER)),varying,vertex,fragment);
         }
         auto fragment = SceneFragmentShader;
+        fragment.insert(fragment.find('\n')+1,"#define SCENE_FOG_SLICES "+std::to_string(SceneFogFieldSlices)+".0\n");
+        if(AutomatedCaptureFrameIndex()>=0 && FindArg("-scene-fog-arithmetic-reference")) {
+            const auto replace=[&](const std::string& from,const std::string& to) {
+                const auto at=fragment.find(from);
+                if(at==std::string::npos) Error("Fog arithmetic probe source mismatch");
+                fragment.replace(at,from.size(),to);
+            };
+            replace("float slices = SCENE_FOG_SLICES;","float slices = float(textureSize(scene_fog_field,0).z-1);");
+            replace("float visible=min(column,1.0);","float visible=column/max(1.0,column);");
+        }
         fragment.insert(fragment.find('\n')+1,std::string("#define SCENE_DIFFUSE_PASS ")+(diffuse_pass ? "1\n" : "0\n"));
         fragment.insert(fragment.find('\n')+1,std::string("#define SCENE_UNLIT_PASS ")+(unlit_pass ? "1\n" : "0\n"));
         fragment.insert(fragment.find('\n')+1,std::string("#define SCENE_EARLY_SOFT_ALPHA ")+

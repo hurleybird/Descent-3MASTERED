@@ -1,5 +1,51 @@
 # GPU bottleneck investigation — November 6
 
+## November10 continuation: remaining four GPU losses
+
+fogarith1110: expose shared64-slice contract as compile-time fragment constant;
+scalar x/max(1,x) becomes min(x,1), identical for finite scalar depths including
+negative values. Paired SSAA0011.549/1.508,1.551/1.506;
+0071.056/1.021,1.046/1.0285ms. All4 paired images pixel-identical. Now default
+in source, qualification ongoing. Capture reference scene-fog-arithmetic-reference.
+No extra programs, textures, passes, resolution or precision changes.
+Qualified root3/3, fogarith-fx all8 exact vs dpprimary-fx; fogarith-aux003/006
+exact vs dpprimary-aux, settings scenario passed. Headlight-on007 inspected.
+
+Depth24 stencil-storage probe rejected: depth24ssaa1110 reference/probe
+0011.506/1.506,1.500/1.5015;0071.010/1.012,1.017/1.021.
+Full0013.178/3.187,3.196/3.1865;0072.563/2.567,2.567/2.572.
+No useful benefit, so no depth-precision change retained. Probe source removed.
+
+foglod1110 explicit level-zero field sampling was neutral0011.565/1.5615,
+1.5585/1.561;0071.067/1.062,1.0605/1.049. Removed isolated probe.
+fogprefix1110 conservative32x32 homogeneous-prefix table lost:
+0011.554/1.647,1.551/1.6475;0071.056/1.141 in both rounds. Removed table,
+compute program, sampler and early branch. Do not retain its quality change.
+
+Refreshed no-boundary-refinement ablation (NOT a valid optimization):
+refinerefresh1110 rounds0011.559/1.366,1.553/1.368;
+0071.057/.926,1.0575/.940ms. Source removed. Boundary work is significant but
+removing it alone would still not win007SSAA and sacrifices established quality.
+
+Refinement-only cache, keeping ordinary field generation/sampling and caching
+up to8 exact candidate triangles per320x180 cell, explicit BVH overflow:
+refinecache1110 rounds0011.559/1.621,1.551/1.6175;
+007 first1.061/1.125,second probe1.119ms. All4 paired images exact. REMOVED all
+cache shaders/resources/expanded geometry records. Extra construction and
+consumer complexity outweighed the reduced per-edge traversal.
+
+Early-fog evaluation with fully obscured fragment lighting omission:
+earlyfog1110 rounds0011.5855/1.714,1.585/1.713;
+007 first1.077/1.146,second probe1.133ms. All4 images exact. Explicit texture
+gradients preserved texture LOD under divergent branches. Even the common
+fog-result refactor was slower than prior accepted source. Entire probe removed.
+Do not infer a register count from this timing: native ISA inspection failed.
+
+Existing rdoc-refresh capture advertises AMD GCN ISA, but RenderDoc reports
+GLSL disassembly unsupported on AMD drivers newer than22.7.1. No actual ISA or
+register pressure evidence obtained; no driver/tool installation attempted.
+Tiny diagnostic text files only; no new RDC/game capture for that investigation.
+
 ## November10: exact ray-bundle cache rejected
 
 Room shape audit confirms genuine concavity, not numerical tolerance:001
