@@ -1,5 +1,30 @@
 # Renderer recovery checkpoint — 2026-09-22
 
+## November10 ACTIVE — final24 ownership sweep
+
+Latest user wants24/24; continue until proven. New user pasted Fable5.2 audit:
+verified largely older renderer/main664aefc, not this tree. render.cpp/gl_mesh.cpp
+and BeginRetainedPolymodelDraw absent here; active RenderSceneView/gl_scene uses
+cached compiled unlit/diffuse/particle variants. Compatibility uniform-query debt
+still exists. Told user correct isolated tree; no unrelated cleanup started.
+
+Latest pushed f5126ef native color transfer, preceded9c1b391 direct SSAA display.
+Read-only depth now qualified, ready checkpoint: ViewPass.depth_remains_readonly
+computed upstream from late-depth tracking; context capabilities queried once;
+GL4.5 texture barrier + read-only contract permit borrowing single-sample depth.
+Fallback copies for unsupported formats/context/laterwriters. Reference flag
+-scene-readonly-depth-reference. No private probe/cache remains. Audit updated
+only for explicit read-only unit7 depth lease, depthmaskfalse; all otheraliasesfail.
+Root3/3; all8 rd-q SSAA2 exact, rd-4ao007 exact, settings/aux003006/trip pass.
+readonlyvalid1110 SSAA ref/new0011.384/1.316,1.405/1.324;
+007.910/.832,.920/.836.1500-frame pairs exact.003 usescopycorrectly.
+Full24 `ownership-20261110` matrix session8659 RUNNING. NO builds/games/copies
+while it swaps both private runtime assets. Next summarize then repeat001007
+with reversed old/new order before claiming24/24; remaininggap appearsclosed.
+No source experiments pending. No shadow/cockpit/main/Candidate edits.
+Untracked lib/gitinfo.h unrelated preserved. Usage68%, creditsunchanged62044.8730600000.
+Prior sections below are historical, not active run records.
+
 ## November10 CURRENT — direct display reduction qualified
 
 NEWER: native color ownership transfer qualified, ready checkpoint after9c1b391.

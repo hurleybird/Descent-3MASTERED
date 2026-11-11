@@ -999,6 +999,7 @@ void buildViewPasses(const Presentation& frame,const ViewVisibility& view,ViewPr
     bool depth_required = false;
     for (size_t i = index; i < view.surfaces.size(); ++i)
         depth_required = depth_required || (view.soft_particles && visibleSurfaceBinding(frame,view.surfaces[i]).soft_depth_range > 0);
+    const auto snapshot_pass = passes.size();
     if (depth_required) passes.push_back({ViewPassKind::SnapshotOpaqueDepth,index,index});
     if (products.opaque_scene && !products.occlusion) passes.push_back({ViewPassKind::ExportOpaqueScene,index,index});
     bool late_depth_changed = false;
@@ -1033,5 +1034,6 @@ void buildViewPasses(const Presentation& frame,const ViewVisibility& view,ViewPr
         if (!soft && !unlit) append_material_pass(ViewPassKind::LateWorld,first,index);
         else passes.push_back({soft ? ViewPassKind::SoftVolumes : ViewPassKind::UnlitWorld,first,index});
     }
+    if (depth_required) passes[snapshot_pass].depth_remains_readonly = !late_depth_changed;
 }
 } // namespace d3scene

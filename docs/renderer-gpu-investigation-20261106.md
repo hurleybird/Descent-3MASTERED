@@ -2,6 +2,29 @@
 
 ## November10 continuation: remaining four GPU losses
 
+Read-only opaque-depth borrowing qualified. Prepared ViewPass now proves
+whether every draw after SnapshotOpaqueDepth leaves depth unchanged, using
+the existing late-depth-write tracking. Runtime borrows single-sample draw
+depth only with that guarantee and context-reported FULL_SUPPORT for the
+required simultaneous depth sampling/depth test/stencil test/stencil write.
+OpenGL4.5 TextureBarrier publishes earlier attachment writes. Other contexts,
+formats, or schedules retain independent snapshots; MSAA resolve reuse unchanged.
+Reference -scene-readonly-depth-reference. No extra packet scan in production.
+Shader input audit allows only the declared unit7 depth lease, never color or
+other aliases, and verifies GL_DEPTH_WRITEMASK is false. Runtime also rejects
+depth-writing packets during a lease. Positive/negative schedule unit tests.
+API basis: [OpenGL4.3 section22.3](https://registry.khronos.org/OpenGL/specs/gl/glspec43.core.pdf)
+and [ARB_texture_barrier](https://registry.khronos.org/OpenGL/extensions/ARB/ARB_texture_barrier.txt).
+readonlyvalid1110 SSAA ref/new0011.384/1.316,1.405/1.324;
+007.910/.832,.920/.836. Both1500-frame pairs exact. rd-q all8 frame60 exact,
+rd-4ao SSAA4/AO007 exact. Borrow active001/002/007;003 correctly falls back.
+Root3/3, rd-settings,rd-aux003/006,rd-trip pass.007 image visually inspected.
+First readonly1110 probe hit capture validator's blanket alias prohibition;
+private process46772 stopped after verifying path/output. No screenshot/qualified
+timing claim for failed run. Validator narrowed to the explicit read-only contract,
+not disabled. Production capability queries moved from probe static into context init.
+Full24 matrix ownership-20261110 now running; no builds/runtime changes during it.
+
 Native display color ownership transfer qualified: compatible single-sample
 color storage swaps between scene/display owners; framebuffer/depth/stencil and
 auxiliary attachments do not move. Native identity transfer with no remaining

@@ -2418,6 +2418,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     const bool measure_particles = measure_passes && FindArg("-scene-particle-stage-audit");
     std::vector<std::array<GLuint,4>> particle_queries;
     bool debug_occlusion = false;
+    bool borrowed_readonly_depth = false;
     for (const auto& pass : passes) {
       if (measure_passes) glQueryCounter(pass_queries[pass_query_index++],GL_TIMESTAMP);
       if (debug_occlusion && (pass.kind == d3scene::ViewPassKind::OpaqueWorld ||
@@ -2571,8 +2572,17 @@ void main() {
         glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING,&previous_read);
         glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING,&previous_draw);
         const bool force_copy = AutomatedCaptureFrameIndex() >= 0 && FindArg("-scene-depth-copy-reference");
-        const bool resolved_storage = output.Samples() >= 2 && !force_copy;
+        const bool borrow_readonly_depth=pass.depth_remains_readonly && output.Samples()<2 &&
+            output.depth_owner && scene_readonly_depth_supported[output.depth_owner->HasStencil() ? 1 : 0] &&
+            !(FindArg("-capture-frame") && FindArg("-scene-readonly-depth-reference"));
+        const bool resolved_storage = (output.Samples() >= 2 || borrow_readonly_depth) && !force_copy;
+        borrowed_readonly_depth=borrow_readonly_depth && !force_copy;
+        if (borrow_readonly_depth && !force_copy) glTextureBarrier();
+        if (AutomatedCapturePending()) AutomatedCaptureLog("scene readonly-depth borrowed=%d",borrow_readonly_depth && !force_copy);
         if (resolved_storage) {
+            // Single-sample depth is borrowed only under the prepared suffix's
+            // read-only guarantee and the context's depth/stencil capabilities.
+            // TextureBarrier publishes prior attachment writes before sampling.
             // The resolve texture is distinct from the multisampled draw depth.
             // LateWorld only writes the latter; no resolve occurs inside that
             // pass. Borrow this immutable opaque snapshot until the view ends,
@@ -2758,6 +2768,8 @@ void main() {
         const auto& surface = *binding;
         const auto range = packet.range;
         const auto& policy = packet.policy;
+        if (borrowed_readonly_depth && policy.writesDepth())
+            Error("Read-only opaque depth lease encountered a depth writer");
         if (surface.view_image_slot && FindArg("-scene-cross-publication-image-probe") && AutomatedCapturePending())
             AutomatedCaptureLog("scene image material publication=%llu collection=%llu slot=%llu alpha=%.6g modulation=%.6g light=%.6g texture_alpha=%d medium=%d unlit=%d",
                 (unsigned long long)presentation.data().sequence,(unsigned long long)view.collection,
@@ -2897,8 +2909,14 @@ void main() {
                 GLint input = 0;
                 glActiveTexture(GL_TEXTURE0+unit);
                 glGetIntegerv(GL_TEXTURE_BINDING_2D,&input);
-                if (input && std::find(outputs.begin(),outputs.end(),input) != outputs.end())
-                    Error("Scene image input unit %d aliases an output texture (%d)",unit,input);
+                if (input && std::find(outputs.begin(),outputs.end(),input) != outputs.end()) {
+                    const bool depth_lease = unit==7 && borrowed_readonly_depth && input==outputs.back() &&
+                        std::find(outputs.begin(),outputs.end()-1,input)==outputs.end()-1;
+                    GLboolean writes_depth=GL_TRUE;
+                    if(depth_lease) glGetBooleanv(GL_DEPTH_WRITEMASK,&writes_depth);
+                    if(!depth_lease || writes_depth)
+                        Error("Scene image input unit %d aliases a writable output texture (%d)",unit,input);
+                }
             }
             glActiveTexture(active);
         }

@@ -201,6 +201,9 @@ struct ViewPass {
     ViewPassKind kind;
     uint32_t begin = 0, end = 0; // half-open range in this view's visible surfaces
     bool specular = true; // false guarantees no authored specular response in this pass
+    // SnapshotOpaqueDepth may borrow draw depth only when the entire suffix
+    // is read-only. A later depth writer requires an independent snapshot.
+    bool depth_remains_readonly = false;
 };
 const SurfaceBinding& visibleSurfaceBinding(const Presentation&,const VisibleSurface&);
 MaterialPolicy visibleSurfacePolicy(const Presentation&,const VisibleSurface&);

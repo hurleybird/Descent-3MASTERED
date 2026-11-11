@@ -1602,6 +1602,9 @@ int runSceneViewTests() {
             grouped[4].kind == d3scene::ViewPassKind::SoftVolumes && grouped[4].begin == 4 && grouped[4].end == 5 &&
             grouped[5].kind == d3scene::ViewPassKind::UnlitWorld && grouped[5].begin == 5 && grouped[5].end == 7,
             "Particle grouping crossed blend saturation, transparency or depth-writing barriers");
+        check(grouped.front().kind == d3scene::ViewPassKind::SnapshotOpaqueDepth &&
+            !grouped.front().depth_remains_readonly,
+            "Opaque depth lease crossed a late depth writer");
         auto lit_glass = glass; lit_glass.surface.unlit = false;
         volume_data.meshes = {glass,lit_glass,glass,glass};
         volume_frame = d3scene::Presentation::freeze(volume_data);
@@ -1611,6 +1614,8 @@ int runSceneViewTests() {
             native_runs[2].kind == d3scene::ViewPassKind::LateWorld && native_runs[2].begin == 1 && native_runs[2].end == 2 &&
             native_runs[3].kind == d3scene::ViewPassKind::UnlitWorld && native_runs[3].begin == 2 && native_runs[3].end == 4,
             "Native lighting specialization reordered or merged through a lit draw");
+        check(native_runs.front().depth_remains_readonly,
+            "Read-only late passes required an unnecessary opaque depth copy");
     }
     {
         auto read_only = solid; read_only.surface.depth = d3scene::DepthMode::ReadOnly;

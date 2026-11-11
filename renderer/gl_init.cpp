@@ -17,6 +17,7 @@
 * along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 #include "gl_local.h"
+#include "gameloop.h"
 #include "SceneImages.h"
 #include "args.h"
 #include "enginebrand.h"
@@ -723,6 +724,24 @@ int GL4Renderer::Init(oeApplication* app, renderer_preferred_state* pref_state)
 	mprintf((0, "OpenGL initialization at %d x %d was successful.\n", OpenGL_state.screen_width, OpenGL_state.screen_height));
 
 	ApplySwapInterval();
+
+    scene_readonly_depth_supported.fill(false);
+    if (GLAD_GL_VERSION_4_5 && glTextureBarrier && glGetInternalformativ) {
+        for (int packed=0;packed<2;++packed) {
+            const GLenum format=packed ? GL_DEPTH32F_STENCIL8 : GL_DEPTH_COMPONENT32F;
+            GLint depth_test=0,stencil_test=GL_FULL_SUPPORT,stencil_write=GL_FULL_SUPPORT;
+            glGetInternalformativ(GL_TEXTURE_2D,format,GL_SIMULTANEOUS_TEXTURE_AND_DEPTH_TEST,1,&depth_test);
+            if(packed) {
+                glGetInternalformativ(GL_TEXTURE_2D,format,GL_SIMULTANEOUS_TEXTURE_AND_STENCIL_TEST,1,&stencil_test);
+                glGetInternalformativ(GL_TEXTURE_2D,format,GL_SIMULTANEOUS_TEXTURE_AND_STENCIL_WRITE,1,&stencil_write);
+            }
+            scene_readonly_depth_supported[packed]=depth_test==GL_FULL_SUPPORT &&
+                stencil_test==GL_FULL_SUPPORT && stencil_write==GL_FULL_SUPPORT;
+            if(FindArg("-capture-frame")) AutomatedCaptureLog(
+                "scene readonly-depth support packed=%d depth=%x stencil_test=%x stencil_write=%x",
+                packed,depth_test,stencil_test,stencil_write);
+        }
+    }
 
 	extern const char* blitVertexSrc;
 	extern const char* blitFragmentSrc;

@@ -235,6 +235,7 @@ class GL4Renderer : public IRenderer
 		void Destroy();
 	};
 	std::map<std::pair<d3scene::ViewKind,uint64_t>,SceneDepthSnapshot> scene_depth_snapshots;
+	std::array<bool,2> scene_readonly_depth_supported{}; // D32F, D32F/S8; context-owned
 	ShaderProgram scene_volume_composite;
 	GLuint scene_volume_sampler = 0;
 	GLint scene_volume_rectangle = -1, scene_volume_extent = -1;
