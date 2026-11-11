@@ -1986,6 +1986,20 @@ bool GL4Renderer::BeginPostPresentFrame()
 
 	GLuint protection_mask_texture = post_protection_mask_dirty ?
 		post_protection_mask.TextureForRead(framebuffers[framebuffer_current_draw].Handle()) : 0;
+	// A native identity-transfer image already is the display product. Move
+	// color ownership only; scene depth and auxiliary attachments stay put.
+	const bool direct_color_transfer =
+		!(FindArg("-capture-frame") && FindArg("-scene-copy-display-reference")) &&
+		supersampling_factor == 1 && !bloom_enabled &&
+		OpenGL_preferred_state.pixel_motion_blur_strength <= 0 &&
+		OpenGL_preferred_state.pixel_motion_blur_legacy_object_strength <= 0 &&
+		!OpenGL_preferred_state.motion_vector_debug_preview &&
+		d3scene::imageReductionIsLinear(display_gamma) &&
+		post_visible_origin_x == 0 && post_visible_origin_y == 0 &&
+		present_framebuffer->SwapColorStorage(post_present_framebuffer);
+	if (direct_color_transfer) present_framebuffer = &post_present_framebuffer;
+	if (AutomatedCapturePending())
+		AutomatedCaptureLog("world display color_ownership_transfer=%d",direct_color_transfer ? 1 : 0);
 	// World AO is completed by the scene schedule before display resampling.
 
 	GL4PerfGpuSplitMark(GL4_GPU_SPLIT_AFTER_AO);
@@ -2016,7 +2030,7 @@ bool GL4Renderer::BeginPostPresentFrame()
 	auto* color_source = ApplyPixelMotionBlur(present_framebuffer,supersampling_factor,
 		post_uv_origin_x,post_uv_origin_y,post_uv_scale_x,post_uv_scale_y);
 	GL4PerfGpuSplitMark(GL4_GPU_SPLIT_BLOOM_AFTER_MOTION_BLUR);
-	if (!direct_display_reduction)
+	if (!direct_display_reduction && !direct_color_transfer)
 		CompositeWorldDisplay(present_framebuffer,color_source,bloom_framebuffer,protection_mask_texture,
 			post_uv_origin_x,post_uv_origin_y,post_uv_scale_x,post_uv_scale_y,display_gamma);
 	DrawMotionVectorDebugPreview(supersampling_factor);

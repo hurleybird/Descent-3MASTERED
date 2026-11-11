@@ -181,6 +181,9 @@ public:
 	// Transfer complete framebuffer storage between compositor roles without
 	// copying pixels. Resolve shaders are context-owned and storage-independent.
 	void SwapStorage(Framebuffer& other);
+	// Transfer compatible single-sample color ownership without moving depth,
+	// stencil, or the framebuffer's other scene exports.
+	bool SwapColorStorage(Framebuffer& other);
 	// Optional transient coverage on the raster target. Exported
 	// depth remains D32F; no stencil data is exported to image-space consumers.
 	void Update(int width, int height, int msaa_samples, GLint color_format = GL_RGBA16F, bool stencil = false);

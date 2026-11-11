@@ -2,6 +2,18 @@
 
 ## November10 continuation: remaining four GPU losses
 
+Native display color ownership transfer qualified: compatible single-sample
+color storage swaps between scene/display owners; framebuffer/depth/stencil and
+auxiliary attachments do not move. Native identity transfer with no remaining
+linear-color consumer only. Reference -scene-copy-display-reference.
+colorowner1110 native ref/new001.594/.579,.594/.578;
+007.396/.381,.395/.381. Both1500-frame pairs exact; co-q all8 frame60 exact;
+co-ao native007 exact. Root3/3; co-settings(clean),co-trip(clean) pass.
+GPU resource audit checks incompatible extents, independent framebuffer/depth
+ownership, bidirectional color exchange, and independent texture destruction.
+Private compact fog-event arrays were slower: privatefog1110 native001
+.595/.598,.5965/.5975;007.3965/.401,.397/.401. Removed.
+
 Direct world display reduction: when no bloom/motion consumer remains, final
 SSAA reduction writes the display product instead of a temporary RGBA16F image
 and another fullscreen copy. Same Wronski taps, explicit half-float rounding;

@@ -2,6 +2,18 @@
 
 ## November10 CURRENT — direct display reduction qualified
 
+NEWER: native color ownership transfer qualified, ready checkpoint after9c1b391.
+SwapColorStorage moves only compatible single-sample color textures, not FBOs,
+depth/stencil or scene attachments. Guard native identity/no bloom/no motion.
+Reference -scene-copy-display-reference. colorowner1110 native001.594/.579,
+.594/.578;007.396/.381,.395/.381.1500-frame pairs/all8frame60/nativeAO007 exact.
+Root3/3, settings/reload pass; GL storage audit verifies ownership/depth/content.
+Private fog events slower; removed. No running game/build. Next investigate
+borrowing single-sample opaque depth when schedule proves suffix read-only and
+GL internal-format simultaneous depth-sampling/stencil-write support permits.
+OpenGL4.3 section22.3 explicitly documents these capability queries. No source
+for this depth-borrow experiment yet.24/24 still unproven,SSAA007~.903vsold.880.
+
 Latest user wants24/24; continue, no ordinary milestone yield. Accepted direct
 world display reduction ready for checkpoint after0bea594: no bloom/motion
 consumer means final SSAA reduction owns display image, eliminating temporary

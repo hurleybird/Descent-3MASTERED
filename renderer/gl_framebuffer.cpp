@@ -262,6 +262,23 @@ void Framebuffer::SwapStorage(Framebuffer& other)
 	swap(m_subcolor_dirty,other.m_subcolor_dirty); swap(m_subdepth_dirty,other.m_subdepth_dirty);
 }
 
+bool Framebuffer::SwapColorStorage(Framebuffer& other)
+{
+	if (this == &other || !m_name || !other.m_name || !m_colorname || !other.m_colorname ||
+		m_samples >= 2 || other.m_samples >= 2 || m_width != other.m_width ||
+		m_height != other.m_height || m_color_format != other.m_color_format)
+		return false;
+	GLint draw;
+	glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING,&draw);
+	std::swap(m_colorname,other.m_colorname);
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER,m_name);
+	glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,m_colorname,0);
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER,other.m_name);
+	glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,other.m_colorname,0);
+	glBindFramebuffer(GL_DRAW_FRAMEBUFFER,draw);
+	return true;
+}
+
 Framebuffer::Framebuffer()
 {
 	m_width = m_height = 0;
@@ -1334,6 +1351,32 @@ void main() {
     storage_b.Destroy();
     if (!glIsFramebuffer(storage_a.Handle())) Error("Compositor storage swap aliased ownership");
     storage_a.Destroy();
+    storage_a.Update(1,1,0,GL_RGBA8); storage_b.Update(2,1,0,GL_RGBA8);
+    if (storage_a.SwapColorStorage(storage_b)) Error("Color ownership accepted incompatible extents");
+    storage_b.Update(1,1,0,GL_RGBA8);
+    const GLuint color_owner_a=storage_a.Handle(),color_owner_b=storage_b.Handle();
+    const float color_a[4]={1,0,0,1},color_b[4]={0,0,1,1};
+    const float depth_a=.25f,depth_b=.75f;
+    glBindFramebuffer(GL_FRAMEBUFFER,color_owner_a);
+    glClearBufferfv(GL_COLOR,0,color_a); glClearBufferfv(GL_DEPTH,0,&depth_a);
+    glBindFramebuffer(GL_FRAMEBUFFER,color_owner_b);
+    glClearBufferfv(GL_COLOR,0,color_b); glClearBufferfv(GL_DEPTH,0,&depth_b);
+    if (!storage_a.SwapColorStorage(storage_b) || storage_a.Handle()!=color_owner_a ||
+        storage_b.Handle()!=color_owner_b) Error("Color transfer moved framebuffer ownership");
+    float color_depth=0;
+    glBindFramebuffer(GL_READ_FRAMEBUFFER,color_owner_a); glReadBuffer(GL_COLOR_ATTACHMENT0);
+    glReadPixels(0,0,1,1,GL_RGBA,GL_FLOAT,radiance);
+    glReadPixels(0,0,1,1,GL_DEPTH_COMPONENT,GL_FLOAT,&color_depth);
+    if (radiance[0]!=0 || radiance[2]!=1 || color_depth!=depth_a)
+        Error("Color transfer changed scene depth or lost display color");
+    glBindFramebuffer(GL_READ_FRAMEBUFFER,color_owner_b); glReadBuffer(GL_COLOR_ATTACHMENT0);
+    glReadPixels(0,0,1,1,GL_RGBA,GL_FLOAT,radiance);
+    glReadPixels(0,0,1,1,GL_DEPTH_COMPONENT,GL_FLOAT,&color_depth);
+    if (radiance[0]!=1 || radiance[2]!=0 || color_depth!=depth_b)
+        Error("Color transfer changed destination depth or lost scene color");
+    storage_a.Destroy();
+    if (!glIsTexture(storage_b.ColorTextureRaw())) Error("Color transfer aliased texture ownership");
+    storage_b.Destroy();
     glBlendFuncSeparatei(0,blend_src_rgb,blend_dst_rgb,blend_src_alpha,blend_dst_alpha);
     glBlendEquationSeparatei(0,blend_rgb,blend_alpha);
     if (blend3) glEnablei(GL_BLEND,3); else glDisablei(GL_BLEND,3);
