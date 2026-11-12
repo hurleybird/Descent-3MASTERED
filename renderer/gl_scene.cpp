@@ -2419,7 +2419,32 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     std::vector<std::array<GLuint,4>> particle_queries;
     bool debug_occlusion = false;
     bool borrowed_readonly_depth = false;
+    // Occlusion overscan widens the main view so depth-based estimates have
+    // context beyond the screen edge. Only depth/surface records are consumed
+    // there: presentation reads the visible rectangle alone. Shade world color
+    // inside that rectangle (plus a filter guard), not across the whole margin.
+    // Bloom is the exception: its filter chain gathers radiance from beyond
+    // the screen edge, so the margin keeps its color whenever bloom is on.
+    d3scene::Rect visible_color{};
+    if (target.role == SceneOutputRole::MainWorld && !target.coverage.width &&
+        !OpenGL_preferred_state.bloom_enabled &&
+        !(FindArg("-capture-frame") && FindArg("-scene-overscan-color-reference"))) {
+        const auto& anchor = view.projection_anchor;
+        if (anchor.width > 0 && anchor.height > 0 && anchor.x >= 0 && anchor.y >= 0 &&
+            anchor.x+anchor.width <= view.viewport.width && anchor.y+anchor.height <= view.viewport.height &&
+            (anchor.width < view.viewport.width || anchor.height < view.viewport.height)) {
+            const int guard = 2;
+            const int left = (std::max)(0,anchor.x-guard), top = (std::max)(0,anchor.y-guard);
+            const int right = (std::min)(view.viewport.width,anchor.x+anchor.width+guard);
+            const int bottom = (std::min)(view.viewport.height,anchor.y+anchor.height+guard);
+            visible_color = d3scene::rasterViewport({view.viewport.x+left,view.viewport.y+top,right-left,bottom-top},
+                output.Height(),SupersamplingFactor(),framebuffer_logical_offset_x,framebuffer_logical_offset_y);
+        }
+    }
+    GLint visible_color_restore[4]{};
+    if (visible_color.width) glGetIntegerv(GL_SCISSOR_BOX,visible_color_restore);
     for (const auto& pass : passes) {
+      if (visible_color.width) glDisable(GL_SCISSOR_TEST); // every pass states its own clip
       if (measure_passes) glQueryCounter(pass_queries[pass_query_index++],GL_TIMESTAMP);
       if (debug_occlusion && (pass.kind == d3scene::ViewPassKind::OpaqueWorld ||
           pass.kind == d3scene::ViewPassKind::LateWorld || pass.kind == d3scene::ViewPassKind::UnlitWorld || pass.kind == d3scene::ViewPassKind::SoftVolumes ||
@@ -2676,6 +2701,9 @@ void main() {
       if (target.coverage.width) {
           glEnable(GL_SCISSOR_TEST);
           glScissor(target.coverage.x,target.coverage.y,target.coverage.width,target.coverage.height);
+      } else if (visible_color.width && !depth_prepass && !volume_layer) {
+          glEnable(GL_SCISSOR_TEST);
+          glScissor(visible_color.x,visible_color.y,visible_color.width,visible_color.height);
       }
       if (depth_prepass) {
           glViewport(raster.x/SupersamplingFactor(),raster.y/SupersamplingFactor(),
@@ -3113,6 +3141,12 @@ void main() {
     glViewport(inherited_viewport[0],inherited_viewport[1],inherited_viewport[2],inherited_viewport[3]);
     if (target.coverage.width) {
         glScissor(inherited_scissor_box[0],inherited_scissor_box[1],inherited_scissor_box[2],inherited_scissor_box[3]);
+        glDisable(GL_SCISSOR_TEST);
+    }
+    if (visible_color.width) {
+        // The clip belongs to this view's color passes; resolves, reductions
+        // and later canvases must never inherit it.
+        glScissor(visible_color_restore[0],visible_color_restore[1],visible_color_restore[2],visible_color_restore[3]);
         glDisable(GL_SCISSOR_TEST);
     }
     if (inherited_scissor) glEnable(GL_SCISSOR_TEST);
