@@ -165,15 +165,16 @@ bool roomMaterialInputsUnchanged() {
 // per-face work. Resolve once per texture for this preparation transaction.
 // Nothing survives the transaction, so edits/reloads/settings cannot go stale.
 struct MaterialResolution {
-    explicit MaterialResolution(float value) : time(value) { bitmaps.fill(-2); occlusion.fill(-1); }
+    explicit MaterialResolution(float value,bool evaluate = true) : time(value),evaluate_procedurals(evaluate) { bitmaps.fill(-2); occlusion.fill(-1); }
     float time;
+    bool evaluate_procedurals;
     std::array<int,MAX_TEXTURES> bitmaps, occlusion;
     int bitmap(int texture) {
         auto& result = bitmaps[texture];
         if (result == -2) {
             if (GameTextures[texture].flags & TF_PROCEDURAL) {
                 PERF_MARKER_SCOPE("Scene.Resources.Procedural");
-                result = GetTextureBitmapAtTime(texture,0,time);
+                result = GetTextureBitmapAtTime(texture,0,time,false,evaluate_procedurals);
             } else result = GetTextureBitmapAtTime(texture,0,time);
         }
         return result;
@@ -556,14 +557,14 @@ d3scene::PresentationRef GameSceneResources::publish(d3scene::FrameData data) {
     state->image_interface = frame->data().image_interface;
     return frame;
 }
-void GameSceneResources::prepare(d3scene::FrameData& data) {
+void GameSceneResources::prepare(d3scene::FrameData& data,bool evaluate_procedurals) {
     data.draw_statistics = Render_draw_call_stats || (SceneGeometryInspection() &&
         AutomatedCaptureFrameIndex() >= 0 && FindArg("-scene-hud-diagnostics-probe"));
     PERF_MARKER_SCOPE("Scene.PrepareResources");
     if (data.scene_lifetime != d3scene::assets().lifetime())
         throw std::invalid_argument("Resource producer belongs to a retired scene");
     const auto state = state_.acquire(d3scene::assets());
-    MaterialResolution resolution(static_cast<float>(data.simulation_time));
+    MaterialResolution resolution(static_cast<float>(data.simulation_time),evaluate_procedurals);
     { PERF_MARKER_SCOPE("Scene.Resources.Materials");
     for (auto& surface : data.terrain.materials) resolveMaterial(surface,resolution,false,true);
     for (auto& model : data.model_variants) {
@@ -620,29 +621,14 @@ void PrepareGameInspectionBanner(d3scene::FrameData& data) {
     data.foregrounds.push_back(std::move(foreground));
 }
 
-d3scene::PresentationRef PrepareGamePresentation(bool advance,const GameMainView* main_view,
-    const std::vector<FrameScreenBlend>* overlays,const HUDCanvasLayout* hud_layout) {
-    PERF_MARKER_SCOPE("Scene.PreparePresentation");
-    struct Publications { d3scene::PresentationRef previous_models; };
-    static d3scene::SceneCache<Publications> publications;
-    const auto publication_state = publications.acquire(d3scene::assets());
-    auto& previous_models = publication_state->previous_models;
-    const bool retain_rooms = [&] { PERF_MARKER_SCOPE("Scene.MaterialInputs"); return roomMaterialInputsUnchanged(); }();
-    if (!retain_rooms) { ResetSplitSpecularTexturePairCache(); InvalidateGameRoomCoronaMaterials(); }
-    const unsigned int simulation_random = ps_rand_get_state();
-    auto data = [&] { PERF_MARKER_SCOPE("Scene.Extract"); return ExtractGameFrame(Gametime, advance ? Frametime : 0, Game_paused,advance,
-        retain_rooms ? previous_models.get() : nullptr,FindArg("-scene-geometry-revision-audit") != 0); }();
-    const auto control_delta = GetPlayerControlledTranslationDelta();
-    data.player_control_delta = {control_delta.x,control_delta.y,control_delta.z};
-    data.afterburner_factor = (std::max)(0.f,(std::min)(1.f,Render_afterburner_visual_factor));
+namespace {
+struct WorldPublications { d3scene::PresentationRef loaded, previous_models; };
+d3scene::SceneCache<WorldPublications> publications;
+GameSceneResources world_resources;
+
+void prepareRoomMaterials(d3scene::FrameData& data,bool evaluate_procedurals) {
     data.lighting_quality = Render_preferred_state.per_pixel_lighting ?
         d3scene::LightingQuality::Pixel : d3scene::LightingQuality::Vertex;
-    if (Player_object) {
-        const auto rotation = PlayerCameraShakeRotation(data.simulation_time,Player_object->handle,data.paused);
-        const auto vector = [](const ::vector& v) { return d3scene::Vec3{v.x,v.y,v.z}; };
-        data.camera_perturbations.push_back({static_cast<uint32_t>(Player_object->handle),
-            {{},vector(rotation.rvec),vector(rotation.uvec),vector(rotation.fvec)}});
-    }
     static uint64_t material_lifetime = 0;
     if (material_lifetime != data.scene_lifetime) {
         ResetSceneMaterialBitmapReads();
@@ -662,7 +648,7 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance,const GameMainView
     const auto exterior_reflection = d3scene::assets().publishReflection(UINT32_MAX,std::move(exterior_reflection_data));
     uint32_t reflection_slot = MAX_SPECIAL_FACES;
     { PERF_MARKER_SCOPE("Scene.RoomMaterials");
-    MaterialResolution resolution(static_cast<float>(data.simulation_time));
+    MaterialResolution resolution(static_cast<float>(data.simulation_time),evaluate_procedurals);
     for (auto& room : data.rooms) {
       room.exterior = (room.authored_flags & RF_EXTERNAL) != 0;
       room.fog_enabled = Detail_settings.Fog_enabled && (room.authored_flags & RF_FOG) && GetFunctionMode() != EDITOR_MODE;
@@ -737,10 +723,69 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance,const GameMainView
       }
     }
     }
+}
+
+void prepareRoomPortals(d3scene::FrameData& data) {
+    for (auto& room : data.rooms) {
+      if (room.portals.publishedFor(room.surfaces)) continue;
+      for (size_t p = 0; p < room.portals.size(); ++p) {
+        const auto& portal = room.portals.read()[p];
+        const auto& surface = room.surfaces.read()[portal.polygon];
+        // Procedural opacity is not a stable aperture blocker.
+        const bool controlled = (portal.flags & PF_RENDER_FACES) && !(GameTextures[surface.texture].flags & TF_PROCEDURAL);
+        if (portal.surface_controls_visibility != controlled || (!controlled && !portal.traversable)) {
+            auto& changed = room.portals[p]; changed.surface_controls_visibility = controlled;
+            if (!controlled) changed.traversable = true;
+        }
+      }
+    }
+}
+}
+
+void PrepareLoadedGameScene() {
+    // The save has restored its authored tables and object lightmap layouts.
+    // Build the same immutable bindings as normal play, not a simulated or
+    // rendered frame. No clocks, history, observations, HUD or FX advance.
+    const auto state = publications.acquire(d3scene::assets());
+    roomMaterialInputsUnchanged();
+    ResetSplitSpecularTexturePairCache(); InvalidateGameRoomCoronaMaterials();
+    auto data = ExtractGameFrame(Gametime,0,true,false,nullptr);
+    prepareRoomMaterials(data,false);
+    PrepareGameTerrain(data);
+    PrepareGameModelInstances(data,nullptr,false,false);
+    world_resources.prepare(data,false);
+    prepareRoomPortals(data);
+    data.fog = d3scene::assets().publishFog(data.rooms);
+    state->loaded = world_resources.publish(std::move(data));
+    state->previous_models.reset();
+    rend_PrepareLevelPrograms(!d3scene::fogVolumes(state->loaded->data()).empty());
+}
+
+d3scene::PresentationRef PrepareGamePresentation(bool advance,const GameMainView* main_view,
+    const std::vector<FrameScreenBlend>* overlays,const HUDCanvasLayout* hud_layout) {
+    PERF_MARKER_SCOPE("Scene.PreparePresentation");
+    const auto publication_state = publications.acquire(d3scene::assets());
+    auto& previous_models = publication_state->previous_models;
+    const auto* materials = previous_models ? previous_models.get() : publication_state->loaded.get();
+    const bool retain_rooms = [&] { PERF_MARKER_SCOPE("Scene.MaterialInputs"); return roomMaterialInputsUnchanged(); }();
+    if (!retain_rooms) { ResetSplitSpecularTexturePairCache(); InvalidateGameRoomCoronaMaterials(); }
+    const unsigned int simulation_random = ps_rand_get_state();
+    auto data = [&] { PERF_MARKER_SCOPE("Scene.Extract"); return ExtractGameFrame(Gametime, advance ? Frametime : 0, Game_paused,advance,
+        retain_rooms ? materials : nullptr,FindArg("-scene-geometry-revision-audit") != 0); }();
+    const auto control_delta = GetPlayerControlledTranslationDelta();
+    data.player_control_delta = {control_delta.x,control_delta.y,control_delta.z};
+    data.afterburner_factor = (std::max)(0.f,(std::min)(1.f,Render_afterburner_visual_factor));
+    if (Player_object) {
+        const auto rotation = PlayerCameraShakeRotation(data.simulation_time,Player_object->handle,data.paused);
+        const auto vector = [](const ::vector& v) { return d3scene::Vec3{v.x,v.y,v.z}; };
+        data.camera_perturbations.push_back({static_cast<uint32_t>(Player_object->handle),
+            {{},vector(rotation.rvec),vector(rotation.uvec),vector(rotation.fvec)}});
+    }
+    prepareRoomMaterials(data,true);
     { PERF_MARKER_SCOPE("Scene.PrepareTerrain"); PrepareGameTerrain(data); }
     { PERF_MARKER_SCOPE("Scene.PrepareSky"); PrepareGameSky(data,advance); }
     { PERF_MARKER_SCOPE("Scene.PrepareEffects"); PrepareGameEffects(data,main_view); }
-    { PERF_MARKER_SCOPE("Scene.PrepareModels"); PrepareGameModelInstances(data, previous_models.get(),retain_rooms); }
+    { PERF_MARKER_SCOPE("Scene.PrepareModels"); PrepareGameModelInstances(data, materials,retain_rooms); }
     { PERF_MARKER_SCOPE("Scene.PrepareObjectEffects"); PrepareGameObjectEffects(data); }
     { PERF_MARKER_SCOPE("Scene.PrepareScorches"); PrepareGameScorches(data); }
     PrepareGameCameraEffects(data,main_view);
@@ -800,23 +845,9 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance,const GameMainView
         if (AutomatedCapturePending() || AutomatedCaptureFrameIndex() == 0)
             AutomatedCaptureLog("scene standalone model fixture instances=%u",detached);
     }
-    static GameSceneResources resources;
-    resources.prepare(data);
+    world_resources.prepare(data);
     { PERF_MARKER_SCOPE("Scene.PrepareLights"); PrepareGameSceneLights(data); }
-    for (auto& room : data.rooms) {
-      if (room.portals.publishedFor(room.surfaces)) continue;
-      for (size_t p = 0; p < room.portals.size(); ++p) {
-        const auto& portal = room.portals.read()[p];
-        const auto& surface = room.surfaces.read()[portal.polygon];
-        // Procedural opacity is not a stable aperture blocker. Otherwise the
-        // renderer compiles traversal from the final material (including mirrors).
-        const bool controlled = (portal.flags & PF_RENDER_FACES) && !(GameTextures[surface.texture].flags & TF_PROCEDURAL);
-        if (portal.surface_controls_visibility != controlled || (!controlled && !portal.traversable)) {
-            auto& changed = room.portals[p]; changed.surface_controls_visibility = controlled;
-            if (!controlled) changed.traversable = true;
-        }
-      }
-    }
+    prepareRoomPortals(data);
     if (SceneGeometryInspection()) {
         // Explicit authoring preview: copy optical properties before compilation,
         // not a view-dependent patch to the finished image or mutable level data.
@@ -866,12 +897,12 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance,const GameMainView
         data.sky_enabled = false;
     }
     // No domain is declared complete by a diagnostic subset of its consumers.
-    auto prepared = [&] { PERF_MARKER_SCOPE("Scene.Freeze"); return resources.publish(std::move(data)); }();
+    auto prepared = [&] { PERF_MARKER_SCOPE("Scene.Freeze"); return world_resources.publish(std::move(data)); }();
     if (FindArg("-scene-geometry-revision-audit")) AuditGameModelPoses(*prepared);
     logPreparedModels(*prepared);
     if (ps_rand_get_state() != simulation_random)
         Error("Presentation preparation consumed simulation randomness");
-    if (advance) previous_models = prepared;
+    if (advance) { previous_models = prepared; publication_state->loaded.reset(); }
     return prepared;
 }
 

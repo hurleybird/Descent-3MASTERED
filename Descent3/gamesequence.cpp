@@ -154,6 +154,14 @@ bool GameSequencer()
 {
 	bool in_editor = (GetFunctionMode() == EDITOR_GAME_MODE);
 	tGameState old_game_state;
+	const auto enter_play = [] {
+		if (!Dedicated_server) {
+			StopTime();
+			PrepareLoadedGameScene();
+			StartTime();
+		}
+		SetGameState(GAMESTATE_LVLPLAYING);
+	};
 
 	// interpret current function mode.
 	switch (GetFunctionMode())
@@ -199,7 +207,7 @@ bool GameSequencer()
 				}
 			}
 
-			SetGameState(GAMESTATE_LVLPLAYING);
+			enter_play();
 			break;
 
 		case GAMESTATE_LVLPLAYING:
@@ -221,7 +229,7 @@ bool GameSequencer()
 
 		case GAMESTATE_LOADDEMO:
 			if (DemoPlaybackFile(Demo_fname))
-				SetGameState(GAMESTATE_LVLPLAYING);
+				enter_play();
 			else
 				SetFunctionMode(MENU_MODE);
 
@@ -231,7 +239,7 @@ bool GameSequencer()
 			char ggdemopath[_MAX_PATH * 2];
 			ddio_MakePath(ggdemopath, User_directory, "demo", Game_gauge_usefile, NULL);
 			if (DemoPlaybackFile(ggdemopath))
-				SetGameState(GAMESTATE_LVLPLAYING);
+				enter_play();
 			else
 				SetFunctionMode(MENU_MODE);
 		}
@@ -248,9 +256,9 @@ bool GameSequencer()
 				SetFunctionMode(MENU_MODE);
 			else
 			{
-				SetGameState(GAMESTATE_LVLPLAYING);
 				SetScreenMode(SM_GAME);
 				SetHUDMode(GetHUDMode());
+				enter_play();
 			}
 			ResumeGame();
 			break;
@@ -555,13 +563,6 @@ void StartLevel()
 
 	//Set screen mode
 	SetScreenMode(SM_GAME);
-
-	if (!Dedicated_server) {
-		bool has_fog = false;
-		for (int i = 0; i <= Highest_room_index && !has_fog; ++i)
-			has_fog = Rooms[i].used && (Rooms[i].flags & RF_FOG);
-		rend_PrepareLevelPrograms(has_fog && Detail_settings.Fog_enabled);
-	}
 
 	//Init HUD and cockpit
 	int ship_index;

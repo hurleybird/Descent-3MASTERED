@@ -1,5 +1,6 @@
 // Descent 3MASTERED - GPL-3.0-or-later
 #include "SceneFog.h"
+#include "SceneImages.h"
 #include "SceneView.h"
 #include <algorithm>
 #include <cmath>
@@ -12,6 +13,35 @@
 #include <cstdlib>
 #include <cerrno>
 namespace d3scene {
+PresentationRef makeFogReadinessScene(SceneAssets& calibration) {
+    FrameData data;
+    data.scene_lifetime=calibration.lifetime(); data.sequence=1; data.paused=true;
+    data.lighting_quality=LightingQuality::Pixel;
+    ImageSource pixel;
+    const uint16_t white=0xffff;
+    pixel.mips.push_back({1,1,reinterpret_cast<const uint8_t*>(&white),sizeof(white)});
+    data.images.push_back({1,calibration.publishImage(0,pixel)});
+    MeshGeometry box;
+    box.vertices={{-4,-4,-4},{4,-4,-4},{4,4,-4},{-4,4,-4},{-4,-4,4},{4,-4,4},{4,4,4},{-4,4,4}};
+    box.polygons={{{0,0,1},{{0},{1},{2},{3}}},{{0,0,-1},{{4},{7},{6},{5}}},
+        {{1,0,0},{{0},{3},{7},{4}}},{{-1,0,0},{{1},{5},{6},{2}}},
+        {{0,1,0},{{0},{4},{5},{1}}},{{0,-1,0},{{3},{2},{6},{7}}}};
+    RoomState room; room.number=0; room.asset=calibration.publishRoom(0,std::move(box));
+    room.bounds={{-4,-4,-4},{4,4,4}}; room.surfaces.resize(6);
+    for(auto& surface:room.surfaces) {
+        surface.bitmap=surface.lightmap_bitmap=0;
+        surface.color_image=surface.baked_image=1;
+    }
+    room.fog_enabled=true; room.fog_depth=12; room.fog_color={.25f,.5f,.25f};
+    data.rooms.push_back(std::move(room));
+    data.fog=calibration.publishFog(data.rooms);
+    PreparedMesh glow; glow.asset=calibration.quadMesh(); glow.room=0;
+    glow.world.position.z=2; glow.surface.bitmap=0; glow.surface.color_image=1;
+    glow.surface.blend=BlendMode::Additive; glow.surface.unlit=true;
+    glow.surface.two_sided=true; glow.surface.soft_depth_range=1;
+    data.meshes.push_back(std::move(glow));
+    return Presentation::publish(std::move(data));
+}
 int fogFieldWidth(const char* option) {
     if (!option) return DefaultFogFieldWidth;
     char* end = nullptr;

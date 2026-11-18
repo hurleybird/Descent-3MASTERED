@@ -344,7 +344,7 @@ int GetTextureBitmap(int handle, int framenum, bool force)
 	return GetTextureBitmapAtTime(handle, framenum, Gametime, force);
 }
 
-int GetTextureBitmapAtTime(int handle, int framenum, float presentation_time, bool force)
+int GetTextureBitmapAtTime(int handle, int framenum, float presentation_time, bool force, bool evaluate)
 {
 	int src_bitmap;
 
@@ -397,7 +397,7 @@ int GetTextureBitmapAtTime(int handle, int framenum, float presentation_time, bo
 			AllocateProceduralForTexture(handle);
 
 		const int visual_tick = static_cast<int>(std::floor(static_cast<double>(presentation_time) * 60.0));
-		const int steps = d3scene::proceduralSteps(
+		const int steps = !evaluate ? 0 : d3scene::proceduralSteps(
 			GameTextures[handle].procedural->last_procedural_tick, visual_tick,
 			force || Detail_settings.Procedurals_enabled);
 		if (steps)

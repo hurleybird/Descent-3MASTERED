@@ -39,7 +39,8 @@ uint64_t GameSceneAppearanceRevision();
 // Publish only immutable room geometry/volume. UI/map consumers do not need a
 // gameplay frame, object inventory, material table or temporal advance for it.
 d3scene::RoomAssetRef PrepareGameRoomAsset(int number,bool audit_geometry = false);
-void PrepareGameModelInstances(d3scene::FrameData&, const d3scene::Presentation* previous,bool retain_materials = false);
+void PrepareGameModelInstances(d3scene::FrameData&, const d3scene::Presentation* previous,bool retain_materials = false,bool attachments = true);
+void PrepareLoadedGameScene();
 d3scene::ModelAssetRef PrepareGameModelAsset(int number,bool audit_geometry = false);
 void AuditGameModelPoses(const d3scene::Presentation&);
 struct ScenePreviewLighting {
@@ -57,7 +58,7 @@ public:
     GameSceneResources() = default;
     GameSceneResources(const GameSceneResources&) = delete;
     GameSceneResources& operator=(const GameSceneResources&) = delete;
-    void prepare(d3scene::FrameData&);
+    void prepare(d3scene::FrameData&,bool evaluate_procedurals = true);
     d3scene::PresentationRef publish(d3scene::FrameData);
 };
 // A UI-owned model producer has its own time, material selection and image.

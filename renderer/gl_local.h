@@ -229,6 +229,9 @@ class GL4Renderer : public IRenderer
 	struct FogFieldProgram { ShaderProgram shader; GLint range = -1, overflow_offset = -1; };
 	FogFieldProgram& FogProgram(bool scalar_field,bool half_field,int event_mode);
 	void PrepareFogTileProgram();
+	void PrepareFogExecution();
+	void RenderViewImage(const d3scene::PreparedViewImage&,GLint color_format);
+	int prepared_fog_samples = -1;
 	std::array<FogFieldProgram,12> scene_fog_field_programs;
 	GLuint scene_fog_field_texture = 0;
 	ShaderProgram scene_fog_tile_program;

@@ -250,7 +250,7 @@ d3scene::ModelAssetRef PrepareGameModelAsset(int number,bool audit_geometry) {
     return asset;
 }
 
-void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::Presentation* previous_frame,bool retain_materials) {
+void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::Presentation* previous_frame,bool retain_materials,bool attachments) {
     const auto* previous = previous_frame ? &previous_frame->data() : nullptr;
     if (previous && (previous->scene_lifetime != data.scene_lifetime || previous->simulation_time > data.simulation_time))
         previous_frame = nullptr;
@@ -377,9 +377,12 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::Presenta
             d3scene::PreparedModel variant;
             variant.asset = asset;
             variant.pose_source_revision = SceneModelSourceEpoch();
-            const d3scene::PreparedModel* history = nullptr;
+            const d3scene::PreparedModel* retained_variant = nullptr;
             if (previous_instance) for (const auto& previous_variant : previous->variants(*previous_instance))
-                if (previous_variant.asset->id() == variant.asset->id()) { history = &previous_variant; break; }
+                if (previous_variant.asset->id() == variant.asset->id()) { retained_variant = &previous_variant; break; }
+            // The loaded world's parts are reusable; only a real predecessor
+            // can supply temporal poses, deformation, or previous draw masks.
+            const auto* history = instance.has_previous ? retained_variant : nullptr;
             variant.modulation = {{1,1,1},effect.color,effect.alpha};
             const bool directional = source->lighting_render_type != LRT_STATIC &&
                 (source->lighting_render_type == LRT_GOURAUD || NoLightmaps);
@@ -393,9 +396,9 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::Presenta
             // this object generation, immutable model revision and allocation
             // epoch. Setup/clear invalidate the epoch; model replacement cannot
             // find this history. Never reuse a negative or unvalidated result.
-            const bool layout_proven = history && history->binding_inputs.valid &&
-                history->binding_inputs.baked_layout_revision == layout_revision &&
-                history->pose_source_revision == variant.pose_source_revision;
+            const bool layout_proven = retained_variant && retained_variant->binding_inputs.valid &&
+                retained_variant->binding_inputs.baked_layout_revision == layout_revision &&
+                retained_variant->pose_source_revision == variant.pose_source_revision;
             const bool checked_layout = baked_candidate && (!layout_proven || audit_geometry) ?
                 ObjectLightmapsMatchPolymodel(source) : layout_proven;
             if (baked_candidate && layout_proven && audit_geometry && !checked_layout)
@@ -444,7 +447,7 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::Presenta
             if (retain_materials) {
                 const auto* shared = baked ? nullptr : material_sources[model_number];
                 if (matches_material(shared)) material = shared;
-                else if (matches_material(history)) material = history;
+                else if (matches_material(retained_variant)) material = retained_variant;
                 if (!baked && material && !material_sources[model_number]) material_sources[model_number] = material;
             }
             const bool reuse_materials = material != nullptr;
@@ -459,6 +462,7 @@ void PrepareGameModelInstances(d3scene::FrameData& data, const d3scene::Presenta
             }
             const auto append_attachment = [&](size_t i,SceneModelPartRole role) {
                 const auto begin = data.meshes.size();
+                if (!attachments) return;
                 if (role == SceneModelPartRole::Facing) prepareFacingPart(data,&owner,*model,i,{});
                 if (role == SceneModelPartRole::Glow) prepareGlowPart(data,&owner,source,*model,i,{});
                 for (size_t attachment = begin; attachment < data.meshes.size(); ++attachment) {

@@ -68,6 +68,27 @@ d3scene::RoomState box(d3scene::SceneAssets& assets,int id,float z) {
 }
 int runFogTests() {
     {
+        using namespace d3scene;
+        SceneAssets private_assets;
+        const auto frame=makeFogReadinessScene(private_assets);
+        View view; view.kind=ViewKind::Preview; view.history_key=1; view.room=0;
+        view.viewport=view.projection_anchor={0,0,8,8};
+        const auto prepared=prepareView(*frame,view);
+        std::vector<ViewPass> passes; buildViewPasses(*frame,prepared.visibility(),{},passes);
+        bool diffuse=false, depth_read=false, additive=false;
+        for(const auto& pass:passes) {
+            diffuse |= pass.kind==ViewPassKind::OpaqueWorld && !pass.specular && pass.end>pass.begin;
+            depth_read |= pass.kind==ViewPassKind::SnapshotOpaqueDepth;
+            if(pass.kind==ViewPassKind::UnlitWorld && pass.end>pass.begin)
+                additive |= visibleSurfaceBinding(*frame,prepared.visibility().surfaces[pass.begin]).blend==BlendMode::Additive;
+        }
+        check(diffuse && depth_read && additive,"Loading workload no longer exercises the fog raster pipelines");
+        check(fogVolumes(frame->data()).size()==1 && !fogVolumes(frame->data())[0].boundary.empty(),
+            "Loading workload has no field boundary");
+        check(prepared.view().feedback==NoFeedback && !frame->data().temporal_predecessor,
+            "Loading workload must not produce gameplay observations or history");
+    }
+    {
         using M = d3scene::FogIntegrationMode;
         check(d3scene::fogFieldWidth() == 320,"Normal fog quality differs from qualified field width");
         check(d3scene::fogFieldWidth("32") == 32 && d3scene::fogFieldWidth("640") == 640,"Supported field extent rejected");

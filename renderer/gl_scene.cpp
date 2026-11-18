@@ -850,6 +850,7 @@ void GL4Renderer::DestroyScenePrograms() {
     // Programs and their uniform locations belong to the GL context, never
     // to an individual level, save, image target or published scene.
     scene_sample_resolve_verified = false;
+    prepared_fog_samples = -1;
     for (auto& program : scene_programs) program.shader.Destroy();
     for (auto& program : scene_fog_field_programs) program.shader.Destroy();
     scene_fog_tile_program.Destroy();
@@ -1490,6 +1491,9 @@ void GL4Renderer::UploadSceneVertices(SceneMeshGpu& gpu,d3scene::AssetId id,cons
 }
 
 void GL4Renderer::RenderViewImage(const d3scene::PreparedViewImage& product) {
+    RenderViewImage(product,GL_RGBA16F);
+}
+void GL4Renderer::RenderViewImage(const d3scene::PreparedViewImage& product,GLint color_format) {
     const auto& prepared = product.producer();
     const auto& presentation = prepared.frame();
     const auto& view = prepared.view();
@@ -1521,7 +1525,7 @@ void GL4Renderer::RenderViewImage(const d3scene::PreparedViewImage& product) {
             image.buffer.Height() != extent.height ||
             image.buffer.RequestedSamples() != product.samples();
         if (reallocated) image.history.clear();
-        image.buffer.Update(extent.width,extent.height,product.samples());
+        image.buffer.Update(extent.width,extent.height,product.samples(),color_format);
         image.buffer.ClearAll(product.transparentBackground());
         const auto raster = d3scene::rasterViewport(view.viewport,image.buffer.Height(),product.scale());
         const auto coverage = view.coverage.width ?
@@ -1745,6 +1749,25 @@ void GL4Renderer::PrepareFogTileProgram() {
         glUniform1i(scene_fog_tile_program.FindUniform("scene_fog_nodes"),13);
     }
 }
+void GL4Renderer::PrepareFogExecution() {
+    const int samples = framebuffers[framebuffer_current_draw].Samples();
+    if (prepared_fog_samples == samples) return;
+    // Linking is not execution: drivers can compile a different machine-code
+    // pipeline on first dispatch/draw. Submit a tiny, self-contained material
+    // workload through the real executor, not a second copy of its GL state.
+    // Its assets, image and view history never belong to the playable level.
+    d3scene::SceneAssets calibration;
+    const auto frame=d3scene::makeFogReadinessScene(calibration);
+    d3scene::View view; view.kind=d3scene::ViewKind::Preview; view.history_key=1; view.room=0;
+    view.viewport=view.projection_anchor={0,0,8,8};
+    const auto plan=d3scene::prepareViewImages(*frame,{{1,view,1,uint32_t(samples),false}});
+    RenderViewImage(plan.images().front(),GL_RGBA8);
+    GLsync done=glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE,0);
+    if (!done || glClientWaitSync(done,GL_SYNC_FLUSH_COMMANDS_BIT,GL_TIMEOUT_IGNORED)==GL_WAIT_FAILED) Error("Fog execution preparation failed");
+    glDeleteSync(done);
+    RetireScene();
+    prepared_fog_samples=samples;
+}
 void GL4Renderer::PrepareLevelPrograms(bool has_fog) {
     // Link the regular world / cockpit / HUD families while the level loads.
     // Don't multiply this by every diagnostic, high-emitter or AA permutation;
@@ -1764,11 +1787,7 @@ void GL4Renderer::PrepareLevelPrograms(bool has_fog) {
             // Single-color fog in half storage is the usual field. The view
             // still chooses the precision it actually needs; never downshift
             // a dense field just because a cheaper program is already linked.
-            const bool compact = !FindArg("-scene-fog-full-bins-reference");
-            const bool half = !FindArg("-scene-fog-full-precision");
-            FogProgram(true,half,compact ? 1 : 0);
-            if (compact) FogProgram(true,half,2);
-            PrepareFogTileProgram();
+            PrepareFogExecution();
         }
     }
     if (previous) previous->Use(); else ShaderProgram::ClearBinding();

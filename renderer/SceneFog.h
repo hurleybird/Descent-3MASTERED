@@ -5,6 +5,9 @@ namespace d3scene {
 struct Camera;
 struct PortalVisibility;
 enum class FogIntegrationMode { Automatic, Exact, Field };
+// A tiny textured room and additive depth-reading surface. The loading
+// executor uses the normal pass planner and never renders a gameplay frame.
+PresentationRef makeFogReadinessScene(SceneAssets& private_assets);
 constexpr int DefaultFogFieldWidth = 320;
 int fogFieldWidth(const char* option = nullptr);
 // Automatic uses the view field where supported; orthographic views retain

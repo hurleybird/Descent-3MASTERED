@@ -132,3 +132,45 @@ on 007 it was 3.17–3.60 ms before, 3.01–3.08 ms after. No interval exceeded
 steady-flight improvement. Outdoor terrain, moving 005, fog 007, in-process
 level restoration, and a mirror with SSAA2/MSAA4/AO/bloom each matched the
 previous preview pixel for pixel at the sampled frames.
+
+### Ready before gameplay (compared with 37f89f21)
+
+On a successful level entry, after save restoration and with the simulation
+clock stopped, the game now builds its immutable room/model material bindings,
+terrain, image dependencies and fog boundaries. The first live frame can
+reuse these bindings without treating the load as pose or camera history.
+Procedural textures resolve their image handles without evaluating an extra
+tick. Transient effects, cockpit and visibility observations stay in gameplay.
+
+On a field-fog level the renderer also executes an isolated 8×8 offscreen
+scene with an opaque, lightmapped wall and an additive, depth-reading quad.
+It uses the normal visibility, pass and GL execution paths, then waits for
+completion during loading. No swap or gameplay feedback. Only the shader
+programs survive retiring this private scene. Linking alone did not prewarm
+the executable pipelines; a stand-in GL draw with hand-built state left
+another 220–234 ms of first-use work. The stand-in was discarded.
+
+Native 1280×720, effects and AA off; ordinary gameplay with frame markers
+on a noninteractive desktop. Each crossover leg used a fresh executable path,
+same filename, without clearing the machine's shader cache. On 007, rendering
+with fog disabled, exiting, and reloading with fog enabled reproduced a much
+larger stall than simply loading the save from scratch:
+
+| 007, first fog encounter after the clear run | Previous | Ready build |
+| --- | ---: | ---: |
+| First playable frame | 61–69 ms | 5.7–6.2 ms |
+| Second playable frame | 428–454 ms | 2.0–2.7 ms |
+
+Direct first launches on four independent paths (before/after/after/before)
+took 3.25–3.31 s before and 3.23 s after from marker initialization through
+the first image. First live frames were 58–68 and 6.4–8.1 ms respectively.
+A repeat launch was about 1.3 s either way. Thus smoother input handoff,
+not a claim of half a second saved from loading. The earlier clear run can
+itself prepare the level's fog on the new build; the direct-launch check
+charges that preparation. No general GPU, resolution or frame-rate claim.
+
+Image checks: 000–007 with deterministic turning/forward input, outdoor,
+an in-process 006→007 reload, and 006/007 at SSAA2 + MSAA4 with AO and
+bloom, all compared at the same frame. All 12 RGB images matched the
+previous preview exactly. A contract test checks that the loading scene
+still exercises both draw passes, opaque depth sampling and fog topology.
