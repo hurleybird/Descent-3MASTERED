@@ -33,6 +33,7 @@
 #include "gameloop.h"
 #include "gametexture.h"
 #include "room.h"
+#include "mission.h"
 #include "lightmap_info.h"
 #include "lightmap.h"
 #include "args.h"
@@ -626,6 +627,19 @@ struct WorldPublications { d3scene::PresentationRef loaded, previous_models; };
 d3scene::SceneCache<WorldPublications> publications;
 GameSceneResources world_resources;
 
+// In the retail Novak prison, the shallow space immediately above the waste
+// room is a separate clear room. Extend the medium through that one connector.
+// Room numbers alone are not content identities: require the retail mission,
+// level file and connecting portal. Never edit simulation or saved room data.
+bool isNovakFogCeiling(const d3scene::RoomState& room) {
+    return room.number == 183 && !(room.authored_flags & RF_FOG) &&
+        Current_mission.cur_level == 2 && GetMainCampaignFileForLevel(Current_mission.filename,2) &&
+        Current_level && Current_level->filename && !stricmp(Current_level->filename,"level2.d3l") &&
+        !(FindArg("-capture-frame") && FindArg("-scene-authored-room-fog")) &&
+        Rooms[184].used && std::any_of(room.portals.read().begin(),room.portals.read().end(),
+            [](const d3scene::Portal& p) { return p.destination_room == 184; });
+}
+
 void prepareRoomMaterials(d3scene::FrameData& data,bool evaluate_procedurals) {
     data.lighting_quality = Render_preferred_state.per_pixel_lighting ?
         d3scene::LightingQuality::Pixel : d3scene::LightingQuality::Vertex;
@@ -651,8 +665,15 @@ void prepareRoomMaterials(d3scene::FrameData& data,bool evaluate_procedurals) {
     MaterialResolution resolution(static_cast<float>(data.simulation_time),evaluate_procedurals);
     for (auto& room : data.rooms) {
       room.exterior = (room.authored_flags & RF_EXTERNAL) != 0;
-      room.fog_enabled = Detail_settings.Fog_enabled && (room.authored_flags & RF_FOG) && GetFunctionMode() != EDITOR_MODE;
       const auto& source = Rooms[room.number];
+      int medium_flags = source.flags;
+      if (isNovakFogCeiling(room)) {
+          const auto& medium = Rooms[184];
+          medium_flags = medium.flags;
+          room.fog_depth = medium.fog_depth;
+          room.fog_color = {medium.fog_r,medium.fog_g,medium.fog_b};
+      }
+      room.fog_enabled = Detail_settings.Fog_enabled && (medium_flags & RF_FOG) && GetFunctionMode() != EDITOR_MODE;
       room.blocks_portals = (source.flags & RF_DOOR) && source.doorway_data &&
           DoorwayGetPosition(&Rooms[room.number]) == 0 && !(Doors[source.doorway_data->doornum].flags & DF_SEETHROUGH);
       room.light_scalar = d3scene::roomLightScalar(static_cast<float>(data.simulation_time),room.pulse_time,
