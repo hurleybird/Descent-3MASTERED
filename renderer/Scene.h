@@ -1021,6 +1021,10 @@ struct FrameData {
     bool observation_inputs_prepared = false;
     bool draw_statistics = false; // opt-in detailed native-submission attribution
     Vec3 player_control_delta; // realized player-controlled translation, not camera motion
+    // World-space interest point shared by the main, chase and reflected views.
+    // A view's orientation is not an input to local shadow-light residency.
+    Vec3 shadow_focus;
+    bool has_shadow_focus = false;
     float afterburner_factor = 0;
     LightingQuality lighting_quality = LightingQuality::Pixel;
     std::vector<RoomState> rooms;

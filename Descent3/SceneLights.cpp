@@ -46,6 +46,9 @@ void emit(d3scene::FrameData& frame, d3scene::LightId id, int room, const vector
 
 void PrepareGameSceneLights(d3scene::FrameData& frame) {
     frame.lights.clear();
+    const auto* focus=Player_object ? Player_object : Viewer_object;
+    frame.has_shadow_focus=focus!=nullptr;
+    if(focus) frame.shadow_focus=value(focus->pos);
     const float time = static_cast<float>(frame.simulation_time);
     const int flare = FindWeaponName("Yellow flare"), greenflare = FindWeaponName("GreenFlare");
     for (int i = 0; i <= Highest_object_index; ++i) {

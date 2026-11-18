@@ -12,6 +12,7 @@ extern int Last_texel_unit_set;
 bool GL4Renderer::PrepareDynamicShadow(const d3scene::PreparedView& prepared) {
     const auto& frame=prepared.frame();
     const auto& data=frame.data();
+    if (!data.has_shadow_focus) return false;
     auto bindCube=[&] {
         glActiveTexture(GL_TEXTURE15); glBindSampler(15,0); glBindTexture(GL_TEXTURE_2D_ARRAY,shadow_cube);
         glActiveTexture(GL_TEXTURE0); Last_texel_unit_set=0;
@@ -21,14 +22,17 @@ bool GL4Renderer::PrepareDynamicShadow(const d3scene::PreparedView& prepared) {
         return has_shadow_sources;
     }
     PERF_MARKER_SCOPE("Scene.DynamicShadow");
-    const bool keep=shadow_lifetime==data.scene_lifetime;
+    const double elapsed=data.simulation_time-shadow_time;
+    const bool keep=shadow_lifetime==data.scene_lifetime && elapsed>=0 && elapsed<.5;
+    shadow_time=data.simulation_time;
     const auto previous=shadow_sources;
     shadow_sources={}; has_shadow_sources=false;
     shadow_lifetime=data.scene_lifetime; shadow_sequence=data.sequence;
-    auto camera=prepared.visibility().camera;
-    if (prepared.view().attached_camera)
-        for (const auto& obj:data.objects) if (obj.handle==prepared.view().camera_owner) {camera.transform=obj.current;break;}
-    const auto eye=camera.transform.position;
+    const auto eye=data.shadow_focus;
+    std::array<ShadowSource,5> wanted{};
+    const auto same_id=[](const auto& a,const auto& b) {
+        return a.source==b.source && a.owner==b.owner && a.channel==b.channel;
+    };
     for (const auto& m:data.model_instances) {
         if (!m.visible || m.collection || !m.has_render_bounds || !m.model_count) continue;
         const auto p=m.current.position;
@@ -36,18 +40,19 @@ bool GL4Renderer::PrepareDynamicShadow(const d3scene::PreparedView& prepared) {
         const float distance=std::sqrt(ex*ex+ey*ey+ez*ez);
         if(distance>180.f) continue;
         const auto& b=m.render_bounds;
-        const float extent=.5f*std::max({b.maximum.x-b.minimum.x,b.maximum.y-b.minimum.y,b.maximum.z-b.minimum.z});
+        const auto* owner=m.has_owner && m.compiled_owner<data.objects.size()?&data.objects[m.compiled_owner]:nullptr;
+        const float extent=owner && owner->handle==m.owner && owner->radius>0 ? owner->radius :
+            .5f*std::max({b.maximum.x-b.minimum.x,b.maximum.y-b.minimum.y,b.maximum.z-b.minimum.z});
         if(extent<.35f) continue;
         const auto* ordinal=frame.roomIndices().find(m.room);
         const auto* room=ordinal?&data.rooms[ordinal->second]:nullptr;
-        // Budget for a light-caster pair and its projected shadow, not a
-        // bright source near the eye that never illuminates a visible object.
+        // Rank nearby light-caster pairs in world space. A spot projected
+        // beyond the hull is not a bound on the actual receiving surface.
+        // Its exit from a camera frustum must never extinguish a shadow.
         const auto score=[&](d3scene::Vec3 source,float radius,float power) {
             const float x=p.x-source.x,y=p.y-source.y,z=p.z-source.z,len=std::sqrt(x*x+y*y+z*z);
             if (len<extent*.6f || len>=radius || !(power>0)) return 0.f;
             const float travel=std::min(radius-len,std::max(8.f,extent*3.f));
-            const d3scene::Vec3 footprint{p.x+x/len*travel,p.y+y/len*travel,p.z+z/len*travel};
-            if (!d3scene::sphereIntersects(camera,footprint,extent*(1+travel/len))) return 0.f;
             return power*(1-len/radius)*extent/(6.f+distance+travel);
         };
         if (room && room->lamps) for(const auto& lamp:*room->lamps) {
@@ -56,8 +61,8 @@ bool GL4Renderer::PrepareDynamicShadow(const d3scene::PreparedView& prepared) {
             float s=score(q,lamp.radius,1.0f);
             if(s<=0) continue;
             if (keep && std::any_of(previous.begin()+1,previous.end(),[&](const auto& v){return v.room==m.room && v.lamp.face==lamp.face;})) s*=1.25f;
-            auto best=std::find_if(shadow_sources.begin()+1,shadow_sources.end(),[&](const auto& v){return v.room==m.room && v.lamp.face==lamp.face;});
-            if(best==shadow_sources.end()) best=std::min_element(shadow_sources.begin()+1,shadow_sources.end(),[](const auto& a,const auto& b){return a.score<b.score;});
+            auto best=std::find_if(wanted.begin()+1,wanted.end(),[&](const auto& v){return v.room==m.room && v.lamp.face==lamp.face;});
+            if(best==wanted.end()) best=std::min_element(wanted.begin()+1,wanted.end(),[](const auto& a,const auto& b){return a.score<b.score;});
             if(s>best->score) {best->score=s;best->room=m.room;best->lamp=lamp;}
         }
         const auto dynamic=[&](uint32_t i) {
@@ -65,14 +70,52 @@ bool GL4Renderer::PrepareDynamicShadow(const d3scene::PreparedView& prepared) {
             if (m.has_owner && l.id.source==d3scene::LightSource::Object && l.id.owner==m.owner) return;
             float s=score(l.position,l.radius,std::max({l.color.x,l.color.y,l.color.z})*d3scene::lightAttenuation(l,p));
             const auto& old=previous[0];
-            if (keep && old.index>=0 && l.id.source==old.id.source && l.id.owner==old.id.owner && l.id.channel==old.id.channel) s*=1.25f;
-            if (s>shadow_sources[0].score) {shadow_sources[0].score=s;shadow_sources[0].index=int(i);shadow_sources[0].id=l.id;}
+            if (keep && old.index>=0 && same_id(l.id,old.id)) s*=1.25f;
+            if (s>wanted[0].score) {wanted[0].score=s;wanted[0].index=int(i);wanted[0].id=l.id;}
         };
         if (room && room->light_influences_prepared)
             for(const auto i:data.lightCandidates(room->light_candidates)) dynamic(i);
         else for(size_t i=0;i<data.lights.size();++i) dynamic(uint32_t(i));
     }
-    for(int i=0;i<int(shadow_sources.size());++i) if(shadow_sources[i].score>0) {
+    // Keep physical identities in their slots. For a genuine budget change,
+    // release the old influence before using that map for a different light.
+    // Never interpolate emitter positions or keep a destroyed lamp alive.
+    for(size_t i=0;keep && i<previous.size();++i) {
+        auto s=previous[i];
+        if(s.weight<=0) continue;
+        const float step=std::min(1.f,float(elapsed)*(i?7.f:18.f));
+        auto desired=i?std::find_if(wanted.begin()+1,wanted.end(),[&](const auto& v){return v.room==s.room && v.lamp.face==s.lamp.face;}):
+                       (wanted[0].index>=0 && same_id(wanted[0].id,s.id)?wanted.begin():wanted.end());
+        if(desired!=wanted.end()) {
+            const float weight=std::min(1.f,s.weight+step);
+            s=*desired; s.weight=weight; *desired={};
+        } else {
+            s.weight-=step;
+            if(s.weight<=0) continue;
+            if(i) {
+                const auto* room=frame.roomIndices().find(s.room);
+                if(!room || !data.rooms[room->second].lamps) continue;
+                const auto& lamps=*data.rooms[room->second].lamps;
+                const auto lamp=std::find_if(lamps.begin(),lamps.end(),[&](const auto& l){return l.face==s.lamp.face;});
+                if(lamp==lamps.end()) continue;
+                s.lamp=*lamp;
+            } else {
+                const auto light=std::find_if(data.lights.begin(),data.lights.end(),[&](const auto& l){return same_id(l.id,s.id);});
+                if(light==data.lights.end()) continue;
+                s.index=int(light-data.lights.begin());
+            }
+        }
+        s.mask=0; shadow_sources[i]=s;
+    }
+    for(size_t i=0;i<wanted.size();++i) {
+        if(wanted[i].score<=0) continue;
+        auto free=i?std::find_if(shadow_sources.begin()+1,shadow_sources.end(),[](const auto& s){return s.score==0;}):
+                   (shadow_sources[0].score==0?shadow_sources.begin():shadow_sources.end());
+        if(free==shadow_sources.end()) continue;
+        *free=wanted[i];
+        free->weight=keep ? std::min(1.f,std::max(float(elapsed),0.f)*(i?7.f:18.f)) : 1.f;
+    }
+    for(int i=0;i<int(shadow_sources.size());++i) if(shadow_sources[i].weight>0) {
         RasterShadowSource(prepared,i);
         has_shadow_sources|=shadow_sources[i].mask!=0;
     }
@@ -134,7 +177,9 @@ void GL4Renderer::RasterShadowSource(const d3scene::PreparedView& prepared,int s
             !close(instance.render_bounds) || (slot && instance.room!=source.room) ||
             (!slot && instance.has_owner && light.id.source==d3scene::LightSource::Object &&
             instance.owner==light.id.owner)) continue;
-        const auto variant=d3scene::selectModelVariant(instance,prepared.visibility().camera);
+        // Shadow geometry must not change when the observing camera turns or
+        // when a mirror happens to render first.
+        const auto variant=instance.lod_models[0];
         if (data.variants(instance)[variant].deformation!=0) continue;
         const auto& model=frame.resolvedModel(i,variant);
         if (!model.asset || model.modulation.alpha<.999f) continue;
@@ -217,6 +262,7 @@ void main() {
     // ExecuteSceneView explicitly binds the destination and all pass state.
     glBindVertexArray(0);
     if (AutomatedCapturePending())
-        AutomatedCaptureLog("shadow slot=%d emitter=%d room=%d face=%d radius=%.2f batches=%u faces=%d",
-            slot,source.index,source.room,source.lamp.face,light.radius,unsigned(shadow_batches.size()),source.mask);
+        AutomatedCaptureLog("shadow slot=%d emitter=%d room=%d face=%d radius=%.2f batches=%u faces=%d weight=%.3f headlight=%d owner=%llu",
+            slot,source.index,source.room,source.lamp.face,light.radius,unsigned(shadow_batches.size()),source.mask,source.weight,
+            int(light.headlight),static_cast<unsigned long long>(light.id.owner));
 }

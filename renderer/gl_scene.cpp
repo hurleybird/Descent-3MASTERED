@@ -160,6 +160,7 @@ int sceneInfluenceLight(ivec2 influences,int index) {
 #if SCENE_SHADOW_RECEIVER
 uniform sampler2DArray shadow_distance;
 uniform int shadow_emitter;
+uniform float live_shadow_weight;
 uniform int shadow_masks[5];
 uniform vec4 baked_shadow_lamp[4],baked_shadow_color[4],baked_shadow_normal[4];
 float blockerDepth(int slot,vec3 p) {
@@ -204,7 +205,7 @@ float sceneEmitterAttenuation(int light,vec3 world_position,out vec3 incident) {
     }
 #if SCENE_SHADOW_RECEIVER
     if (draw_params[21].w!=0.0 && light==shadow_emitter && attenuation>0.0 && distance>.001)
-        attenuation*=sceneShadow(0,delta,distance,.12);
+        attenuation*=mix(1.0,sceneShadow(0,delta,distance,.12),live_shadow_weight);
 #endif
     return attenuation;
 }
@@ -1751,6 +1752,7 @@ GL4Renderer::SceneProgram& GL4Renderer::SceneRasterProgram(size_t fog_mode,bool 
     if (shadows) {
         glUniform1i(scene_shader.FindUniform("shadow_distance"),15);
         scene_uniforms.shadow_emitter=scene_shader.FindUniform("shadow_emitter");
+        scene_uniforms.live_shadow_weight=scene_shader.FindUniform("live_shadow_weight");
         scene_uniforms.baked_shadow_lamp=scene_shader.FindUniform("baked_shadow_lamp[0]");
         scene_uniforms.baked_shadow_color=scene_shader.FindUniform("baked_shadow_color[0]");
         scene_uniforms.baked_shadow_normal=scene_shader.FindUniform("baked_shadow_normal[0]");
@@ -1996,11 +1998,12 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
             if (!i || !s.mask) continue;
             const auto& l=s.lamp; const size_t j=i-1;
             lamps[j][0]=l.position.x;lamps[j][1]=l.position.y;lamps[j][2]=l.position.z;lamps[j][3]=l.radius;
-            colors[j][0]=l.color.x;colors[j][1]=l.color.y;colors[j][2]=l.color.z;colors[j][3]=std::sqrt(l.area)*.25f;
+            colors[j][0]=l.color.x*s.weight;colors[j][1]=l.color.y*s.weight;colors[j][2]=l.color.z*s.weight;colors[j][3]=std::sqrt(l.area)*.25f;
             normals[j][0]=l.normal.x;normals[j][1]=l.normal.y;normals[j][2]=l.normal.z;normals[j][3]=float(s.room+1);
         }
         for (auto* p : {&view_program,&diffuse_program}) {
             p->shader.Use(); glUniform1i(p->uniforms.shadow_emitter,masks[0]?shadow_sources[0].index*4:-1);
+            glUniform1f(p->uniforms.live_shadow_weight,shadow_sources[0].weight);
             glUniform4fv(p->uniforms.baked_shadow_lamp,4,lamps[0]);
             glUniform4fv(p->uniforms.baked_shadow_color,4,colors[0]);
             glUniform4fv(p->uniforms.baked_shadow_normal,4,normals[0]);

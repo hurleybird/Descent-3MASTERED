@@ -184,6 +184,7 @@ class GL4Renderer : public IRenderer
 		GLint volume_mapping = -1, volume_edge_only = -1;
 		GLint planar_projection = -1;
 		GLint shadow_emitter = -1;
+		GLint live_shadow_weight = -1;
 		GLint baked_shadow_lamp=-1,baked_shadow_color=-1,baked_shadow_normal=-1,shadow_masks=-1;
 	};
 	struct SceneProgram { ShaderProgram shader; SceneUniformLocations uniforms; };
@@ -198,8 +199,9 @@ class GL4Renderer : public IRenderer
 	uint64_t shadow_sequence = UINT64_MAX, shadow_lifetime = 0;
 	// Slice group 0 is a live emitter, 1..4 are direct-light estimates from
 	// the room bake. All thirty faces share a single sampler and depth buffer.
-	struct ShadowSource { int index=-1,room=-1; d3scene::LightId id{}; d3scene::RoomLamp lamp{}; float score=0; int mask=0; };
+	struct ShadowSource { int index=-1,room=-1; d3scene::LightId id{}; d3scene::RoomLamp lamp{}; float score=0,weight=0; int mask=0; };
 	std::array<ShadowSource,5> shadow_sources{};
+	double shadow_time = 0;
 	bool has_shadow_sources=false;
 	struct ShadowBatch { GLuint vao; GLint first; GLsizei count; d3scene::Transform pose; unsigned faces; };
 	std::vector<ShadowBatch> shadow_batches;
