@@ -1945,7 +1945,17 @@ static void ConfigOptionsUICallback()
 	if (Config_options_old_ui_callback)
 		(*Config_options_old_ui_callback)();
 
-	if (Config_options_capture_output && ++Config_options_capture_frames >= 5)
+	if (Config_options_capture_output) ++Config_options_capture_frames;
+	if (Config_options_capture_output && Config_options_capture_frames == 3 &&
+		FindArg("-capture-options-change-aa") && Config_active_video_menu &&
+		Config_active_options_menu->GetCurrentOption() == IDV_VCONFIG) {
+		// Select a real menu preset before closing the modal. The ordinary
+		// video.finish() path must apply it and resume the world with new targets.
+		auto& video = *Config_active_video_menu;
+		*video.sampling_quality = SamplingQualityToIndex(2,4);
+		video.sheet->UpdateChanges();
+	}
+	if (Config_options_capture_output && Config_options_capture_frames >= 5)
 	{
 		// Capture after this UI frame has been drawn and composited. Modal UI
 		// now lives in its own resolved 720p layer rather than the scene FBO.
@@ -2609,6 +2619,11 @@ void OptionsMenu()
 			sound.finish();
 			details.finish();
 			video.finish();
+			if (capture_options && FindArg("-capture-options-change-aa")) {
+				if (Render_preferred_state.supersampling_factor != 2 || Render_preferred_state.msaa_samples != 4)
+					Error("Video menu did not apply captured sampling selection");
+				AutomatedCaptureLog("video menu applied SSAA2/MSAA4 on close");
+			}
 
 			// write them out and close.
 			if (!capture_options)

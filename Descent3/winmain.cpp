@@ -322,12 +322,14 @@ oeD3Win32Database::oeD3Win32Database():
 	// All instances may read the common defaults, but only the first live
 	// instance may persist them. A secondary holds a reference to the named
 	// object so ownership never transfers to its stale snapshot mid-session.
-	m_settings_instance_handle = CreateMutexA(nullptr, FALSE,
-		"Local\\Descent3Mastered-GlobalSettings-v1");
-	if (m_settings_instance_handle)
-		m_can_persist_settings = GetLastError() != ERROR_ALREADY_EXISTS;
+	if (!FindArg("-readonlysettings")) {
+		m_settings_instance_handle = CreateMutexA(nullptr, FALSE,
+			"Local\\Descent3Mastered-GlobalSettings-v1");
+		if (m_settings_instance_handle)
+			m_can_persist_settings = GetLastError() != ERROR_ALREADY_EXISTS;
+	}
 	if (!m_can_persist_settings)
-		mprintf((0, "Secondary instance: global settings persistence disabled\n"));
+		mprintf((0, "Global settings persistence disabled for this instance\n"));
 
 //	create descent III entry if it doesn't exit.
 
