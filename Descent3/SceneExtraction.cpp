@@ -179,9 +179,11 @@ d3scene::FrameData ExtractGameFrame(double time, float delta, bool paused, bool 
         if (audit_retained && !reuse) throw std::logic_error("Room appearance changed without producer invalidation");
         if (reuse) {
             state.surfaces = cached->surfaces;
+            state.lamps = cached->lamps;
             state.mirrors = cached->mirrors;
             state.uses_room_illumination = cached->uses_room_illumination;
         } else {
+        std::shared_ptr<std::vector<d3scene::RoomLamp>> lamps;
         state.surfaces.reserve(source.num_faces);
         for (int j = 0; j < source.num_faces; ++j) {
             const face& face = source.faces[j];
@@ -192,8 +194,26 @@ d3scene::FrameData ExtractGameFrame(double time, float delta, bool paused, bool 
             binding.portal = face.portal_num;
             binding.authored_flags = face.flags & SurfaceAppearanceFlags;
             binding.light_multiple = face.light_multiple;
+            binding.room_emitter=face.tmap>=0 && face.tmap<MAX_TEXTURES && (GameTextures[face.tmap].flags&TF_LIGHT);
             state.surfaces.push_back(binding);
+            if (face.portal_num!=-1 || (face.flags&FF_DESTROYED) || !(face.flags&FF_LIGHTMAP) ||
+                face.num_verts<3 || face.num_verts>MAX_VERTS_PER_FACE || face.tmap<0 || face.tmap>=MAX_TEXTURES) continue;
+            const auto& tex=GameTextures[face.tmap];
+            if (!tex.used || !(tex.flags&TF_LIGHT)) continue;
+            const float peak=(std::max)({tex.r,tex.g,tex.b});
+            if (!(peak>0) || !face.light_multiple) continue;
+            vector polygon[MAX_VERTS_PER_FACE],center;
+            for (int k=0;k<face.num_verts;++k) polygon[k]=source.verts[face.face_verts[k]];
+            const float area=vm_GetCentroid(&center,polygon,face.num_verts);
+            // Same influence radius as DestroyLight's estimate of the direct
+            // portion of a baked face light. Keep indirect illumination intact.
+            const float radius2=area*(peak*(face.light_multiple/4.f)/(.2f*3.14159f)-1.f);
+            if (!(radius2>0) || !std::isfinite(radius2)) continue;
+            if (!lamps) lamps=std::make_shared<std::vector<d3scene::RoomLamp>>();
+            lamps->push_back({value(center+face.normal*.05f),value(face.normal),{tex.r/peak,tex.g/peak,tex.b/peak},
+                std::sqrt(radius2),area,j});
         }
+        state.lamps=std::move(lamps);
         }
         const auto two_sided = [&](int destination) {
             return (source.flags & RF_EXTERNAL) && destination >= 0 && destination < MAX_ROOMS &&

@@ -15,6 +15,7 @@ SET (RENDERER_SOURCES
 		renderer/SceneTerrain.cpp
 		renderer/SceneFog.cpp
 		renderer/gl_scene.cpp
+		renderer/gl_scene_shadows.cpp
 		renderer/HardwareInternal.h
 		renderer/RendererConfig.h
 		renderer/globalvars.cpp

@@ -12,7 +12,6 @@
 #include "renderer.h"
 #include "lighting.h"
 #include "viseffect.h"
-#include "polymodel.h"
 #include <cmath>
 #include <algorithm>
 
@@ -111,25 +110,7 @@ void PrepareGameSceneLights(d3scene::FrameData& frame) {
             const int bit = static_cast<int>(std::fmod(time,info->time_interval)*8/info->time_interval);
             if (!(info->timebits & (1 << std::max(0,std::min(bit,7))))) continue;
         }
-        vector emitter=obj.pos;
-        if (Render_preferred_state.dynamic_shadows && obj.type==OBJ_WEAPON && (obj.id==flare || obj.id==greenflare) &&
-            (obj.render_type==RT_POLYOBJ || (obj.render_type==RT_WEAPON && !(Weapons[obj.id].flags&(WF_IMAGE_BITMAP|WF_IMAGE_VCLIP|WF_ELECTRICAL)))) &&
-            obj.rtype.pobj_info.model_num>=0 && obj.rtype.pobj_info.model_num<MAX_POLY_MODELS) {
-            // Retail flares put the collision tip at the model origin. When
-            // stuck to rock, the flame is behind that tip. Use the authored
-            // main corona's rigid attachment for BOTH emission and occlusion.
-            const auto* model=GetPolymodelPointer(obj.rtype.pobj_info.model_num);
-            int corona=-1;
-            for (int j=0;j<model->n_models;++j)
-                if ((model->submodel[j].flags&SOF_FACING) && (corona<0 || model->submodel[j].rad>model->submodel[corona].rad))
-                    corona=j;
-            if (corona>=0) {
-                vector local{};
-                for (int j=corona;j>=0;j=model->submodel[j].parent) local+=model->submodel[j].offset;
-                emitter+=obj.orient.rvec*local.x+obj.orient.uvec*local.y+obj.orient.fvec*local.z;
-            }
-        }
-        emit(frame,identity(0),obj.roomnum,emitter,radius*std::max(0.f,scalar),r*sign,g*sign,b*sign,
+        emit(frame,identity(0),obj.roomnum,obj.pos,radius*std::max(0.f,scalar),r*sign,g*sign,b*sign,
             info->flags & OLF_DIRECTIONAL ? &obj.orient.fvec : nullptr,info->directional_dot);
     }
     if (Detail_settings.Dynamic_lighting && VisEffects) for (int i = 0; i <= Highest_vis_effect_index; ++i) {

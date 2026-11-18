@@ -184,6 +184,7 @@ class GL4Renderer : public IRenderer
 		GLint volume_mapping = -1, volume_edge_only = -1;
 		GLint planar_projection = -1;
 		GLint shadow_emitter = -1;
+		GLint baked_shadow_lamp=-1,baked_shadow_color=-1,baked_shadow_normal=-1,shadow_masks=-1;
 	};
 	struct SceneProgram { ShaderProgram shader; SceneUniformLocations uniforms; };
 	SceneProgram& SceneRasterProgram(size_t fog_mode,bool uniform_lights,bool unlit,bool layer,bool diffuse = false,bool shadows = false);
@@ -195,11 +196,15 @@ class GL4Renderer : public IRenderer
 	GLint shadow_model_uniform=-1,shadow_face_uniform=-1,shadow_lamp_uniform=-1;
 	GLuint shadow_cube = 0, shadow_fbo = 0, shadow_depth = 0;
 	uint64_t shadow_sequence = UINT64_MAX, shadow_lifetime = 0;
-	int shadow_index = -1;
-	d3scene::LightId shadow_id{};
+	// Slice group 0 is a live emitter, 1..4 are direct-light estimates from
+	// the room bake. All thirty faces share a single sampler and depth buffer.
+	struct ShadowSource { int index=-1,room=-1; d3scene::LightId id{}; d3scene::RoomLamp lamp{}; float score=0; int mask=0; };
+	std::array<ShadowSource,5> shadow_sources{};
+	bool has_shadow_sources=false;
 	struct ShadowBatch { GLuint vao; GLint first; GLsizei count; d3scene::Transform pose; unsigned faces; };
 	std::vector<ShadowBatch> shadow_batches;
-	int PrepareDynamicShadow(const d3scene::PreparedView&);
+	bool PrepareDynamicShadow(const d3scene::PreparedView&);
+	void RasterShadowSource(const d3scene::PreparedView&,int slot);
 	GLuint scene_light_buffer = 0, scene_light_texture = 0;
 	GLuint scene_draw_buffer = 0;
     GLuint scene_view_buffer = 0;

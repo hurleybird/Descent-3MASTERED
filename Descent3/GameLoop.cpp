@@ -765,6 +765,10 @@ static void BeginAutomatedCaptureFrame()
 	if (Automated_capture.gameplay_frame == 0 && FindArg("-capture-main-rear") && Player_object)
 		Players[Player_num].flags |= PLAYER_FLAGS_REARVIEW;
 	PlaceAutomatedCaptureScorch();
+	// Use the game's ordinary chase camera for cast-shadow inspection. No
+	// fabricated light or caster; the same flight inputs drive the same ship.
+	if (Automated_capture.gameplay_frame==0 && FindArg("-capture-chase-camera"))
+		Player_has_camera=true;
 	// Deterministic cast-silhouette comparison: real game objects, no special
 	// renderer path. Only used on the automated capture desktop.
 	if (Automated_capture.gameplay_frame == 10 && FindArg("-capture-shadow-fixture") && Player_object) {

@@ -352,7 +352,7 @@ struct SurfaceBinding {
     float lightmap_u_scale = 1, lightmap_v_scale = 1;
     float u_offset = 0, v_offset = 0, alpha = 1;
     Vec2 texture_scale{1,1};
-    bool draw_surface = true, texture_alpha = false;
+    bool draw_surface = true, texture_alpha = false, room_emitter = false;
     int32_t texture = -1, lightmap = -1, special = -1, portal = -1;
     uint32_t authored_flags = 0;
     uint8_t light_multiple = 0;
@@ -587,11 +587,15 @@ public:
     auto end() { return edit().end(); }
     void push_back(Portal portal) { edit().push_back(portal); }
 };
+// Actual light-emitting faces, not virtual specular anchors. The authored
+// diffuse is already in the lightmap; these must never enter the additive lights.
+struct RoomLamp { Vec3 position,normal,color; float radius=0, area=0; int face=-1; };
 struct RoomState {
     int32_t number = -1;
     uint64_t source_material_revision = 0;
     int32_t source_mirror_face = -1;
     RoomAssetRef asset;
+    std::shared_ptr<const std::vector<RoomLamp>> lamps;
     Bounds bounds;
     RoomSurfaces surfaces;
     uint32_t surface_base = 0;
