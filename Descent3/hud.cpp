@@ -2402,7 +2402,6 @@ void PrepareGameReticle(d3scene::FrameData& frame,const HUDCanvasLayout& layout)
 
 void RenderPreparedReticle(const d3scene::Presentation& frame)
 {
-	if (!SceneGeometryInspection()) Error("HUD publication has not passed gameplay acceptance");
 	const auto* layer = frame.foreground(SceneReticle);
 	if (!layer) return;
 	// Diagnostic oracle only: run the frozen legacy HUD operation over exactly

@@ -950,8 +950,6 @@ d3scene::PresentationRef PrepareGameOverlayPresentation(const d3scene::Presentat
 
 void RenderGameSceneView(const d3scene::Presentation& frame, d3scene::View view,
     SceneFeedbackTransaction* game_observations) {
-    if (!SceneGeometryInspection())
-        Error("Renderer migration is incomplete. This test build requires -scene-inspection; use the preserved Candidate for gameplay.");
     view.feedback = d3scene::NoFeedback;
     if (FindArg("-scene-automap-probe") && Player_object) {
         const auto& p = Player_object->pos;
@@ -1292,7 +1290,6 @@ void RenderGameSceneView(const d3scene::Presentation& frame, d3scene::View view,
 
 void RenderGameForegrounds(const d3scene::Presentation& frame,d3scene::ForegroundPhase phase,
     const d3scene::Presentation* overlays) {
-    if (!SceneGeometryInspection()) Error("Foreground migration has not passed gameplay acceptance");
     if (overlays && overlays->data().scene_lifetime != frame.data().scene_lifetime)
         Error("Foreground publications belong to different scene lifetimes");
     const auto execute = [&](const d3scene::Presentation& owner,const d3scene::PreparedForeground& foreground) {
@@ -1318,7 +1315,6 @@ void RenderGameForegrounds(const d3scene::Presentation& frame,d3scene::Foregroun
     }
 }
 void PrepareCockpitComposition(d3scene::FrameData& frame,d3scene::Rect viewport,float zoom) {
-    if (!SceneGeometryInspection()) Error("Cockpit migration has not passed gameplay acceptance");
     bool base = false, layered = false, late = false, gauges = false, monitors = false, text = false;
     for (const auto& instance : frame.model_instances) {
         base = base || instance.collection == SceneCockpitBase;

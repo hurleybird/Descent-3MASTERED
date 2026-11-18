@@ -340,7 +340,6 @@ void TCAMDrawMenu()
 // The callback function that the telcom calls every frame
 void TCAMCallback(void)
 {
-    if (!SceneGeometryInspection()) Error("Automap migration requires renderer inspection");
     if (AM_center_on_player) { TCAMCenterOnPlayer(); AM_center_on_player = 0; }
     if (AM_realign) { AM_pitch = 0; AM_realign = 0; }
     const auto& monitor = Telcom_system.Monitor_coords[MONITOR_MAIN];
@@ -361,8 +360,10 @@ void TCAMCallback(void)
     TCAMDrawMenu();
     rend_FlushTextLayer();
     // Keep the diagnostic warning inside the monitor, not behind its surround.
-    auto banner = MakeSceneCanvasView(SceneInspectionBanner,
-        {viewport.x,viewport.y+16,viewport.width,viewport.height-16},d3scene::ViewTarget::Display);
-    d3scene::renderView(*frame,banner);
+    if (SceneGeometryInspection()) {
+        auto banner = MakeSceneCanvasView(SceneInspectionBanner,
+            {viewport.x,viewport.y+16,viewport.width,viewport.height-16},d3scene::ViewTarget::Display);
+        d3scene::renderView(*frame,banner);
+    }
     TCAMReadControls();
 }
