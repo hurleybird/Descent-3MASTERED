@@ -169,6 +169,8 @@ class GL4Renderer : public IRenderer
 		GLint specular_texture = -1;
 		GLint scene_fog = -1;
 		GLint fog_field_range = -1;
+		GLint display_fog_active = -1;
+		GLint display_fog_mapping = -1;
 		GLint fog_field_color = -1;
 		GLint fog_debug = -1;
 		GLint surface_prepass = -1;
@@ -240,10 +242,15 @@ class GL4Renderer : public IRenderer
 	FogFieldProgram& FogProgram(bool scalar_field,bool half_field,int event_mode);
 	void PrepareFogTileProgram();
 	void PrepareFogExecution();
+	void BuildDisplayFog(GLuint depth_texture,const d3scene::Rect&,float near_z,float field_range,bool diagnostic);
 	void RenderViewImage(const d3scene::PreparedViewImage&,GLint color_format);
 	int prepared_fog_samples = -1;
 	std::array<FogFieldProgram,12> scene_fog_field_programs;
 	GLuint scene_fog_field_texture = 0;
+	GLuint display_fog_image = 0;
+	int display_fog_width = 0, display_fog_height = 0;
+	ShaderProgram display_fog_program;
+	GLint display_fog_origin = -1, display_fog_near_range = -1;
 	ShaderProgram scene_fog_tile_program;
 	GLuint scene_fog_tile_buffer = 0;
 	size_t scene_fog_tile_capacity = 0;

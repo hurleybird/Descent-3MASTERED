@@ -9,6 +9,7 @@
 #include "SceneTerrain.h"
 #include "SceneFog.h"
 #include "SceneFogShaders.h"
+#include "SceneDisplayFog.h"
 #include "SceneMotion.h"
 #include "SceneRasterTrail.h"
 #include "SceneDeformation.h"
@@ -25,6 +26,10 @@ extern int Last_texel_unit_set;
 namespace {
 constexpr size_t SceneUniformLightCapacity = 256;
 constexpr size_t SceneDrawRecordWords = 100;
+bool DisplayFogRequested() {
+    static const bool requested=FindArg("-scene-display-fog")!=0;
+    return requested;
+}
 bool SceneInlineLightsEnabled() {
     static const bool enabled = !FindArg("-scene-indirect-light-indices-reference");
     return enabled;
@@ -405,6 +410,16 @@ uniform samplerBuffer scene_fog_nodes;
 uniform sampler3D scene_fog_field;
 uniform vec4 fragment_mapping; // raster pixel -> owning scene pixel (scale, offset)
 uniform float fog_field_range;
+#if SCENE_DISPLAY_FOG
+uniform usampler2D display_fog;
+uniform int display_fog_active;
+uniform vec4 display_fog_mapping;
+#if SCENE_DISPLAY_FOG_ORACLE
+layout(std430,binding=4) buffer DisplayFogOracle {
+    uint audit_samples,audit_hits,audit_repairs,audit_excess,audit_peak;
+};
+#endif
+#endif
 uniform vec4 fog_field_color; // W selects scalar optical depth; RGB is shared fog color.
 uniform int fog_debug;
 
@@ -459,6 +474,36 @@ vec3 applySceneFog(vec3 radiance,out float transmission) {
     // No medium can contribute: preserve transmission without constructing
     // a ray or clip-plane path for every fragment in a clear view.
     if (fog_enabled == 0 || (fog_volume_count == 0 && fog_exterior == 0)) return radiance;
+#if SCENE_DISPLAY_FOG_ORACLE
+    float predicted=-1.0;
+    vec3 before_fog=radiance;
+#endif
+#if SCENE_FOG_MODE == 2 && SCENE_DISPLAY_FOG
+    if(display_fog_active!=0 && fog_enabled==2) {
+        vec2 uv=(gl_FragCoord.xy-display_fog_mapping.xy)*display_fog_mapping.zw;
+        vec2 location=uv*vec2(textureSize(display_fog,0)-1)+.5;
+        uvec4 rec=texelFetch(display_fog,ivec2(location),0);
+        vec2 span=unpackHalf2x16(rec.x);
+        float z=1.0/gl_FragCoord.w;
+#if SCENE_DISPLAY_FOG_ORACLE
+        bool compare=display_fog_active==2 && all(equal(ivec2(gl_FragCoord.xy)&ivec2(7),ivec2(3)));
+        if(compare) atomicAdd(audit_samples,1u);
+#endif
+        if(z>=span.x && z<=span.y) {
+            vec2 f=fract(location)-.5;
+            vec2 v=unpackHalf2x16(rec.y)+f.x*unpackHalf2x16(rec.z)+f.y*unpackHalf2x16(rec.w);
+            float amount=clamp(mix(v.x,v.y,(z-span.x)/(span.y-span.x)),0.0,1.0);
+#if SCENE_DISPLAY_FOG_ORACLE
+            if(compare) {predicted=amount; atomicAdd(audit_hits,1u);}
+            else
+#endif
+            {
+            transmission=1.0-amount;
+            return mix(radiance,fog_field_color.rgb,amount);
+            }
+        }
+    }
+#endif
     vec3 delta = world_position-eye;
     float distance = length(delta);
     if (distance < 1.e-6) return radiance;
@@ -505,6 +550,9 @@ vec3 applySceneFog(vec3 radiance,out float transmission) {
         // This is a contrast heuristic, not a bound on unsampled thin features.
         // The absolute floor avoids chasing sub-code-value quantization noise.
         refine_fog = any(greaterThan(maximum-minimum,max(vec4(1.0/255.0),maximum*0.25)));
+#if SCENE_DISPLAY_FOG_ORACLE
+        if(predicted>=0.0 && refine_fog) atomicAdd(audit_repairs,1u);
+#endif
         optical_depth = integrated.a; weighted_color = integrated.rgb;
     }
 #endif
@@ -571,6 +619,15 @@ vec3 applySceneFog(vec3 radiance,out float transmission) {
         radiance = mix(radiance,multiply_material != 0 ? vec3(1) : (fog_additive != 0 ? vec3(0) : weighted_color/optical_depth),clamp(optical_depth,0.0,1.0));
         transmission *= 1.0-clamp(optical_depth,0.0,1.0);
     }
+#if SCENE_DISPLAY_FOG_ORACLE
+    if(predicted>=0.0) {
+        float error=abs(predicted-(1.0-transmission));
+        atomicMax(audit_peak,uint(round(error*16777216.0)));
+        if(error>.0015) atomicAdd(audit_excess,1u);
+        transmission=1.0-predicted;
+        return mix(before_fog,fog_field_color.rgb,predicted);
+    }
+#endif
     return radiance;
 }
 void main() {
@@ -835,6 +892,8 @@ void GL4Renderer::DestroySceneResources() {
     scene_fog_nodes_texture = 0;
     if (scene_fog_field_texture) glDeleteTextures(1,&scene_fog_field_texture);
     scene_fog_field_texture = 0;
+    if(display_fog_image) glDeleteTextures(1,&display_fog_image);
+    display_fog_image=0; display_fog_width=display_fog_height=0;
     scene_fog_field_width = scene_fog_field_height = 0;
     if (scene_fog_tile_buffer) glDeleteBuffers(1,&scene_fog_tile_buffer);
     scene_fog_tile_buffer=0; scene_fog_tile_capacity=0;
@@ -881,6 +940,7 @@ void GL4Renderer::DestroyScenePrograms() {
     scene_sample_resolve_verified = false;
     prepared_fog_samples = -1;
     for (auto& program : scene_programs) program.shader.Destroy();
+    display_fog_program.Destroy();
     for (auto& program : scene_fog_field_programs) program.shader.Destroy();
     scene_fog_tile_program.Destroy();
     scene_volume_composite.Destroy(); scene_volume_rectangle = -1;
@@ -1634,6 +1694,7 @@ void GL4Renderer::EnsureSceneLifetime(const d3scene::Presentation& presentation)
 }
 GL4Renderer::SceneProgram& GL4Renderer::SceneRasterProgram(size_t fog_mode,bool uniform_lights,bool unlit_pass,bool layer_interface,bool diffuse_pass,bool shadows) {
     const size_t index = (uniform_lights ? 12 : 0)+fog_mode*4+(unlit_pass ? 1 : 0)+(layer_interface ? 2 : 0)+(diffuse_pass ? 24 : 0)+(shadows ? 48 : 0);
+    const bool cached=DisplayFogRequested() && fog_mode==2 && !unlit_pass && !layer_interface;
     auto& program = scene_programs[index];
     if (program.shader.Handle()) return program;
     const bool inline_lights = SceneInlineLightsEnabled();
@@ -1649,6 +1710,14 @@ GL4Renderer::SceneProgram& GL4Renderer::SceneRasterProgram(size_t fog_mode,bool 
             reinterpret_cast<const char*>(glGetString(GL_RENDERER)),varying,vertex,fragment);
     }
     auto fragment = SceneFragmentShader;
+    if(cached) {
+        fragment.replace(0,fragment.find('\n'),"#version 430 core");
+        fragment.insert(fragment.find('\n')+1,"#define SCENE_DISPLAY_FOG 1\n");
+    }
+    if(cached && FindArg("-scene-display-fog-oracle")) {
+        fragment.replace(0,fragment.find('\n'),"#version 430 core");
+        fragment.insert(fragment.find('\n')+1,"#define SCENE_DISPLAY_FOG_ORACLE 1\n");
+    }
     if (shadows) fragment.insert(fragment.find('\n')+1,"#define SCENE_SHADOW_RECEIVER 1\n");
     fragment.insert(fragment.find('\n')+1,"#define SCENE_FOG_SLICES "+std::to_string(SceneFogFieldSlices)+".0\n");
     if(FindArg("-scene-fog-arithmetic-reference")) {
@@ -1696,6 +1765,8 @@ GL4Renderer::SceneProgram& GL4Renderer::SceneRasterProgram(size_t fog_mode,bool 
     scene_uniforms.specular_texture = scene_shader.FindUniform("specular_texture");
     scene_uniforms.scene_fog = scene_shader.FindUniform("scene_fog");
     scene_uniforms.fog_field_range = scene_shader.FindUniform("fog_field_range");
+    scene_uniforms.display_fog_active = scene_shader.FindUniform("display_fog_active");
+    scene_uniforms.display_fog_mapping = scene_shader.FindUniform("display_fog_mapping");
     scene_uniforms.fog_field_color = scene_shader.FindUniform("fog_field_color");
     scene_uniforms.fog_debug = scene_shader.FindUniform("fog_debug");
     scene_uniforms.surface_prepass = scene_shader.FindUniform("surface_prepass");
@@ -1729,6 +1800,7 @@ GL4Renderer::SceneProgram& GL4Renderer::SceneRasterProgram(size_t fog_mode,bool 
     glUniform1i(scene_uniforms.specular_texture,8);
     glUniform1i(scene_uniforms.scene_fog,6);
     glUniform1i(scene_shader.FindUniform("scene_fog_field"),12);
+    glUniform1i(scene_shader.FindUniform("display_fog"),14);
     glUniform1i(scene_shader.FindUniform("scene_fog_nodes"),13);
     glUniform1i(scene_uniforms.scene_occlusion,11);
     glUniform1i(scene_uniforms.opaque_depth,7);
@@ -1783,6 +1855,51 @@ void GL4Renderer::PrepareFogTileProgram() {
         glUniform1i(scene_fog_tile_program.FindUniform("scene_fog_nodes"),13);
     }
 }
+void GL4Renderer::BuildDisplayFog(GLuint depth_texture,const d3scene::Rect& area,float near_z,float field_range,bool diagnostic) {
+    const int w=scene_fog_field_width+1,h=scene_fog_field_height+1;
+    glActiveTexture(GL_TEXTURE14);
+    if(!display_fog_image) glGenTextures(1,&display_fog_image);
+    glBindTexture(GL_TEXTURE_2D,display_fog_image);
+    if(w!=display_fog_width || h!=display_fog_height) {
+        glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA32UI,w,h,0,GL_RGBA_INTEGER,GL_UNSIGNED_INT,nullptr);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
+        display_fog_width=w; display_fog_height=h;
+    }
+    if(!display_fog_program.Handle()) {
+        display_fog_program.AttachComputeSource(SceneDisplayFogCompute);
+        display_fog_origin=display_fog_program.FindUniform("depth_rect");
+        display_fog_near_range=display_fog_program.FindUniform("near_range");
+    }
+    display_fog_program.Use();
+    glUniform4i(display_fog_origin,area.x,area.y,area.width,area.height);
+    glUniform2f(display_fog_near_range,near_z,field_range);
+    glActiveTexture(GL_TEXTURE7); glBindTexture(GL_TEXTURE_2D,depth_texture);
+    glActiveTexture(GL_TEXTURE12); glBindTexture(GL_TEXTURE_3D,scene_fog_field_texture);
+    glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
+    glBindImageTexture(0,display_fog_image,0,GL_FALSE,0,GL_WRITE_ONLY,GL_RGBA32UI);
+    GLuint fq[2]{};
+    if(diagnostic && AutomatedCapturePending() && FindArg("-scene-display-fog-audit")) {
+        glGenQueries(2,fq); glQueryCounter(fq[0],GL_TIMESTAMP);
+    }
+    glDispatchCompute((w+7)/8,(h+7)/8,1);
+    glMemoryBarrier(GL_TEXTURE_FETCH_BARRIER_BIT);
+    if(fq[0]) {
+        glQueryCounter(fq[1],GL_TIMESTAMP);
+        GLuint64 a,b; glGetQueryObjectui64v(fq[0],GL_QUERY_RESULT,&a); glGetQueryObjectui64v(fq[1],GL_QUERY_RESULT,&b);
+        glDeleteQueries(2,fq);
+        AutomatedCaptureLog("display fog %dx%d GPU ms=%.6f",w,h,double(b-a)*1.e-6);
+        glMemoryBarrier(GL_TEXTURE_UPDATE_BARRIER_BIT);
+        glActiveTexture(GL_TEXTURE14); glBindTexture(GL_TEXTURE_2D,display_fog_image);
+        std::vector<unsigned> values(size_t(w)*h); glGetTexImage(GL_TEXTURE_2D,0,GL_RED_INTEGER,GL_UNSIGNED_INT,values.data());
+        size_t good=0; for(auto v:values) good+=v!=0xbc003c00u; // Half pair (1,-1) denotes an empty interval.
+        AutomatedCaptureLog("display fog certified %u/%u",unsigned(good),unsigned(w*h));
+    }
+    glBindImageTexture(0,0,0,GL_FALSE,0,GL_WRITE_ONLY,GL_RGBA32UI);
+    glActiveTexture(GL_TEXTURE0); Last_texel_unit_set=0;
+}
 void GL4Renderer::PrepareFogExecution() {
     const int samples = framebuffers[framebuffer_current_draw].Samples();
     if (prepared_fog_samples == samples) return;
@@ -1796,6 +1913,13 @@ void GL4Renderer::PrepareFogExecution() {
     view.viewport=view.projection_anchor={0,0,8,8};
     const auto plan=d3scene::prepareViewImages(*frame,{{1,view,1,uint32_t(samples),false}});
     RenderViewImage(plan.images().front(),GL_RGBA8);
+    // Warm the same image-store format and program used by the opaque view.
+    // The preview has no AO prepass of its own; its resolved depth is a valid
+    // representative receiver for this calibration dispatch.
+    if(DisplayFogRequested() && scene_fog_field_texture) {
+        auto& target=scene_view_images.at(plan.images().front().image()).buffer;
+        BuildDisplayFog(target.DepthTextureForRead(),{0,0,int(target.Width()),int(target.Height())},.1f,1.f,false);
+    }
     GLsync done=glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE,0);
     if (!done || glClientWaitSync(done,GL_SYNC_FLUSH_COMMANDS_BIT,GL_TIMEOUT_IGNORED)==GL_WAIT_FAILED) Error("Fog execution preparation failed");
     glDeleteSync(done);
@@ -2342,6 +2466,10 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     float field_range = 0;
     d3scene::Vec3 field_color{};
     bool scalar_field = false;
+    bool display_ready=false;
+    GLuint display_oracle=0;
+    GLint saved_oracle_slot=0,saved_oracle_buffer=0;
+    const bool want_display=DisplayFogRequested() && field_fog && view.collection==0 && products.occlusion && SupersamplingFactor()>1;
     GLuint field_queries[3]{}; // capture frame only; read after all view work
     if (field_fog) {
         PERF_MARKER_SCOPE("Scene.FogField");
@@ -2494,6 +2622,10 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         const auto* found = presentation.roomIndices().find(room);
         return !found || presentation.data().rooms[found->second].exterior;
     };
+    // The contrast proof uses optical depth as the strongest color channel.
+    // Signed, HDR and mixed-color media retain full vector field evaluation.
+    const bool project_receivers=want_display && scalar_field &&
+        field_color.x>=0 && field_color.x<=1 && field_color.y>=0 && field_color.y<=1 && field_color.z>=0 && field_color.z<=1;
 
     check_scene_error("pass setup");
 
@@ -2603,6 +2735,11 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         const bool exterior = item.terrain || (item.model ? exteriorRoom(presentation.data().model_instances[item.model_instance_index].room) :
             (item.mesh ? exteriorRoom(presentation.data().meshes[item.mesh_index].room) : presentation.data().rooms[item.room_index].exterior));
         record[72] = float(view.collection == 0 && exterior && exterior_fog.enabled);
+        // Room/model/terrain positions project directly to the raster. A
+        // transient mesh may expand its vertices in screen space (e.g. trails).
+        // Leave those receivers, exterior fog and every blend on their own ray.
+        if(project_receivers && policy.medium_transport && policy.blend==d3scene::BlendMode::Solid && !record[72] && !item.mesh)
+            record[69]=2.f;
         const auto& world = visibility.world(item);
         if (item.mesh && presentation.data().meshes[item.mesh_index].raster_stroke_width > 0) {
             const auto side = d3scene::rasterStrokeSide(visibility.camera,world,view.viewport);
@@ -2764,6 +2901,19 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         if (AutomatedCaptureFrameIndex() >= 0 && FindArg("-scene-ao-debug-probe"))
             ao_preferences.ao_debug_preview = true;
         const auto estimate = ao.Evaluate(inputs,ao_preferences);
+        if(project_receivers && !estimate.debug_display) {
+            const int ss=SupersamplingFactor(), lw=raster.width/ss,lh=raster.height/ss;
+            BuildDisplayFog(inputs.depth,{raster.x/ss,raster.y/ss,lw,lh},visibility.camera.projection.near_distance,field_range,true);
+            display_ready=true;
+            if(AutomatedCapturePending() && FindArg("-scene-display-fog-oracle")) {
+                glGetIntegerv(GL_SHADER_STORAGE_BUFFER_BINDING,&saved_oracle_buffer);
+                glGetIntegeri_v(GL_SHADER_STORAGE_BUFFER_BINDING,4,&saved_oracle_slot);
+                const GLuint zero[5]{};
+                glGenBuffers(1,&display_oracle); glBindBuffer(GL_SHADER_STORAGE_BUFFER,display_oracle);
+                glBufferData(GL_SHADER_STORAGE_BUFFER,sizeof(zero),zero,GL_STREAM_READ);
+                glBindBufferBase(GL_SHADER_STORAGE_BUFFER,4,display_oracle);
+            }
+        }
         if (!estimate.ao_texture) Error("Scheduled occlusion estimate is missing");
         BindSceneTables();
         glActiveTexture(GL_TEXTURE6); glBindTexture(GL_TEXTURE_BUFFER,fog_gpu.texture);
@@ -2963,6 +3113,13 @@ void main() {
       auto& scene_shader = raster_program.shader;
       auto& scene_uniforms = raster_program.uniforms;
       scene_shader.Use();
+      if(scene_uniforms.display_fog_active>=0) {
+          const bool use=display_ready && pass.kind==d3scene::ViewPassKind::OpaqueWorld;
+          glActiveTexture(GL_TEXTURE14); glBindTexture(GL_TEXTURE_2D,use ? display_fog_image : 0);
+          glUniform1i(scene_uniforms.display_fog_active,use ? (display_oracle ? 2 : 1) : 0);
+          if(use) glUniform4f(scene_uniforms.display_fog_mapping,float(raster.x),float(raster.y),1.f/raster.width,1.f/raster.height);
+          glActiveTexture(GL_TEXTURE0);
+      }
       if ((volume_layer && specialize_volumes) || unlit_pass || !pass.specular)
           glUniform2i(scene_uniforms.depth_snapshot_origin,depth_for_sampling == depth.texture ? raster.x : 0,
               depth_for_sampling == depth.texture ? raster.y : 0);
@@ -3395,6 +3552,13 @@ void main() {
                 static_cast<unsigned long long>(view.history_key),unsigned(x),unsigned(y));
             check_scene_error("stationary layer readback");
         }
+    }
+    if(display_oracle) {
+        GLuint v[5]{}; glMemoryBarrier(GL_BUFFER_UPDATE_BARRIER_BIT); glBindBuffer(GL_SHADER_STORAGE_BUFFER,display_oracle);
+        glGetBufferSubData(GL_SHADER_STORAGE_BUFFER,0,sizeof(v),v);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER,4,GLuint(saved_oracle_slot)); glBindBuffer(GL_SHADER_STORAGE_BUFFER,GLuint(saved_oracle_buffer));
+        glDeleteBuffers(1,&display_oracle);
+        AutomatedCaptureLog("display fog oracle samples=%u hits=%u missed_repairs=%u error_excess=%u worst=%.8f",v[0],v[1],v[2],v[3],double(v[4])/16777216.0);
     }
     if (measure_passes) {
         glQueryCounter(pass_queries.back(),GL_TIMESTAMP);
