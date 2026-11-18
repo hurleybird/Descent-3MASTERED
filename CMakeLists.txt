@@ -209,7 +209,8 @@ ENDIF()
 
 #From GZDOOM
 add_custom_target( revision_check ALL
-	COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_SOURCE_DIR}/tools/UpdateRevision.cmake" Descent3/gitinfo.h
+	COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_SOURCE_DIR}/tools/UpdateRevision.cmake" "${CMAKE_BINARY_DIR}/generated/d3_build_revision.h"
+	BYPRODUCTS "${CMAKE_BINARY_DIR}/generated/d3_build_revision.h"
 	WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 # set default cmake build type to Debug (None Debug Release RelWithDebInfo MinSizeRel)
@@ -347,6 +348,7 @@ target_compile_definitions(dmfc PUBLIC -DOUTRAGE_VERSION)
 target_compile_definitions(dmfc PRIVATE -DDMFC_DLL)
 target_include_directories(dmfc PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/netgames/includes")
 add_dependencies(Descent3Mastered revision_check descent3mastered_hog TCP-IP Tracker dmfc)
+target_include_directories(Descent3Mastered PRIVATE "${CMAKE_BINARY_DIR}/generated")
 if (WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 8)
 	add_dependencies(Descent3Mastered descent3mastered_win_hog ${NETGAME_TARGETS})
 endif()

@@ -22,6 +22,7 @@
 #include "game.h"
 #include "program.h"
 #include "descent.h"
+#include "d3_build_revision.h"
 #include "cinematics.h"
 #include "gameloop.h"
 #include "args.h"

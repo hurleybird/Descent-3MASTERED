@@ -21,8 +21,6 @@
 
 #include <stdlib.h>
 #include "application.h"
-//[ISB] Version information
-#include "gitinfo.h"
 //Branding information
 #include "enginebrand.h"
 
