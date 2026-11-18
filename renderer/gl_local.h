@@ -183,13 +183,23 @@ class GL4Renderer : public IRenderer
 		GLint fragment_mapping = -1;
 		GLint volume_mapping = -1, volume_edge_only = -1;
 		GLint planar_projection = -1;
+		GLint shadow_emitter = -1;
 	};
 	struct SceneProgram { ShaderProgram shader; SceneUniformLocations uniforms; };
-	SceneProgram& SceneRasterProgram(size_t fog_mode,bool uniform_lights,bool unlit,bool layer,bool diffuse = false);
+	SceneProgram& SceneRasterProgram(size_t fog_mode,bool uniform_lights,bool unlit,bool layer,bool diffuse = false,bool shadows = false);
 	void DestroyScenePrograms();
 	// Light storage x fog mode x layer interface x lighting contract. Level
 	// loading prepares common combinations; the rest link on first use.
-	std::array<SceneProgram,48> scene_programs;
+	std::array<SceneProgram,96> scene_programs;
+	ShaderProgram shadow_writer;
+	GLint shadow_model_uniform=-1,shadow_face_uniform=-1,shadow_lamp_uniform=-1;
+	GLuint shadow_cube = 0, shadow_fbo = 0, shadow_depth = 0;
+	uint64_t shadow_sequence = UINT64_MAX, shadow_lifetime = 0;
+	int shadow_index = -1;
+	d3scene::LightId shadow_id{};
+	struct ShadowBatch { GLuint vao; GLint first; GLsizei count; d3scene::Transform pose; unsigned faces; };
+	std::vector<ShadowBatch> shadow_batches;
+	int PrepareDynamicShadow(const d3scene::PreparedView&);
 	GLuint scene_light_buffer = 0, scene_light_texture = 0;
 	GLuint scene_draw_buffer = 0;
     GLuint scene_view_buffer = 0;

@@ -1,0 +1,11 @@
+# Dynamic shadows (experimental)
+
+On the playable renderer branch, F2 → Video → **Dynamic shadows (per-pixel)** enables the first local-light shadow pass. Per-pixel lighting must also be on. Shadows default off; the command-line overrides are `-dynamic-shadows` and `-no-dynamic-shadows`.
+
+One dynamic emitter per published frame gets a 512 × 512 map in six directions. Bright nearby emitters have priority, with some preference for retaining the current light. A flare beside an obstacle is a better visual test than the headlight: from the cockpit, a headlight shadow often falls straight behind its caster. For a flared wall, strafe sideways after firing. Baked level lights do not cast new shadows.
+
+The pass gathers opaque room geometry and solid, rigid model parts within the light's reach independently of which faces the pilot can see. At each texel it keeps the plane of the closest blocker. A receiver is tested against that plane, with a small numerical tolerance and four samples across the edge. This avoids displacing the caster or receiver to hide self-shadowing. Only the selected light's diffuse and specular contributions are attenuated. Fog, the HUD, and baked light are not themselves shadow receivers. When shadows are disabled the renderer uses the original lighting program and does not allocate a map on a fresh launch.
+
+Limits: point-like lights give hard silhouettes; a flare touching coarse rock can throw conspicuous angular patches. A flare uses its authored flame attachment instead of its collision tip when shadows are enabled. Terrain, alpha-tested fences, translucent effects, and vertex-deformed models are not casters. This pass is not baked-light replacement, soft area lighting, or volumetric shadowing.
+
+For a reproducible object-caster check, use `-capture-frame 38 -capture-dt 0.016666667 -capture-seed 12345 -capture-shadow-fixture` with per-pixel lighting, shadows, and save 007. This capture-only fixture places a stationary Guide-Bot just in front of a wall and a real flare to one side. Repeat with `-capture-room-casters-only`: the bot and light remain in place, but models no longer block the light. Compare the wall below and left of the bot. Neither switch stages objects during normal gameplay.

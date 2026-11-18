@@ -333,6 +333,7 @@ struct renderer_preferred_state
 	float afterburner_pixel_blur_multiplier;
 	ubyte anisotropy; //1 (off), 2, 4, 8, or 16. Effective only with mipmaps.
 	bool vsync;
+	bool dynamic_shadows = false;
 };
 
 enum renderer_ao_class

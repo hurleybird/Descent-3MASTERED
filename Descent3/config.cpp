@@ -1306,6 +1306,7 @@ struct video_menu
 	bool* per_pixel_lighting;
 	bool* bloom_enabled;
 	bool* refined_cockpits;
+	bool* dynamic_shadows;
 	bool* perf_markers;
 	bool* show_fps;
 	bool* vrr_status;
@@ -1491,6 +1492,10 @@ struct video_menu
 		}
 		if (refined_cockpits && sheet->HasChanged(refined_cockpits))
 			CockpitSetRefinementEnabled(*refined_cockpits);
+		if (dynamic_shadows && sheet->HasChanged(dynamic_shadows)) {
+			Render_preferred_state.dynamic_shadows = *dynamic_shadows;
+			changed = true;
+		}
 		if (ao && sheet->HasChanged(ao))
 		{
 			ApplyAOPresetFromIndex(*ao);
@@ -1597,6 +1602,7 @@ struct video_menu
 		per_pixel_lighting = NULL;
 		bloom_enabled = NULL;
 		refined_cockpits = NULL;
+		dynamic_shadows = NULL;
 		perf_markers = NULL;
 		show_fps = NULL;
 		vrr_status = NULL;
@@ -1682,9 +1688,10 @@ struct video_menu
 		bloom_enabled = sheet->AddLongCheckBox("Bloom", Render_preferred_state.bloom_enabled);
 		soft_vis_effects = sheet->AddLongCheckBox("Soft particles", Render_soft_vis_effects);
 		refined_cockpits = sheet->AddLongCheckBox("Refined cockpits (test)", CockpitRefinementEnabled());
+		dynamic_shadows = sheet->AddLongCheckBox("Dynamic shadows (per-pixel)", Render_preferred_state.dynamic_shadows);
 
 #ifndef RELEASE
-		sheet->NewGroup("Debug", 0, 255);
+		sheet->NewGroup("Debug", 0, 268);
 		motion_vector_debug = sheet->AddLongCheckBox("Vector debug", Render_preferred_state.motion_vector_debug_preview);
 		perf_markers = sheet->AddLongCheckBox("Perf markers", Perf_markers_enabled);
 		show_fps = sheet->AddLongCheckBox("Show FPS", (Hud_stat_mask & STAT_FPS) != 0);
@@ -1740,6 +1747,8 @@ struct video_menu
 			Render_preferred_state.bloom_enabled = *bloom_enabled;
 		if (refined_cockpits)
 			CockpitSetRefinementEnabled(*refined_cockpits);
+		if (dynamic_shadows)
+			Render_preferred_state.dynamic_shadows = *dynamic_shadows;
 		if (ao)
 			ApplyAOPresetFromIndex(*ao);
 		if (ao_overscan && ao && *ao != 0)

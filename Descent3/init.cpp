@@ -394,6 +394,7 @@ void SaveGameSettings()
 	Database->write("RS_msaa_samples", Render_preferred_state.msaa_samples);
 	Database->write("RS_supersampling", Render_preferred_state.supersampling_factor);
 	Database->write("RS_per_pixel_lighting", Render_preferred_state.per_pixel_lighting);
+	Database->write("RS_dynamic_shadows", Render_preferred_state.dynamic_shadows);
 	Database->write("RS_bloom_enabled", Render_preferred_state.bloom_enabled);
 	sprintf(tempbuffer, "%f", Render_preferred_state.bloom_threshold);
 	Database->write("RS_bloom_threshold", tempbuffer, strlen(tempbuffer) + 1);
@@ -875,6 +876,9 @@ void LoadGameSettings()
 	}
 	Render_preferred_state.antialised = Render_preferred_state.msaa_samples > 0;
 	Database->read("RS_per_pixel_lighting", &Render_preferred_state.per_pixel_lighting);
+	Database->read("RS_dynamic_shadows", &Render_preferred_state.dynamic_shadows);
+	if (FindArg("-dynamic-shadows")) Render_preferred_state.dynamic_shadows = true;
+	if (FindArg("-no-dynamic-shadows")) Render_preferred_state.dynamic_shadows = false;
 	if (FindArg("-noperpixellighting") || FindArg("-no-per-pixel-lighting"))
 		Render_preferred_state.per_pixel_lighting = false;
 	else if (FindArg("-perpixellighting") || FindArg("-per-pixel-lighting"))

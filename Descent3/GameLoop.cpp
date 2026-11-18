@@ -765,6 +765,29 @@ static void BeginAutomatedCaptureFrame()
 	if (Automated_capture.gameplay_frame == 0 && FindArg("-capture-main-rear") && Player_object)
 		Players[Player_num].flags |= PLAYER_FLAGS_REARVIEW;
 	PlaceAutomatedCaptureScorch();
+	// Deterministic cast-silhouette comparison: real game objects, no special
+	// renderer path. Only used on the automated capture desktop.
+	if (Automated_capture.gameplay_frame == 10 && FindArg("-capture-shadow-fixture") && Player_object) {
+		const auto& axes=Player_object->orient;
+		auto direction=axes.fvec-axes.rvec*.32f+axes.uvec*.12f;
+		vm_NormalizeVector(&direction);
+		auto end=Player_object->pos+direction*150.f;
+		fvi_query query{};
+		query.p0=&Player_object->pos; query.p1=&end; query.startroom=Player_object->roomnum;
+		query.thisobjnum=OBJNUM(Player_object); query.flags=FQ_IGNORE_RENDER_THROUGH_PORTALS;
+		fvi_info wall{};
+		if (fvi_FindIntersection(&query,&wall)!=HIT_WALL) Error("Shadow fixture needs a nearby receiving wall");
+		auto bot=wall.hit_pnt-direction*5.f;
+		auto lamp=bot-direction*8.f+axes.rvec*5.f+axes.uvec*2.f;
+		const int flare_type=FindWeaponName("Yellow flare");
+		const int flare=flare_type<0?-1:CreateAndFireWeapon(&lamp,&direction,Player_object,flare_type);
+		const int robot=ObjCreate(OBJ_ROBOT,GENOBJ_GUIDEBOT,wall.hit_room,&bot,&Player_object->orient);
+		if (flare<0 || robot<0) Error("Shadow capture requires clear space in front of the player");
+		Objects[flare].movement_type=MT_NONE;
+		Objects[robot].control_type=CT_NONE; Objects[robot].movement_type=MT_NONE;
+		AutomatedCaptureLog("shadow fixture flare=%d robot=%d wall distance=%.2f",Objects[flare].handle,Objects[robot].handle,
+			vm_VectorDistance(&wall.hit_pnt,&Player_object->pos));
+	}
 	if (Automated_capture.gameplay_frame == 10 && FindArg("-capture-fire-flare") &&
 		Player_object && Player_num >= 0 && Player_num < MAX_PLAYERS)
 	{

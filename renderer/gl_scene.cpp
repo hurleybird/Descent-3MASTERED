@@ -157,6 +157,26 @@ int sceneInfluenceLight(ivec2 influences,int index) {
     return texelFetch(scene_influences,influences.x+index).r*4;
 }
 
+#if SCENE_SHADOW_RECEIVER
+uniform samplerCube shadow_planes;
+uniform int shadow_emitter;
+// The light pass stores each nearest blocker's actual plane relative to the
+// light. A receiver on that plane evaluates to zero even at grazing angles;
+// no caster displacement, polygon offset, or depth-slope bias is needed.
+float shadowTap(vec3 ray,vec3 receiver,float tolerance) {
+    vec4 p=textureLod(shadow_planes,ray,0);
+    return step(dot(p.xyz,receiver)-p.w,tolerance);
+}
+float sceneShadow(vec3 delta,float distance) {
+    vec3 d=delta/distance;
+    vec3 a=normalize(cross(abs(d.y)<.9 ? vec3(0,1,0) : vec3(1,0,0),d));
+    vec3 b=cross(d,a);
+    float w=1.3/float(textureSize(shadow_planes,0).x);
+    float e=.001+.00002*distance;
+    return .25*(shadowTap(d+w*(a+b),delta,e)+shadowTap(d+w*(a-b),delta,e)+
+                shadowTap(d+w*(b-a),delta,e)+shadowTap(d-w*(a+b),delta,e));
+}
+#endif
 float sceneEmitterAttenuation(int light,vec3 world_position,out vec3 incident) {
     vec4 position_radius = sceneLight(light);
     vec4 color_falloff = sceneLight(light+1);
@@ -171,6 +191,10 @@ float sceneEmitterAttenuation(int light,vec3 world_position,out vec3 incident) {
         float cone = distance > .000001 ? dot(incident,direction_cone.xyz) : 1.0;
         attenuation *= max(0.0,(cone-direction_cone.w)/max(.000001,1.0-direction_cone.w));
     }
+#if SCENE_SHADOW_RECEIVER
+    if (light==shadow_emitter && attenuation>0.0 && distance>.001)
+        attenuation*=sceneShadow(delta,distance);
+#endif
     return attenuation;
 }
 vec3 sceneDynamicLighting(vec3 world_position,ivec2 influences) {
@@ -847,6 +871,11 @@ void GL4Renderer::DestroySceneResources() {
     scene_asset_lifetime = 0;
 }
 void GL4Renderer::DestroyScenePrograms() {
+    shadow_writer.Destroy();
+    if (shadow_cube) glDeleteTextures(1,&shadow_cube);
+    if (shadow_depth) glDeleteRenderbuffers(1,&shadow_depth);
+    if (shadow_fbo) glDeleteFramebuffers(1,&shadow_fbo);
+    shadow_cube=shadow_depth=shadow_fbo=0; shadow_sequence=UINT64_MAX; shadow_lifetime=0;
     // Programs and their uniform locations belong to the GL context, never
     // to an individual level, save, image target or published scene.
     scene_sample_resolve_verified = false;
@@ -1603,8 +1632,8 @@ void GL4Renderer::EnsureSceneLifetime(const d3scene::Presentation& presentation)
         scene_asset_lifetime = presentation.data().scene_lifetime;
     }
 }
-GL4Renderer::SceneProgram& GL4Renderer::SceneRasterProgram(size_t fog_mode,bool uniform_lights,bool unlit_pass,bool layer_interface,bool diffuse_pass) {
-    const size_t index = (uniform_lights ? 12 : 0)+fog_mode*4+(unlit_pass ? 1 : 0)+(layer_interface ? 2 : 0)+(diffuse_pass ? 24 : 0);
+GL4Renderer::SceneProgram& GL4Renderer::SceneRasterProgram(size_t fog_mode,bool uniform_lights,bool unlit_pass,bool layer_interface,bool diffuse_pass,bool shadows) {
+    const size_t index = (uniform_lights ? 12 : 0)+fog_mode*4+(unlit_pass ? 1 : 0)+(layer_interface ? 2 : 0)+(diffuse_pass ? 24 : 0)+(shadows ? 48 : 0);
     auto& program = scene_programs[index];
     if (program.shader.Handle()) return program;
     const bool inline_lights = SceneInlineLightsEnabled();
@@ -1620,6 +1649,7 @@ GL4Renderer::SceneProgram& GL4Renderer::SceneRasterProgram(size_t fog_mode,bool 
             reinterpret_cast<const char*>(glGetString(GL_RENDERER)),varying,vertex,fragment);
     }
     auto fragment = SceneFragmentShader;
+    if (shadows) fragment.insert(fragment.find('\n')+1,"#define SCENE_SHADOW_RECEIVER 1\n");
     fragment.insert(fragment.find('\n')+1,"#define SCENE_FOG_SLICES "+std::to_string(SceneFogFieldSlices)+".0\n");
     if(FindArg("-scene-fog-arithmetic-reference")) {
         const auto replace=[&](const std::string& from,const std::string& to) {
@@ -1688,6 +1718,10 @@ GL4Renderer::SceneProgram& GL4Renderer::SceneRasterProgram(size_t fog_mode,bool 
     glUniform1i(scene_uniforms.planar_texture,10);
     glUniform1i(scene_uniforms.lightmaptexture,1);
     glUniform1i(scene_uniforms.scene_lights,2);
+    if (shadows) {
+        glUniform1i(scene_shader.FindUniform("shadow_planes"),15);
+        scene_uniforms.shadow_emitter=scene_shader.FindUniform("shadow_emitter");
+    }
     glUniform1i(scene_uniforms.scene_influences,3);
     glUniform1i(scene_uniforms.instance_uvs,4);
     glUniform1i(scene_uniforms.instance_positions,5);
@@ -1791,6 +1825,179 @@ void GL4Renderer::PrepareLevelPrograms(bool has_fog) {
         }
     }
     if (previous) previous->Use(); else ShaderProgram::ClearBinding();
+}
+int GL4Renderer::PrepareDynamicShadow(const d3scene::PreparedView& prepared) {
+    const auto& frame=prepared.frame();
+    const auto& data=frame.data();
+    auto bindCube=[&] {
+        glActiveTexture(GL_TEXTURE15); glBindSampler(15,0); glBindTexture(GL_TEXTURE_CUBE_MAP,shadow_cube);
+        glActiveTexture(GL_TEXTURE0); Last_texel_unit_set=0;
+    };
+    if (shadow_lifetime==data.scene_lifetime && shadow_sequence==data.sequence) {
+        if (shadow_index>=0) bindCube();
+        return shadow_index;
+    }
+    PERF_MARKER_SCOPE("Scene.DynamicShadow");
+    const bool keep=shadow_lifetime==data.scene_lifetime && shadow_index>=0;
+    shadow_lifetime=data.scene_lifetime; shadow_sequence=data.sequence; shadow_index=-1;
+    auto eye=prepared.view().camera.position;
+    // Mirrors normally render before the main view. Use the attached pilot's
+    // physical position, not its reflected virtual eye, for light budgeting.
+    if (prepared.view().attached_camera)
+        for (const auto& obj:data.objects) if (obj.handle==prepared.view().camera_owner) {eye=obj.current.position;break;}
+    float best=0;
+    for (size_t i=0;i<data.lights.size();++i) {
+        const auto& l=data.lights[i];
+        const float x=eye.x-l.position.x,y=eye.y-l.position.y,z=eye.z-l.position.z;
+        const float brightness=std::max({l.color.x,l.color.y,l.color.z});
+        if (l.radius<=.15f || brightness<=0) continue;
+        float score=brightness*l.radius/(5.f+std::sqrt(x*x+y*y+z*z)+l.radius);
+        // Off-axis local lights show readable cast silhouettes; the player's
+        // eye-coincident beam is useful but not automatically the best light.
+        if (l.headlight) score*=.32f;
+        if (keep && l.id.source==shadow_id.source && l.id.owner==shadow_id.owner && l.id.channel==shadow_id.channel) score*=1.35f;
+        if (score>best) {best=score; shadow_index=int(i);}
+    }
+    if (shadow_index<0) return -1;
+    const auto& light=data.lights[shadow_index]; shadow_id=light.id;
+    const auto origin=light.position;
+    const auto close=[&](const d3scene::Bounds& b) {
+        const float x=std::max({b.minimum.x-origin.x,origin.x-b.maximum.x,0.f});
+        const float y=std::max({b.minimum.y-origin.y,origin.y-b.maximum.y,0.f});
+        const float z=std::max({b.minimum.z-origin.z,origin.z-b.maximum.z,0.f});
+        return x*x+y*y+z*z<=light.radius*light.radius;
+    };
+    shadow_batches.clear();
+    auto collect=[&](const SceneMeshGpu& gpu,const d3scene::Transform& pose,const d3scene::Bounds& bounds,auto surface) {
+        // Conservative overlap with each square cube-face pyramid. Do this
+        // once per room/part, not once per polygon or draw.
+        const float lo[]={bounds.minimum.x-origin.x,bounds.minimum.y-origin.y,bounds.minimum.z-origin.z};
+        const float hi[]={bounds.maximum.x-origin.x,bounds.maximum.y-origin.y,bounds.maximum.z-origin.z};
+        unsigned faces=0;
+        for (int axis=0;axis<3;++axis) {
+            const int a=(axis+1)%3,b=(axis+2)%3;
+            const float side=std::max({.05f,lo[a],-hi[a],lo[b],-hi[b]});
+            if (hi[axis]>=side) faces|=1u<<(axis*2);
+            if (-lo[axis]>=side) faces|=2u<<(axis*2);
+        }
+        if (!faces) return;
+        const auto begin=shadow_batches.size();
+        for (size_t f=0;f<gpu.polygons.size();++f) {
+            const auto& s=surface(f); const auto& policy=s.material;
+            if (!s.draw_surface || !policy.writesSolidDepth() || policy.texture_alpha!=d3scene::TextureAlpha::Ignore) continue;
+            const auto range=gpu.polygons[f];
+            if (!range.count) continue;
+            const GLint first=GLint(gpu.vertices.offset+range.offset);
+            if (shadow_batches.size()>begin && shadow_batches.back().first+shadow_batches.back().count==first)
+                shadow_batches.back().count+=range.count;
+            else shadow_batches.push_back({gpu.vao,first,GLsizei(range.count),pose,faces});
+        }
+    };
+    // Gather from the light's radius, never the eye's visible polygons. An
+    // off-screen door or robot still blocks the light. Open portals, glass,
+    // particles, alpha fences and the cockpit are deliberately not solid.
+    for (const auto& r:data.rooms) {
+        if (!r.asset || r.number<0 || !close(r.bounds)) continue;
+        const auto candidates=data.lightCandidates(r.light_candidates);
+        if (r.light_influences_prepared && std::find(candidates.begin(),candidates.end(),uint32_t(shadow_index))==candidates.end()) continue;
+        if (scene_rooms.size()<=size_t(r.number)) scene_rooms.resize(r.number+1);
+        auto& gpu=scene_rooms[r.number];
+        UploadSceneMesh(gpu,r.asset->id(),r.asset->geometry());
+        collect(gpu,{},r.bounds,[&](size_t f)->const auto& {return r.surfaces[f];});
+    }
+    // Capture-only control: keep the exact same lights and visible models,
+    // but remove model occluders from the light's view for an attribution pair.
+    const size_t caster_models=AutomatedCaptureFrameIndex()>=0 && FindArg("-capture-room-casters-only") ?
+        0 : data.model_instances.size();
+    for (size_t i=0;i<caster_models;++i) {
+        const auto& instance=data.model_instances[i];
+        if (!instance.visible || instance.collection || !instance.model_count || !instance.has_render_bounds ||
+            !close(instance.render_bounds) || (instance.has_owner && shadow_id.source==d3scene::LightSource::Object &&
+            instance.owner==shadow_id.owner)) continue;
+        const auto variant=d3scene::selectModelVariant(instance,prepared.visibility().camera);
+        if (data.variants(instance)[variant].deformation!=0) continue;
+        const auto& model=frame.resolvedModel(i,variant);
+        if (!model.asset || model.modulation.alpha<.999f) continue;
+        const auto id=model.asset->id();
+        if (scene_models.size()<=id.slot) scene_models.resize(size_t(id.slot)+1);
+        auto& meshes=scene_models[id.slot];
+        if (meshes.size()<model.parts.size()) meshes.resize(model.parts.size());
+        for (size_t j=0;j<model.parts.size();++j) {
+            const auto& part=model.parts[j];
+            if (!part.draw || !part.has_render_bounds || !close(part.render_bounds) || !part.vertices.empty()) continue;
+            const auto& asset=model.asset->geometry().parts[j];
+            UploadSceneMesh(meshes[j],id,asset.geometry,&asset);
+            collect(meshes[j],d3scene::compose(instance.current,part.current),part.render_bounds,
+                [&](size_t f)->const auto& {return part.surface(asset,f);});
+        }
+    }
+    constexpr int side=512;
+    if (!shadow_writer.Handle()) {
+        shadow_writer.AttachSource(R"GLSL(#version 330 core
+layout(location=0) in vec3 position;
+uniform mat4 model;
+uniform vec4 lamp;
+uniform int face;
+out vec3 relative;
+void main() {
+    relative=(model*vec4(position,1)).xyz-lamp.xyz;
+    vec3 p=relative;
+    vec3 v=face==0?vec3(-p.z,-p.y,p.x):face==1?vec3(p.z,-p.y,-p.x):
+           face==2?vec3(p.x,p.z,p.y):face==3?vec3(p.x,-p.z,-p.y):
+           face==4?vec3(p.x,-p.y,p.z):vec3(-p.x,-p.y,-p.z);
+    float n=.05,f=lamp.w;
+    gl_Position=vec4(v.xy,((f+n)*v.z-2.0*f*n)/(f-n),v.z);
+})GLSL",R"GLSL(#version 330 core
+in vec3 relative;layout(location=0) out vec4 plane;
+void main() {
+    vec3 n=cross(dFdx(relative),dFdy(relative));
+    n*=inversesqrt(max(dot(n,n),1.e-30));
+    if(dot(n,relative)<0.0)n=-n;
+    plane=vec4(n,dot(n,relative));
+})GLSL");
+        shadow_model_uniform=shadow_writer.FindUniform("model");
+        shadow_face_uniform=shadow_writer.FindUniform("face");
+        shadow_lamp_uniform=shadow_writer.FindUniform("lamp");
+    }
+    if (!shadow_cube) {
+        glGenTextures(1,&shadow_cube);glActiveTexture(GL_TEXTURE15);glBindTexture(GL_TEXTURE_CUBE_MAP,shadow_cube);
+        for (int face=0;face<6;++face) glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X+face,0,GL_RGBA32F,side,side,0,GL_RGBA,GL_FLOAT,nullptr);
+        glTexParameteri(GL_TEXTURE_CUBE_MAP,GL_TEXTURE_MIN_FILTER,GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_CUBE_MAP,GL_TEXTURE_MAG_FILTER,GL_NEAREST);
+        for (auto wrap:{GL_TEXTURE_WRAP_S,GL_TEXTURE_WRAP_T,GL_TEXTURE_WRAP_R}) glTexParameteri(GL_TEXTURE_CUBE_MAP,wrap,GL_CLAMP_TO_EDGE);
+        glGenFramebuffers(1,&shadow_fbo);glGenRenderbuffers(1,&shadow_depth);
+        glBindRenderbuffer(GL_RENDERBUFFER,shadow_depth);glRenderbufferStorage(GL_RENDERBUFFER,GL_DEPTH_COMPONENT24,side,side);
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER,shadow_fbo);
+        glFramebufferRenderbuffer(GL_DRAW_FRAMEBUFFER,GL_DEPTH_ATTACHMENT,GL_RENDERBUFFER,shadow_depth);
+        glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_CUBE_MAP_POSITIVE_X,shadow_cube,0);
+        if (glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER)!=GL_FRAMEBUFFER_COMPLETE) Error("Dynamic shadow framebuffer incomplete");
+    }
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER,shadow_fbo);glDrawBuffer(GL_COLOR_ATTACHMENT0);
+    glDisable(GL_CLIP_DISTANCE0);glDisable(GL_CULL_FACE);glDisable(GL_BLEND);glDisable(GL_SCISSOR_TEST);
+    glDisable(GL_POLYGON_OFFSET_FILL);
+    glEnable(GL_DEPTH_TEST);glDepthFunc(GL_LESS);glDepthMask(GL_TRUE);glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);
+    glViewport(0,0,side,side);shadow_writer.Use();
+    glUniform4f(shadow_lamp_uniform,origin.x,origin.y,origin.z,light.radius);
+    const GLfloat blank[]={0,0,0,0},far_value=1;
+    for (int face=0;face<6;++face) {
+        glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_CUBE_MAP_POSITIVE_X+face,shadow_cube,0);
+        glClearBufferfv(GL_COLOR,0,blank);glClearBufferfv(GL_DEPTH,0,&far_value);
+        glUniform1i(shadow_face_uniform,face);
+        for (const auto& b:shadow_batches) {
+            if (!(b.faces&(1u<<face))) continue;
+            const auto& t=b.pose;
+            const GLfloat matrix[]={t.right.x,t.right.y,t.right.z,0,t.up.x,t.up.y,t.up.z,0,
+                t.forward.x,t.forward.y,t.forward.z,0,t.position.x,t.position.y,t.position.z,1};
+            glUniformMatrix4fv(shadow_model_uniform,1,GL_FALSE,matrix);
+            glBindVertexArray(b.vao);glDrawArrays(GL_TRIANGLES,b.first,b.count);
+        }
+    }
+    // ExecuteSceneView explicitly binds the destination and all pass state.
+    glBindVertexArray(0);bindCube();
+    if (AutomatedCapturePending() || AutomatedCaptureFrameIndex()==0)
+        AutomatedCaptureLog("dynamic shadow emitter=%d owner=%llu headlight=%d radius=%.2f batches=%u",
+            shadow_index,(unsigned long long)shadow_id.owner,int(light.headlight),light.radius,unsigned(shadow_batches.size()));
+    return shadow_index;
 }
 d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedView& prepared,const SceneRasterTarget& target) {
     PERF_MARKER_SCOPE("Scene.ExecuteView");
@@ -1913,11 +2120,21 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
         return pass.specular && pass.begin != pass.end && pass.kind != d3scene::ViewPassKind::DepthSurface &&
             pass.kind != d3scene::ViewPassKind::UnlitWorld && pass.kind != d3scene::ViewPassKind::SoftVolumes;
     });
-    auto& view_program = SceneRasterProgram(fog_mode,uniform_lights,false,general_layer,primary_diffuse);
+    const int shadow_light = OpenGL_preferred_state.dynamic_shadows && view.dynamic_lighting && !view.collection &&
+        presentation.data().lighting_quality==d3scene::LightingQuality::Pixel ?
+        PrepareDynamicShadow(prepared) : -1;
+    const bool shadows=shadow_light>=0;
+    auto& view_program = SceneRasterProgram(fog_mode,uniform_lights,false,general_layer,primary_diffuse,shadows);
     auto& volume_program = specialize_volumes ? SceneRasterProgram(fog_mode,uniform_lights,true,true) : view_program;
     auto& unlit_program = specialize_unlit ? SceneRasterProgram(fog_mode,uniform_lights,true,false) : view_program;
     auto& diffuse_program = specialize_diffuse && !primary_diffuse ?
-        SceneRasterProgram(fog_mode,uniform_lights,false,general_layer,true) : view_program;
+        SceneRasterProgram(fog_mode,uniform_lights,false,general_layer,true,shadows) : view_program;
+    if (shadows) {
+        for (auto* p : {&view_program,&diffuse_program}) {
+            p->shader.Use(); glUniform1i(p->uniforms.shadow_emitter,shadow_light*4);
+            if (&view_program==&diffuse_program) break;
+        }
+    }
     auto& scene_shader = view_program.shader;
     auto& scene_uniforms = view_program.uniforms;
 
