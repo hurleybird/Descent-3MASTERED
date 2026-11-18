@@ -131,6 +131,7 @@ struct gl_vertex
 };
 
 static constexpr GLuint GL4_DRAW_BUFFER_SYNC_POINT_COUNT = 16;
+namespace d3scene { struct TerrainBatch; }
 
 constexpr int NUM_GL4_FBOS = 1;
 class GL4Renderer : public IRenderer
@@ -151,6 +152,9 @@ class GL4Renderer : public IRenderer
 	std::vector<std::vector<SceneMeshGpu>> scene_terrain;
 	d3scene::SceneGpuCache<d3scene::MeshAsset,SceneMeshGpu> scene_meshes;
 	void UploadSceneMesh(SceneMeshGpu&, d3scene::AssetId, const d3scene::MeshGeometry&, const d3scene::ModelPart* = nullptr);
+	struct SceneVertex;
+	void UploadSceneVertices(SceneMeshGpu&, d3scene::AssetId, const std::vector<SceneVertex>&);
+	void UploadTerrainBatch(SceneMeshGpu&, d3scene::AssetId, const d3scene::TerrainBatch&);
 	void ReleaseSceneMesh(SceneMeshGpu&);
 	uint64_t scene_asset_lifetime = 0;
 	struct SceneUniformLocations {
@@ -181,8 +185,10 @@ class GL4Renderer : public IRenderer
 		GLint planar_projection = -1;
 	};
 	struct SceneProgram { ShaderProgram shader; SceneUniformLocations uniforms; };
-	// Light storage x fog mode x layer interface x lighting contract. Only
-	// requested combinations compile; every program shares the view/draw UBOs.
+	SceneProgram& SceneRasterProgram(size_t fog_mode,bool uniform_lights,bool unlit,bool layer,bool diffuse = false);
+	void DestroyScenePrograms();
+	// Light storage x fog mode x layer interface x lighting contract. Level
+	// loading prepares common combinations; the rest link on first use.
 	std::array<SceneProgram,48> scene_programs;
 	GLuint scene_light_buffer = 0, scene_light_texture = 0;
 	GLuint scene_draw_buffer = 0;
@@ -221,6 +227,8 @@ class GL4Renderer : public IRenderer
 	SceneFogGpu scene_empty_fog;
 	GLuint scene_fog_nodes_texture = 0; // float view of the shared per-view influence stream
 	struct FogFieldProgram { ShaderProgram shader; GLint range = -1, overflow_offset = -1; };
+	FogFieldProgram& FogProgram(bool scalar_field,bool half_field,int event_mode);
+	void PrepareFogTileProgram();
 	std::array<FogFieldProgram,12> scene_fog_field_programs;
 	GLuint scene_fog_field_texture = 0;
 	ShaderProgram scene_fog_tile_program;
@@ -861,6 +869,7 @@ public:
 	// Clears the texture cache
 	void ResetCache() override;
 	void RetireScene() override;
+	void PrepareLevelPrograms(bool has_fog) override;
 
 	//DRAWING
 

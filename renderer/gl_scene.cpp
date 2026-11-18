@@ -25,8 +25,15 @@ extern int Last_texel_unit_set;
 namespace {
 constexpr size_t SceneUniformLightCapacity = 256;
 constexpr size_t SceneDrawRecordWords = 100;
+bool SceneInlineLightsEnabled() {
+    static const bool enabled = !FindArg("-scene-indirect-light-indices-reference");
+    return enabled;
+}
 constexpr size_t SceneUniformLightBytes = SceneUniformLightCapacity*16*sizeof(float);
 static_assert(SceneUniformLightBytes <= 16384,"Light block exceeds the portable uniform-block minimum");
+int SceneFogGroupRows() {
+    return FindArg("-scene-fog-row-group-reference") ? 1 : SceneFogFieldRows;
+}
 bool SceneFogFieldEnabled(const d3scene::Camera& camera) {
     const bool exact = FindArg("-scene-fog-exact") != 0;
     const bool field = FindArg("-scene-fog-field") != 0;
@@ -50,7 +57,6 @@ static_assert(static_cast<int>(d3scene::OcclusionClass::Default) == RENDERER_AO_
     static_cast<int>(d3scene::OcclusionClass::Model) == RENDERER_AO_CLASS_POLYOBJECT &&
     static_cast<int>(d3scene::OcclusionClass::MineRock) == RENDERER_AO_CLASS_MINE_ROCK &&
     static_cast<int>(d3scene::OcclusionClass::Mine) == RENDERER_AO_CLASS_MINE,"Canvas AO class adapter differs from scene contract");
-struct SceneVertex { d3scene::Vec3 position; float u, v, lu, lv, alpha; d3scene::Vec3 normal, color; d3scene::Vec2 raster_offset; uint32_t polygon; };
 const char* SceneLightingShader = R"GLSL(#version 330 core
 layout(std140) uniform SceneViewBlock { vec4 view_params[16]; uvec4 deformer_keys; ivec4 view_options; };
 #define eye (view_params[0].xyz)
@@ -777,8 +783,6 @@ void GL4Renderer::RetireScene() {
 
 void GL4Renderer::DestroySceneResources() {
     scene_display_backdrop.Destroy();
-    scene_image_compositor.Destroy();
-    scene_ao_debug_shader.Destroy();
     for (auto& image : scene_view_images) image.second.Destroy();
     scene_view_images.clear();
     scene_view_history.clear();
@@ -808,18 +812,12 @@ void GL4Renderer::DestroySceneResources() {
     if (scene_fog_field_texture) glDeleteTextures(1,&scene_fog_field_texture);
     scene_fog_field_texture = 0;
     scene_fog_field_width = scene_fog_field_height = 0;
-    for (auto& program : scene_fog_field_programs) program.shader.Destroy();
-    scene_fog_tile_program.Destroy();
     if (scene_fog_tile_buffer) glDeleteBuffers(1,&scene_fog_tile_buffer);
     scene_fog_tile_buffer=0; scene_fog_tile_capacity=0;
     scene_fog_tile_words=scene_fog_tile_max_stride=0;
     scene_view_fog = {}; scene_view_fog_volumes.clear();
     for (auto& depth : scene_depth_snapshots) depth.second.Destroy();
     scene_depth_snapshots.clear();
-    if (scene_volume_sampler) glDeleteSamplers(1,&scene_volume_sampler);
-    scene_volume_sampler = 0;
-    scene_volume_composite.Destroy();
-    scene_volume_rectangle = -1;
     if (scene_light_buffer) glDeleteBuffers(1,&scene_light_buffer);
     if (scene_influence_buffer) glDeleteBuffers(1,&scene_influence_buffer);
     if (scene_light_texture) glDeleteTextures(1,&scene_light_texture);
@@ -847,7 +845,19 @@ void GL4Renderer::DestroySceneResources() {
     scene_frame_owner.reset();
     scene_draw_record_bytes = 0;
     scene_asset_lifetime = 0;
+}
+void GL4Renderer::DestroyScenePrograms() {
+    // Programs and their uniform locations belong to the GL context, never
+    // to an individual level, save, image target or published scene.
+    scene_sample_resolve_verified = false;
     for (auto& program : scene_programs) program.shader.Destroy();
+    for (auto& program : scene_fog_field_programs) program.shader.Destroy();
+    scene_fog_tile_program.Destroy();
+    scene_volume_composite.Destroy(); scene_volume_rectangle = -1;
+    if (scene_volume_sampler) glDeleteSamplers(1,&scene_volume_sampler);
+    scene_volume_sampler = 0;
+    scene_image_compositor.Destroy();
+    scene_ao_debug_shader.Destroy();
 }
 
 void GL4Renderer::BindSceneImage(const d3scene::ImageAsset& image,int unit,bool wrap,bool baked,d3scene::TextureFilter sampling) {
@@ -1403,6 +1413,7 @@ void GL4Renderer::ReleaseSceneMesh(SceneMeshGpu& gpu) {
     scene_geometry_allocator.release(gpu.vertices);
     gpu = {};
 }
+struct GL4Renderer::SceneVertex { d3scene::Vec3 position; float u, v, lu, lv, alpha; d3scene::Vec3 normal, color; d3scene::Vec2 raster_offset; uint32_t polygon; };
 void GL4Renderer::UploadSceneMesh(SceneMeshGpu& gpu, d3scene::AssetId id, const d3scene::MeshGeometry& geometry,const d3scene::ModelPart* model) {
     if (gpu.id == id) return;
     ReleaseSceneMesh(gpu);
@@ -1440,6 +1451,19 @@ void GL4Renderer::UploadSceneMesh(SceneMeshGpu& gpu, d3scene::AssetId id, const 
             glBindBuffer(GL_COPY_WRITE_BUFFER,0);
         }
     }
+    UploadSceneVertices(gpu,id,vertices);
+}
+void GL4Renderer::UploadTerrainBatch(SceneMeshGpu& gpu,d3scene::AssetId id,const d3scene::TerrainBatch& batch) {
+    if (gpu.id == id) return;
+    ReleaseSceneMesh(gpu);
+    std::vector<SceneVertex> vertices;
+    vertices.reserve(batch.vertices.size());
+    for (const auto& v : batch.vertices) {
+        vertices.push_back({v.position,v.uv.x,v.uv.y,v.baked_uv.x,v.baked_uv.y,1,v.normal,{1,1,1},{},uint32_t(vertices.size()/3)});
+    }
+    UploadSceneVertices(gpu,id,vertices);
+}
+void GL4Renderer::UploadSceneVertices(SceneMeshGpu& gpu,d3scene::AssetId id,const std::vector<SceneVertex>& vertices) {
     if (!vertices.empty()) {
         gpu.vertices = scene_geometry_allocator.allocate(uint32_t(vertices.size()));
         if (scene_geometry_pages.size() <= gpu.vertices.page) scene_geometry_pages.resize(gpu.vertices.page+1);
@@ -1575,6 +1599,180 @@ void GL4Renderer::EnsureSceneLifetime(const d3scene::Presentation& presentation)
         scene_asset_lifetime = presentation.data().scene_lifetime;
     }
 }
+GL4Renderer::SceneProgram& GL4Renderer::SceneRasterProgram(size_t fog_mode,bool uniform_lights,bool unlit_pass,bool layer_interface,bool diffuse_pass) {
+    const size_t index = (uniform_lights ? 12 : 0)+fog_mode*4+(unlit_pass ? 1 : 0)+(layer_interface ? 2 : 0)+(diffuse_pass ? 24 : 0);
+    auto& program = scene_programs[index];
+    if (program.shader.Handle()) return program;
+    const bool inline_lights = SceneInlineLightsEnabled();
+    auto& scene_shader = program.shader;
+    auto& scene_uniforms = program.uniforms;
+    PERF_MARKER_SCOPE("Scene.FirstUse.Program");
+    if (AutomatedCaptureFrameIndex() >= 0) {
+        GLint varying = 0, vertex = 0, fragment = 0;
+        glGetIntegerv(GL_MAX_VARYING_COMPONENTS,&varying);
+        glGetIntegerv(GL_MAX_VERTEX_OUTPUT_COMPONENTS,&vertex);
+        glGetIntegerv(GL_MAX_FRAGMENT_INPUT_COMPONENTS,&fragment);
+        AutomatedCaptureLog("scene shader device=%s varying_components=%d vertex_outputs=%d fragment_inputs=%d",
+            reinterpret_cast<const char*>(glGetString(GL_RENDERER)),varying,vertex,fragment);
+    }
+    auto fragment = SceneFragmentShader;
+    fragment.insert(fragment.find('\n')+1,"#define SCENE_FOG_SLICES "+std::to_string(SceneFogFieldSlices)+".0\n");
+    if(FindArg("-scene-fog-arithmetic-reference")) {
+        const auto replace=[&](const std::string& from,const std::string& to) {
+            const auto at=fragment.find(from);
+            if(at==std::string::npos) Error("Fog arithmetic probe source mismatch");
+            fragment.replace(at,from.size(),to);
+        };
+        replace("float slices = SCENE_FOG_SLICES;","float slices = float(textureSize(scene_fog_field,0).z-1);");
+        replace("float visible=min(column,1.0);","float visible=column/max(1.0,column);");
+    }
+    fragment.insert(fragment.find('\n')+1,std::string("#define SCENE_DIFFUSE_PASS ")+(diffuse_pass ? "1\n" : "0\n"));
+    fragment.insert(fragment.find('\n')+1,std::string("#define SCENE_UNLIT_PASS ")+(unlit_pass ? "1\n" : "0\n"));
+    fragment.insert(fragment.find('\n')+1,std::string("#define SCENE_EARLY_SOFT_ALPHA ")+
+        (FindArg("-scene-soft-alpha-late-reference") ? "0\n" : "1\n"));
+    if (layer_interface) fragment.insert(fragment.find("void main()"),ParticleEdgeShader);
+    fragment.insert(fragment.find('\n')+1,std::string("#define SCENE_PARTICLE_LAYER ")+(layer_interface ? "1\n" : "0\n"));
+    fragment.insert(fragment.find('\n')+1,"#define SCENE_FOG_MODE "+std::to_string(fog_mode)+"\n");
+    auto vertex = SceneVertexShader;
+    if(inline_lights) {
+        vertex.insert(vertex.find('\n')+1,"#define SCENE_INLINE_LIGHTS 1\n");
+        fragment.insert(fragment.find('\n')+1,"#define SCENE_INLINE_LIGHTS 1\n");
+    }
+    if (uniform_lights) {
+        const std::string definitions = "#define SCENE_UNIFORM_LIGHT_STORAGE 1\n#define SCENE_UNIFORM_LIGHT_RECORDS "+
+            std::to_string(SceneUniformLightCapacity*4)+"\n";
+        vertex.insert(vertex.find('\n')+1,definitions);
+        fragment.insert(fragment.find('\n')+1,definitions);
+    }
+    if (unlit_pass) vertex.insert(vertex.find('\n')+1,"#define SCENE_UNLIT_PASS 1\n");
+    scene_shader.AttachSource(vertex.c_str(), fragment.c_str());
+    if (uniform_lights) {
+        const auto block=glGetUniformBlockIndex(scene_shader.Handle(),"SceneLightBlock");
+        if (block!=GL_INVALID_INDEX) glUniformBlockBinding(scene_shader.Handle(),block,9);
+    }
+    // Resolve the shader interface at link time, never by string in a view.
+    scene_uniforms.colortexture = scene_shader.FindUniform("colortexture");
+    scene_uniforms.planar_texture = scene_shader.FindUniform("planar_texture");
+    scene_uniforms.lightmaptexture = scene_shader.FindUniform("lightmaptexture");
+    scene_uniforms.scene_lights = scene_shader.FindUniform("scene_lights");
+    scene_uniforms.scene_influences = scene_shader.FindUniform("scene_influences");
+    scene_uniforms.instance_uvs = scene_shader.FindUniform("instance_uvs");
+    scene_uniforms.instance_positions = scene_shader.FindUniform("instance_positions");
+    scene_uniforms.scene_reflections = scene_shader.FindUniform("scene_reflections");
+    scene_uniforms.specular_texture = scene_shader.FindUniform("specular_texture");
+    scene_uniforms.scene_fog = scene_shader.FindUniform("scene_fog");
+    scene_uniforms.fog_field_range = scene_shader.FindUniform("fog_field_range");
+    scene_uniforms.fog_field_color = scene_shader.FindUniform("fog_field_color");
+    scene_uniforms.fog_debug = scene_shader.FindUniform("fog_debug");
+    scene_uniforms.surface_prepass = scene_shader.FindUniform("surface_prepass");
+    scene_uniforms.scene_occlusion_enabled = scene_shader.FindUniform("scene_occlusion_enabled");
+    scene_uniforms.scene_occlusion = scene_shader.FindUniform("scene_occlusion");
+    scene_uniforms.scene_occlusion_intensity = scene_shader.FindUniform("scene_occlusion_intensity");
+    scene_uniforms.scene_highlight_suppression = scene_shader.FindUniform("scene_highlight_suppression");
+    scene_uniforms.scene_highlight_gamma = scene_shader.FindUniform("scene_highlight_gamma");
+    scene_uniforms.scene_highlight_threshold = scene_shader.FindUniform("scene_highlight_threshold");
+    scene_uniforms.opaque_depth = scene_shader.FindUniform("opaque_depth");
+    scene_uniforms.depth_snapshot_origin = scene_shader.FindUniform("depth_snapshot_origin");
+    scene_uniforms.fragment_mapping = scene_shader.FindUniform("fragment_mapping");
+    scene_uniforms.volume_mapping = scene_shader.FindUniform("volume_mapping");
+    scene_uniforms.volume_edge_only = scene_shader.FindUniform("volume_edge_only");
+    scene_uniforms.planar_projection = scene_shader.FindUniform("planar_projection");
+    glUniformBlockBinding(scene_shader.Handle(),glGetUniformBlockIndex(scene_shader.Handle(),"SceneDrawBlock"),7);
+    glUniformBlockBinding(scene_shader.Handle(),glGetUniformBlockIndex(scene_shader.Handle(),"SceneViewBlock"),8);
+    scene_shader.Use();
+    glUniform1i(scene_uniforms.colortexture,0);
+    glUniform1i(scene_uniforms.planar_texture,10);
+    glUniform1i(scene_uniforms.lightmaptexture,1);
+    glUniform1i(scene_uniforms.scene_lights,2);
+    glUniform1i(scene_uniforms.scene_influences,3);
+    glUniform1i(scene_uniforms.instance_uvs,4);
+    glUniform1i(scene_uniforms.instance_positions,5);
+    glUniform1i(scene_uniforms.scene_reflections,9);
+    glUniform1i(scene_uniforms.specular_texture,8);
+    glUniform1i(scene_uniforms.scene_fog,6);
+    glUniform1i(scene_shader.FindUniform("scene_fog_field"),12);
+    glUniform1i(scene_shader.FindUniform("scene_fog_nodes"),13);
+    glUniform1i(scene_uniforms.scene_occlusion,11);
+    glUniform1i(scene_uniforms.opaque_depth,7);
+    return program;
+}
+
+GL4Renderer::FogFieldProgram& GL4Renderer::FogProgram(bool scalar_field,bool half_field,int event_mode) {
+    const size_t format=(scalar_field ? 2 : 0)+(half_field ? 1 : 0);
+    auto& target = scene_fog_field_programs[format+4*event_mode];
+    auto& scene_fog_field_shader = target.shader;
+    if (scene_fog_field_shader.Handle()) return target;
+    PERF_MARKER_SCOPE("Scene.FirstUse.FogProgram");
+    const int field_rows = SceneFogGroupRows();
+    std::string source = SceneLightingShader;
+    source.replace(0,source.find('\n'),"#version 430 core");
+    source += "\nuniform samplerBuffer scene_fog;\n";
+    source += "\nuniform samplerBuffer scene_fog_nodes;\n";
+    source += FogFieldDefinitions();
+    source += SceneFogIntersectionShader;
+    source += "\n#define SCENE_FOG_SLICES "+std::to_string(SceneFogFieldSlices)+"\n";
+    if (event_mode == 1) source += "\n#define SCENE_FOG_COMPACT 1\n#define SCENE_FOG_EVENT_CAPACITY "+
+        std::to_string(FindArg("-scene-fog-compact-single-probe") ? 1 : 8)+"\n";
+    if (event_mode == 2) source += "\n#define SCENE_FOG_OVERFLOW_REPAIR 1\n";
+    source += "\n#define SCENE_FOG_LANES "+std::to_string(SceneFogFieldColumns*field_rows)+"\n";
+    source += "\n#define SCENE_FOG_GROUP_X "+std::to_string(SceneFogFieldColumns)+"\n";
+    source += "\n#define SCENE_FOG_GROUP_Y "+std::to_string(field_rows)+"\n";
+    source += scalar_field ? "\n#define SCENE_FOG_SCALAR_FIELD 1\n" : "\n#define SCENE_FOG_SCALAR_FIELD 0\n";
+    source += "\n#define SCENE_FOG_FIELD_FORMAT ";
+    source += scalar_field ? (half_field ? "r16f\n" : "r32f\n") : (half_field ? "rgba16f\n" : "rgba32f\n");
+    source += SceneFogFieldComputeShader;
+    scene_fog_field_shader.AttachComputeSource(source.c_str());
+    glUniformBlockBinding(scene_fog_field_shader.Handle(),glGetUniformBlockIndex(scene_fog_field_shader.Handle(),"SceneViewBlock"),8);
+    scene_fog_field_shader.Use();
+    glUniform1i(scene_fog_field_shader.FindUniform("scene_fog"),6);
+    glUniform1i(scene_fog_field_shader.FindUniform("scene_fog_nodes"),13);
+    glUniform1i(scene_fog_field_shader.FindUniform("scene_influences"),3);
+    target.range = scene_fog_field_shader.FindUniform("fog_field_range");
+    target.overflow_offset = scene_fog_field_shader.FindUniform("fog_overflow_offset");
+    return target;
+}
+void GL4Renderer::PrepareFogTileProgram() {
+    if (!scene_fog_tile_program.Handle()) {
+        std::string source=SceneLightingShader;
+        source.replace(0,source.find('\n'),"#version 430 core");
+        source+="\nuniform samplerBuffer scene_fog_nodes;\n";
+        source+=FogFieldDefinitions();
+        source+=SceneFogTileComputeShader;
+        scene_fog_tile_program.AttachComputeSource(source.c_str());
+        glUniformBlockBinding(scene_fog_tile_program.Handle(),glGetUniformBlockIndex(scene_fog_tile_program.Handle(),"SceneViewBlock"),8);
+        scene_fog_tile_program.Use();
+        glUniform1i(scene_fog_tile_program.FindUniform("scene_influences"),3);
+        glUniform1i(scene_fog_tile_program.FindUniform("scene_fog_nodes"),13);
+    }
+}
+void GL4Renderer::PrepareLevelPrograms(bool has_fog) {
+    // Link the regular world / cockpit / HUD families while the level loads.
+    // Don't multiply this by every diagnostic, high-emitter or AA permutation;
+    // uncommon combinations still resolve through the same cache on first use.
+    auto* previous = ShaderProgram::Current();
+    const auto prepare = [&](size_t fog_mode) {
+        SceneRasterProgram(fog_mode,true,false,false);
+        SceneRasterProgram(fog_mode,true,false,false,true);
+        SceneRasterProgram(fog_mode,true,true,false);
+        if (SupersamplingFactor() > 1) SceneRasterProgram(fog_mode,true,true,true);
+    };
+    prepare(0);
+    if (has_fog) {
+        const bool field = SceneFogFieldEnabled(d3scene::Camera{});
+        prepare(field ? 2 : 1);
+        if (field) {
+            // Single-color fog in half storage is the usual field. The view
+            // still chooses the precision it actually needs; never downshift
+            // a dense field just because a cheaper program is already linked.
+            const bool compact = !FindArg("-scene-fog-full-bins-reference");
+            const bool half = !FindArg("-scene-fog-full-precision");
+            FogProgram(true,half,compact ? 1 : 0);
+            if (compact) FogProgram(true,half,2);
+            PrepareFogTileProgram();
+        }
+    }
+    if (previous) previous->Use(); else ShaderProgram::ClearBinding();
+}
 d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedView& prepared,const SceneRasterTarget& target) {
     PERF_MARKER_SCOPE("Scene.ExecuteView");
     const auto& presentation = prepared.frame();
@@ -1616,7 +1814,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     // Driver error polling is diagnostic work, not part of each view's normal
     // submission contract. Keep scene-data validation unconditional; enable
     // these stage-local GL checks explicitly in Release qualification runs.
-#ifndef NDEBUG
+#if !defined(RELEASE) && !defined(NDEBUG)
     constexpr bool audit_scene_gl = true;
 #else
     static const bool audit_scene_gl = FindArg("-scene-gl-audit") != 0;
@@ -1657,12 +1855,11 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     GLint inherited_viewport[4]; glGetIntegerv(GL_VIEWPORT,inherited_viewport);
     glDisable(GL_SCISSOR_TEST);
     check_scene_error("font flush");
-    if (!scene_sample_resolve_verified) {
+    if (audit_scene_gl && !scene_sample_resolve_verified) {
+        PERF_MARKER_SCOPE("Scene.FirstUse.VerifyResolve");
         GL_VerifySceneSampleResolve();
-        if (audit_scene_gl) {
-            GL_VerifyColorReadback();
-            AutomatedCaptureLog("scene readback verified: owned image, preserved targets/read mode/PBO/packing");
-        }
+        GL_VerifyColorReadback();
+        AutomatedCaptureLog("scene readback verified: owned image, preserved targets/read mode/PBO/packing");
         scene_sample_resolve_verified = true;
         check_scene_error("sample resolve self-test");
     }
@@ -1675,7 +1872,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     PrepareSceneViewTables(prepared);
     check_scene_error("frame upload");
     const bool field_fog = scene_view_fog.count && SceneFogFieldEnabled(visibility.camera);
-    const bool inline_lights=!(AutomatedCaptureFrameIndex()>=0 && FindArg("-scene-indirect-light-indices-reference"));
+    const bool inline_lights = SceneInlineLightsEnabled();
     const size_t fog_mode = scene_view_fog.count == 0 ? 0 : (field_fog ? 2 : 1);
     const bool uniform_lights = presentation.data().lights.size() <= SceneUniformLightCapacity &&
         !(AutomatedCaptureFrameIndex() >= 0 && (FindArg("-scene-texture-lights-reference") ||
@@ -1693,112 +1890,15 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
     const bool specialize_diffuse = std::any_of(passes.begin(),passes.end(),[](const d3scene::ViewPass& pass) {
         return !pass.specular;
     });
-    const auto initialize_program = [&](SceneProgram& program,bool unlit_pass,bool layer_interface,bool diffuse_pass = false) {
-    auto& scene_shader = program.shader;
-    auto& scene_uniforms = program.uniforms;
-    if (!scene_shader.Handle()) {
-        if (AutomatedCaptureFrameIndex() >= 0) {
-            GLint varying = 0, vertex = 0, fragment = 0;
-            glGetIntegerv(GL_MAX_VARYING_COMPONENTS,&varying);
-            glGetIntegerv(GL_MAX_VERTEX_OUTPUT_COMPONENTS,&vertex);
-            glGetIntegerv(GL_MAX_FRAGMENT_INPUT_COMPONENTS,&fragment);
-            AutomatedCaptureLog("scene shader device=%s varying_components=%d vertex_outputs=%d fragment_inputs=%d",
-                reinterpret_cast<const char*>(glGetString(GL_RENDERER)),varying,vertex,fragment);
-        }
-        auto fragment = SceneFragmentShader;
-        fragment.insert(fragment.find('\n')+1,"#define SCENE_FOG_SLICES "+std::to_string(SceneFogFieldSlices)+".0\n");
-        if(AutomatedCaptureFrameIndex()>=0 && FindArg("-scene-fog-arithmetic-reference")) {
-            const auto replace=[&](const std::string& from,const std::string& to) {
-                const auto at=fragment.find(from);
-                if(at==std::string::npos) Error("Fog arithmetic probe source mismatch");
-                fragment.replace(at,from.size(),to);
-            };
-            replace("float slices = SCENE_FOG_SLICES;","float slices = float(textureSize(scene_fog_field,0).z-1);");
-            replace("float visible=min(column,1.0);","float visible=column/max(1.0,column);");
-        }
-        fragment.insert(fragment.find('\n')+1,std::string("#define SCENE_DIFFUSE_PASS ")+(diffuse_pass ? "1\n" : "0\n"));
-        fragment.insert(fragment.find('\n')+1,std::string("#define SCENE_UNLIT_PASS ")+(unlit_pass ? "1\n" : "0\n"));
-        fragment.insert(fragment.find('\n')+1,std::string("#define SCENE_EARLY_SOFT_ALPHA ")+
-            (AutomatedCaptureFrameIndex() >= 0 && FindArg("-scene-soft-alpha-late-reference") ? "0\n" : "1\n"));
-        if (layer_interface) fragment.insert(fragment.find("void main()"),ParticleEdgeShader);
-        fragment.insert(fragment.find('\n')+1,std::string("#define SCENE_PARTICLE_LAYER ")+(layer_interface ? "1\n" : "0\n"));
-        fragment.insert(fragment.find('\n')+1,"#define SCENE_FOG_MODE "+std::to_string(fog_mode)+"\n");
-        auto vertex = SceneVertexShader;
-        if(inline_lights) {
-            vertex.insert(vertex.find('\n')+1,"#define SCENE_INLINE_LIGHTS 1\n");
-            fragment.insert(fragment.find('\n')+1,"#define SCENE_INLINE_LIGHTS 1\n");
-        }
-        if (uniform_lights) {
-            const std::string definitions = "#define SCENE_UNIFORM_LIGHT_STORAGE 1\n#define SCENE_UNIFORM_LIGHT_RECORDS "+
-                std::to_string(SceneUniformLightCapacity*4)+"\n";
-            vertex.insert(vertex.find('\n')+1,definitions);
-            fragment.insert(fragment.find('\n')+1,definitions);
-        }
-        if (unlit_pass) vertex.insert(vertex.find('\n')+1,"#define SCENE_UNLIT_PASS 1\n");
-        scene_shader.AttachSource(vertex.c_str(), fragment.c_str());
-        if (uniform_lights) {
-            const auto block=glGetUniformBlockIndex(scene_shader.Handle(),"SceneLightBlock");
-            if (block!=GL_INVALID_INDEX) glUniformBlockBinding(scene_shader.Handle(),block,9);
-        }
-        // Resolve the shader interface at link time, never by string in a view.
-        scene_uniforms.colortexture = scene_shader.FindUniform("colortexture");
-        scene_uniforms.planar_texture = scene_shader.FindUniform("planar_texture");
-        scene_uniforms.lightmaptexture = scene_shader.FindUniform("lightmaptexture");
-        scene_uniforms.scene_lights = scene_shader.FindUniform("scene_lights");
-        scene_uniforms.scene_influences = scene_shader.FindUniform("scene_influences");
-        scene_uniforms.instance_uvs = scene_shader.FindUniform("instance_uvs");
-        scene_uniforms.instance_positions = scene_shader.FindUniform("instance_positions");
-        scene_uniforms.scene_reflections = scene_shader.FindUniform("scene_reflections");
-        scene_uniforms.specular_texture = scene_shader.FindUniform("specular_texture");
-        scene_uniforms.scene_fog = scene_shader.FindUniform("scene_fog");
-        scene_uniforms.fog_field_range = scene_shader.FindUniform("fog_field_range");
-        scene_uniforms.fog_field_color = scene_shader.FindUniform("fog_field_color");
-        scene_uniforms.fog_debug = scene_shader.FindUniform("fog_debug");
-        scene_uniforms.surface_prepass = scene_shader.FindUniform("surface_prepass");
-        scene_uniforms.scene_occlusion_enabled = scene_shader.FindUniform("scene_occlusion_enabled");
-        scene_uniforms.scene_occlusion = scene_shader.FindUniform("scene_occlusion");
-        scene_uniforms.scene_occlusion_intensity = scene_shader.FindUniform("scene_occlusion_intensity");
-        scene_uniforms.scene_highlight_suppression = scene_shader.FindUniform("scene_highlight_suppression");
-        scene_uniforms.scene_highlight_gamma = scene_shader.FindUniform("scene_highlight_gamma");
-        scene_uniforms.scene_highlight_threshold = scene_shader.FindUniform("scene_highlight_threshold");
-        scene_uniforms.opaque_depth = scene_shader.FindUniform("opaque_depth");
-        scene_uniforms.depth_snapshot_origin = scene_shader.FindUniform("depth_snapshot_origin");
-        scene_uniforms.fragment_mapping = scene_shader.FindUniform("fragment_mapping");
-        scene_uniforms.volume_mapping = scene_shader.FindUniform("volume_mapping");
-        scene_uniforms.volume_edge_only = scene_shader.FindUniform("volume_edge_only");
-        scene_uniforms.planar_projection = scene_shader.FindUniform("planar_projection");
-        glUniformBlockBinding(scene_shader.Handle(),glGetUniformBlockIndex(scene_shader.Handle(),"SceneDrawBlock"),7);
-        glUniformBlockBinding(scene_shader.Handle(),glGetUniformBlockIndex(scene_shader.Handle(),"SceneViewBlock"),8);
-        scene_shader.Use();
-        glUniform1i(scene_uniforms.colortexture,0);
-        glUniform1i(scene_uniforms.planar_texture,10);
-        glUniform1i(scene_uniforms.lightmaptexture,1);
-        glUniform1i(scene_uniforms.scene_lights,2);
-        glUniform1i(scene_uniforms.scene_influences,3);
-        glUniform1i(scene_uniforms.instance_uvs,4);
-        glUniform1i(scene_uniforms.instance_positions,5);
-        glUniform1i(scene_uniforms.scene_reflections,9);
-        glUniform1i(scene_uniforms.specular_texture,8);
-        glUniform1i(scene_uniforms.scene_fog,6);
-        glUniform1i(scene_shader.FindUniform("scene_fog_field"),12);
-        glUniform1i(scene_shader.FindUniform("scene_fog_nodes"),13);
-        glUniform1i(scene_uniforms.scene_occlusion,11);
-        glUniform1i(scene_uniforms.opaque_depth,7);
-    }
-    };
-    const size_t program_base = (uniform_lights ? 12 : 0)+fog_mode*4;
     const bool primary_diffuse = specialize_diffuse && std::none_of(passes.begin(),passes.end(),[](const d3scene::ViewPass& pass) {
         return pass.specular && pass.begin != pass.end && pass.kind != d3scene::ViewPassKind::DepthSurface &&
             pass.kind != d3scene::ViewPassKind::UnlitWorld && pass.kind != d3scene::ViewPassKind::SoftVolumes;
     });
-    auto& view_program = scene_programs[program_base+(primary_diffuse ? 24 : 0)+(general_layer ? 2 : 0)];
-    auto& volume_program = scene_programs[program_base+3];
-    auto& unlit_program = scene_programs[program_base+1];
-    auto& diffuse_program = scene_programs[program_base+24+(general_layer ? 2 : 0)];
-    initialize_program(view_program,false,general_layer,primary_diffuse);
-    if (specialize_volumes) initialize_program(volume_program,true,true);
-    if (specialize_unlit) initialize_program(unlit_program,true,false);
-    if (specialize_diffuse && !primary_diffuse) initialize_program(diffuse_program,false,general_layer,true);
+    auto& view_program = SceneRasterProgram(fog_mode,uniform_lights,false,general_layer,primary_diffuse);
+    auto& volume_program = specialize_volumes ? SceneRasterProgram(fog_mode,uniform_lights,true,true) : view_program;
+    auto& unlit_program = specialize_unlit ? SceneRasterProgram(fog_mode,uniform_lights,true,false) : view_program;
+    auto& diffuse_program = specialize_diffuse && !primary_diffuse ?
+        SceneRasterProgram(fog_mode,uniform_lights,false,general_layer,true) : view_program;
     auto& scene_shader = view_program.shader;
     auto& scene_uniforms = view_program.uniforms;
 
@@ -2059,44 +2159,11 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
             d3scene::fogFieldFitsHalf(storage_bound,scene_view_fog_volumes.size());
         const GLenum field_format = scalar_field ? (half_field ? GL_R16F : GL_R32F) : (half_field ? GL_RGBA16F : GL_RGBA32F);
         const bool compact_events = !(AutomatedCaptureFrameIndex() >= 0 && FindArg("-scene-fog-full-bins-reference"));
-        const size_t format_index=(scalar_field ? 2 : 0)+(half_field ? 1 : 0);
-        auto& program = scene_fog_field_programs[format_index+(compact_events ? 4 : 0)];
-        auto& repair_program = scene_fog_field_programs[format_index+8];
+        auto& program = FogProgram(scalar_field,half_field,compact_events ? 1 : 0);
+        auto& repair_program = compact_events ? FogProgram(scalar_field,half_field,2) : program;
         auto& scene_fog_field_shader = program.shader;
         auto& scene_fog_field_range = program.range;
-        const int field_rows = AutomatedCaptureFrameIndex() >= 0 && FindArg("-scene-fog-row-group-reference") ? 1 : SceneFogFieldRows;
-        const auto initialize_field_program = [&](FogFieldProgram& target,int event_mode) {
-        auto& scene_fog_field_shader = target.shader;
-        if (!scene_fog_field_shader.Handle()) {
-            std::string source = SceneLightingShader;
-            source.replace(0,source.find('\n'),"#version 430 core");
-            source += "\nuniform samplerBuffer scene_fog;\n";
-            source += "\nuniform samplerBuffer scene_fog_nodes;\n";
-            source += FogFieldDefinitions();
-            source += SceneFogIntersectionShader;
-            source += "\n#define SCENE_FOG_SLICES "+std::to_string(SceneFogFieldSlices)+"\n";
-            if (event_mode == 1) source += "\n#define SCENE_FOG_COMPACT 1\n#define SCENE_FOG_EVENT_CAPACITY "+
-                std::to_string(FindArg("-scene-fog-compact-single-probe") ? 1 : 8)+"\n";
-            if (event_mode == 2) source += "\n#define SCENE_FOG_OVERFLOW_REPAIR 1\n";
-            source += "\n#define SCENE_FOG_LANES "+std::to_string(SceneFogFieldColumns*field_rows)+"\n";
-            source += "\n#define SCENE_FOG_GROUP_X "+std::to_string(SceneFogFieldColumns)+"\n";
-            source += "\n#define SCENE_FOG_GROUP_Y "+std::to_string(field_rows)+"\n";
-            source += scalar_field ? "\n#define SCENE_FOG_SCALAR_FIELD 1\n" : "\n#define SCENE_FOG_SCALAR_FIELD 0\n";
-            source += "\n#define SCENE_FOG_FIELD_FORMAT ";
-            source += scalar_field ? (half_field ? "r16f\n" : "r32f\n") : (half_field ? "rgba16f\n" : "rgba32f\n");
-            source += SceneFogFieldComputeShader;
-            scene_fog_field_shader.AttachComputeSource(source.c_str());
-            glUniformBlockBinding(scene_fog_field_shader.Handle(),glGetUniformBlockIndex(scene_fog_field_shader.Handle(),"SceneViewBlock"),8);
-            scene_fog_field_shader.Use();
-            glUniform1i(scene_fog_field_shader.FindUniform("scene_fog"),6);
-            glUniform1i(scene_fog_field_shader.FindUniform("scene_fog_nodes"),13);
-            glUniform1i(scene_fog_field_shader.FindUniform("scene_influences"),3);
-            target.range = scene_fog_field_shader.FindUniform("fog_field_range");
-            target.overflow_offset = scene_fog_field_shader.FindUniform("fog_overflow_offset");
-        }
-        };
-        initialize_field_program(program,compact_events ? 1 : 0);
-        if (compact_events) initialize_field_program(repair_program,2);
+        const int field_rows = SceneFogGroupRows();
         const int width_arg = FindArg("-scene-fog-field-width");
         const char* width_text = width_arg ? GetArg(width_arg+1) : nullptr;
         if (width_arg && !width_text) Error("Fog field width requires a value");
@@ -2128,18 +2195,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
             glGenQueries(3,field_queries);
             glQueryCounter(field_queries[0],GL_TIMESTAMP);
         }
-        if (!scene_fog_tile_program.Handle()) {
-            std::string source=SceneLightingShader;
-            source.replace(0,source.find('\n'),"#version 430 core");
-            source+="\nuniform samplerBuffer scene_fog_nodes;\n";
-            source+=FogFieldDefinitions();
-            source+=SceneFogTileComputeShader;
-            scene_fog_tile_program.AttachComputeSource(source.c_str());
-            glUniformBlockBinding(scene_fog_tile_program.Handle(),glGetUniformBlockIndex(scene_fog_tile_program.Handle(),"SceneViewBlock"),8);
-            scene_fog_tile_program.Use();
-            glUniform1i(scene_fog_tile_program.FindUniform("scene_influences"),3);
-            glUniform1i(scene_fog_tile_program.FindUniform("scene_fog_nodes"),13);
-        }
+        PrepareFogTileProgram();
         if (!scene_fog_tile_buffer) glGenBuffers(1,&scene_fog_tile_buffer);
         GLint previous_tile_binding=0,previous_storage_binding=0;
         glGetIntegeri_v(GL_SHADER_STORAGE_BUFFER_BINDING,0,&previous_tile_binding);
@@ -2236,7 +2292,7 @@ d3scene::VisibilityReport GL4Renderer::ExecuteSceneView(const d3scene::PreparedV
             auto& batches = scene_terrain[item.terrain_patch];
             if (batches.size() <= item.terrain_batch) batches.resize(item.terrain_batch+1);
             mesh = &batches[item.terrain_batch];
-            UploadSceneMesh(*mesh,terrain.asset->id(),terrain.asset->patches()[item.terrain_patch].batches[item.terrain_batch].geometry);
+            UploadTerrainBatch(*mesh,terrain.asset->id(),terrain.asset->patches()[item.terrain_patch].batches[item.terrain_batch]);
             binding = &terrain.surface(item.terrain_patch,item.terrain_batch);
         } else if (item.model) {
             const auto& object = presentation.data().model_instances[item.model_instance_index];

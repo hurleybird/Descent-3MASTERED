@@ -898,6 +898,7 @@ void GL4Renderer::Close()
 	CHECK_ERROR(5);
 	glFinish();
 	DestroySceneResources();
+	DestroyScenePrograms();
 
 	blitshader.Destroy();
 	for(auto& program : image_reduction_programs) program.shader.Destroy();

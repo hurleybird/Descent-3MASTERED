@@ -783,6 +783,7 @@ void rend_ClearZBuffer ();
 void rend_ResetCache ();
 // End the world-resource lifetime without discarding the displayed UI/backdrop.
 void rend_RetireScene();
+void rend_PrepareLevelPrograms(bool has_fog);
 
 void rend_UpdateCommon(float* projection, float* modelview, int depth = 0);
 void rend_SetCommonDepth(int depth);

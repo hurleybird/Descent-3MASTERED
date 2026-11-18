@@ -85,15 +85,19 @@ bool roomMaterialInputsUnchanged() {
     const auto bitmap_revision = bm_MaterialRevision();
     const bool bitmap_metadata_current = bitmap_material_revision == bitmap_revision;
     const bool audit_bitmaps = FindArg("-scene-image-revision-audit") != 0;
-    bool bitmap_metadata_equal = true;
+    bool bitmap_metadata_equal = true, material_formats_equal = true;
     if (!bitmap_metadata_current || audit_bitmaps) for (int i = 0; i < MAX_BITMAPS; ++i) {
         const int format = GameBitmaps[i].used ? int(GameBitmaps[i].format)+1 : 0;
-        if (bitmap_formats[i] != format) { bitmap_metadata_equal = false; bitmap_formats[i] = format; }
+        if (bitmap_formats[i] != format) {
+            bitmap_metadata_equal = false;
+            if (SceneMaterialReadsBitmapFormat(i)) material_formats_equal = false;
+            bitmap_formats[i] = format;
+        }
     }
     if (bitmap_metadata_current && !bitmap_metadata_equal && audit_bitmaps)
         throw std::logic_error("Bitmap format/lifetime changed without producer invalidation");
     bitmap_material_revision = bitmap_revision;
-    same = same && bitmap_metadata_equal;
+    same = same && material_formats_equal;
     if (previous.size() != MAX_TEXTURES) previous.resize(MAX_TEXTURES);
     for (int i = 0; i < MAX_TEXTURES; ++i) {
         const auto& a = GameTextures[i]; auto& b = previous[i];
@@ -389,6 +393,7 @@ void logPreparedModels(const d3scene::Presentation& frame) {
     const auto& data = frame.data();
     if (!AutomatedCapturePending() && AutomatedCaptureFrameIndex() != 0) return;
     AutomatedCaptureLog("scene probe frame=%d time=%.9g",AutomatedCaptureFrameIndex(),data.simulation_time);
+    PERF_MARKER_SCOPE("Scene.Capture.Inventory");
     size_t room_surfaces = 0, model_surfaces = 0, terrain_surfaces = 0, retained_surfaces = 0;
     for (const auto& room : data.rooms) { room_surfaces += room.surfaces.size();
         if (room.surfaces.publishedFor(room.asset->id())) retained_surfaces += room.surfaces.size(); }
@@ -497,7 +502,7 @@ void resolveMaterial(d3scene::SurfaceBinding& surface, MaterialResolution& resol
     // Room 4444 textures historically carry specular masks, while model alpha
     // can be authored in that format. Keep the distinction at compilation.
     surface.texture_alpha = (texture.flags & TF_TMAP2) != 0 &&
-        (model || bm_format(surface.bitmap) != BITMAP_FORMAT_4444);
+        (model || SceneMaterialBitmapFormat(surface.bitmap) != BITMAP_FORMAT_4444);
     if (!model && Detail_settings.Specular_lighting) {
         int specular_texture = surface.texture;
         int specular_bitmap = -1;
@@ -507,7 +512,7 @@ void resolveMaterial(d3scene::SurfaceBinding& surface, MaterialResolution& resol
         if (specular_texture >= 0 && specular_texture < MAX_TEXTURES && GameTextures[specular_texture].used) {
             const auto& specular = GameTextures[specular_texture];
             if (specular_bitmap < 0) specular_bitmap = resolution.bitmap(specular_texture);
-            const bool opaque_mask = bm_format(specular_bitmap) == BITMAP_FORMAT_4444 && texture.alpha >= 1 &&
+            const bool opaque_mask = SceneMaterialBitmapFormat(specular_bitmap) == BITMAP_FORMAT_4444 && texture.alpha >= 1 &&
                 surface.blend == d3scene::BlendMode::Solid && surface.lightmap >= 0 && (surface.authored_flags & FF_LIGHTMAP);
             const bool authored_path = (authored.flags & TF_SPECULAR) && (surface.special >= 0 || exterior);
             const bool generated_path = !exterior && opaque_mask && (pair.valid ||
@@ -640,6 +645,7 @@ d3scene::PresentationRef PrepareGamePresentation(bool advance,const GameMainView
     }
     static uint64_t material_lifetime = 0;
     if (material_lifetime != data.scene_lifetime) {
+        ResetSceneMaterialBitmapReads();
         ResetSplitSpecularTexturePairCache();
         material_lifetime = data.scene_lifetime;
     }

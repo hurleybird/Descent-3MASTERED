@@ -20,7 +20,7 @@ int runTerrainTests() {
     const auto first = assets.publishTerrain(grid);
     check(first->patches().size() == 256);
     size_t triangles = 0;
-    for (const auto& patch : first->patches()) for (const auto& batch : patch.batches) triangles += batch.geometry.polygons.size();
+    for (const auto& patch : first->patches()) for (const auto& batch : patch.batches) triangles += batch.vertices.size()/3;
     check(triangles == 255*255*2);
     check(assets.publishTerrain(grid) == first);
     bool mapping_matches = true;
@@ -124,6 +124,14 @@ int runTerrainTests() {
     clipped.clip_planes.push_back({{1,0,0},-8}); clipped.cells[0].clip_plane = 1;
     auto clipped_vertices = terrainCellTriangles(clipped,0);
     check(clipped_vertices.size() == 9);
+    const auto clipped_asset = assets.publishTerrain(clipped);
+    const auto& baked = clipped_asset->patches().at(0).batches.at(0).vertices;
+    check(baked.size() == clipped_vertices.size());
+    for (size_t i=0;i<baked.size();++i) {
+        const auto& a=baked[i]; const auto& b=clipped_vertices[i];
+        check(a.position.x==b.position.x && a.position.z==b.position.z && a.normal.y==b.normal.y &&
+            a.uv.x==b.uv.x && a.uv.y==b.uv.y && a.baked_uv.x==b.baked_uv.x && a.baked_uv.y==b.baked_uv.y);
+    }
     bool kept_half = true;
     for (const auto& vertex : clipped_vertices) kept_half &= vertex.position.x >= 7.9949f &&
         std::abs(vertex.uv.x-vertex.position.x/128.f) < .000001f;

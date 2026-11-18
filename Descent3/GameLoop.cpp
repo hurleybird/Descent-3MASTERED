@@ -24,6 +24,7 @@
 #include <limits.h>
 #include <algorithm>
 #include <chrono>
+#include <mutex>
 #include <cmath>
 #include <vector>
 #include "gameloop.h"
@@ -284,21 +285,25 @@ static const char* GetEngineEnvironmentValue(const char* name, const char* legac
 
 void AutomatedCaptureLog(const char* format, ...)
 {
-	const char* path = GetEngineEnvironmentValue(ENGINE_ENV_CAPTURE_LOG,
-		ENGINE_LEGACY_ENV_CAPTURE_LOG);
-	if (!path || !path[0] || !format)
+	// Capture logging is configured by the process that launches the game.
+	// Reopening the same file for every object dominated the first-frame
+	// measurement on large saves. Preserve live/crash diagnostics by flushing
+	// each completed line; the CRT closes the stream at process exit.
+	static FILE* const file = []() -> FILE* {
+		const char* path = GetEngineEnvironmentValue(ENGINE_ENV_CAPTURE_LOG, ENGINE_LEGACY_ENV_CAPTURE_LOG);
+		return path && path[0] ? fopen(path, "ab") : nullptr;
+	}();
+	if (!file || !format)
 		return;
 
-	FILE* file = fopen(path, "ab");
-	if (!file)
-		return;
-
+	static std::mutex capture_log_mutex;
+	std::lock_guard<std::mutex> lock(capture_log_mutex);
 	va_list arguments;
 	va_start(arguments, format);
 	vfprintf(file, format, arguments);
 	va_end(arguments);
 	fputc('\n', file);
-	fclose(file);
+	fflush(file);
 }
 
 static bool AutomatedFramePerfEnabled()

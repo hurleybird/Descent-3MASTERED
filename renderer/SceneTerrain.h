@@ -42,9 +42,15 @@ struct TerrainGrid {
     std::vector<uint8_t> sky_visibility; // eight height bits per grid sample
 };
 bool operator==(const TerrainGrid&,const TerrainGrid&);
+struct TerrainVertex {
+    Vec3 position, normal;
+    Vec2 uv, baked_uv;
+};
 struct TerrainBatch {
     uint32_t material = 0;
-    MeshGeometry geometry;
+    // Already triangulated in cell order; no editable polygons or per-face
+    // draw ranges are consumed by terrain submission.
+    std::vector<TerrainVertex> vertices;
 };
 struct TerrainPatch {
     Bounds bounds;
@@ -61,10 +67,6 @@ private:
     AssetId id_;
     TerrainGrid grid_;
     std::vector<TerrainPatch> patches_;
-};
-struct TerrainVertex {
-    Vec3 position, normal;
-    Vec2 uv, baked_uv;
 };
 // One canonical cell expansion for visibility, lighting and GPU upload. Retains
 // the authored diagonal, 8-cell texture tiling and 128-cell lightmap quadrants.

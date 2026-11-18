@@ -556,7 +556,14 @@ void StartLevel()
 	//Set screen mode
 	SetScreenMode(SM_GAME);
 
-	//Init HUD and cockpit	
+	if (!Dedicated_server) {
+		bool has_fog = false;
+		for (int i = 0; i <= Highest_room_index && !has_fog; ++i)
+			has_fog = Rooms[i].used && (Rooms[i].flags & RF_FOG);
+		rend_PrepareLevelPrograms(has_fog && Detail_settings.Fog_enabled);
+	}
+
+	//Init HUD and cockpit
 	int ship_index;
 
 	if (Game_mode & GM_MULTI)

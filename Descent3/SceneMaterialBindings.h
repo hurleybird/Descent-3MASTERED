@@ -16,5 +16,8 @@ struct SplitSpecularTexturePair
 };
 
 bool SplitSpecularTexturePathEnabled();
+int SceneMaterialBitmapFormat(int bitmap);
+bool SceneMaterialReadsBitmapFormat(int bitmap);
+void ResetSceneMaterialBitmapReads();
 void ResetSplitSpecularTexturePairCache();
 SplitSpecularTexturePair FindSplitSpecularTexturePair(int tmap);

@@ -1210,6 +1210,10 @@ void rend_RetireScene()
 {
 	if (Renderer_initted) renderer_inst->RetireScene();
 }
+void rend_PrepareLevelPrograms(bool has_fog)
+{
+	if (Renderer_initted) renderer_inst->PrepareLevelPrograms(has_fog);
+}
 
 void rend_UpdateCommon(float* projection, float* modelview, int depth)
 {

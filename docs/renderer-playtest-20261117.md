@@ -92,3 +92,43 @@ both `-capture-heading` and `-capture-forward` at frames 4,8,12,16,20,24,32.
 In the fixed world rectangle [150,1250) × [68,468), mean absolute RGB-channel
 error fell from 7.02–12.26 to 0.30–0.41 (0–255). Inspected the crops and
 motion comparison; this is not sign-off on every mirror or the GPU corpus.
+
+### Gameplay hitches after loading
+
+Compared with the preceding playable checkpoint (`4f43bb57`), alternating
+before/after/after/before, loading each save directly in a fresh process at
+1280×720, native resolution, AA and post effects off. These are CPU frame
+markers in ordinary gameplay, not screenshot captures or GPU intervals.
+
+| Save and frame | Previous preview | Hitch fix |
+| --- | ---: | ---: |
+| 006 (mirror), first | 112–115 ms | 29.7 ms |
+| 007 (fog), first | 268–510 ms | 96–127 ms |
+| 007 (fog), second | 42–52 ms | 5.8–7.9 ms |
+
+Three gameplay costs were avoidable. Common shaders linked during the first
+live draw, and were discarded on every level change despite not depending on
+level assets. They now live with the GL context; common variants link during
+loading. Release gameplay also ran synchronous GL self-tests intended for
+development. Those remain available with `-scene-gl-audit`. Finally, the
+terrain compiler built a heap-backed polygon for each terrain triangle, even
+on indoor starts. It now emits triangles into contiguous material batches.
+On 007, creating one unrelated bitmap on frame two invalidated all static
+room materials; only changes to formats actually used in those decisions
+now invalidate them. The independent bitmap audit is still available.
+
+Time from marker initialization through the first mirror frame was
+1.56–1.66 s before and 1.58–1.66 s after. Moving shader linking into loading
+is not a claim that loading itself got faster. The capture-only inventory
+log also reopened the same file for each printed line; that fix is **not**
+included as a gain in the ordinary-play figures. The first fog frame still
+exceeds a 60 Hz frame budget by several times.
+
+Separate turning/forward captures measured steady frame-start intervals
+(main thread pinned, frames 400–2199, two runs per build and save). The
+99th percentile on 005 was 2.66–2.74 ms before, 2.82–2.93 ms after;
+on 007 it was 3.17–3.60 ms before, 3.01–3.08 ms after. No interval exceeded
+16.67 ms in those windows. These results do not establish a general
+steady-flight improvement. Outdoor terrain, moving 005, fog 007, in-process
+level restoration, and a mirror with SSAA2/MSAA4/AO/bloom each matched the
+previous preview pixel for pixel at the sampled frames.

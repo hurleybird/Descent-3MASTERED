@@ -78,8 +78,11 @@ void prepareTerrainPatches(TerrainState& terrain) {
         throw std::invalid_argument("Incomplete terrain materials");
     terrain.patches.resize(terrain.asset->patches().size());
 }
+static void expandTerrainCell(const TerrainGrid&,uint32_t,std::vector<TerrainVertex>&);
 TerrainAsset::TerrainAsset(AssetId id,const TerrainGrid& grid) : id_(id), grid_(grid) {
     constexpr uint32_t patch_size = 16;
+    std::vector<TerrainVertex> vertices;
+    vertices.reserve(12); // two triangles, each clipped to at most a quad
     for (uint32_t z = 0; z < grid.depth-1; z += patch_size) for (uint32_t x = 0; x < grid.width-1; x += patch_size) {
         TerrainPatch patch;
         patch.bounds.minimum = {x*grid.spacing,std::numeric_limits<float>::max(),z*grid.spacing};
@@ -91,24 +94,18 @@ TerrainAsset::TerrainAsset(AssetId id,const TerrainGrid& grid) : id_(id), grid_(
                 const uint32_t index = cz*(grid.width-1)+cx;
                 const auto& cell = grid.cells[index];
                 if (!cell.visible) continue;
-                const auto vertices = terrainCellTriangles(grid,index);
+                expandTerrainCell(grid,index,vertices);
                 if (vertices.empty()) continue;
                 auto found = batches.find(cell.material);
                 if (found == batches.end()) {
                     found = batches.emplace(cell.material,patch.batches.size()).first;
                     patch.batches.push_back({cell.material,{}});
                 }
-                auto& mesh = patch.batches[found->second].geometry;
-                for (size_t triangle = 0; triangle < vertices.size(); triangle += 3) {
-                    MeshPolygon polygon; polygon.normal = vertices[triangle].normal;
-                    for (size_t corner = 0; corner < 3; ++corner) {
-                        const auto& v = vertices[triangle+corner];
-                        polygon.corners.push_back({static_cast<uint32_t>(mesh.vertices.size()),v.uv.x,v.uv.y,v.baked_uv.x,v.baked_uv.y,255});
-                        mesh.vertices.push_back(v.position);
-                        patch.bounds.minimum.y = std::min(patch.bounds.minimum.y,v.position.y);
-                        patch.bounds.maximum.y = std::max(patch.bounds.maximum.y,v.position.y);
-                    }
-                    mesh.polygons.push_back(std::move(polygon));
+                auto& batch = patch.batches[found->second].vertices;
+                batch.insert(batch.end(),vertices.begin(),vertices.end());
+                for (const auto& v : vertices) {
+                    patch.bounds.minimum.y = std::min(patch.bounds.minimum.y,v.position.y);
+                    patch.bounds.maximum.y = std::max(patch.bounds.maximum.y,v.position.y);
                 }
             }
         if (!patch.batches.empty()) patches_.push_back(std::move(patch));
@@ -151,7 +148,8 @@ TerrainAssetRef SceneAssets::publishTerrain(const TerrainGrid& grid) {
     terrain_ = replacement; ++revision_;
     return replacement;
 }
-std::vector<TerrainVertex> terrainCellTriangles(const TerrainGrid& grid,uint32_t cell_index) {
+static void expandTerrainCell(const TerrainGrid& grid,uint32_t cell_index,std::vector<TerrainVertex>& triangles) {
+    triangles.clear();
     if (cell_index >= grid.cells.size() || grid.width < 2) throw std::out_of_range("Terrain cell");
     const auto& cell = grid.cells[cell_index];
     const uint32_t x = cell_index%(grid.width-1), z = cell_index/(grid.width-1);
@@ -181,15 +179,15 @@ std::vector<TerrainVertex> terrainCellTriangles(const TerrainGrid& grid,uint32_t
         n = {n.x/length,n.y/length,n.z/length};
         for (size_t corner = 0; corner < 3; ++corner) output[triangle+corner].normal = n;
     }
-    if (!cell.clip_plane) return {output.begin(),output.end()};
+    if (!cell.clip_plane) { triangles.assign(output.begin(),output.end()); return; }
     const auto& plane = grid.clip_planes.at(cell.clip_plane-1);
     const auto distance = [&](const TerrainVertex& v) {
         return double(v.position.x)*plane.normal.x+double(v.position.y)*plane.normal.y+double(v.position.z)*plane.normal.z+plane.constant+.005;
     };
     const auto mix = [](float a,float b,double t) { return static_cast<float>(a+(b-a)*t); };
-    std::vector<TerrainVertex> triangles;
     for (size_t triangle = 0; triangle < 6; triangle += 3) {
-        std::vector<TerrainVertex> clipped;
+        std::array<TerrainVertex,4> clipped;
+        size_t count = 0;
         auto previous = output[triangle+2]; double previous_distance = distance(previous);
         for (size_t corner = 0; corner < 3; ++corner) {
             const auto current = output[triangle+corner]; const double current_distance = distance(current);
@@ -200,15 +198,19 @@ std::vector<TerrainVertex> terrainCellTriangles(const TerrainGrid& grid,uint32_t
                 crossing.normal = current.normal;
                 crossing.uv = {mix(previous.uv.x,current.uv.x,t),mix(previous.uv.y,current.uv.y,t)};
                 crossing.baked_uv = {mix(previous.baked_uv.x,current.baked_uv.x,t),mix(previous.baked_uv.y,current.baked_uv.y,t)};
-                clipped.push_back(crossing);
+                clipped[count++] = crossing;
             }
-            if (current_distance >= 0) clipped.push_back(current);
+            if (current_distance >= 0) clipped[count++] = current;
             previous = current; previous_distance = current_distance;
         }
-        for (size_t corner = 1; corner+1 < clipped.size(); ++corner) {
+        for (size_t corner = 1; corner+1 < count; ++corner) {
             triangles.push_back(clipped[0]); triangles.push_back(clipped[corner]); triangles.push_back(clipped[corner+1]);
         }
     }
+}
+std::vector<TerrainVertex> terrainCellTriangles(const TerrainGrid& grid,uint32_t cell) {
+    std::vector<TerrainVertex> triangles;
+    expandTerrainCell(grid,cell,triangles);
     return triangles;
 }
 }

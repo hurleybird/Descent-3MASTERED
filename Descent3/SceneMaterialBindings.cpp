@@ -7,8 +7,20 @@
 #include "game.h"
 #include "terrain.h"
 #include "dedicated_server.h"
+#include <bitset>
 #include <cstring>
 #include <stdexcept>
+
+// Format affects alpha and the choice of a split specular pair. Track the
+// handles actually consulted, including failed pair decisions; an image-only
+// allocation elsewhere (e.g. in the HUD) is not a world material change.
+static std::bitset<MAX_BITMAPS> material_format_reads;
+int SceneMaterialBitmapFormat(int bitmap) {
+	if (bitmap >= 0 && bitmap < MAX_BITMAPS) material_format_reads.set(bitmap);
+	return bm_format(bitmap);
+}
+bool SceneMaterialReadsBitmapFormat(int bitmap) { return material_format_reads.test(bitmap); }
+void ResetSceneMaterialBitmapReads() { material_format_reads.reset(); }
 
 void PageInHighResolutionSky()
 {
@@ -145,7 +157,7 @@ static SplitSpecularTexturePair ComputeSplitSpecularTexturePair(int tmap)
 	int spec_bm = GetTextureBitmap(spec_tmap, 0);
 	if (base_bm < 0 || spec_bm < 0)
 		return pair;
-	if (bm_format(base_bm) != BITMAP_FORMAT_1555 || bm_format(spec_bm) != BITMAP_FORMAT_4444)
+	if (SceneMaterialBitmapFormat(base_bm) != BITMAP_FORMAT_1555 || SceneMaterialBitmapFormat(spec_bm) != BITMAP_FORMAT_4444)
 		return pair;
 
 	pair.base_tmap = base_tmap;
