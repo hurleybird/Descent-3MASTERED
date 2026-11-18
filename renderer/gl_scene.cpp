@@ -644,10 +644,14 @@ void main() {
             vec4 projected = planar_projection*vec4(world_position,1);
             vec2 uv = projected.xy/projected.w*.5+.5;
             vec3 reflected = texture(planar_texture,uv).rgb;
-            color.rgb = color.rgb*base.a+reflected*(1.0-base.a);
+            // Descent draws the lit mirror coating at the depth boundary
+            // and again with translucent walls. Compose both equal layers
+            // analytically; the reflected scene is still sampled only once.
+            float film_transmission = (1.0-base.a)*(1.0-base.a);
+            color.rgb = mix(color.rgb,reflected,film_transmission);
             // Only the physical film receives this camera's surface AO. The
             // reflected radiance is not illumination on the mirror polygon.
-            surface_radiance *= base.a;
+            surface_radiance *= 1.0-film_transmission;
         }
         color.a = 1.0;
     }

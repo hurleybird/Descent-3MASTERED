@@ -95,6 +95,7 @@ bool touchesBounds(const Light& light,const Bounds& b) {
     const float z = std::max(b.minimum.z-light.position.z,std::max(0.f,light.position.z-b.maximum.z));
     return x*x+y*y+z*z <= light.radius*light.radius;
 }
+enum class LightTarget { Receiver, Portal };
 class LightSurface {
     MeshView mesh_;
     const MeshPolygon& polygon_;
@@ -106,8 +107,11 @@ public:
     LightSurface(MeshView mesh,const MeshPolygon& polygon,const Transform& transform)
         : mesh_(mesh),polygon_(polygon),transform_(transform),
           first_(transformPoint(transform,mesh.positions[polygon.corners[0].vertex])) {}
-    bool touches(const Light& light) {
-        if (light.directional) {
+    bool touches(const Light& light, LightTarget target) {
+        // The ship's beam adds to baked light by cone and distance, not
+        // receiver normal. Another camera can see the face while the ship
+        // is behind it. A portal, however, is still a directed crossing.
+        if (light.directional && (target == LightTarget::Portal || !light.headlight)) {
             if (!have_normal_) { normal_ = transformDirection(transform_,polygon_.normal); have_normal_ = true; }
             if (normal_.x*(light.position.x-first_.x)+normal_.y*(light.position.y-first_.y)+
                 normal_.z*(light.position.z-first_.z) < 0) return false;
@@ -127,9 +131,6 @@ public:
         return touchesBounds(light,bounds_);
     }
 };
-bool touches(const Light& light,MeshView mesh,const MeshPolygon& polygon,const Transform& transform) {
-    return LightSurface(mesh,polygon,transform).touches(light);
-}
 }
 void appendSurfaceLightIndices(const FrameData& data,LightCandidateRange candidates,
     MeshView mesh,const MeshPolygon& polygon,const Transform& transform,std::vector<int32_t>& output) {
@@ -137,7 +138,7 @@ void appendSurfaceLightIndices(const FrameData& data,LightCandidateRange candida
     if (lights.empty()) return;
     LightSurface surface(mesh,polygon,transform);
     for (const auto index : lights)
-        if (surface.touches(data.lights[index])) output.push_back(static_cast<int32_t>(index));
+        if (surface.touches(data.lights[index],LightTarget::Receiver)) output.push_back(static_cast<int32_t>(index));
 }
 void prepareLightInfluences(FrameData& data) {
     auto& packed = data.light_candidate_indices;
@@ -173,6 +174,7 @@ void prepareLightInfluences(FrameData& data) {
     exterior.assign(data.lights.size(),0);
     static thread_local std::vector<size_t> queue;
     queue.reserve(room_count);
+    const Transform identity{};
     for (size_t i = 0; i < data.lights.size(); ++i) {
         const auto& light = data.lights[i];
         queue.clear();
@@ -188,7 +190,8 @@ void prepareLightInfluences(FrameData& data) {
             for (const auto& portal : room.portals) {
                 const auto* destination = rooms.find(portal.destination_room);
                 if (!destination || reachable[i*room_count+destination->second]) continue;
-                if (!touches(light,MeshView(room.asset->geometry()),room.asset->geometry().polygons[portal.polygon],{})) continue;
+                if (!LightSurface(MeshView(room.asset->geometry()),room.asset->geometry().polygons[portal.polygon],identity)
+                        .touches(light,LightTarget::Portal)) continue;
                 reachable[i*room_count+destination->second] = 1; queue.push_back(destination->second);
             }
         }

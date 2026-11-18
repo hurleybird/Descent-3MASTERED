@@ -124,6 +124,25 @@ int runLightTests() {
         MeshView(mesh),mesh.polygons[0],distant,submitted);
     check(submitted.empty(),"View refinement ignored posed polygon position");
     {
+        // The triangular receiver is at z=5 facing -Z. Move the ship from
+        // the front to the back of its plane without taking it out of the
+        // beam. A reflected camera can see that receiver the entire time.
+        FrameData lamps = data;
+        auto& beam = lamps.lights[0];
+        beam.headlight = beam.directional = true; beam.direction = {1,0,0};
+        beam.radius = 12; beam.cone = .8f; beam.position = {-4,0,5};
+        for (float z : {4.99f,5.f,5.01f}) {
+            beam.position.z = z; prepareLightInfluences(lamps); submitted.clear();
+            appendSurfaceLightIndices(lamps,lamps.rooms[0].light_candidates,MeshView(mesh),mesh.polygons[0],{},submitted);
+            check(submitted == std::vector<int32_t>{0} && lightAttenuation(beam,{0,0,5}) > 0,
+                "Headlight vanished at a receiver plane inside the beam");
+        }
+        check(lamps.rooms[1].light_candidates.empty(),"Receiver rule admitted a headlight through a back-facing portal");
+        submitted.clear();
+        appendSurfaceLightIndices(lamps,lamps.rooms[0].light_candidates,MeshView(mesh),mesh.polygons[0],distant,submitted);
+        check(submitted.empty(),"Headlight receiver rule bypassed range rejection");
+    }
+    {
         FrameData candidates;
         for (uint32_t i = 0; i < 32; ++i) {
             Light light = point;

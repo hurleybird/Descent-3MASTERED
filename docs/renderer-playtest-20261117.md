@@ -58,3 +58,37 @@ and restore from the menus, pause/automap transitions, live resolution/fullscree
 switching, and multiplayer are not signed off by this checkpoint. No new
 24-case comparison against the old renderer was performed. No shadows,
 experimental room adapter, or release deployment.
+
+## Mirror thing 2 follow-up (saveg006)
+
+The saved player's headlight is **on**. With no input, the main lamp is pale
+but its reflection was red-orange. Two independent regressions:
+
+- The headlight shader uses a cone and radius, not the receiver normal.
+  Publication rejected the headlight when the ship was behind a polygon's
+  plane. This can switch the entire face off in a mirror although its pixels
+  are still inside the beam. Keep the radius and directed portal tests; do
+  not use portal-style facing rejection on headlight receivers. Main and
+  reflected views consume the same light table. No extra reflected light.
+- The legacy room renderer draws the lit mirror coating with the mirror depth
+  surface and again with the translucent walls. One blend left the rewrite's
+  mirror surface too dim and its reflection too prominent. Two identical
+  source-over blends transmit `(1-alpha)^2` of the reflection. Evaluate that
+  in one draw, giving only the coating's share to the main view's AO.
+
+Reference: installed pre-rewrite `664aefc7`, which includes the August mirror
+fix `b3bacdb4`. The older installation named “Release” (`ec109de5`) itself
+renders the tip orange; it is **not** the good reference. Compared isolated
+copies at 1280×720, per-pixel lighting, native/no MSAA, AO/bloom/motion blur
+off, fixed 1/60 s, seed 12345. Original save SHA256:
+`AE6D8719311EFE4767F27166564C5AEFBB8D0302F3FCEDB36A48F79F5AC85101`.
+
+At frame 60 the tip at (916,302) was RGB (217,55,12) before, (188,176,143)
+after, (189,177,144) in the reference. A separate camera-still control with
+only the saved headlight bit cleared gave (188,42,4) after vs (189,42,4)
+reference. At (1133,322), the mirror surface went from (37,17,6) to (60,28,10),
+matching the reference. Compared the unmodified save again while applying
+both `-capture-heading` and `-capture-forward` at frames 4,8,12,16,20,24,32.
+In the fixed world rectangle [150,1250) × [68,468), mean absolute RGB-channel
+error fell from 7.02–12.26 to 0.30–0.41 (0–255). Inspected the crops and
+motion comparison; this is not sign-off on every mirror or the GPU corpus.
