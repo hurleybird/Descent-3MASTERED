@@ -753,11 +753,13 @@ static void BeginAutomatedCaptureFrame()
 		Detail_settings.Fog_enabled = false;
 		AutomatedCaptureLog("capture fog disabled");
 	}
-	if (Automated_capture.gameplay_frame == 0 && FindArg("-capture-headlight") &&
+	if (Automated_capture.gameplay_frame == 0 && (FindArg("-capture-headlight") || FindArg("-capture-no-headlight")) &&
 		Player_num >= 0 && Player_num < MAX_PLAYERS)
 	{
-		Players[Player_num].flags |= PLAYER_FLAGS_HEADLIGHT;
-		AutomatedCaptureLog("capture headlight enabled");
+		const bool enabled=!FindArg("-capture-no-headlight");
+		if (enabled) Players[Player_num].flags |= PLAYER_FLAGS_HEADLIGHT;
+		else Players[Player_num].flags &= ~PLAYER_FLAGS_HEADLIGHT;
+		AutomatedCaptureLog("capture headlight %s",enabled?"enabled":"disabled");
 	}
 	if (Automated_capture.gameplay_frame == 0 && FindArg("-capture-rear-smallview") && Player_object)
 		CreateSmallView(SVW_LEFT,Player_object->handle,SVF_REARVIEW,0.0f,D3_DEFAULT_ZOOM,-1,

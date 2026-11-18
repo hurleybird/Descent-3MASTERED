@@ -33,6 +33,22 @@ bool GL4Renderer::PrepareDynamicShadow(const d3scene::PreparedView& prepared) {
     const auto same_id=[](const auto& a,const auto& b) {
         return a.source==b.source && a.owner==b.owner && a.channel==b.channel;
     };
+    const auto consider_live=[&](uint32_t i,float s) {
+        const auto& id=data.lights[i].id;
+        if (keep && previous[0].index>=0 && same_id(id,previous[0].id)) s*=1.25f;
+        if (s>wanted[0].score) {wanted[0].score=s;wanted[0].index=int(i);wanted[0].id=id;}
+    };
+    // Architecture can block a beam even in a room containing no actors.
+    // Use the indoor emitter itself as a candidate, independently of camera direction.
+    for (uint32_t i=0;i<data.lights.size();++i) {
+        const auto& l=data.lights[i];
+        if (!frame.roomIndices().find(l.room)) continue;
+        const float x=l.position.x-eye.x,y=l.position.y-eye.y,z=l.position.z-eye.z;
+        const float d=std::sqrt(x*x+y*y+z*z);
+        if (d>=l.radius+100.f) continue;
+        const float reach=std::min(l.radius,50.f);
+        consider_live(i,std::max({l.color.x,l.color.y,l.color.z})*reach/(50.f+d)*(1.f-d/(l.radius+100.f)));
+    }
     for (const auto& m:data.model_instances) {
         if (!m.visible || m.collection || !m.has_render_bounds || !m.model_count) continue;
         const auto p=m.current.position;
@@ -68,10 +84,7 @@ bool GL4Renderer::PrepareDynamicShadow(const d3scene::PreparedView& prepared) {
         const auto dynamic=[&](uint32_t i) {
             const auto& l=data.lights[i];
             if (m.has_owner && l.id.source==d3scene::LightSource::Object && l.id.owner==m.owner) return;
-            float s=score(l.position,l.radius,std::max({l.color.x,l.color.y,l.color.z})*d3scene::lightAttenuation(l,p));
-            const auto& old=previous[0];
-            if (keep && old.index>=0 && same_id(l.id,old.id)) s*=1.25f;
-            if (s>wanted[0].score) {wanted[0].score=s;wanted[0].index=int(i);wanted[0].id=l.id;}
+            consider_live(i,score(l.position,l.radius,std::max({l.color.x,l.color.y,l.color.z})*d3scene::lightAttenuation(l,p)));
         };
         if (room && room->light_influences_prepared)
             for(const auto i:data.lightCandidates(room->light_candidates)) dynamic(i);
@@ -137,6 +150,16 @@ void GL4Renderer::RasterShadowSource(const d3scene::PreparedView& prepared,int s
         return x*x+y*y+z*z<=light.radius*light.radius;
     };
     shadow_batches.clear();
+    unsigned lit_faces=63;
+    if (light.directional && light.cone>0.f) {
+        // A cube face fits inside a cone with cos(angle)=1/sqrt(3).
+        // Reject only disjoint cones, retaining an extra texel/filter margin.
+        const float limit=light.cone*.57735027f-std::sqrt(1-light.cone*light.cone)*.81649658f-.07f;
+        const auto d=light.direction;
+        const float axis_dot[]={d.x,-d.x,d.y,-d.y,d.z,-d.z};
+        lit_faces=0;
+        for (int i=0;i<6;++i) if (axis_dot[i]>=limit) lit_faces|=1u<<i;
+    }
     auto collect=[&](const SceneMeshGpu& gpu,const d3scene::Transform& pose,const d3scene::Bounds& bounds,auto surface) {
         // Conservative overlap with each square cube-face pyramid. Do this
         // once per room/part, not once per polygon or draw.
@@ -149,6 +172,7 @@ void GL4Renderer::RasterShadowSource(const d3scene::PreparedView& prepared,int s
             if (hi[axis]>=side) faces|=1u<<(axis*2);
             if (-lo[axis]>=side) faces|=2u<<(axis*2);
         }
+        faces&=lit_faces;
         if (!faces) return;
         const auto begin=shadow_batches.size();
         for (size_t f=0;f<gpu.polygons.size();++f) {
@@ -162,11 +186,23 @@ void GL4Renderer::RasterShadowSource(const d3scene::PreparedView& prepared,int s
             else shadow_batches.push_back({gpu.vao,first,GLsizei(range.count),pose,faces});
         }
     };
-    // Models cast onto architecture; the immutable room shell never casts
-    // onto its own polygon edges. Static room shadowing remains in the bake.
     // Capture-only control: keep the exact same lights and visible models,
     // but remove model occluders from the light's view for an attribution pair.
     const bool capture=AutomatedCaptureFrameIndex()>=0;
+    // Only moving lights need the room shell. Fixed lights already have its
+    // occlusion in their bake. Use light reachability, not camera visibility.
+    if (!slot && !(capture && (FindArg("-capture-no-shadow-casters") || FindArg("-capture-model-casters-only"))))
+        for (const auto& room:data.rooms) {
+            if (!room.asset || room.number<0 || !close(room.asset->bounds())) continue;
+            if (room.light_influences_prepared) {
+                const auto lights=data.lightCandidates(room.light_candidates);
+                if (std::find(lights.begin(),lights.end(),uint32_t(source.index))==lights.end()) continue;
+            }
+            if (scene_rooms.size()<=size_t(room.number)) scene_rooms.resize(size_t(room.number)+1);
+            auto& gpu=scene_rooms[room.number];
+            UploadSceneMesh(gpu,room.asset->id(),room.asset->geometry());
+            collect(gpu,{},room.asset->bounds(),[&](size_t f)->const auto& {return room.surfaces[f];});
+        }
     const bool omit_camera=capture && FindArg("-capture-no-pilot-shadow");
     const size_t caster_models=capture && (FindArg("-capture-no-shadow-casters") || FindArg("-capture-room-casters-only")) ?
         0 : data.model_instances.size();

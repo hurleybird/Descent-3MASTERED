@@ -163,29 +163,55 @@ uniform int shadow_emitter;
 uniform float live_shadow_weight;
 uniform int shadow_masks[5];
 uniform vec4 baked_shadow_lamp[4],baked_shadow_color[4],baked_shadow_normal[4];
-float blockerDepth(int slot,vec3 p) {
+vec3 shadow_receiver_normal;
+float blockerDepth(int slot,vec3 p,vec3 receiver_plane) {
     vec3 a=abs(p); int face; vec2 uv;
     if (a.x>=a.y && a.x>=a.z) { face=p.x>0?0:1; uv=vec2(p.x>0?-p.z:p.z,-p.y)/a.x; }
     else if (a.y>=a.z) { face=p.y>0?2:3; uv=vec2(p.x,p.y>0?p.z:-p.z)/a.y; }
     else { face=p.z>0?4:5; uv=vec2(p.z>0?p.x:-p.x,-p.y)/a.z; }
     if ((shadow_masks[slot] & (1<<face))==0) return 1.e20;
-    return textureLod(shadow_distance,vec3(uv*.5+.5,float(6*slot+face)),0).r;
+    if (slot!=0) return textureLod(shadow_distance,vec3(uv*.5+.5,float(6*slot+face)),0).r;
+    int side=textureSize(shadow_distance,0).x;
+    ivec2 cell=clamp(ivec2((uv*.5+.5)*float(side)),ivec2(0),ivec2(side-1));
+    float depth=texelFetch(shadow_distance,ivec3(cell,6*slot+face),0).r;
+    if (depth>1.e19) return depth;
+    // The stored distance belongs to the ray through the TEXEL CENTER,
+    // not the requested filter direction. Compare in the receiving plane's
+    // depth coordinate, so even an oblique, coplanar wall compares equal.
+    vec2 q=(vec2(cell)+.5)*(2.0/float(side))-1.0;
+    vec3 ray=face==0?vec3(1,-q.y,-q.x):face==1?vec3(-1,-q.y,q.x):
+             face==2?vec3(q.x,1,q.y):face==3?vec3(q.x,-1,-q.y):
+             face==4?vec3(q.x,-q.y,1):vec3(-q.x,-q.y,-1);
+    float ratio=dot(normalize(ray),receiver_plane);
+    // A blocker must also lie on the finite light-to-receiver segment.
+    // Extrapolating a grazing receiver plane alone can pull a distant wall
+    // in front of the receiver (especially when a flare rests on it).
+    return ratio>0.0 ? max(depth,depth*ratio) : 1.e20;
 }
 float sceneShadow(int slot,vec3 delta,float distance,float source_size) {
     vec3 d=delta/distance;
+    vec3 plane=vec3(0);
+    float depth=distance-.015;
+    if (slot==0) {
+        float n=dot(shadow_receiver_normal,d);
+        if(abs(n)<1.e-7) return 1.0;
+        plane=shadow_receiver_normal/n;
+        // Bound the comparison error normal to the triangle. A tiny radial
+        // epsilon alone goes to zero in plane space as incidence grazes.
+        depth=distance-max(.015,.002/abs(n));
+    }
     vec3 a=normalize(cross(abs(d.y)<.9 ? vec3(0,1,0) : vec3(1,0,0),d));
     vec3 b=cross(d,a);
-    float depth=distance-.015;
     float texel=1.5/float(textureSize(shadow_distance,0).x);
     float search=max(texel,min(.04,source_size/distance));
-    float nearest=min(blockerDepth(slot,d),min(min(blockerDepth(slot,d+a*search),blockerDepth(slot,d-a*search)),
-            min(blockerDepth(slot,d+b*search),blockerDepth(slot,d-b*search))));
+    float nearest=min(blockerDepth(slot,d,plane),min(min(blockerDepth(slot,d+a*search,plane),blockerDepth(slot,d-a*search,plane)),
+            min(blockerDepth(slot,d+b*search,plane),blockerDepth(slot,d-b*search,plane))));
     if(nearest>=depth) return 1.0;
     float width=clamp(source_size*(distance-nearest)/(distance*max(.1,nearest)),texel,.06);
     float visibility=0.0;
     const vec2 disk[8]=vec2[8](vec2(.195,.151),vec2(-.440,.099),vec2(.221,-.510),vec2(.215,.613),
         vec2(-.641,-.341),vec2(.785,-.155),vec2(-.492,.708),vec2(-.105,-.922));
-    for(int i=0;i<8;++i) visibility+=step(depth,blockerDepth(slot,d+(a*disk[i].x+b*disk[i].y)*width));
+    for(int i=0;i<8;++i) visibility+=step(depth,blockerDepth(slot,d+(a*disk[i].x+b*disk[i].y)*width,plane));
     return visibility*.125;
 }
 #endif
@@ -346,8 +372,16 @@ void main() {
     float shade = directional_ambient != 0 && lighting_per_pixel == 0 ? clamp((1.0-dot(world_normal,ambient_direction))*0.5,0.0,1.0) : 1.0;
     vec3 ambient = ambient_color*shade;
     surface_payload[0] = vec4(world,ambient.x);
-    surface_payload[1] = vec4(ambient.yz,vertex_dynamic.xy);
-    surface_payload[2] = vec4(vertex_dynamic.z,vertex_color);
+#if SCENE_SHADOW_VERTEX
+    // Shadow variants require per-pixel lighting; these three vertex-light
+    // components are otherwise unused. Do not differentiate absolute world
+    // coordinates to recover the plane under a wall-mounted flare.
+    surface_payload[1]=vec4(ambient.yz,relative.xy);
+    surface_payload[2]=vec4(relative.z,vertex_color);
+#else
+    surface_payload[1]=vec4(ambient.yz,vertex_dynamic.xy);
+    surface_payload[2]=vec4(vertex_dynamic.z,vertex_color);
+#endif
 }
 )GLSL";
 // Shared classification keeps the layer composite and full-resolution repair
@@ -444,7 +478,12 @@ in vec4 reflection_payload[7];
 in vec4 surface_payload[3];
 #define world_position (surface_payload[0].xyz)
 #define ambient vec3(surface_payload[0].w,surface_payload[1].xy)
+#if SCENE_SHADOW_RECEIVER
+#define vertex_dynamic vec3(0)
+#define shadow_relative vec3(surface_payload[1].zw,surface_payload[2].x)
+#else
 #define vertex_dynamic vec3(surface_payload[1].zw,surface_payload[2].x)
+#endif
 #define authored_color (surface_payload[2].yzw)
 flat in ivec2 primitive_influences;
 in vec4 texture_coordinates;
@@ -587,6 +626,12 @@ vec3 applySceneFog(vec3 radiance,out float transmission) {
 }
 void main() {
     vec2 material_uv=texcoord*texture_scale+texture_offset;
+#if SCENE_SHADOW_RECEIVER
+    // Obtain the geometric triangle plane before discards and non-uniform
+    // light loops. Smoothed lighting normals are not depth planes.
+    vec3 area=cross(dFdx(shadow_relative),dFdy(shadow_relative));
+    shadow_receiver_normal=area*inversesqrt(max(dot(area,area),1.e-30));
+#endif
 #if SCENE_PARTICLE_LAYER
     vec2 scene_pixel = gl_FragCoord.xy*fragment_mapping.xy+fragment_mapping.zw;
     if (volume_edge_only != 0 && !particleDepthEdge(scene_pixel)) discard;
@@ -1699,6 +1744,7 @@ GL4Renderer::SceneProgram& GL4Renderer::SceneRasterProgram(size_t fog_mode,bool 
     fragment.insert(fragment.find('\n')+1,std::string("#define SCENE_PARTICLE_LAYER ")+(layer_interface ? "1\n" : "0\n"));
     fragment.insert(fragment.find('\n')+1,"#define SCENE_FOG_MODE "+std::to_string(fog_mode)+"\n");
     auto vertex = SceneVertexShader;
+    if (shadows) vertex.insert(vertex.find('\n')+1,"#define SCENE_SHADOW_VERTEX 1\n");
     if(inline_lights) {
         vertex.insert(vertex.find('\n')+1,"#define SCENE_INLINE_LIGHTS 1\n");
         fragment.insert(fragment.find('\n')+1,"#define SCENE_INLINE_LIGHTS 1\n");

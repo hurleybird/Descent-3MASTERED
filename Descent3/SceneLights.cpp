@@ -67,9 +67,20 @@ void PrepareGameSceneLights(d3scene::FrameData& frame) {
         }
         if (obj.type == OBJ_PLAYER) {
             const auto& player = Players[obj.id];
-            if (player.flags & PLAYER_FLAGS_HEADLIGHT)
-                emit(frame,identity(0),obj.roomnum,obj.pos,PLAYER_HEADLIGHT_DISTANCE,sign,sign,sign,
-                    &obj.orient.fvec,PLAYER_HEADLIGHT_DOT,true);
+            if (player.flags & PLAYER_FLAGS_HEADLIGHT) {
+                // A lamp at the eye projects a rock's silhouette directly
+                // behind the rock. Mount the optional shadowed beam on the
+                // port bow, inside the ship radius. Lighting and occlusion
+                // must use the *same* emitter, including in reflected views.
+                vector mount=obj.pos,aim=obj.orient.fvec;
+                if (Render_preferred_state.dynamic_shadows && frame.lighting_quality==d3scene::LightingQuality::Pixel) {
+                    const vector offset=(obj.orient.fvec*.20f-obj.orient.rvec*.55f-obj.orient.uvec*.12f)*obj.size;
+                    mount+=offset;
+                    aim=aim*(PLAYER_HEADLIGHT_DISTANCE*.33f)-offset; // aim back at the reticle at mid-beam
+                }
+                emit(frame,identity(0),obj.roomnum,mount,PLAYER_HEADLIGHT_DISTANCE,sign,sign,sign,
+                    &aim,PLAYER_HEADLIGHT_DOT,true);
+            }
             if (Detail_settings.Dynamic_lighting) {
                 if (player.light_dist > .5f)
                     emit(frame,identity(1),obj.roomnum,obj.pos,player.light_dist,sign*player.r,sign*player.g,sign*player.b);
