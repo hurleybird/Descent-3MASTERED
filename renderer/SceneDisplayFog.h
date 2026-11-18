@@ -19,6 +19,7 @@ const float eps=.00020, far_z=60000.0;
 vec2 halfPair(vec2 v){return unpackHalf2x16(packHalf2x16(v));}
 float knot(int j,float unit){return float(j*j)*unit;}
 float val(ivec2 p,int j){return texelFetch(field_image,ivec3(p,j),0).r;}
+bool bent(ivec2 p,int j){return texelFetch(field_image,ivec3(p,j),0).z!=0.0;}
 vec4 lineAt(ivec2 p,ivec3 dim,out float receiver) {
     p=clamp(p,ivec2(0),dim.xy-1);
     ivec2 q=ivec2((vec2(p)+.5)/vec2(dim.xy)*vec2(depth_rect.zw))+depth_rect.xy;
@@ -27,21 +28,32 @@ vec4 lineAt(ivec2 p,ivec3 dim,out float receiver) {
     float unit=near_range.y/float(n*n), z=near_range.x/max(1.e-9,1.0-d);
     receiver=min(z,far_z);
     int i=min(n-1,int(floor(sqrt(clamp(z/near_range.y,0.,1.0))*float(n))));
-    float zl=knot(i,unit),zh=knot(i+1,unit),a=val(p,i),b=val(p,i+1);
+    vec4 rec=texelFetch(field_image,ivec3(p,i+1),0);
+    float zl=knot(i,unit),zh=knot(i+1,unit),a=rec.y,b=rec.x;
+    bool extend_low=true,extend_high=true;
+    if(z>=near_range.y){zl=near_range.y;zh=far_z;a=b;i=n;}
+    else if(rec.z!=0.0 && rec.w>0.0 && rec.w<1.0) {
+        // Certify only the straight side containing this receiver. Never
+        // extrapolate through the fog boundary when growing the interval.
+        float at=mix(zl,zh,rec.w),v=mix(a,b,rec.w)+rec.z*rec.w*(1.0-rec.w);
+        if(z<at){zh=at;b=v;extend_high=false;}
+        else {zl=at;a=v;extend_low=false;}
+    }
+    if(zh<=zl || abs(b-a)>.09 || abs(a)>32.0 || abs(b)>32.0) return vec4(1,-1,0,0);
     float slope=(b-a)/(zh-zl), intercept=a-slope*zl;
-    if(z>=near_range.y){zl=near_range.y;zh=far_z;slope=0;intercept=b;i=n;}
-    else if(abs(b-a)>.09 || abs(a)>32.0 || abs(b)>32.0) return vec4(1,-1,0,0);
     vec2 line=halfPair(vec2(slope,intercept));
     if(abs((slope-line.x)*zl+intercept-line.y)>eps || abs((slope-line.x)*zh+intercept-line.y)>eps)
         return vec4(1,-1,0,0);
     slope=line.x;intercept=line.y;
-    for(int j=i-1;j>=max(0,i-16);--j) {
+    for(int j=i-1;extend_low && j>=max(0,i-16);--j) {
         float t=knot(j,unit);
+        if(bent(p,j+1)) break;
         if(abs(val(p,j)-(slope*t+intercept))>eps || abs(slope)*(zl-t)>.09) break;
         zl=t;
     }
-    for(int j=i+2;j<=min(n,i+17);++j) {
+    for(int j=i+2;extend_high && j<=min(n,i+17);++j) {
         float t=knot(j,unit);
+        if(bent(p,j)) break;
         if(abs(val(p,j)-(slope*t+intercept))>eps || abs(slope)*(t-zh)>.09) break;
         zh=t;
     }

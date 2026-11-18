@@ -494,6 +494,11 @@ float fogOccupiedLength(const FogVolume& volume,Vec3 eye,Vec3 endpoint,int windi
     const auto delta = sub(endpoint,eye); const double length = std::sqrt(dot(delta,delta));
     if (!(length > start_distance)) return 0;
     const Vec3 direction{float(delta.x/length),float(delta.y/length),float(delta.z/length)};
+    return fogOccupiedRayLength(volume,eye,direction,length,winding,start_distance);
+}
+float fogOccupiedRayLength(const FogVolume& volume,Vec3 eye,Vec3 direction,double length,int winding,float start_distance) {
+    if (!std::isfinite(start_distance) || start_distance < 0) throw std::invalid_argument("Invalid fog interval start");
+    if (!(length>start_distance)) return 0;
     std::vector<std::pair<double,int>> crossings;
     visitCrossings(volume,eye,direction,length,[&](const FogTriangle& triangle,double distance) {
         crossings.emplace_back(distance,dot(triangle.inward,direction) > 0 ? 1 : -1);

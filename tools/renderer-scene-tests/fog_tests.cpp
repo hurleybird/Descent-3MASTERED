@@ -408,6 +408,8 @@ int runFogTests() {
             "Trimmed fog interval lost pre-start containment");
         check(near(d3scene::fogOccupiedLength(separated,{0,0,0},{0,0,10},0,start),expected),
             "Positive-occupancy reference lost a disconnected or clipped interval");
+        check(near(d3scene::fogOccupiedRayLength(separated,{0,0,0},{0,0,1},10,0,start),expected),
+            "Fixed-ray fog audit lost a disconnected or clipped interval");
         check(near(d3scene::fogSegmentLength(separated,{0,0,10},{0,0,0},false,start),expected),
             "Trimmed fog interval depends on ray orientation");
     }

@@ -256,7 +256,7 @@ class GL4Renderer : public IRenderer
 	size_t scene_fog_tile_capacity = 0;
 	uint32_t scene_fog_tile_words = 0, scene_fog_tile_max_stride = 0;
 	GLenum scene_fog_field_format = GL_RGBA32F;
-	int scene_fog_field_width = 0, scene_fog_field_height = 0;
+	int scene_fog_field_width = 0, scene_fog_field_height = 0, scene_fog_field_slices = 0;
 	struct SceneDepthSnapshot {
 		GLuint texture = 0, framebuffer = 0;
 		int width = 0, height = 0;

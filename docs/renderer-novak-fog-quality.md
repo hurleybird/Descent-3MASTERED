@@ -50,3 +50,38 @@ to ordinary 8-bit banding present in both renderers. A next experiment would
 reconstruct just the partially traversed boundary interval rather than doubling
 the whole 3-D field or hiding the contour with noise. No global sampling or
 precision change is shipped by this checkpoint.
+
+## Default banding correction (follow-up to 92b8d115)
+
+For fog volumes sharing one color, the field now stores two straight parts of
+the optical curve per depth record. A solitary entry or exit puts their join
+at the actual boundary, not at a fixed slice distance. For multiple crossings
+or clipped intervals the producer retains the old intervening knot; contributions
+from different volumes with incompatible joins are combined at that knot.
+Thus 32 intervals suffice instead of 64. This does not use dithering, change
+the fog density, or route ambiguous cells through a new per-pixel geometry
+trace. The existing angular edge repair is still applied. Scenes with genuinely
+different fog colors retain the original 64-interval vector field. An opaque
+projection may only reuse the linear side containing its receiver.
+
+**Images.** On the same 1440p wall crop above, the mean green-channel error fell
+from **0.916 to 0.138** against exact fog, and **1.086 to 0.380** against
+pre-rewrite. In the full 1440p scenes, mean RGB error vs exact was about 0.059
+(001), 0.049 (002), and 0.014 (007). The forced compact-bin overflow repair and
+full-bin path matched the ordinary 002 result pixel-for-pixel in the native check.
+The separate projected-fog oracle reported no missed edge repairs or over-budget
+transmission differences in the sampled 001/002/007 and moving roof frames.
+The field audit now also checks between stored knots using a fixed ray direction:
+round-tripping a float world endpoint can perturb the ray across an edge. This
+is sampled validation, not an assertion that all gradients are free of banding.
+
+**Cost.** RX 6600, prior checkpoint vs corrected executable; hidden-desktop
+restores, 360 frames/run, median unique GPU intervals for gameplay frames
+100–335. Two four-run groups with reversed order. Native 720p save 002 cost
+about **0.03 ms** extra. At 1440p SSAA2/MSAA4/AO/bloom, 002 moved both ways;
+001 cost roughly 0.2–0.5 ms more. At 4K with motion blur also enabled, 002
+cost about **0.3–1.1 ms** more across groups. These are whole GPU intervals,
+not isolated shader costs. At 320×180 the ordinary single-color field uses
+about 7.4 MiB more memory (33 RGBA16F layers instead of 65 R16F); it is
+still independent of output resolution. This checkpoint trades some GPU
+time for image quality, not a claimed speedup.

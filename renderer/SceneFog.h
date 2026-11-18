@@ -71,5 +71,8 @@ float fogSegmentLength(const FogVolume&,Vec3 eye,Vec3 endpoint,bool eye_inside,f
 // Slow independent reference for field audits/tests: sort crossings and integrate
 // positive occupancy, including overlapping sheets. Not a per-frame CPU query.
 float fogOccupiedLength(const FogVolume&,Vec3 eye,Vec3 endpoint,int eye_winding,float start_distance = 0);
+// Audit a field column along one fixed unit ray. Reconstructing a float world
+// endpoint and subtracting the eye for each sample can switch sides of an edge.
+float fogOccupiedRayLength(const FogVolume&,Vec3 eye,Vec3 unit_direction,double length,int eye_winding,float start_distance);
 float fogRayStart(const View&,Vec3 endpoint);
 }

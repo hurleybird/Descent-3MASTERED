@@ -2,8 +2,9 @@
 #pragma once
 
 static constexpr int SceneFogFieldSlices = 64;
+static_assert(SceneFogFieldSlices%2==0,"Each scalar fog record spans two original depth intervals");
 // A compact 2D group keeps neighboring optical columns together. Each lane
-// owns its event bins: 3KiB for the compact path, 16KiB for overflow repair.
+// owns its event bins. Both vector and curve overflow repair fit in 16 KiB.
 static constexpr int SceneFogFieldColumns = 8;
 static constexpr int SceneFogFieldRows = 4;
 
@@ -94,11 +95,17 @@ const int FOG_SLICES = SCENE_FOG_SLICES;
 shared int event_bins[SCENE_FOG_EVENT_CAPACITY*SCENE_FOG_LANES];
 shared float slope_events[SCENE_FOG_EVENT_CAPACITY*SCENE_FOG_LANES];
 shared float depth_events[SCENE_FOG_EVENT_CAPACITY*SCENE_FOG_LANES];
+#if SCENE_FOG_CURVE
+shared vec2 event_shape[SCENE_FOG_EVENT_CAPACITY*SCENE_FOG_LANES];
+#endif
 int event_count;
 bool event_overflow;
 #else
 shared float slope_events[FOG_SLICES*SCENE_FOG_LANES];
 shared float depth_events[FOG_SLICES*SCENE_FOG_LANES];
+#if SCENE_FOG_CURVE
+shared vec2 event_shape[FOG_SLICES*SCENE_FOG_LANES];
+#endif
 #endif
 bool fieldEdge(vec4 plane,vec2 sample_position,int flags,int edge) {
     float side=dot(plane.xy,sample_position)+plane.z;
@@ -107,6 +114,12 @@ bool fieldEdge(vec4 plane,vec2 sample_position,int flags,int edge) {
 void crossingEvent(float z,float sign,float start) {
     int slice = max(0,int(floor(sqrt(max(0.0,z/fog_field_range))*float(FOG_SLICES))));
     if (slice>=FOG_SLICES) return;
+#if SCENE_FOG_CURVE
+    float h=(float(slice)+0.5)/float(FOG_SLICES);
+    // Count crossings and retain their signed integral at the intervening
+    // original knot. We don't need twice as many bins to preserve that knot.
+    vec2 change=vec2(1.0,sign*max(0.0,h*h*fog_field_range-max(z,start)));
+#endif
 #if SCENE_FOG_COMPACT
     int lane=int(gl_LocalInvocationIndex);
     int slot=0;
@@ -115,22 +128,34 @@ void crossingEvent(float z,float sign,float start) {
         int address=slot*SCENE_FOG_LANES+lane;
         slope_events[address]+=sign;
         depth_events[address]+=sign*max(z,start);
+#if SCENE_FOG_CURVE
+        event_shape[address]+=change;
+#endif
         return;
     }
     if (event_count==SCENE_FOG_EVENT_CAPACITY) { event_overflow=true; return; }
     for (int move=event_count;move>slot;--move) {
         int to=move*SCENE_FOG_LANES+lane,from=to-SCENE_FOG_LANES;
         event_bins[to]=event_bins[from]; slope_events[to]=slope_events[from]; depth_events[to]=depth_events[from];
+#if SCENE_FOG_CURVE
+        event_shape[to]=event_shape[from];
+#endif
     }
     int address=slot*SCENE_FOG_LANES+lane;
     event_bins[address]=slice;
     slope_events[address]=0.0+sign;
     depth_events[address]=0.0+sign*max(z,start);
+#if SCENE_FOG_CURVE
+    event_shape[address]=change;
+#endif
     ++event_count;
 #else
     int address=slice*SCENE_FOG_LANES+int(gl_LocalInvocationIndex);
     slope_events[address] += sign;
     depth_events[address] += sign*max(z,start);
+#if SCENE_FOG_CURVE
+    event_shape[address]+=change;
+#endif
 #endif
 }
 void main() {
@@ -177,6 +202,9 @@ void main() {
 #else
         for (int i=0;i<FOG_SLICES;++i) {
             slope_events[i*SCENE_FOG_LANES+lane]=0.0; depth_events[i*SCENE_FOG_LANES+lane]=0.0;
+#if SCENE_FOG_CURVE
+            event_shape[i*SCENE_FOG_LANES+lane]=vec2(0);
+#endif
         }
 #endif
         int field_base=view_nodes*4-SCENE_FOG_HEADER_WORDS;
@@ -213,17 +241,26 @@ void main() {
         float integrated_length=0.0;
         if (first_volume) imageStore(fog_field_output,ivec3(pixel,0),vec4(0));
         for (int slice=0;slice<FOG_SLICES;++slice) {
+#if SCENE_FOG_CURVE
+            vec2 changes=vec2(0);
+#endif
 #if SCENE_FOG_COMPACT
             float slope=0.0,depth=0.0;
             if (slice==next_event) {
                 int address=event_cursor*SCENE_FOG_LANES+lane;
                 slope=slope_events[address]; depth=depth_events[address];
+#if SCENE_FOG_CURVE
+                changes=event_shape[address];
+#endif
                 ++event_cursor;
                 next_event=event_cursor<event_count ? event_bins[event_cursor*SCENE_FOG_LANES+lane] : FOG_SLICES;
             }
 #else
             int address=slice*SCENE_FOG_LANES+lane;
             float slope=slope_events[address],depth=depth_events[address];
+#if SCENE_FOG_CURVE
+            changes=event_shape[address];
+#endif
 #endif
             float low=float(slice)/float(FOG_SLICES),high=float(slice+1)/float(FOG_SLICES);
             float low_z=low*low*fog_field_range,high_z=high*high*fog_field_range;
@@ -233,12 +270,47 @@ void main() {
             // Closed non-overlapping boundaries are exact along this column.
             // Clamp overlapping sheets per cell, never amplify their density.
             float occupied=winding*interval+slope*high_z-depth;
-            if (interval>0.0) integrated_length+=clamp(occupied,0.0,high_z-low_z);
             ivec3 output_cell=ivec3(pixel,slice+1);
-#if SCENE_FOG_SCALAR_FIELD
-            float prior=first_volume ? 0.0 : imageLoad(fog_field_output,output_cell).r;
-            imageStore(fog_field_output,output_cell,vec4(prior+density.a*integrated_length));
+#if SCENE_FOG_CURVE
+            {
+                // Keep the two outside knots. One true crossing gives a pair
+                // of straight lines meeting at that crossing. For a complex
+                // interval retain the original middle knot instead: two old
+                // chords in one record, no per-fragment geometry trace.
+                float coarse_start=integrated_length, dz=high_z-low_z;
+                float h=(float(slice)+0.5)/float(FOG_SLICES), middle_z=h*h*fog_field_range;
+                float mid=(middle_z-low_z)/dz, start_z=start*forward_scale;
+                bool clipped=start_z>low_z && start_z<high_z;
+                float k=0.0,u=mid;
+                if(changes.x==1.0 && !clipped && interval>0.0 &&
+                    ((winding==1.0 && slope==-1.0) || (winding==0.0 && slope==1.0))) {
+                    k=-slope*dz*density.a; u=clamp((depth/slope-low_z)/dz,0.0,1.0);
+                    integrated_length+=clamp(occupied,0.0,dz);
+                } else if((changes.x!=0.0 || clipped) && interval>0.0) {
+                    float raw_mid=winding*max(0.0,middle_z-max(low_z,start_z))+changes.y;
+                    float first=clamp(raw_mid,0.0,middle_z-low_z);
+                    float total=first+clamp(occupied-raw_mid,0.0,high_z-middle_z);
+                    integrated_length+=total;
+                    k=(first-mid*total)*density.a/(mid*(1.0-mid));
+                } else {
+                    if(interval>0.0) integrated_length+=clamp(occupied,0.0,dz);
+                }
+                vec4 rec=first_volume ? vec4(0) : imageLoad(fog_field_output,output_cell);
+                rec.xy+=density.a*vec2(integrated_length,coarse_start);
+                if(k!=0.0) {
+                    if(rec.z==0.0) rec.zw=vec2(k,u);
+                    else {
+                        // Independent media may turn at different distances.
+                        // Sum their departures from the chord at the old knot.
+                        rec.z=(rec.z*min(mid*(1.0-rec.w),(1.0-mid)*rec.w)+
+                            k*min(mid*(1.0-u),(1.0-mid)*u))/(mid*(1.0-mid));
+                        rec.w=mid;
+                    }
+                }
+                imageStore(fog_field_output,output_cell,rec);
+            }
 #else
+            if (interval>0.0) integrated_length+=clamp(occupied,0.0,high_z-low_z);
             vec4 prior=first_volume ? vec4(0) : imageLoad(fog_field_output,output_cell);
             imageStore(fog_field_output,output_cell,prior+density*integrated_length);
 #endif
@@ -246,7 +318,7 @@ void main() {
         }
         first_volume=false;
     }
-    if (first_volume) for (int slice=0;slice<=FOG_SLICES;++slice)
+    if (first_volume) for (int slice=0;slice<size.z;++slice)
         imageStore(fog_field_output,ivec3(pixel,slice),vec4(0));
 }
 )GLSL";
