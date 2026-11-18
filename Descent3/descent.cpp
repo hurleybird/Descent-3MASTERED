@@ -136,8 +136,7 @@ void Descent3()
 		//Show intro & loading screens if not dedicated server
 		if (!Dedicated_server)
 		{
-			const bool automated_capture = FindArg("-capture-frame") ||
-				FindArg("-screenshot-frame");
+			const bool automated_capture = AutomatedCaptureSuppressesInput();
 			SetScreenMode(SM_CINEMATIC);
 			AutomatedCaptureLog("descent cinematic screen ready");
 

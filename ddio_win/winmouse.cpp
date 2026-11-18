@@ -114,6 +114,12 @@ void DDIOShowCursor(BOOL show)
 
 void ddio_MouseMode(int mode) 
 {
+    // A hidden verification window never owns the desktop pointer, including
+    // on reinit. Even ClipCursor(nullptr) would release another app's clip.
+    if (DInputData.app && DInputData.app->background_mode()) {
+        DDIO_mouse_state.mode = MOUSE_STANDARD_MODE;
+        return;
+    }
     mprintf((0, "mouse mode set to %d\n", mode));
     if (mode == MOUSE_EXCLUSIVE_MODE) 
     {
@@ -598,6 +604,13 @@ bool InitNewMouse()
 
 bool ddio_MouseInit() 
 {
+    if (DInputData.app->background_mode()) {
+        ddio_MouseReset();
+        DDIO_mouse_state.mode = MOUSE_STANDARD_MODE;
+        DDIO_mouse_state.suspended = true;
+        DDIO_mouse_init = true;
+        return true; // no WM_INPUT subscription, cursor hiding or recentering
+    }
     tWin32OS os;
     int major, minor;
 
